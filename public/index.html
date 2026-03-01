@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TicketCheckin | Home</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="home">
+    <div class="container">
+        <div class="card" style="text-align: center;">
+            <div class="header">
+                <h1 id="eventBrand">TicketCheckin 🎟️</h1>
+                <p>Event Registration & Check-in System</p>
+            </div>
+
+            <div style="display: grid; gap: 16px; margin-top: 20px;">
+                <a href="register.html" style="text-decoration: none;">
+                    <button style="background: var(--primary);">
+                        Attendee Registration
+                    </button>
+                </a>
+                <a href="login.html" style="text-decoration: none;">
+                    <button style="background: #1e293b; color: white;">
+                        Organizer Login
+                    </button>
+                </a>
+                <a href="scanner.html" style="text-decoration: none;">
+                    <button style="background: #f8fafc; color: #334155; border: 1px solid #e2e8f0;">
+                        Open Mobile Scanner
+                    </button>
+                </a>
+            </div>
+
+            <p style="margin-top: 32px; font-size: 12px; color: var(--text-muted);">
+                Powered by TicketCheckin Local Server
+            </p>
+        </div>
+    </div>
+    <script>
+        async function loadBranding() {
+            try {
+                const res = await fetch('/api/event');
+                const event = await res.json();
+                document.getElementById('eventBrand').textContent = event.name + ' 🎟️';
+                document.title = event.name + ' | Home';
+            } catch (err) { }
+        }
+        loadBranding();
+    </script>
+</body>
+
+</html>

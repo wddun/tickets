@@ -1,0 +1,24 @@
+{
+    "formatVersion": 1,
+    "passTypeIdentifier": "REPLACE_WITH_ENV",
+    "serialNumber": "REPLACE_WITH_TOKEN",
+    "teamIdentifier": "REPLACE_WITH_ENV",
+    "organizationName": "TicketCheckin",
+    "description": "Event Ticket",
+    "logoText": "TicketCheckin",
+    "foregroundColor": "rgb(255, 255, 255)",
+    "backgroundColor": "rgb(99, 102, 241)",
+    "labelColor": "rgb(255, 255, 255)",
+    "eventTicket": {
+        "primaryFields": [],
+        "secondaryFields": [],
+        "auxiliaryFields": [],
+        "backFields": [
+            {
+                "key": "info",
+                "label": "Information",
+                "value": "This ticket is single-use. Please have your QR code ready for scanning."
+            }
+        ]
+    }
+}

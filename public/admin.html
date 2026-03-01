@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Admin - TicketCheckin</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .admin-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-top: 30px;
+        }
+
+        @media (max-width: 768px) {
+            .admin-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .stats-card {
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            text-align: center;
+        }
+
+        .stats-number {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--primary);
+            margin: 10px 0;
+        }
+
+        .ticket-list {
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            background: #fff;
+            border-radius: 12px;
+            padding: 10px;
+        }
+
+        .ticket-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .ticket-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-used {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .status-valid {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        input[type="color"] {
+            width: 100%;
+            height: 40px;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            background: none;
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-content">
+            <div class="logo">🎟️ TicketCheckin <span>Admin</span></div>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/scanner.html">Scanner</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <header>
+            <h1>Event Management</h1>
+            <p>Configure your event details and monitor ticket sales.</p>
+        </header>
+
+        <div class="admin-grid">
+            <!-- Event Settings -->
+            <div class="card">
+                <h2>Event Settings</h2>
+                <form id="eventForm">
+                    <div class="form-group">
+                        <label>Event Name</label>
+                        <input type="text" id="eventName" placeholder="My Awesome Conference" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Event Date & Time</label>
+                        <input type="datetime-local" id="eventTime" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Pass Theme Color</label>
+                        <input type="color" id="eventColor" value="#6366f1">
+                    </div>
+                    <button type="submit">Update Event</button>
+                    <p id="saveStatus" style="margin-top: 10px; font-size: 14px; text-align: center; display: none;">
+                    </p>
+                </form>
+            </div>
+
+            <!-- Stats -->
+            <div class="admin-grid" style="margin-top: 0; grid-template-columns: 1fr; gap: 20px;">
+                <div class="stats-card">
+                    <p>Total Tickets</p>
+                    <div class="stats-number" id="totalTickets">0</div>
+                </div>
+                <div class="stats-card">
+                    <p>Tickets Used</p>
+                    <div class="stats-number" id="usedTickets">0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top: 30px;">
+            <h2>Recent Attendees</h2>
+            <div class="ticket-list" id="attendeeList">
+                <p style="text-align: center; padding: 20px; color: #666;">Loading attendees...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const eventForm = document.getElementById('eventForm');
+        const saveStatus = document.getElementById('saveStatus');
+
+        // Load existing data
+        async function loadData() {
+            try {
+                const [eventRes, ticketsRes] = await Promise.all([
+                    fetch('/api/event'),
+                    fetch('/api/tickets')
+                ]);
+
+                const event = await eventRes.json();
+                const tickets = await ticketsRes.json();
+
+                // Populate form
+                document.getElementById('eventName').value = event.name;
+                // Format ISO date for datetime-local
+                if (event.time) {
+                    const date = new Date(event.time);
+                    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+                    document.getElementById('eventTime').value = date.toISOString().slice(0, 16);
+                }
+                document.getElementById('eventColor').value = event.color;
+
+                // Stats
+                document.getElementById('totalTickets').textContent = tickets.length;
+                document.getElementById('usedTickets').textContent = tickets.filter(t => t.used_at).length;
+
+                // Attendee List
+                const list = document.getElementById('attendeeList');
+                if (tickets.length === 0) {
+                    list.innerHTML = '<p style="text-align: center; padding: 20px; color: #666;">No attendees yet.</p>';
+                } else {
+                    list.innerHTML = tickets.reverse().map(t => `
+                        <div class="ticket-item">
+                            <div>
+                                <div style="font-weight: 600;">${t.name}</div>
+                                <div style="font-size: 0.8rem; color: #666;">${t.email}</div>
+                            </div>
+                            <span class="status-badge ${t.used_at ? 'status-used' : 'status-valid'}">
+                                ${t.used_at ? 'Used' : 'Valid'}
+                            </span>
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Error loading admin data:', err);
+            }
+        }
+
+        // Save Event Info
+        eventForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = eventForm.querySelector('button');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
+            try {
+                const res = await fetch('/api/event', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: document.getElementById('eventName').value,
+                        time: new Date(document.getElementById('eventTime').value).toISOString(),
+                        color: document.getElementById('eventColor').value
+                    })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    saveStatus.textContent = '✅ Event updated successfully!';
+                    saveStatus.style.color = '#166534';
+                    saveStatus.style.display = 'block';
+                    setTimeout(() => saveStatus.style.display = 'none', 3000);
+                }
+            } catch (err) {
+                saveStatus.textContent = '❌ Error saving changes.';
+                saveStatus.style.color = '#991b1b';
+                saveStatus.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Update Event';
+            }
+        });
+
+        loadData();
+    </script>
+</body>
+
+</html>

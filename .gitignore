@@ -1,0 +1,11 @@
+.env
+db.json
+certs/
+Certificates.p12
+pass.cer
+wwdr.cer
+CertificateSigningRequest.certSigningRequest
+*.pkpass
+sessions/
+node_modules/
+public/uploads/

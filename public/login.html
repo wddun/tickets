@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | TicketCheckin</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .auth-card {
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 30px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .toggle-auth {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        .toggle-auth a {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body class="home">
+    <div class="container">
+        <div class="auth-card">
+            <div class="header" style="text-align: center;">
+                <h1 id="authTitle">Organizer Login</h1>
+                <p id="authDesc">Manage your events and tickets.</p>
+            </div>
+
+            <form id="authForm" style="margin-top: 20px;">
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" id="email" placeholder="organizer@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="password" placeholder="••••••••" required>
+                </div>
+                <button type="submit" id="submitBtn">Login</button>
+            </form>
+
+            <div class="toggle-auth">
+                <span id="toggleText">Don't have an account?</span>
+                <a href="#" id="toggleBtn">Sign Up</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isLogin = true;
+        const authForm = document.getElementById('authForm');
+        const authTitle = document.getElementById('authTitle');
+        const authDesc = document.getElementById('authDesc');
+        const toggleBtn = document.getElementById('toggleBtn');
+        const toggleText = document.getElementById('toggleText');
+        const submitBtn = document.getElementById('submitBtn');
+
+        toggleBtn.onclick = (e) => {
+            e.preventDefault();
+            isLogin = !isLogin;
+            authTitle.textContent = isLogin ? 'Organizer Login' : 'Create Account';
+            authDesc.textContent = isLogin ? 'Manage your events and tickets.' : 'Start hosting your own events today.';
+            toggleText.textContent = isLogin ? "Don't have an account?" : "Already have an account?";
+            toggleBtn.textContent = isLogin ? 'Sign Up' : 'Login';
+            submitBtn.textContent = isLogin ? 'Login' : 'Create Account';
+        };
+
+        authForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
+
+            try {
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.href = '/dashboard.html';
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (err) {
+                alert('Connection error');
+            }
+        };
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | TicketCheckin</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .event-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .event-item {
+            padding: 15px;
+            background: white;
+            border-radius: 12px;
+            border: 1px solid #eee;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .event-item:hover {
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .event-item.active {
+            border-color: var(--primary);
+            background: #f8faff;
+        }
+
+        .create-btn {
+            background: #10b981;
+            margin-bottom: 20px;
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-box {
+            padding: 20px;
+            background: #f8fafc;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .stat-box h4 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .stat-box p {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .ticket-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container" style="max-width: 1000px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h1>Event Dashboard</h1>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <span id="userEmail" style="font-size: 14px; color: var(--text-muted);"></span>
+                <button onclick="logout()"
+                    style="background: #ef4444; padding: 8px 15px; font-size: 12px;">Logout</button>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <!-- Sidebar -->
+            <div>
+                <button class="create-btn" onclick="showCreateModal()">+ Create New Event</button>
+                <div class="event-list" id="eventList">
+                    <!-- Events will load here -->
+                </div>
+            </div>
+
+            <!-- Main Panel -->
+            <div class="card" id="eventDetail" style="display: none;">
+                <div class="header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                        <h2 id="detailName">Event Name</h2>
+                        <p id="detailInfo">Date • Location</p>
+                    </div>
+                    <button onclick="deleteEvent()"
+                        style="background: #ef4444; padding: 5px 12px; font-size: 11px; width: auto;">Delete
+                        Event</button>
+                </div>
+
+                <div class="stats-row">
+                    <div class="stat-box">
+                        <h4 id="statTotal">0</h4>
+                        <p>Total Tickets</p>
+                    </div>
+                    <div class="stat-box">
+                        <h4 id="statUsed">0</h4>
+                        <p>Checked In</p>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <label>Public Registration Link:</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="regLink" readonly style="flex: 1;">
+                        <button onclick="copyLink()" style="width: auto; padding: 0 15px;">Copy</button>
+                    </div>
+                </div>
+
+                <div style="margin-top: 30px;">
+                    <h3>Attendee List</h3>
+                    <div id="ticketList" style="margin-top: 15px;">
+                        <!-- Tickets will load here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Event Modal -->
+    <div id="createModal"
+        style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: center; justify-content: center;">
+        <div class="card" style="max-width: 500px; width: 90%;">
+            <h2>New Event</h2>
+            <form id="createEventForm">
+                <div class="form-group">
+                    <label>Event Name</label>
+                    <input type="text" id="newName" required>
+                </div>
+                <div class="form-group">
+                    <label>Date & Time</label>
+                    <input type="datetime-local" id="newTime" required>
+                </div>
+                <div class="form-group" style="position: relative;">
+                    <label>Search Venue / Address</label>
+                    <input type="text" id="locSearch" placeholder="Type to search places..."
+                        oninput="searchPlaces(this.value)">
+                    <div id="locSuggestions"
+                        style="display: none; position: absolute; width: 100%; max-height: 200px; overflow-y: auto; background: white; border: 1px solid #ddd; border-radius: 8px; z-index: 1000; margin-top: 5px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Display Venue Name</label>
+                    <input type="text" id="newLocName" required placeholder="e.g. My Backyard">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                    <div class="form-group">
+                        <label>Latitude</label>
+                        <input type="number" step="any" id="newLat" value="37.33182">
+                    </div>
+                    <div class="form-group">
+                        <label>Longitude</label>
+                        <input type="number" step="any" id="newLng" value="-122.03118">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Event Image (PNG/JPG)</label>
+                    <input type="file" id="newImage" accept="image/png,image/jpeg">
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button type="submit">Create Event</button>
+                    <button type="button" onclick="hideCreateModal()"
+                        style="background: #eee; color: #333;">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentEvents = [];
+        let selectedEventId = null;
+
+        async function init() {
+            const res = await fetch('/api/auth/me');
+            if (!res.ok) return window.location.href = '/login.html';
+            const data = await res.json();
+            document.getElementById('userEmail').textContent = data.user.email;
+            loadEvents();
+        }
+
+        async function loadEvents() {
+            const res = await fetch('/api/events');
+            currentEvents = await res.json();
+            const list = document.getElementById('eventList');
+            list.innerHTML = '';
+
+            currentEvents.forEach(e => {
+                const div = document.createElement('div');
+                div.className = `event-item ${selectedEventId === e.id ? 'active' : ''}`;
+                div.innerHTML = `
+                    <div style="font-weight: 700;">${e.name}</div>
+                    <div style="font-size: 12px; color: #666;">${new Date(e.time).toLocaleDateString()} • ${e.location.name}</div>
+                `;
+                div.onclick = () => selectEvent(e.id);
+                list.appendChild(div);
+            });
+        }
+
+        async function selectEvent(id) {
+            selectedEventId = id;
+            loadEvents(); // for active styling
+            const event = currentEvents.find(e => e.id === id);
+            document.getElementById('eventDetail').style.display = 'block';
+            document.getElementById('detailName').textContent = event.name;
+            document.getElementById('detailInfo').textContent = `${new Date(event.time).toLocaleString()} • ${event.location.name}`;
+            document.getElementById('regLink').value = `${window.location.origin}/register.html?id=${id}`;
+
+            const res = await fetch(`/api/event/${id}/tickets`);
+            const tickets = await res.json();
+
+            document.getElementById('statTotal').textContent = tickets.length;
+            document.getElementById('statUsed').textContent = tickets.filter(t => t.used_at).length;
+
+            const tList = document.getElementById('ticketList');
+            tList.innerHTML = '';
+            tickets.forEach(t => {
+                const div = document.createElement('div');
+                div.className = 'ticket-row';
+                div.innerHTML = `
+                    <div>
+                        <div style="font-weight: 600;">${t.name}</div>
+                        <div style="font-size: 11px; color: #888;">${t.email}</div>
+                    </div>
+                    <div style="color: ${t.used_at ? '#10b981' : '#f59e0b'}; font-weight: 700; font-size: 12px;">
+                        ${t.used_at ? 'SCANNED' : 'PENDING'}
+                    </div>
+                `;
+                tList.appendChild(div);
+            });
+        }
+
+        function showCreateModal() { document.getElementById('createModal').style.display = 'flex'; }
+        function hideCreateModal() { document.getElementById('createModal').style.display = 'none'; }
+
+        document.getElementById('createEventForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('name', document.getElementById('newName').value);
+            formData.append('time', document.getElementById('newTime').value);
+            formData.append('locationName', document.getElementById('newLocName').value);
+            formData.append('lat', document.getElementById('newLat').value);
+            formData.append('lng', document.getElementById('newLng').value);
+            formData.append('color', '#6366f1');
+            const imageFile = document.getElementById('newImage').files[0];
+            if (imageFile) formData.append('image', imageFile);
+
+            const res = await fetch('/api/events', {
+                method: 'POST',
+                body: formData
+            });
+            if (res.ok) {
+                hideCreateModal();
+                loadEvents();
+            }
+        };
+
+        let userLocation = null;
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+            }, err => console.warn('Geolocation disabled'));
+        }
+
+        let searchTimeout;
+        async function searchPlaces(query) {
+            if (query.length < 3) return document.getElementById('locSuggestions').style.display = 'none';
+
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(async () => {
+                let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`;
+                if (userLocation) {
+                    // Bias towards user location if available
+                    url += `&viewbox=${userLocation.lon - 1},${userLocation.lat + 1},${userLocation.lon + 1},${userLocation.lat - 1}&bounded=0`;
+                }
+
+                try {
+                    const res = await fetch(url);
+                    const results = await res.json();
+                    const container = document.getElementById('locSuggestions');
+                    container.innerHTML = '';
+                    container.style.display = results.length ? 'block' : 'none';
+
+                    results.forEach(place => {
+                        const div = document.createElement('div');
+                        div.style.padding = '10px';
+                        div.style.cursor = 'pointer';
+                        div.style.borderBottom = '1px solid #f0f0f0';
+                        div.style.fontSize = '13px';
+                        div.innerHTML = `<strong>${place.display_name.split(',')[0]}</strong><br><span style="color: #888;">${place.display_name}</span>`;
+                        div.onmouseover = () => div.style.background = '#f8faff';
+                        div.onmouseout = () => div.style.background = 'white';
+                        div.onclick = () => {
+                            document.getElementById('newLocName').value = place.display_name.split(',')[0];
+                            document.getElementById('newLat').value = place.lat;
+                            document.getElementById('newLng').value = place.lon;
+                            document.getElementById('locSearch').value = place.display_name;
+                            container.style.display = 'none';
+                        };
+                        container.appendChild(div);
+                    });
+                } catch (e) { console.error('Search failed', e); }
+            }, 300);
+        }
+
+        async function logout() {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.href = '/login.html';
+        }
+
+        async function deleteEvent() {
+            if (!selectedEventId) return;
+            if (!confirm('Are you sure you want to delete this event? This will also delete all tickets associated with it.')) return;
+
+            try {
+                const res = await fetch(`/api/event/${selectedEventId}`, { method: 'DELETE' });
+                if (res.ok) {
+                    selectedEventId = null;
+                    document.getElementById('eventDetail').style.display = 'none';
+                    loadEvents();
+                } else {
+                    alert('Error deleting event');
+                }
+            } catch (err) {
+                alert('Connection error');
+            }
+        }
+
+        function copyLink() {
+            const input = document.getElementById('regLink');
+            input.select();
+            document.execCommand('copy');
+            alert('Registration link copied!');
+        }
+
+        init();
+    </script>
+</body>
+
+</html>
