@@ -207,6 +207,151 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
+// API: Bulk Register Tickets (for Google Sheets integration)
+app.post('/api/register-bulk', async (req, res) => {
+    const { firstName, lastName, email, eventId, ticketCount } = req.body;
+
+    if (!firstName || !lastName || !email || !eventId || !ticketCount) {
+        return res.status(400).json({ error: 'firstName, lastName, email, eventId, and ticketCount are required' });
+    }
+
+    const event = db.data.events.find(e => e.id === eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const count = parseInt(ticketCount, 10);
+    if (isNaN(count) || count < 1 || count > 20) {
+        return res.status(400).json({ error: 'ticketCount must be a number between 1 and 20' });
+    }
+
+    const fullName = `${firstName} ${lastName}`;
+
+    // Create N tickets
+    const newTickets = Array.from({ length: count }, () => ({
+        id: nanoid(8),
+        token: nanoid(12),
+        eventId,
+        name: fullName,
+        firstName,
+        lastName,
+        email,
+        created_at: new Date().toISOString(),
+        used_at: null
+    }));
+
+    try {
+        await db.update(({ tickets }) => newTickets.forEach(t => tickets.push(t)));
+
+        // Build one email with all QR codes
+        if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 're_your_api_key') {
+            const ticketLabel = count === 1 ? 'Ticket' : `${count} Tickets`;
+
+            const qrBlocks = newTickets.map((ticket, i) => `
+                <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
+                    <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
+                        ${count > 1 ? `Ticket ${i + 1} of ${count}` : 'Your Ticket'}
+                    </p>
+                    <img src="${BASE_URL}/qr/${ticket.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
+                    <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${ticket.token}</p>
+                    <a href="${BASE_URL}/api/pass/${ticket.token}.pkpass">
+                        <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:38px;">
+                    </a>
+                </div>
+            `).join('');
+
+            await resend.emails.send({
+                from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+                to: email,
+                subject: `Your ${ticketLabel} for ${event.name}`,
+                html: `
+                    <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
+                        <h2 style="color:#333; margin-bottom:4px;">Hey ${firstName}!</h2>
+                        <p style="color:#555;">You're registered for <strong>${event.name}</strong> with <strong>${ticketLabel}</strong>.</p>
+                        ${event.imageUrl ? `
+                        <div style="text-align:center; margin:20px 0;">
+                            <img src="${BASE_URL}${event.imageUrl}" alt="${event.name}" style="max-width:100%; border-radius:12px;" />
+                        </div>` : ''}
+                        <p style="color:#555;">📍 ${event.location.name}</p>
+                        <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
+                        <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
+                        <p style="font-size:13px; color:#888; text-align:center; margin-bottom:4px;">
+                            ${count > 1 ? 'Scan each QR code separately at the door.' : 'Show this QR code at the door.'}
+                        </p>
+                        ${qrBlocks}
+                    </div>
+                `
+            });
+        }
+
+        res.json({
+            success: true,
+            tokens: newTickets.map(t => t.token),
+            tickets: newTickets
+        });
+    } catch (error) {
+        console.error('Bulk registration error:', error);
+        res.status(500).json({ error: 'Failed to process registration' });
+    }
+});
+
+// API: Create Event from Google Sheet (API key auth, no session required)
+app.post('/api/sheet/create-event', async (req, res) => {
+    const { apiKey, name, time, color, locationName, address, lat, lng, imageBase64, imageExt } = req.body;
+
+    if (!apiKey || apiKey !== process.env.SHEET_API_KEY) {
+        return res.status(401).json({ error: 'Invalid API key' });
+    }
+
+    if (!name || !time) {
+        return res.status(400).json({ error: 'name and time are required' });
+    }
+
+    // Find the owner account so events appear in the dashboard
+    const ownerEmail = process.env.SHEET_USER_EMAIL;
+    const owner = ownerEmail ? db.data.users.find(u => u.email === ownerEmail) : null;
+    const userId = owner ? owner.id : 'sheet';
+
+    let imageUrl = null;
+    if (imageBase64) {
+        try {
+            const ext = (imageExt || 'png').toLowerCase().replace('jpeg', 'jpg');
+            const filename = `${Date.now()}-${nanoid(8)}.${ext}`;
+            const filepath = path.join(uploadsDir, filename);
+            await fs.promises.writeFile(filepath, Buffer.from(imageBase64, 'base64'));
+
+            if (ext === 'jpg') {
+                const pngName = filename.replace(/\.[^.]+$/, '.png');
+                const pngPath = path.join(uploadsDir, pngName);
+                await sharp(filepath).png().toFile(pngPath);
+                await fs.promises.unlink(filepath);
+                imageUrl = `/uploads/${pngName}`;
+            } else {
+                imageUrl = `/uploads/${filename}`;
+            }
+        } catch (imgErr) {
+            console.warn('Image save failed, continuing without image:', imgErr.message);
+        }
+    }
+
+    const newEvent = {
+        id: nanoid(10),
+        userId,
+        name,
+        time,
+        color: color || 'rgb(99, 102, 241)',
+        imageUrl,
+        location: {
+            name: locationName || address || 'Venue',
+            address: address || '',
+            lat: parseFloat(lat) || 0,
+            lng: parseFloat(lng) || 0
+        }
+    };
+
+    await db.update(data => data.events.push(newEvent));
+
+    res.json({ success: true, eventId: newEvent.id, event: newEvent });
+});
+
 // --- Event APIs ---
 app.get('/api/events', requireAuth, (req, res) => {
     const userEvents = db.data.events.filter(e => e.userId === req.session.userId);
