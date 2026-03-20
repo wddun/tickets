@@ -27,13 +27,14 @@ var EV_EVENT_ID    = 'B14';  // Auto-filled after create
 var EV_STATUS      = 'B15';  // Auto-filled after create
 
 // ---- Attendees sheet columns (1-based) ----
-var COL_FIRST   = 1;  // A
-var COL_LAST    = 2;  // B
-var COL_EMAIL   = 3;  // C
-var COL_TICKETS = 4;  // D
-var COL_STATUS  = 5;  // E  (auto)
-var COL_SENT_AT = 6;  // F  (auto)
-var COL_TOKENS  = 7;  // G  (auto)
+var COL_FIRST    = 1;  // A
+var COL_LAST     = 2;  // B
+var COL_EMAIL    = 3;  // C
+var COL_TICKETS  = 4;  // D
+var COL_STATUS   = 5;  // E  (auto)
+var COL_SENT_AT  = 6;  // F  (auto)
+var COL_TOKENS   = 7;  // G  (auto)
+var COL_SCANNED  = 8;  // H  (auto — scan status)
 
 var ATT_HEADER_ROW = 1;
 var ATT_DATA_START = 2;
@@ -64,6 +65,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Send Pending Emails', 'sendPendingEmails')
     .addItem('Resend Selected Row', 'resendSelectedRow')
+    .addSeparator()
+    .addItem('Refresh Scan Status', 'refreshScanStatus')
     .addToUi();
 }
 
@@ -144,7 +147,7 @@ function initializeSheet() {
   attSheet.clear();
   attSheet.clearFormats();
 
-  var headers = ['First Name', 'Last Name', 'Email', '# of Tickets', 'Status', 'Sent At', 'Ticket Tokens'];
+  var headers = ['First Name', 'Last Name', 'Email', '# of Tickets', 'Status', 'Sent At', 'Ticket Tokens', 'Scan Status'];
   var headerRange = attSheet.getRange(ATT_HEADER_ROW, 1, 1, headers.length);
   headerRange.setValues([headers])
     .setFontWeight('bold')
@@ -152,8 +155,8 @@ function initializeSheet() {
     .setFontColor('#ffffff');
   attSheet.setFrozenRows(ATT_HEADER_ROW);
 
-  // Shade auto-filled columns
-  attSheet.getRange(ATT_DATA_START, COL_STATUS, 500, 3)
+  // Shade auto-filled columns (E through H)
+  attSheet.getRange(ATT_DATA_START, COL_STATUS, 500, 4)
     .setBackground('#f5f5f5')
     .setNote('Auto-filled by script — do not edit');
 
@@ -164,6 +167,7 @@ function initializeSheet() {
   attSheet.setColumnWidth(5, 210);
   attSheet.setColumnWidth(6, 150);
   attSheet.setColumnWidth(7, 340);
+  attSheet.setColumnWidth(8, 150);
 
   // Bring Event tab to front
   ss.setActiveSheet(evSheet);
@@ -536,6 +540,70 @@ function resendSelectedRow() {
     sheet.getRange(row, COL_STATUS).setValue('❌ Error: ' + err.message);
     ui.alert('❌ Error: ' + err.message);
   }
+}
+
+// ============================================================
+//  REFRESH SCAN STATUS — checks each row's tokens against the server
+// ============================================================
+function refreshScanStatus() {
+  var ss       = SpreadsheetApp.getActive();
+  var evSheet  = ss.getSheetByName(EVENT_SHEET_NAME);
+  var attSheet = ss.getSheetByName(ATTENDEES_SHEET_NAME);
+
+  if (!attSheet) {
+    SpreadsheetApp.getUi().alert('Attendees tab not found.');
+    return;
+  }
+
+  var serverUrl = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
+  if (!serverUrl) {
+    SpreadsheetApp.getUi().alert('Server URL not set in Event tab (B2).');
+    return;
+  }
+
+  var lastRow = attSheet.getLastRow();
+  var updated = 0;
+
+  for (var row = ATT_DATA_START; row <= lastRow; row++) {
+    var tokensRaw = getCellValue(attSheet, row, COL_TOKENS);
+    if (!tokensRaw) continue;
+
+    var tokens = tokensRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
+    if (!tokens.length) continue;
+
+    try {
+      var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/ticket-status', {
+        method:             'post',
+        contentType:        'application/json',
+        payload:            JSON.stringify({ tokens: tokens }),
+        muteHttpExceptions: true
+      });
+
+      var statuses = JSON.parse(response.getContentText());
+      var scannedCount = statuses.filter(function(s) { return s.status === 'scanned'; }).length;
+      var total        = statuses.filter(function(s) { return s.status !== 'not found'; }).length;
+
+      var label, bg;
+      if (scannedCount === 0) {
+        label = '⬜ Not scanned';
+        bg    = '#ffffff';
+      } else if (scannedCount < total) {
+        label = '🟡 ' + scannedCount + ' / ' + total + ' scanned';
+        bg    = '#fff9c4';
+      } else {
+        label = '✅ All scanned (' + total + ')';
+        bg    = '#e8f5e9';
+      }
+
+      var cell = attSheet.getRange(row, COL_SCANNED);
+      cell.setValue(label).setBackground(bg);
+      updated++;
+    } catch (err) {
+      attSheet.getRange(row, COL_SCANNED).setValue('⚠️ Error');
+    }
+  }
+
+  SpreadsheetApp.getUi().alert('Scan status refreshed for ' + updated + ' row(s).');
 }
 
 // ============================================================

@@ -274,7 +274,10 @@ app.post('/api/register-bulk', async (req, res) => {
                         <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
                         <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
                         <p style="font-size:13px; color:#888; text-align:center; margin-bottom:4px;">
-                            ${count > 1 ? 'Scan each QR code separately at the door.' : 'Show this QR code at the door.'}
+                            ${count > 1 ? 'Show each QR code separately at the door.' : 'Show this QR code at the door.'}
+                        </p>
+                        <p style="font-size:12px; color:#e53e3e; text-align:center; margin-bottom:4px; font-weight:600;">
+                            ⚠️ Each ticket is valid for one-time entry only and cannot be reused once scanned.
                         </p>
                         ${qrBlocks}
                     </div>
@@ -348,9 +351,27 @@ app.post('/api/sheet/create-event', async (req, res) => {
     res.json({ success: true, eventId: newEvent.id, event: newEvent });
 });
 
+// API: Batch ticket scan status (for Google Sheet)
+app.post('/api/ticket-status', (req, res) => {
+    const { tokens } = req.body;
+    if (!tokens || !Array.isArray(tokens)) {
+        return res.status(400).json({ error: 'tokens array required' });
+    }
+    const statuses = tokens.map(token => {
+        const ticket = db.data.tickets.find(t => t.token === token.trim());
+        if (!ticket) return { token, status: 'not found' };
+        return { token, status: ticket.used_at ? 'scanned' : 'not scanned', used_at: ticket.used_at || null };
+    });
+    res.json(statuses);
+});
+
 // --- Event APIs ---
 app.get('/api/events', requireAuth, (req, res) => {
-    const userEvents = db.data.events.filter(e => e.userId === req.session.userId);
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const userEvents = isAdmin
+        ? db.data.events
+        : db.data.events.filter(e => e.userId === req.session.userId);
     res.json(userEvents);
 });
 
@@ -594,12 +615,22 @@ const handlePassRequest = async (req, res) => {
             });
         }
 
+        // Back of pass — one-time use notice
+        pass.backFields.push({
+            key: 'terms',
+            label: 'ENTRY POLICY',
+            value: 'This ticket is valid for one-time entry only. Once scanned at the door it cannot be used again.'
+        });
+
         if (event.imageUrl) {
             const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
             if (fs.existsSync(imagePath)) {
                 const imageBuffer = fs.readFileSync(imagePath);
                 pass.addBuffer('thumbnail.png', imageBuffer);
                 pass.addBuffer('thumbnail@2x.png', imageBuffer);
+                // Use event image as the logo (top-left corner of the pass)
+                pass.addBuffer('logo.png', imageBuffer);
+                pass.addBuffer('logo@2x.png', imageBuffer);
             }
         }
 
