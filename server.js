@@ -293,13 +293,9 @@ app.post('/api/register-bulk', async (req, res) => {
     }
 });
 
-// API: Create Event from Google Sheet (API key auth, no session required)
+// API: Create Event from Google Sheet (no auth required — keep your server URL private)
 app.post('/api/sheet/create-event', async (req, res) => {
-    const { apiKey, name, time, color, locationName, address, lat, lng, imageBase64, imageExt } = req.body;
-
-    if (!apiKey || apiKey !== process.env.SHEET_API_KEY) {
-        return res.status(401).json({ error: 'Invalid API key' });
-    }
+    const { name, time, color, locationName, address, lat, lng, imageBase64, imageExt } = req.body;
 
     if (!name || !time) {
         return res.status(400).json({ error: 'name and time are required' });

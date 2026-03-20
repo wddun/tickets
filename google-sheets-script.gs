@@ -16,7 +16,6 @@ var ATTENDEES_SHEET_NAME = 'Attendees';
 
 // ---- Event sheet cell addresses ----
 var EV_SERVER_URL  = 'B2';   // Server URL setting
-var EV_API_KEY     = 'D2';   // Sheet API Key setting
 var EV_NAME        = 'B5';
 var EV_DATE        = 'B6';
 var EV_TIME        = 'B7';
@@ -85,9 +84,7 @@ function initializeSheet() {
 
   // Settings section
   styleLabel(evSheet.getRange('A2'), 'Server URL');
-  styleInput(evSheet.getRange('B2'), 'https://yourserver.com');
-  styleLabel(evSheet.getRange('C2'), 'Sheet API Key');
-  styleInput(evSheet.getRange('D2'), '').setNote('Must match SHEET_API_KEY in your .env file');
+  styleInput(evSheet.getRange('B2'), 'https://yourserver.com').setNote('Your ticket server URL — no trailing slash');
 
   // Divider
   evSheet.getRange('A3').setValue('').setBackground('#4a4a8a');
@@ -140,9 +137,7 @@ function initializeSheet() {
 
   // Column widths
   evSheet.setColumnWidth(1, 160);
-  evSheet.setColumnWidth(2, 340);
-  evSheet.setColumnWidth(3, 140);
-  evSheet.setColumnWidth(4, 280);
+  evSheet.setColumnWidth(2, 400);
 
   // ---- Attendees tab ----
   var attSheet = ss.getSheetByName(ATTENDEES_SHEET_NAME) || ss.insertSheet(ATTENDEES_SHEET_NAME);
@@ -197,7 +192,6 @@ function createEventFromSheet() {
   }
 
   var serverUrl = evSheet.getRange(EV_SERVER_URL).getValue().toString().trim();
-  var apiKey    = evSheet.getRange(EV_API_KEY).getValue().toString().trim();
   var name      = evSheet.getRange(EV_NAME).getValue().toString().trim();
   var dateVal   = evSheet.getRange(EV_DATE).getValue();
   var timeVal   = evSheet.getRange(EV_TIME).getValue();
@@ -206,8 +200,8 @@ function createEventFromSheet() {
   var colorRaw  = evSheet.getRange(EV_COLOR).getValue().toString().trim();
   var imageRef  = evSheet.getRange(EV_IMAGE).getValue().toString().trim();
 
-  if (!serverUrl || !apiKey) {
-    SpreadsheetApp.getUi().alert('Please fill in Server URL (B2) and Sheet API Key (D2) first.');
+  if (!serverUrl) {
+    SpreadsheetApp.getUi().alert('Please fill in your Server URL in cell B2 first.');
     return;
   }
   if (!name) {
@@ -273,7 +267,6 @@ function createEventFromSheet() {
 
   // Build payload
   var payload = {
-    apiKey:      apiKey,
     name:        name,
     time:        isoTime,
     color:       color,
@@ -377,7 +370,6 @@ function onRowComplete(e) {
   var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
   var eventId   = evSheet ? evSheet.getRange(EV_EVENT_ID).getValue().toString().trim() : '';
   var serverUrl = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
-  var apiKey    = evSheet ? evSheet.getRange(EV_API_KEY).getValue().toString().trim() : '';
 
   if (!eventId || !serverUrl) {
     sheet.getRange(row, COL_STATUS).setValue('⚠️ Create the event first (Event tab)');
@@ -435,7 +427,7 @@ function sendPendingEmails() {
   var serverUrl = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
 
   if (!eventId || !serverUrl) {
-    SpreadsheetApp.getUi().alert('Please create the event first (Event tab).');
+    SpreadsheetApp.getUi().alert('Please create the event first on the Event tab.');
     return;
   }
 
