@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,24 +7,14 @@
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/html5-qrcode"></script>
 </head>
-
-<body style="background: #000;">
-    <div class="container" style="margin: 0; padding: 0; max-width: none;">
-        <div id="reader" style="height: 100vh;"></div>
+<body style="background:#000;">
+    <div class="container" style="margin:0; padding:0; max-width:none;">
+        <div id="reader" style="height:100vh;"></div>
 
         <div id="statusOverlay" class="status-overlay">
             <div class="status-icon" id="statusIcon">✓</div>
             <div class="status-msg" id="statusMsg">Valid Ticket</div>
             <div class="status-sub" id="statusSub">Name Surname</div>
-            <button id="scanNextBtn" onclick="closeOverlay()" style="max-width: 200px; display: none;">Scan
-                Next</button>
-        </div>
-
-        <div
-            style="position: fixed; bottom: 30px; left: 0; right: 0; display: flex; justify-content: center; z-index: 10;">
-            <a href="register.html"
-                style="color: white; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 20px; text-decoration: none; font-size: 14px; backdrop-filter: blur(5px);">←
-                Back to Registration</a>
         </div>
     </div>
 
@@ -33,82 +22,56 @@
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
         function playSound(type) {
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-
+            if (audioCtx.state === 'suspended') audioCtx.resume();
             if (type === 'success') {
-                // "Dong" (Low)
-                const osc1 = audioCtx.createOscillator();
-                const gain1 = audioCtx.createGain();
-                osc1.connect(gain1);
-                gain1.connect(audioCtx.destination);
-                osc1.type = 'sine';
-                osc1.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+                const osc1 = audioCtx.createOscillator(), gain1 = audioCtx.createGain();
+                osc1.connect(gain1); gain1.connect(audioCtx.destination);
+                osc1.type = 'sine'; osc1.frequency.setValueAtTime(523.25, audioCtx.currentTime);
                 gain1.gain.setValueAtTime(1.4, audioCtx.currentTime);
-                gain1.gain.linearRampToValueAtTime(1.4, audioCtx.currentTime + 0.15); // Full volume for 150ms
+                gain1.gain.linearRampToValueAtTime(1.4, audioCtx.currentTime + 0.15);
                 gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-                osc1.start();
-                osc1.stop(audioCtx.currentTime + 0.3);
-
-                // "Ding" (High)
+                osc1.start(); osc1.stop(audioCtx.currentTime + 0.3);
                 setTimeout(() => {
-                    const osc2 = audioCtx.createOscillator();
-                    const gain2 = audioCtx.createGain();
-                    osc2.connect(gain2);
-                    gain2.connect(audioCtx.destination);
-                    osc2.type = 'sine';
-                    osc2.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+                    const osc2 = audioCtx.createOscillator(), gain2 = audioCtx.createGain();
+                    osc2.connect(gain2); gain2.connect(audioCtx.destination);
+                    osc2.type = 'sine'; osc2.frequency.setValueAtTime(880, audioCtx.currentTime);
                     gain2.gain.setValueAtTime(1.3, audioCtx.currentTime);
-                    gain2.gain.linearRampToValueAtTime(1.3, audioCtx.currentTime + 0.2); // Full volume for 200ms
+                    gain2.gain.linearRampToValueAtTime(1.3, audioCtx.currentTime + 0.2);
                     gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
-                    osc2.start();
-                    osc2.stop(audioCtx.currentTime + 0.5);
+                    osc2.start(); osc2.stop(audioCtx.currentTime + 0.5);
                 }, 150);
             } else {
-                const osc1 = audioCtx.createOscillator();
-                const gain1 = audioCtx.createGain();
-                osc1.connect(gain1);
-                gain1.connect(audioCtx.destination);
-                osc1.type = 'square';
-                osc1.frequency.setValueAtTime(220, audioCtx.currentTime); // A3
+                const osc1 = audioCtx.createOscillator(), gain1 = audioCtx.createGain();
+                osc1.connect(gain1); gain1.connect(audioCtx.destination);
+                osc1.type = 'square'; osc1.frequency.setValueAtTime(220, audioCtx.currentTime);
                 gain1.gain.setValueAtTime(1.0, audioCtx.currentTime);
                 gain1.gain.linearRampToValueAtTime(1.0, audioCtx.currentTime + 0.2);
                 gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-                osc1.start();
-                osc1.stop(audioCtx.currentTime + 0.3);
-
-                // Second buzz
+                osc1.start(); osc1.stop(audioCtx.currentTime + 0.3);
                 setTimeout(() => {
-                    const osc2 = audioCtx.createOscillator();
-                    const gain2 = audioCtx.createGain();
-                    osc2.connect(gain2);
-                    gain2.connect(audioCtx.destination);
-                    osc2.type = 'square';
-                    osc2.frequency.setValueAtTime(180, audioCtx.currentTime);
+                    const osc2 = audioCtx.createOscillator(), gain2 = audioCtx.createGain();
+                    osc2.connect(gain2); gain2.connect(audioCtx.destination);
+                    osc2.type = 'square'; osc2.frequency.setValueAtTime(180, audioCtx.currentTime);
                     gain2.gain.setValueAtTime(1.0, audioCtx.currentTime);
                     gain2.gain.linearRampToValueAtTime(1.0, audioCtx.currentTime + 0.3);
                     gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
-                    osc2.start();
-                    osc2.stop(audioCtx.currentTime + 0.4);
+                    osc2.start(); osc2.stop(audioCtx.currentTime + 0.4);
                 }, 150);
             }
         }
 
         let isProcessing = false;
-        const html5QrCode = new Html5Qrcode("reader");
-        const overlay = document.getElementById('statusOverlay');
+        const overlay    = document.getElementById('statusOverlay');
         const statusIcon = document.getElementById('statusIcon');
-        const statusMsg = document.getElementById('statusMsg');
-        const statusSub = document.getElementById('statusSub');
+        const statusMsg  = document.getElementById('statusMsg');
+        const statusSub  = document.getElementById('statusSub');
 
-        function onScanSuccess(decodedText, decodedResult) {
+        function onScanSuccess(decodedText) {
             if (isProcessing) return;
             isProcessing = true;
 
-            // Simple validation of format
             if (!decodedText.startsWith('ticket:')) {
-                showStatus('error', 'Invalid Format', 'This is not a valid ticket QR');
+                showStatus('error', 'Invalid Format', 'Not a valid ticket QR code');
                 return;
             }
 
@@ -119,56 +82,38 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token })
             })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === 'valid') {
-                        showStatus('success', 'Valid Ticket', data.name);
-                    } else if (data.status === 'used') {
-                        showStatus('error', 'Already Used', `${data.name} scanned at ${new Date(data.used_at).toLocaleTimeString()}`);
-                    } else {
-                        showStatus('error', 'Invalid Ticket', 'Ticket not found in system');
-                    }
-                })
-                .catch(err => {
-                    showStatus('error', 'System Error', 'Could not connect to server');
-                });
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'valid') {
+                    showStatus('success', 'Valid Ticket', data.name);
+                } else if (data.status === 'used') {
+                    showStatus('error', 'Already Used', `${data.name} — scanned at ${new Date(data.used_at).toLocaleTimeString()}`);
+                } else {
+                    showStatus('error', 'Invalid Ticket', data.message || 'Ticket not found');
+                }
+            })
+            .catch(() => showStatus('error', 'System Error', 'Could not connect to server'));
         }
 
         function showStatus(type, title, subtitle) {
             isProcessing = true;
             playSound(type);
-
             overlay.className = `status-overlay active ${type}`;
             overlay.style.backgroundColor = type === 'success' ? 'var(--success)' : 'var(--danger)';
             overlay.style.color = 'white';
-
             statusIcon.textContent = type === 'success' ? '✓' : '✕';
-            statusMsg.textContent = title;
-            statusSub.textContent = subtitle;
-
-            // Auto-close after 2 seconds
+            statusMsg.textContent  = title;
+            statusSub.textContent  = subtitle;
             setTimeout(() => {
-                closeOverlay();
+                overlay.classList.remove('active');
+                overlay.style.backgroundColor = '';
+                overlay.style.color = '';
+                setTimeout(() => { isProcessing = false; }, 1000);
             }, 2000);
         }
 
-        function closeOverlay() {
-            overlay.classList.remove('active');
-            overlay.style.backgroundColor = '';
-            overlay.style.color = '';
-            // Wait a bit before allowing next scan to prevent double scans
-            setTimeout(() => {
-                isProcessing = false;
-            }, 1000);
-        }
-
-        const config = {
-            fps: 10,
-            aspectRatio: 1.0
-        };
-
-        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess);
+        const html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start({ facingMode: "environment" }, { fps: 10, aspectRatio: 1.0 }, onScanSuccess);
     </script>
 </body>
-
 </html>

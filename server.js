@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { PKPass } from 'passkit-generator';
+import JSZip from 'jszip';
 import multer from 'multer';
 import sharp from 'sharp';
 
@@ -70,6 +71,20 @@ if (!db.data.users) db.data.users = [];
 if (!db.data.events) db.data.events = [];
 if (!db.data.tickets) db.data.tickets = [];
 
+// Migration: backfill scannerPin on any events that don't have one
+const eventsMissingPin = db.data.events.filter(e => !e.scannerPin);
+if (eventsMissingPin.length > 0) {
+    console.log(`🔄 Adding scanner PINs to ${eventsMissingPin.length} existing event(s)...`);
+    await db.update(data => {
+        data.events.forEach(e => {
+            if (!e.scannerPin) {
+                e.scannerPin = Math.floor(100000 + Math.random() * 900000).toString();
+            }
+        });
+    });
+    console.log('✅ Scanner PINs assigned. View them in the dashboard.');
+}
+
 // Data Migration: If old structure exists, migrate it
 if (db.data.event && db.data.events.length === 0) {
     console.log('🔄 Migrating legacy event data...');
@@ -97,19 +112,26 @@ if (db.data.event && db.data.events.length === 0) {
 }
 
 // --- Auth API ---
-app.post('/api/auth/signup', async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+// Signup disabled — admin account is created via /api/auth/setup-admin on first run
+app.post('/api/auth/signup', (req, res) => {
+    res.status(403).json({ error: 'Registration is not open' });
+});
 
-    const existing = db.data.users.find(u => u.email === email);
-    if (existing) return res.status(400).json({ error: 'User already exists' });
+// One-time admin setup — only works if no admin account exists yet
+app.post('/api/auth/setup-admin', async (req, res) => {
+    const { password } = req.body;
+    const adminEmail = process.env.ADMIN_EMAIL;
+    if (!adminEmail) return res.status(500).json({ error: 'ADMIN_EMAIL not set in .env' });
+    if (!password)   return res.status(400).json({ error: 'password required' });
+
+    const existing = db.data.users.find(u => u.email === adminEmail);
+    if (existing) return res.status(400).json({ error: 'Admin account already exists' });
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = { id: nanoid(), email, password: hashedPassword };
-
+    const newUser = { id: nanoid(), email: adminEmail, password: hashedPassword };
     await db.update(data => data.users.push(newUser));
     req.session.userId = newUser.id;
-    res.json({ success: true, user: { id: newUser.id, email: newUser.email } });
+    res.json({ success: true, message: `Admin account created for ${adminEmail}` });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -141,8 +163,32 @@ const requireAuth = (req, res, next) => {
     next();
 };
 
-// API: Register Ticket
-app.post('/api/register', async (req, res) => {
+const requireAdmin = (req, res, next) => {
+    if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    if (!user || user.email !== process.env.ADMIN_EMAIL) {
+        return res.status(403).json({ error: 'Admin access required' });
+    }
+    next();
+};
+
+// Serve protected pages for admin only (scanner is PIN-protected itself, so excluded)
+app.get(['/dashboard.html', '/admin.html'], (req, res, next) => {
+    if (!req.session.userId) return res.redirect('/login.html');
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    if (!user || user.email !== process.env.ADMIN_EMAIL) return res.redirect('/login.html');
+    next();
+});
+
+// Block the public register page entirely
+app.get('/register.html', (req, res) => res.redirect('/login.html'));
+
+// API: Register Ticket — disabled, registration is handled via Google Sheets
+app.post('/api/register', (req, res) => {
+    res.status(403).json({ error: 'Public registration is not available' });
+});
+
+app.post('/api/register_disabled', async (req, res) => {
     const { name, email, eventId } = req.body;
 
     if (!name || !email || !eventId) {
@@ -224,11 +270,13 @@ app.post('/api/register-bulk', async (req, res) => {
     }
 
     const fullName = `${firstName} ${lastName}`;
+    const registrationId = nanoid(10);
 
-    // Create N tickets
+    // Create N tickets — all share a registrationId so they can be bundled
     const newTickets = Array.from({ length: count }, () => ({
         id: nanoid(8),
         token: nanoid(12),
+        registrationId,
         eventId,
         name: fullName,
         firstName,
@@ -258,6 +306,15 @@ app.post('/api/register-bulk', async (req, res) => {
                 </div>
             `).join('');
 
+            const addAllButton = count > 1 ? `
+                <div style="text-align:center; margin:20px 0 8px;">
+                    <a href="${BASE_URL}/api/passes/bundle/${registrationId}" style="display:inline-block; background:#000; color:#fff; text-decoration:none; padding:14px 28px; border-radius:10px; font-size:15px; font-weight:600; letter-spacing:0.3px;">
+                        🍎 Add All ${count} Tickets to Apple Wallet
+                    </a>
+                    <p style="font-size:11px; color:#aaa; margin-top:8px;">Tap to add all tickets at once</p>
+                </div>
+            ` : '';
+
             await resend.emails.send({
                 from: process.env.RESEND_FROM || 'onboarding@resend.dev',
                 to: email,
@@ -273,8 +330,9 @@ app.post('/api/register-bulk', async (req, res) => {
                         <p style="color:#555;">📍 ${event.location.name}</p>
                         <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
                         <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
+                        ${addAllButton}
                         <p style="font-size:13px; color:#888; text-align:center; margin-bottom:4px;">
-                            ${count > 1 ? 'Show each QR code separately at the door.' : 'Show this QR code at the door.'}
+                            ${count > 1 ? 'Or add tickets individually below.' : 'Show this QR code at the door.'}
                         </p>
                         <p style="font-size:12px; color:#e53e3e; text-align:center; margin-bottom:4px; font-weight:600;">
                             ⚠️ Each ticket is valid for one-time entry only and cannot be reused once scanned.
@@ -338,6 +396,7 @@ app.post('/api/sheet/create-event', async (req, res) => {
         time,
         color: color || 'rgb(99, 102, 241)',
         imageUrl,
+        scannerPin: Math.floor(100000 + Math.random() * 900000).toString(), // 6-digit PIN
         location: {
             name: locationName || address || 'Venue',
             address: address || '',
@@ -404,6 +463,7 @@ app.post('/api/events', requireAuth, upload.single('image'), async (req, res) =>
         time,
         color,
         imageUrl,
+        scannerPin: Math.floor(100000 + Math.random() * 900000).toString(), // 6-digit PIN
         location: {
             name: locationName || 'Venue',
             lat: parseFloat(lat) || 37.33182,
@@ -439,38 +499,24 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
 // API: Validate QR Code
 app.post('/api/validate', async (req, res) => {
     const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token is required' });
 
-    if (!token) {
-        return res.status(400).json({ error: 'Token is required' });
-    }
-
-    // Standardize token format (handle "ticket:<token>" if scanned as is)
     const cleanToken = token.startsWith('ticket:') ? token.split(':')[1] : token;
-
     const ticket = db.data.tickets.find(t => t.token === cleanToken);
 
-    if (!ticket) {
-        return res.json({ status: 'invalid', message: 'Invalid ticket' });
-    }
+    if (!ticket) return res.json({ status: 'invalid', message: 'Invalid ticket' });
 
     if (ticket.used_at) {
-        return res.json({
-            status: 'used',
-            message: 'Ticket already used',
-            used_at: ticket.used_at,
-            name: ticket.name
-        });
+        return res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, name: ticket.name });
     }
 
-    // Mark as used
     ticket.used_at = new Date().toISOString();
     await db.write();
 
     const event = db.data.events.find(e => e.id === ticket.eventId);
-
     res.json({
         status: 'valid',
-        message: `Success! Welcome to ${event ? event.name : 'the event'}.`,
+        message: `Welcome to ${event ? event.name : 'the event'}!`,
         name: ticket.name,
         email: ticket.email
     });
@@ -487,171 +533,172 @@ app.get('/qr/:token', async (req, res) => {
     }
 });
 
-const handlePassRequest = async (req, res) => {
+// Shared helper — builds and returns a .pkpass Buffer for a ticket+event
+async function generatePassBuffer(ticket, event) {
+    const certPath = path.resolve(__dirname, 'certs');
+    const wwdrFile = path.join(certPath, 'wwdr.pem');
+    const signerCertFile = path.join(certPath, 'signer.pem');
+    const signerKeyFile = path.join(certPath, 'signer.key');
+    const modelPath = path.resolve(__dirname, 'pass-assets.pass');
+
+    const pass = await PKPass.from({
+        model: modelPath,
+        certificates: {
+            wwdr: fs.readFileSync(wwdrFile),
+            signerCert: fs.readFileSync(signerCertFile),
+            signerKey: fs.readFileSync(signerKeyFile),
+            signerKeyPassphrase: process.env.PASS_CERT_PASSWORD || undefined,
+        }
+    }, {
+        serialNumber: ticket.token,
+        passTypeIdentifier: process.env.PASS_TYPE_ID,
+        teamIdentifier: process.env.TEAM_ID,
+        description: event.name,
+        logoText: event.name,
+        backgroundColor: event.color || "rgb(99, 102, 241)",
+    });
+
+    pass.voided = !!ticket.used_at;
+
+    pass.setBarcodes({
+        format: "PKBarcodeFormatQR",
+        message: `ticket:${ticket.token}`,
+        messageEncoding: "iso-8859-1"
+    });
+
+    const lat = event.location?.lat;
+    const lng = event.location?.lng;
+    if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
+        pass.setLocations({
+            latitude: Number(lat),
+            longitude: Number(lng),
+            relevantText: `${event.name} is starting!`
+        });
+    }
+
+    pass.primaryFields.push({ key: "event", label: "EVENT", value: event.name });
+    pass.secondaryFields.push({ key: "attendee", label: "ATTENDEE", value: ticket.name });
+
+    const eventDate = new Date(event.time);
+    if (!Number.isNaN(eventDate.getTime())) {
+        pass.auxiliaryFields.push({
+            key: "date", label: "DATE", value: eventDate,
+            dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
+        });
+        const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
+        const windowEnd   = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
+        pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
+        pass.expirationDate = windowEnd;
+    } else {
+        pass.auxiliaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
+    }
+
+    if (event.location?.name) {
+        pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: event.location.name });
+    }
+
+    if (ticket.used_at) {
+        pass.auxiliaryFields.push({ key: "status", label: "STATUS", value: "USED / SCANNED" });
+    }
+
+    pass.backFields.push({
+        key: 'terms',
+        label: 'ENTRY POLICY',
+        value: 'This ticket is valid for one-time entry only. Once scanned at the door it cannot be used again.'
+    });
+
+    if (event.imageUrl) {
+        const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
+        if (fs.existsSync(imagePath)) {
+            const imageBuffer = fs.readFileSync(imagePath);
+            pass.addBuffer('thumbnail.png', imageBuffer);
+            pass.addBuffer('thumbnail@2x.png', imageBuffer);
+            pass.addBuffer('logo.png', imageBuffer);
+            pass.addBuffer('logo@2x.png', imageBuffer);
+        }
+    }
+
+    return pass.getAsBuffer();
+}
+
+// Validates Apple Wallet prerequisites, returns error string or null
+function checkPassPrereqs() {
+    const missing = [];
+    if (!process.env.PASS_TYPE_ID) missing.push('PASS_TYPE_ID');
+    if (!process.env.TEAM_ID)      missing.push('TEAM_ID');
+    if (missing.length) return `Missing env vars: ${missing.join(', ')}`;
+
+    const certPath = path.resolve(__dirname, 'certs');
+    const files = ['wwdr.pem', 'signer.pem', 'signer.key'];
+    const missingFiles = files.filter(f => !fs.existsSync(path.join(certPath, f)));
+    if (missingFiles.length) return `Missing cert files: ${missingFiles.join(', ')}`;
+
+    const modelPath = path.resolve(__dirname, 'pass-assets.pass');
+    if (!fs.existsSync(path.join(modelPath, 'pass.json'))) return 'Pass model missing';
+
+    return null;
+}
+
+// API: Generate single Apple Wallet Pass
+app.get(['/api/pass/:token', '/api/pass/:token.pkpass'], async (req, res) => {
     const rawToken = req.params.token;
     const token = rawToken.endsWith('.pkpass') ? rawToken.slice(0, -7) : rawToken;
     const ticket = db.data.tickets.find(t => t.token === token);
-
     if (!ticket) return res.status(404).send('Ticket not found');
 
     const event = db.data.events.find(e => e.id === ticket.eventId);
     if (!event) return res.status(404).send('Event not found');
 
+    const prereqError = checkPassPrereqs();
+    if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError}`);
+
     try {
-        const certPath = path.resolve(__dirname, 'certs');
-        const wwdrFile = path.join(certPath, 'wwdr.pem');
-        const signerCertFile = path.join(certPath, 'signer.pem');
-        const signerKeyFile = path.join(certPath, 'signer.key');
-
-        const missingEnv = [];
-        if (!process.env.PASS_TYPE_ID) missingEnv.push('PASS_TYPE_ID');
-        if (!process.env.TEAM_ID) missingEnv.push('TEAM_ID');
-
-        if (missingEnv.length) {
-            console.warn(`⚠️ Apple Wallet env vars missing: ${missingEnv.join(', ')}`);
-            return res.status(503).send(`Apple Wallet integration not fully configured. Missing env vars: ${missingEnv.join(', ')}`);
-        }
-
-        const missingFiles = [];
-        if (!fs.existsSync(wwdrFile)) missingFiles.push('wwdr.pem');
-        if (!fs.existsSync(signerCertFile)) missingFiles.push('signer.pem');
-        if (!fs.existsSync(signerKeyFile)) missingFiles.push('signer.key');
-
-        if (missingFiles.length) {
-            console.warn(`⚠️ Apple Wallet certificates missing: ${missingFiles.join(', ')}`);
-            return res.status(503).send(`Apple Wallet integration not fully configured. Missing files: ${missingFiles.join(', ')}`);
-        }
-
-        const modelPath = path.resolve(__dirname, 'pass-assets.pass');
-        const passJsonPath = path.join(modelPath, 'pass.json');
-        if (!fs.existsSync(modelPath) || !fs.existsSync(passJsonPath)) {
-            console.warn('⚠️ Apple Wallet pass model missing in /pass-assets.pass.');
-            return res.status(503).send('Apple Wallet integration not fully configured. Pass model missing.');
-        }
-
         console.log(`🎟️ Generating pass for: ${ticket.name} (${ticket.token})`);
-
-        const signerKeyPassphrase = process.env.PASS_CERT_PASSWORD || undefined;
-
-        const passOverrides = {
-            serialNumber: ticket.token,
-            passTypeIdentifier: process.env.PASS_TYPE_ID,
-            teamIdentifier: process.env.TEAM_ID,
-            description: event.name,
-            logoText: event.name,
-            backgroundColor: event.color || "rgb(99, 102, 241)",
-        };
-
-        const pass = await PKPass.from({
-            model: modelPath,
-            certificates: {
-                wwdr: fs.readFileSync(wwdrFile),
-                signerCert: fs.readFileSync(signerCertFile),
-                signerKey: fs.readFileSync(signerKeyFile),
-                signerKeyPassphrase,
-            }
-        }, passOverrides);
-
-        // Set Top-Level Properties
-        pass.voided = !!ticket.used_at;
-
-        // Add Barcode
-        pass.setBarcodes({
-            format: "PKBarcodeFormatQR",
-            message: `ticket:${ticket.token}`,
-            messageEncoding: "iso-8859-1"
-        });
-
-        // Add Geolocation
-        const lat = event.location?.lat;
-        const lng = event.location?.lng;
-        const hasValidCoords = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
-        if (hasValidCoords) {
-            console.log(`📍 Geofencing: ${lat}, ${lng}`);
-            pass.setLocations({
-                latitude: Number(lat),
-                longitude: Number(lng),
-                relevantText: `${event.name} is starting!`
-            });
-        }
-
-        // Push Fields into the pre-existing arrays from pass.json
-        pass.primaryFields.push({ key: "event", label: "EVENT", value: event.name });
-        pass.secondaryFields.push({ key: "attendee", label: "ATTENDEE", value: ticket.name });
-
-        const eventDate = new Date(event.time);
-        if (!Number.isNaN(eventDate.getTime())) {
-            pass.auxiliaryFields.push({
-                key: "date",
-                label: "DATE",
-                value: eventDate,
-                dateStyle: "PKDateStyleMedium",
-                timeStyle: "PKDateStyleShort"
-            });
-
-            // Show on lock screen from 2 hours before to 2 hours after start.
-            const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
-            const windowEnd = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
-            pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
-            pass.expirationDate = windowEnd;
-        } else {
-            pass.auxiliaryFields.push({
-                key: "date",
-                label: "DATE",
-                value: String(event.time)
-            });
-        }
-
-        if (event.location && event.location.name) {
-            pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: event.location.name });
-        }
-
-        if (ticket.used_at) {
-            pass.auxiliaryFields.push({
-                key: "status",
-                label: "STATUS",
-                value: "USED / SCANNED",
-                // Pass properties colors must be string or Apple won't render
-            });
-        }
-
-        // Back of pass — one-time use notice
-        pass.backFields.push({
-            key: 'terms',
-            label: 'ENTRY POLICY',
-            value: 'This ticket is valid for one-time entry only. Once scanned at the door it cannot be used again.'
-        });
-
-        if (event.imageUrl) {
-            const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
-            if (fs.existsSync(imagePath)) {
-                const imageBuffer = fs.readFileSync(imagePath);
-                pass.addBuffer('thumbnail.png', imageBuffer);
-                pass.addBuffer('thumbnail@2x.png', imageBuffer);
-                // Use event image as the logo (top-left corner of the pass)
-                pass.addBuffer('logo.png', imageBuffer);
-                pass.addBuffer('logo@2x.png', imageBuffer);
-            }
-        }
-
-
-        console.log('✅ Pass object created, getting buffer...');
-        const buffer = pass.getAsBuffer();
+        const buffer = await generatePassBuffer(ticket, event);
         console.log(`📦 Buffer generated: ${buffer.length} bytes`);
         res.set('Content-Type', 'application/vnd.apple.pkpass');
         res.set('Content-Disposition', `attachment; filename="ticket-${ticket.token}.pkpass"`);
         res.set('Content-Length', buffer.length);
         res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
         res.send(buffer);
-
     } catch (err) {
         console.error('Error generating pass:', err);
         res.status(500).send('Error generating Apple Wallet Pass');
     }
-};
+});
 
-// API: Generate Apple Wallet Pass
-app.get(['/api/pass/:token', '/api/pass/:token.pkpass'], handlePassRequest);
+// API: Bundle all passes for a registration into one .pkpassbundle
+app.get('/api/passes/bundle/:registrationId', async (req, res) => {
+    const { registrationId } = req.params;
+    const tickets = db.data.tickets.filter(t => t.registrationId === registrationId);
+    if (!tickets.length) return res.status(404).send('No tickets found for this registration');
+
+    const prereqError = checkPassPrereqs();
+    if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError}`);
+
+    const event = db.data.events.find(e => e.id === tickets[0].eventId);
+    if (!event) return res.status(404).send('Event not found');
+
+    try {
+        console.log(`📦 Generating bundle of ${tickets.length} passes for registration ${registrationId}`);
+        const zip = new JSZip();
+
+        for (const ticket of tickets) {
+            const passBuffer = await generatePassBuffer(ticket, event);
+            zip.file(`ticket-${ticket.token}.pkpass`, passBuffer);
+        }
+
+        const bundleBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE' });
+        res.set('Content-Type', 'application/vnd.apple.pkpasses');
+        res.set('Content-Disposition', `attachment; filename="tickets-${registrationId}.pkpassbundle"`);
+        res.set('Content-Length', bundleBuffer.length);
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.send(bundleBuffer);
+    } catch (err) {
+        console.error('Error generating pass bundle:', err);
+        res.status(500).send('Error generating Apple Wallet pass bundle');
+    }
+});
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🎟️  Ticket Check-in System running at:\n   - Local:    http://localhost:${PORT}\n   - Network:  http://0.0.0.0:${PORT}\n`);

@@ -105,6 +105,7 @@
                     <div>
                         <h2 id="detailName">Event Name</h2>
                         <p id="detailInfo">Date • Location</p>
+                        <p id="scannerPinDisplay" style="font-size:13px; font-weight:700; color:#6366f1; margin:2px 0 0; letter-spacing:2px;"></p>
                     </div>
                     <button onclick="deleteEvent()"
                         style="background: #ef4444; padding: 5px 12px; font-size: 11px; width: auto;">Delete
@@ -227,6 +228,8 @@
             document.getElementById('detailName').textContent = event.name;
             document.getElementById('detailInfo').textContent = `${new Date(event.time).toLocaleString()} • ${event.location.name}`;
             document.getElementById('regLink').value = `${window.location.origin}/register.html?id=${id}`;
+            const pinEl = document.getElementById('scannerPinDisplay');
+            if (pinEl) pinEl.textContent = event.scannerPin ? `Scanner PIN: ${event.scannerPin}` : '';
 
             const res = await fetch(`/api/event/${id}/tickets`);
             const tickets = await res.json();
