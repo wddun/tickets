@@ -292,7 +292,7 @@ function createEventFromSheet() {
       muteHttpExceptions: true
     });
 
-    var result = JSON.parse(response.getContentText());
+    var result = safeParseJSON(response);
 
     if (result.success) {
       evSheet.getRange(EV_EVENT_ID).setValue(result.eventId);
@@ -327,20 +327,30 @@ function createEventFromSheet() {
 //  SETUP TRIGGERS — installs installable onEdit trigger
 // ============================================================
 function setupTriggers() {
+  // Remove old triggers for both handlers
   ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'onRowComplete') {
+    if (t.getHandlerFunction() === 'onRowComplete' ||
+        t.getHandlerFunction() === 'refreshScanStatus') {
       ScriptApp.deleteTrigger(t);
     }
   });
 
+  // Auto-send emails on edit
   ScriptApp.newTrigger('onRowComplete')
     .forSpreadsheet(SpreadsheetApp.getActive())
     .onEdit()
     .create();
 
+  // Auto-refresh scan status every 5 minutes
+  ScriptApp.newTrigger('refreshScanStatus')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
   SpreadsheetApp.getUi().alert(
     '✅ Triggers installed!\n\n' +
-    'The Attendees tab will now auto-send emails whenever a row is fully filled in.'
+    '• Emails send automatically when a row is filled in\n' +
+    '• Scan status refreshes automatically every 5 minutes'
   );
 }
 
@@ -397,7 +407,7 @@ function onRowComplete(e) {
       muteHttpExceptions: true
     });
 
-    var result = JSON.parse(response.getContentText());
+    var result = safeParseJSON(response);
 
     if (result.success) {
       var label = ticketCount + ' ticket' + (ticketCount > 1 ? 's' : '');
@@ -460,7 +470,7 @@ function sendPendingEmails() {
         payload:          JSON.stringify({ firstName, lastName, email, eventId, ticketCount }),
         muteHttpExceptions: true
       });
-      var result = JSON.parse(response.getContentText());
+      var result = safeParseJSON(response);
       if (result.success) {
         attSheet.getRange(row, COL_STATUS).setValue('✅ Sent (' + ticketCount + ' ticket' + (ticketCount > 1 ? 's' : '') + ')');
         attSheet.getRange(row, COL_SENT_AT).setValue(
@@ -526,7 +536,7 @@ function resendSelectedRow() {
       payload:          JSON.stringify({ firstName, lastName, email, eventId, ticketCount }),
       muteHttpExceptions: true
     });
-    var result = JSON.parse(response.getContentText());
+    var result = safeParseJSON(response);
     if (result.success) {
       sheet.getRange(row, COL_STATUS).setValue('✅ Sent (' + ticketCount + ' ticket' + (ticketCount > 1 ? 's' : '') + ')');
       sheet.getRange(row, COL_SENT_AT).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy h:mm a'));
@@ -579,7 +589,7 @@ function refreshScanStatus() {
         muteHttpExceptions: true
       });
 
-      var statuses = JSON.parse(response.getContentText());
+      var statuses = safeParseJSON(response);
       var scannedCount = statuses.filter(function(s) { return s.status === 'scanned'; }).length;
       var total        = statuses.filter(function(s) { return s.status !== 'not found'; }).length;
 
@@ -599,11 +609,14 @@ function refreshScanStatus() {
       cell.setValue(label).setBackground(bg);
       updated++;
     } catch (err) {
-      attSheet.getRange(row, COL_SCANNED).setValue('⚠️ Error');
+      attSheet.getRange(row, COL_SCANNED).setValue('⚠️ ' + err.message.substring(0, 80));
     }
   }
 
-  SpreadsheetApp.getUi().alert('Scan status refreshed for ' + updated + ' row(s).');
+  // Only show alert when run manually (time-based triggers have no UI context)
+  try {
+    SpreadsheetApp.getUi().alert('Scan status refreshed for ' + updated + ' row(s).');
+  } catch (e) { /* running as background trigger — no UI available */ }
 }
 
 // ============================================================
@@ -611,6 +624,18 @@ function refreshScanStatus() {
 // ============================================================
 function getCellValue(sheet, row, col) {
   return sheet.getRange(row, col).getValue().toString().trim();
+}
+
+// Safe JSON parse — returns null and shows a readable error if the server
+// returned something other than JSON (e.g. a 502 proxy error page).
+function safeParseJSON(response) {
+  var code = response.getResponseCode();
+  var body = response.getContentText();
+  try {
+    return JSON.parse(body);
+  } catch (e) {
+    throw new Error('Server returned HTTP ' + code + ': ' + body.substring(0, 120));
+  }
 }
 
 // Extracts a number from "2", "2 tickets", "1 ticket", etc.
