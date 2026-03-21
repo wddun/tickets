@@ -298,6 +298,25 @@ app.post('/api/register-bulk', async (req, res) => {
         if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 're_your_api_key') {
             const ticketLabel = count === 1 ? 'Ticket' : `${count} Tickets`;
 
+            const walletButton = (token) => `
+                <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
+                    <table cellpadding="0" cellspacing="0" border="0" style="display:inline-table; background:#000; border-radius:8px; overflow:hidden;">
+                        <tr>
+                            <td style="padding:10px 8px 10px 16px; vertical-align:middle;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="22" viewBox="0 0 814 1000">
+                                    <path fill="#fff" d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 790.7 0 663 0 541.8c0-207.5 135.4-317.3 269-317.3 71 0 130.5 46.4 174.9 46.4 42.7 0 109.2-49.9 189.2-49.9 30.6-.1 111.2 2.6 166 79zm-168-180.5c31.1-36.9 53.1-88.1 53.1-139.3 0-7.1-.6-14.3-1.9-20.1-50.6 1.9-110.8 33.7-147.1 75.8-28.5 32.4-55.1 83.6-55.1 135.5 0 7.8 1.3 15.6 1.9 18.1 3.2.6 8.4 1.3 13.6 1.3 45.4 0 102.5-30.4 135.5-71.3z"/>
+                                </svg>
+                            </td>
+                            <td style="padding:10px 16px 10px 4px; vertical-align:middle; border-left:1px solid #333;">
+                                <div style="color:#fff; font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif; line-height:1.2;">
+                                    <div style="font-size:10px; font-weight:400; letter-spacing:0.4px; opacity:0.85;">Add to</div>
+                                    <div style="font-size:15px; font-weight:600; letter-spacing:0.2px;">Apple Wallet</div>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                </a>`;
+
             const qrBlocks = newTickets.map((ticket, i) => `
                 <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
                     <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
@@ -305,9 +324,7 @@ app.post('/api/register-bulk', async (req, res) => {
                     </p>
                     <img src="${BASE_URL}/qr/${ticket.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
                     <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${ticket.token}</p>
-                    <a href="${BASE_URL}/api/pass/${ticket.token}.pkpass">
-                        <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:38px;">
-                    </a>
+                    ${walletButton(ticket.token)}
                 </div>
             `).join('');
 

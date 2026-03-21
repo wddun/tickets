@@ -70,6 +70,8 @@ function onOpen() {
     .addItem('Resend Selected Row', 'resendSelectedRow')
     .addSeparator()
     .addItem('Refresh Scan Status', 'refreshScanStatus')
+    .addSeparator()
+    .addItem('Fix: Remove Duplicate Triggers', 'setupTriggers')
     .addToUi();
 }
 
@@ -444,11 +446,17 @@ function onRowComplete(e) {
   var sheet = e.source.getActiveSheet();
   if (sheet.getName() !== ATTENDEES_SHEET_NAME) return;
 
-  var colMap   = getColumnMap(sheet);
   var firstRow = e.range.getRow();
   var lastRow  = e.range.getLastRow();
   if (lastRow < ATT_DATA_START) return;
   firstRow = Math.max(firstRow, ATT_DATA_START);
+
+  // Acquire a script-wide lock so duplicate triggers (if any) can't double-send
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch(lockErr) { return; }
+
+  try {
+  var colMap   = getColumnMap(sheet);
 
   // Get settings once up front
   var ss        = SpreadsheetApp.getActive();
@@ -483,6 +491,9 @@ function onRowComplete(e) {
     isFirst = false;
 
     sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
+  }
+  } finally {
+    lock.releaseLock();
   }
 }
 
