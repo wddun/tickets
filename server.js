@@ -545,7 +545,9 @@ app.post('/api/events', requireAuth, upload.single('image'), async (req, res) =>
 });
 
 app.get('/api/event/:id/tickets', requireAuth, (req, res) => {
-    const event = db.data.events.find(e => e.id === req.params.id && e.userId === req.session.userId);
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const event = db.data.events.find(e => e.id === req.params.id && (isAdmin || e.userId === req.session.userId));
     if (!event) return res.status(401).json({ error: 'Unauthorized or not found' });
     const tickets = db.data.tickets.filter(t => t.eventId === req.params.id);
     res.json(tickets);
