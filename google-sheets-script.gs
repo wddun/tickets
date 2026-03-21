@@ -243,27 +243,8 @@ function createEventFromSheet() {
     }
   }
 
-  // Fetch image from Google Drive (if provided)
-  var imageBase64 = null;
-  var imageExt    = null;
-  if (imageRef) {
-    try {
-      var fileId = parseDriveFileId(imageRef);
-      if (fileId) {
-        var file    = DriveApp.getFileById(fileId);
-        var mime    = file.getMimeType();
-        var blob    = file.getBlob();
-        imageBase64 = Utilities.base64Encode(blob.getBytes());
-        imageExt    = mime === 'image/jpeg' ? 'jpg' : 'png';
-      }
-    } catch (imgErr) {
-      Logger.log('Image fetch failed: ' + imgErr.message);
-      SpreadsheetApp.getUi().alert(
-        '⚠️ Could not fetch image from Drive: ' + imgErr.message +
-        '\n\nMake sure the file is shared "Anyone with the link". Continuing without image.'
-      );
-    }
-  }
+  // Just extract the Drive file ID — the server fetches the image directly
+  var driveFileId = imageRef ? parseDriveFileId(imageRef) : null;
 
   // Mark as in-progress
   evSheet.getRange(EV_STATUS).setValue('⏳ Creating event...');
@@ -279,10 +260,7 @@ function createEventFromSheet() {
     lat:         lat,
     lng:         lng
   };
-  if (imageBase64) {
-    payload.imageBase64 = imageBase64;
-    payload.imageExt    = imageExt;
-  }
+  if (driveFileId) payload.driveFileId = driveFileId;
 
   try {
     var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/sheet/create-event', {
@@ -417,19 +395,8 @@ function onEventTabEdit(e) {
     } catch(geoErr) {}
   }
 
-  // Fetch updated image only if the image cell was edited
-  var imageBase64 = null, imageExt = null;
-  if (row === 11 && imageRef) {
-    try {
-      var fileId = parseDriveFileId(imageRef);
-      if (fileId) {
-        var file = DriveApp.getFileById(fileId);
-        var mime = file.getMimeType();
-        imageBase64 = Utilities.base64Encode(file.getBlob().getBytes());
-        imageExt = mime === 'image/jpeg' ? 'jpg' : 'png';
-      }
-    } catch(imgErr) {}
-  }
+  // Just extract the Drive file ID if the image cell was edited — server fetches it directly
+  var driveFileId = (row === 11 && imageRef) ? parseDriveFileId(imageRef) : null;
 
   var payload = { eventId: eventId };
   if (name)         payload.name = name;
@@ -439,7 +406,7 @@ function onEventTabEdit(e) {
   if (address)      payload.address = address;
   if (lat !== '')   payload.lat = lat;
   if (lng !== '')   payload.lng = lng;
-  if (imageBase64)  { payload.imageBase64 = imageBase64; payload.imageExt = imageExt; }
+  if (driveFileId)  payload.driveFileId = driveFileId;
 
   try {
     var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/sheet/update-event', {

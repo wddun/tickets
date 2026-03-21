@@ -28,7 +28,7 @@ const PORT = process.env.PORT || 3002;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
 app.use(express.static('public'));
 app.use(session({
     store: new FileStore({
@@ -369,9 +369,24 @@ app.post('/api/register-bulk', async (req, res) => {
     }
 });
 
+// Shared helper — server fetches image directly from Google Drive thumbnail URL.
+// This avoids sending large payloads through the reverse proxy entirely.
+async function fetchAndSaveImage(driveFileId) {
+    const url = `https://drive.google.com/thumbnail?id=${driveFileId}&sz=w1200`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Drive fetch failed: ${response.status}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const filename = `${Date.now()}-${nanoid(8)}.png`;
+    const filepath = path.join(uploadsDir, filename);
+    // Always convert to PNG via sharp (input is JPEG from Google's thumbnail)
+    await sharp(buffer).png().toFile(filepath);
+    return `/uploads/${filename}`;
+}
+
 // API: Update Event from Google Sheet
 app.post('/api/sheet/update-event', async (req, res) => {
-    const { eventId, name, time, color, locationName, address, lat, lng, imageBase64, imageExt } = req.body;
+    const { eventId, name, time, color, locationName, address, lat, lng, driveFileId } = req.body;
 
     if (!eventId) return res.status(400).json({ error: 'eventId is required' });
 
@@ -387,25 +402,9 @@ app.post('/api/sheet/update-event', async (req, res) => {
         if (lat != null && !isNaN(parseFloat(lat))) event.location.lat = parseFloat(lat);
         if (lng != null && !isNaN(parseFloat(lng))) event.location.lng = parseFloat(lng);
 
-        if (imageBase64) {
-            try {
-                const ext = (imageExt || 'png').toLowerCase().replace('jpeg', 'jpg');
-                const filename = `${Date.now()}-${nanoid(8)}.${ext}`;
-                const filepath = path.join(uploadsDir, filename);
-                await fs.promises.writeFile(filepath, Buffer.from(imageBase64, 'base64'));
-
-                if (ext === 'jpg') {
-                    const pngName = filename.replace(/\.[^.]+$/, '.png');
-                    const pngPath = path.join(uploadsDir, pngName);
-                    await sharp(filepath).png().toFile(pngPath);
-                    await fs.promises.unlink(filepath);
-                    event.imageUrl = `/uploads/${pngName}`;
-                } else {
-                    event.imageUrl = `/uploads/${filename}`;
-                }
-            } catch (imgErr) {
-                console.warn('Image update failed:', imgErr.message);
-            }
+        if (driveFileId) {
+            try { event.imageUrl = await fetchAndSaveImage(driveFileId); }
+            catch (imgErr) { console.warn('Image update failed:', imgErr.message); }
         }
 
         await db.write();
@@ -418,7 +417,7 @@ app.post('/api/sheet/update-event', async (req, res) => {
 
 // API: Create Event from Google Sheet (no auth required — keep your server URL private)
 app.post('/api/sheet/create-event', async (req, res) => {
-    const { name, time, color, locationName, address, lat, lng, imageBase64, imageExt } = req.body;
+    const { name, time, color, locationName, address, lat, lng, driveFileId } = req.body;
 
     if (!name || !time) {
         return res.status(400).json({ error: 'name and time are required' });
@@ -430,25 +429,9 @@ app.post('/api/sheet/create-event', async (req, res) => {
     const userId = owner ? owner.id : 'sheet';
 
     let imageUrl = null;
-    if (imageBase64) {
-        try {
-            const ext = (imageExt || 'png').toLowerCase().replace('jpeg', 'jpg');
-            const filename = `${Date.now()}-${nanoid(8)}.${ext}`;
-            const filepath = path.join(uploadsDir, filename);
-            await fs.promises.writeFile(filepath, Buffer.from(imageBase64, 'base64'));
-
-            if (ext === 'jpg') {
-                const pngName = filename.replace(/\.[^.]+$/, '.png');
-                const pngPath = path.join(uploadsDir, pngName);
-                await sharp(filepath).png().toFile(pngPath);
-                await fs.promises.unlink(filepath);
-                imageUrl = `/uploads/${pngName}`;
-            } else {
-                imageUrl = `/uploads/${filename}`;
-            }
-        } catch (imgErr) {
-            console.warn('Image save failed, continuing without image:', imgErr.message);
-        }
+    if (driveFileId) {
+        try { imageUrl = await fetchAndSaveImage(driveFileId); }
+        catch (imgErr) { console.warn('Image save failed, continuing without image:', imgErr.message); }
     }
 
     const newEvent = {
