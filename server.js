@@ -650,10 +650,11 @@ async function generatePassBuffer(ticket, event) {
             key: "date", label: "DATE", value: eventDate,
             dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
         });
-        const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
-        const windowEnd   = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
+        const windowStart  = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
+        const windowEnd    = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
+        const expiresAt    = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
         pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
-        pass.expirationDate = windowEnd;
+        pass.expirationDate = expiresAt;
     } else {
         pass.auxiliaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
     }
