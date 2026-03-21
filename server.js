@@ -2,7 +2,7 @@ import express from 'express';
 import { JSONFilePreset } from 'lowdb/node';
 import { nanoid } from 'nanoid';
 import QRCode from 'qrcode';
-import { Resend } from 'resend';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -26,7 +26,32 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3002;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
-const resend = new Resend(process.env.RESEND_API_KEY);
+
+const ses = new SESClient({
+    region: process.env.AWS_REGION || 'us-east-1',
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    }
+});
+
+// Rate limiter: ensures at least 100ms between sends (~10/sec max)
+let lastSendTime = 0;
+async function sendEmail({ to, subject, html }) {
+    const now = Date.now();
+    const wait = Math.max(0, lastSendTime + 100 - now);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    lastSendTime = Date.now();
+
+    return ses.send(new SendEmailCommand({
+        Source: process.env.SES_FROM,
+        Destination: { ToAddresses: [to] },
+        Message: {
+            Subject: { Data: subject, Charset: 'UTF-8' },
+            Body:    { Html:  { Data: html,    Charset: 'UTF-8' } }
+        }
+    }));
+}
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.static('public'));
@@ -295,7 +320,7 @@ app.post('/api/register-bulk', async (req, res) => {
         await db.update(({ tickets }) => newTickets.forEach(t => tickets.push(t)));
 
         // Build one email with all QR codes
-        if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 're_your_api_key') {
+        if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
             const ticketLabel = count === 1 ? 'Ticket' : `${count} Tickets`;
 
             const walletButton = (token) => `
@@ -323,8 +348,7 @@ app.post('/api/register-bulk', async (req, res) => {
                 </div>
             ` : '';
 
-            await resend.emails.send({
-                from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+            await sendEmail({
                 to: email,
                 subject: `Your ${ticketLabel} for ${event.name}`,
                 html: `
