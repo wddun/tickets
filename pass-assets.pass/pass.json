@@ -13,12 +13,6 @@
         "primaryFields": [],
         "secondaryFields": [],
         "auxiliaryFields": [],
-        "backFields": [
-            {
-                "key": "info",
-                "label": "Information",
-                "value": "This ticket is single-use. Please have your QR code ready for scanning."
-            }
-        ]
+        "backFields": []
     }
 }
