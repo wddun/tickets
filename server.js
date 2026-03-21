@@ -720,24 +720,24 @@ async function generatePassBuffer(ticket, event) {
     } else {
         pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
     }
-    cfEntries.slice(0, 2).forEach(([label, value], i) => {
-        pass.secondaryFields.push({ key: `cf_${i}`, label: label.toUpperCase(), value: String(value) });
-    });
+    if (cfEntries[0]) {
+        pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
+    }
 
-    // Auxiliary row: Location + up to 2 more custom fields (max 3 total)
+    // Auxiliary row: Location + 1 custom field
     if (event.location?.name) {
         pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: event.location.name });
     }
-    cfEntries.slice(2, 4).forEach(([label, value], i) => {
-        pass.auxiliaryFields.push({ key: `cf_aux_${i}`, label: label.toUpperCase(), value: String(value) });
-    });
+    if (cfEntries[1]) {
+        pass.auxiliaryFields.push({ key: 'cf_1', label: cfEntries[1][0].toUpperCase(), value: String(cfEntries[1][1]) });
+    }
 
     if (ticket.used_at) {
         pass.auxiliaryFields.push({ key: "status", label: "STATUS", value: "USED / SCANNED" });
     }
 
-    // Back: any remaining custom fields
-    cfEntries.slice(4).forEach(([label, value], i) => {
+    // Back: remaining custom fields
+    cfEntries.slice(2).forEach(([label, value], i) => {
         pass.backFields.push({ key: `cf_back_${i}`, label: label, value: String(value) });
     });
 
