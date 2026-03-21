@@ -611,6 +611,13 @@ async function generatePassBuffer(ticket, event) {
     const signerKeyFile = path.join(certPath, 'signer.key');
     const modelPath = path.resolve(__dirname, 'pass-assets.pass');
 
+    const [icon1x, icon2x, baseLogo1x, baseLogo2x] = await Promise.all([
+        sharp(path.join(modelPath, 'icon.png')).resize(29, 29, { fit: 'cover' }).png().toBuffer(),
+        sharp(path.join(modelPath, 'icon@2x.png')).resize(58, 58, { fit: 'cover' }).png().toBuffer(),
+        sharp(path.join(modelPath, 'logo.png')).resize(160, 50, { fit: 'inside' }).png().toBuffer(),
+        sharp(path.join(modelPath, 'logo@2x.png')).resize(320, 100, { fit: 'inside' }).png().toBuffer(),
+    ]);
+
     const pass = await PKPass.from({
         model: modelPath,
         certificates: {
@@ -627,6 +634,12 @@ async function generatePassBuffer(ticket, event) {
         logoText: event.name,
         backgroundColor: event.color || "rgb(99, 102, 241)",
     });
+
+    pass.addBuffer('icon.png', icon1x);
+    pass.addBuffer('icon@2x.png', icon2x);
+    // Only use base logo if the event has no custom image (will be overridden below if it does)
+    pass.addBuffer('logo.png', baseLogo1x);
+    pass.addBuffer('logo@2x.png', baseLogo2x);
 
     pass.voided = !!ticket.used_at;
 
@@ -700,13 +713,16 @@ async function generatePassBuffer(ticket, event) {
     if (event.imageUrl) {
         const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
         if (fs.existsSync(imagePath)) {
-            const imageBuffer = fs.readFileSync(imagePath);
-            // Use event image as the logo (top-left corner) — replaces the blank default ticket icon
-            pass.addBuffer('logo.png', imageBuffer);
-            pass.addBuffer('logo@2x.png', imageBuffer);
-            // Also show as thumbnail on the right side of the pass
-            pass.addBuffer('thumbnail.png', imageBuffer);
-            pass.addBuffer('thumbnail@2x.png', imageBuffer);
+            const [logo1x, logo2x, thumb1x, thumb2x] = await Promise.all([
+                sharp(imagePath).resize(160, 50, { fit: 'inside' }).png().toBuffer(),
+                sharp(imagePath).resize(320, 100, { fit: 'inside' }).png().toBuffer(),
+                sharp(imagePath).resize(90, 90, { fit: 'cover' }).png().toBuffer(),
+                sharp(imagePath).resize(180, 180, { fit: 'cover' }).png().toBuffer(),
+            ]);
+            pass.addBuffer('logo.png', logo1x);
+            pass.addBuffer('logo@2x.png', logo2x);
+            pass.addBuffer('thumbnail.png', thumb1x);
+            pass.addBuffer('thumbnail@2x.png', thumb2x);
         }
     }
 
@@ -764,6 +780,11 @@ app.get('/api/passes/bundle/:registrationId', async (req, res) => {
     const { registrationId } = req.params;
     const tickets = db.data.tickets.filter(t => t.registrationId === registrationId);
     if (!tickets.length) return res.status(404).send('No tickets found for this registration');
+
+    // Single ticket — redirect to the standard pass endpoint
+    if (tickets.length === 1) {
+        return res.redirect(`/api/passes/${tickets[0].token}`);
+    }
 
     const prereqError = checkPassPrereqs();
     if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError}`);
