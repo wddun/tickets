@@ -301,9 +301,16 @@ async function init() {
 }
 
 async function loadEvents() {
-    const r = await fetch('/api/events');
+    const [r, rc] = await Promise.all([fetch('/api/events'), fetch('/api/events/counts')]);
     if (!r.ok) return;
     events = await r.json();
+    if (rc.ok) {
+        const counts = await rc.json();
+        events.forEach(e => {
+            const c = counts[e.id];
+            if (c) e._counts = c;
+        });
+    }
     renderSidebar();
     if (selectedId) {
         const still = events.find(e => e.id === selectedId);
@@ -320,9 +327,8 @@ function renderSidebar() {
     list.innerHTML = '';
     const sorted = [...events].sort((a, b) => new Date(b.time) - new Date(a.time));
     sorted.forEach(e => {
-        const tickets = e._tickets || [];
-        const total   = tickets.length;
-        const scanned = tickets.filter(t => t.used_at).length;
+        const total   = e._counts ? e._counts.total   : (e._tickets || []).length;
+        const scanned = e._counts ? e._counts.scanned : (e._tickets || []).filter(t => t.used_at).length;
         const allDone = total > 0 && scanned === total;
         const isChecked = checkedEventIds.has(e.id);
 
@@ -417,6 +423,7 @@ async function fetchAndRender(event, silent = false) {
     const tickets = await r.json();
     allTickets = tickets;
     event._tickets = tickets;
+    event._counts = { total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
     if (!silent) renderSidebar();
     renderDetail(event, tickets);
 }

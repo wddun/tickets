@@ -504,6 +504,20 @@ app.get('/api/events', requireAuth, (req, res) => {
     res.json(userEvents);
 });
 
+app.get('/api/events/counts', requireAuth, (req, res) => {
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const userEvents = isAdmin
+        ? db.data.events
+        : db.data.events.filter(e => e.userId === req.session.userId);
+    const counts = {};
+    userEvents.forEach(e => {
+        const tickets = db.data.tickets.filter(t => t.eventId === e.id);
+        counts[e.id] = { total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
+    });
+    res.json(counts);
+});
+
 app.get('/api/event/:id', (req, res) => {
     const event = db.data.events.find(e => e.id === req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });

@@ -20,25 +20,27 @@
 
     <script>
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const compressor = audioCtx.createDynamicsCompressor();
+        compressor.connect(audioCtx.destination);
 
         function playSound(type) {
             if (audioCtx.state === 'suspended') audioCtx.resume();
             if (type === 'success') {
                 const osc1 = audioCtx.createOscillator(), gain1 = audioCtx.createGain();
-                osc1.connect(gain1); gain1.connect(audioCtx.destination);
+                osc1.connect(gain1); gain1.connect(compressor);
                 osc1.type = 'sine'; osc1.frequency.setValueAtTime(523.25, audioCtx.currentTime);
-                gain1.gain.setValueAtTime(1.4, audioCtx.currentTime);
-                gain1.gain.linearRampToValueAtTime(1.4, audioCtx.currentTime + 0.15);
-                gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-                osc1.start(); osc1.stop(audioCtx.currentTime + 0.3);
+                gain1.gain.setValueAtTime(3.0, audioCtx.currentTime);
+                gain1.gain.linearRampToValueAtTime(3.0, audioCtx.currentTime + 0.15);
+                gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                osc1.start(); osc1.stop(audioCtx.currentTime + 0.4);
                 setTimeout(() => {
                     const osc2 = audioCtx.createOscillator(), gain2 = audioCtx.createGain();
-                    osc2.connect(gain2); gain2.connect(audioCtx.destination);
+                    osc2.connect(gain2); gain2.connect(compressor);
                     osc2.type = 'sine'; osc2.frequency.setValueAtTime(880, audioCtx.currentTime);
-                    gain2.gain.setValueAtTime(1.3, audioCtx.currentTime);
-                    gain2.gain.linearRampToValueAtTime(1.3, audioCtx.currentTime + 0.2);
-                    gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
-                    osc2.start(); osc2.stop(audioCtx.currentTime + 0.5);
+                    gain2.gain.setValueAtTime(3.0, audioCtx.currentTime);
+                    gain2.gain.linearRampToValueAtTime(3.0, audioCtx.currentTime + 0.2);
+                    gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+                    osc2.start(); osc2.stop(audioCtx.currentTime + 0.6);
                 }, 150);
             } else {
                 const osc1 = audioCtx.createOscillator(), gain1 = audioCtx.createGain();
