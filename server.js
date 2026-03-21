@@ -704,8 +704,10 @@ async function generatePassBuffer(ticket, event) {
         const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
         if (fs.existsSync(imagePath)) {
             const imageBuffer = fs.readFileSync(imagePath);
-            // thumbnail = event image on the right side of the pass
-            // logo is left as the default from pass-assets.pass (no override)
+            // Use event image as the logo (top-left corner) — replaces the blank default ticket icon
+            pass.addBuffer('logo.png', imageBuffer);
+            pass.addBuffer('logo@2x.png', imageBuffer);
+            // Also show as thumbnail on the right side of the pass
             pass.addBuffer('thumbnail.png', imageBuffer);
             pass.addBuffer('thumbnail@2x.png', imageBuffer);
         }
