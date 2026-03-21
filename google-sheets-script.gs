@@ -153,7 +153,7 @@ function initializeSheet() {
 
   // Headers: fixed columns, then one example custom field, then auto columns
   // To add more custom fields: insert a column between "# of Tickets" and "Status"
-  var headers = ['First Name', 'Last Name', 'Email', '# of Tickets', 'T-Shirt Size', 'Status', 'Sent At', 'Ticket Tokens', 'Scan Status'];
+  var headers = ['First Name', 'Last Name', 'Email', '# of Tickets', 'T-Shirt Size', 'Status', 'Sent At', 'Ticket Tokens'];
   var headerRange = attSheet.getRange(ATT_HEADER_ROW, 1, 1, headers.length);
   headerRange.setValues([headers])
     .setFontWeight('bold')
@@ -168,8 +168,8 @@ function initializeSheet() {
     'They automatically appear on tickets and Apple Wallet passes.'
   );
 
-  // Shade auto-filled columns (Status through Scan Status = cols 6–9)
-  attSheet.getRange(ATT_DATA_START, 6, 500, 4)
+  // Shade auto-filled columns (Status through Ticket Tokens = cols 6–8)
+  attSheet.getRange(ATT_DATA_START, 6, 500, 3)
     .setBackground('#f5f5f5')
     .setNote('Auto-filled by script — do not edit');
 
@@ -182,7 +182,6 @@ function initializeSheet() {
   attSheet.setColumnWidth(6, 210);  // Status
   attSheet.setColumnWidth(7, 150);  // Sent At
   attSheet.setColumnWidth(8, 340);  // Ticket Tokens
-  attSheet.setColumnWidth(9, 150);  // Scan Status
 
   // Bring Event tab to front
   ss.setActiveSheet(evSheet);
@@ -674,23 +673,20 @@ function refreshScanStatus() {
       var scannedCount = statuses.filter(function(s) { return s.status === 'scanned'; }).length;
       var total        = statuses.filter(function(s) { return s.status !== 'not found'; }).length;
 
-      var label, bg;
-      if (scannedCount === 0) {
-        label = '⬜ Not scanned';
-        bg    = '#ffffff';
-      } else if (scannedCount < total) {
-        label = '🟡 ' + scannedCount + ' / ' + total + ' scanned';
-        bg    = '#fff9c4';
-      } else {
-        label = '✅ All scanned (' + total + ')';
-        bg    = '#e8f5e9';
-      }
+      var cell = attSheet.getRange(row, colMap.statusCol);
+      var existing = cell.getValue().toString();
+      // Don't overwrite if already manually checked in
+      if (existing.indexOf('manual') !== -1) { updated++; continue; }
 
-      var cell = attSheet.getRange(row, colMap.scannedCol);
-      cell.setValue(label).setBackground(bg);
+      if (scannedCount === total && total > 0) {
+        cell.setValue('✅ Checked In (scanned)').setBackground('#e8f5e9');
+      } else if (scannedCount > 0) {
+        cell.setValue('🟡 ' + scannedCount + '/' + total + ' checked in').setBackground('#fff9c4');
+      }
+      // If nobody scanned yet, leave the existing "✅ Sent" status alone
       updated++;
     } catch (err) {
-      attSheet.getRange(row, colMap.scannedCol).setValue('⚠️ ' + err.message.substring(0, 80));
+      attSheet.getRange(row, colMap.statusCol).setValue('⚠️ ' + err.message.substring(0, 80));
     }
   }
 
@@ -727,7 +723,7 @@ function getColumnMap(sheet) {
     statusCol:    statusColIdx,
     sentAtCol:    statusColIdx + 1,
     tokensCol:    statusColIdx + 2,
-    scannedCol:   statusColIdx + 3,
+    scannedCol:   statusColIdx,   // merged into Status
     customFields: {}  // { "T-Shirt Size": colIndex (1-based), ... }
   };
 
