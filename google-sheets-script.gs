@@ -464,7 +464,6 @@ function onRowComplete(e) {
   var eventId   = evSheet ? evSheet.getRange(EV_EVENT_ID).getValue().toString().trim() : '';
   var serverUrl = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
 
-  var isFirst = true;
   for (var row = firstRow; row <= lastRow; row++) {
     var firstName  = getCellValue(sheet, row, COL_FIRST);
     var lastName   = getCellValue(sheet, row, COL_LAST);
@@ -485,10 +484,6 @@ function onRowComplete(e) {
       sheet.getRange(row, colMap.statusCol).setValue('⚠️ Create the event first (Event tab)');
       continue;
     }
-
-    // 1-second gap between emails — skip delay on the very first one
-    if (!isFirst) Utilities.sleep(1000);
-    isFirst = false;
 
     sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
   }
@@ -569,7 +564,7 @@ function sendPendingEmails() {
 
   var colMap  = getColumnMap(attSheet);
   var lastRow = attSheet.getLastRow();
-  var sent = 0, errors = 0, isFirst = true;
+  var sent = 0, errors = 0;
 
   for (var row = ATT_DATA_START; row <= lastRow; row++) {
     var firstName  = getCellValue(attSheet, row, COL_FIRST);
@@ -582,9 +577,6 @@ function sendPendingEmails() {
 
     var ticketCount = parseTicketCount(ticketsRaw);
     if (!ticketCount) continue;
-
-    if (!isFirst) Utilities.sleep(1000);
-    isFirst = false;
 
     sendOneRow(attSheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
     var statusAfter = getCellValue(attSheet, row, colMap.statusCol);
@@ -769,7 +761,7 @@ function parseTicketCount(raw) {
   var match = raw.match(/\d+/);
   if (!match) return 0;
   var n = parseInt(match[0], 10);
-  return (n >= 1 && n <= 20) ? n : 0;
+  return (n >= 1 && n <= 500) ? n : 0;
 }
 
 // Extracts Drive file ID from a URL or raw ID

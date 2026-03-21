@@ -291,8 +291,8 @@ app.post('/api/register-bulk', async (req, res) => {
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     const count = parseInt(ticketCount, 10);
-    if (isNaN(count) || count < 1 || count > 20) {
-        return res.status(400).json({ error: 'ticketCount must be a number between 1 and 20' });
+    if (isNaN(count) || count < 1 || count > 500) {
+        return res.status(400).json({ error: 'ticketCount must be a number between 1 and 500' });
     }
 
     const fullName = `${firstName} ${lastName}`;
@@ -323,6 +323,11 @@ app.post('/api/register-bulk', async (req, res) => {
         if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
             const ticketLabel = count === 1 ? 'Ticket' : `${count} Tickets`;
 
+            // Generate QR codes as inline base64 — no external server dependency
+            const qrDataUrls = await Promise.all(
+                newTickets.map(t => QRCode.toDataURL(`ticket:${t.token}`, { width: 400, margin: 2 }))
+            );
+
             const walletButton = (token) => `
                 <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
                     <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
@@ -333,7 +338,7 @@ app.post('/api/register-bulk', async (req, res) => {
                     <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
                         ${count > 1 ? `Ticket ${i + 1} of ${count}` : 'Your Ticket'}
                     </p>
-                    <img src="${BASE_URL}/qr/${ticket.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
+                    <img src="${qrDataUrls[i]}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
                     <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${ticket.token}</p>
                     ${walletButton(ticket.token)}
                 </div>

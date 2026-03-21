@@ -9,3 +9,4 @@ CertificateSigningRequest.certSigningRequest
 sessions/
 node_modules/
 public/uploads/
+.env.example
