@@ -327,16 +327,22 @@ function createEventFromSheet() {
 //  SETUP TRIGGERS — installs installable onEdit trigger
 // ============================================================
 function setupTriggers() {
-  // Remove old triggers for both handlers
+  // Remove all old managed triggers
   ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'onRowComplete' ||
-        t.getHandlerFunction() === 'refreshScanStatus') {
+    var fn = t.getHandlerFunction();
+    if (fn === 'onRowComplete' || fn === 'onEventTabEdit' || fn === 'refreshScanStatus') {
       ScriptApp.deleteTrigger(t);
     }
   });
 
-  // Auto-send emails on edit
+  // Auto-send emails when attendee rows are filled in
   ScriptApp.newTrigger('onRowComplete')
+    .forSpreadsheet(SpreadsheetApp.getActive())
+    .onEdit()
+    .create();
+
+  // Auto-sync event details when Event tab is edited
+  ScriptApp.newTrigger('onEventTabEdit')
     .forSpreadsheet(SpreadsheetApp.getActive())
     .onEdit()
     .create();
@@ -349,47 +355,157 @@ function setupTriggers() {
 
   SpreadsheetApp.getUi().alert(
     '✅ Triggers installed!\n\n' +
-    '• Emails send automatically when a row is filled in\n' +
-    '• Scan status refreshes automatically every 5 minutes'
+    '• Emails send automatically when attendee rows are filled in\n' +
+    '• Event details sync to server when you edit the Event tab\n' +
+    '• Scan status refreshes every 5 minutes'
   );
 }
 
 // ============================================================
+//  EVENT TAB SYNC — auto-pushes changes to server when you
+//  edit event details (name, date, time, venue, address, color, image)
+// ============================================================
+function onEventTabEdit(e) {
+  var sheet = e.source.getActiveSheet();
+  if (sheet.getName() !== EVENT_SHEET_NAME) return;
+
+  // Only react to edits in the data cells (rows 5-11)
+  var row = e.range.getRow();
+  if (row < 5 || row > 11) return;
+
+  var eventId = sheet.getRange(EV_EVENT_ID).getValue().toString().trim();
+  if (!eventId) return; // event not created yet — nothing to sync
+
+  var serverUrl = sheet.getRange(EV_SERVER_URL).getValue().toString().trim();
+  if (!serverUrl) return;
+
+  // Debounce: store a flag and let a short sleep absorb rapid edits
+  Utilities.sleep(800);
+
+  // Re-read all fields fresh after the pause
+  var name      = sheet.getRange(EV_NAME).getValue().toString().trim();
+  var dateVal   = sheet.getRange(EV_DATE).getValue();
+  var timeVal   = sheet.getRange(EV_TIME).getValue();
+  var location  = sheet.getRange(EV_LOCATION).getValue().toString().trim();
+  var address   = sheet.getRange(EV_ADDRESS).getValue().toString().trim();
+  var colorRaw  = sheet.getRange(EV_COLOR).getValue().toString().trim();
+  var imageRef  = sheet.getRange(EV_IMAGE).getValue().toString().trim();
+
+  var color = colorRaw.replace(/^.*—\s*/, '').trim();
+  if (!color.startsWith('rgb') && !color.startsWith('#')) color = '';
+
+  // Build ISO datetime only if both date and time are set
+  var isoTime = '';
+  if (dateVal && timeVal) {
+    try {
+      var dateObj = new Date(dateVal);
+      var timeObj = new Date(timeVal);
+      dateObj.setHours(timeObj.getHours(), timeObj.getMinutes(), 0, 0);
+      isoTime = dateObj.toISOString();
+    } catch(e) {}
+  }
+
+  // Geocode address if it was the edited row
+  var lat = '', lng = '';
+  if (row === 9 && address) { // row 9 = address
+    try {
+      var geo = Maps.newGeocoder().geocode(address);
+      if (geo.status === 'OK' && geo.results.length > 0) {
+        lat = geo.results[0].geometry.location.lat;
+        lng = geo.results[0].geometry.location.lng;
+      }
+    } catch(geoErr) {}
+  }
+
+  // Fetch updated image only if the image cell was edited
+  var imageBase64 = null, imageExt = null;
+  if (row === 11 && imageRef) {
+    try {
+      var fileId = parseDriveFileId(imageRef);
+      if (fileId) {
+        var file = DriveApp.getFileById(fileId);
+        var mime = file.getMimeType();
+        imageBase64 = Utilities.base64Encode(file.getBlob().getBytes());
+        imageExt = mime === 'image/jpeg' ? 'jpg' : 'png';
+      }
+    } catch(imgErr) {}
+  }
+
+  var payload = { eventId: eventId };
+  if (name)         payload.name = name;
+  if (isoTime)      payload.time = isoTime;
+  if (color)        payload.color = color;
+  if (location)     payload.locationName = location;
+  if (address)      payload.address = address;
+  if (lat !== '')   payload.lat = lat;
+  if (lng !== '')   payload.lng = lng;
+  if (imageBase64)  { payload.imageBase64 = imageBase64; payload.imageExt = imageExt; }
+
+  try {
+    var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/sheet/update-event', {
+      method:           'post',
+      contentType:      'application/json',
+      payload:          JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    var result = safeParseJSON(response);
+    sheet.getRange(EV_STATUS).setValue(result.success ? '✅ Synced' : '⚠️ Sync error: ' + result.error);
+  } catch (err) {
+    sheet.getRange(EV_STATUS).setValue('⚠️ Sync error: ' + err.message.substring(0, 60));
+  }
+}
+
+// ============================================================
 //  INSTALLABLE TRIGGER — fires on every sheet edit
+//  Handles single edits AND autofill of multiple rows at once
 // ============================================================
 function onRowComplete(e) {
   var sheet = e.source.getActiveSheet();
   if (sheet.getName() !== ATTENDEES_SHEET_NAME) return;
 
-  var row = e.range.getRow();
-  if (row < ATT_DATA_START) return;
+  var firstRow = e.range.getRow();
+  var lastRow  = e.range.getLastRow();
+  if (lastRow < ATT_DATA_START) return;
+  firstRow = Math.max(firstRow, ATT_DATA_START);
 
-  var firstName  = getCellValue(sheet, row, COL_FIRST);
-  var lastName   = getCellValue(sheet, row, COL_LAST);
-  var email      = getCellValue(sheet, row, COL_EMAIL);
-  var ticketsRaw = getCellValue(sheet, row, COL_TICKETS);
-  var status     = getCellValue(sheet, row, COL_STATUS);
-
-  if (!firstName || !lastName || !email || !ticketsRaw) return;
-  if (status !== '') return; // already processed
-
-  var ticketCount = parseTicketCount(ticketsRaw);
-  if (!ticketCount) {
-    sheet.getRange(row, COL_STATUS).setValue('⚠️ Invalid ticket count');
-    return;
-  }
-
-  // Get settings from Event tab
-  var ss      = SpreadsheetApp.getActive();
-  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
+  // Get settings once up front
+  var ss        = SpreadsheetApp.getActive();
+  var evSheet   = ss.getSheetByName(EVENT_SHEET_NAME);
   var eventId   = evSheet ? evSheet.getRange(EV_EVENT_ID).getValue().toString().trim() : '';
   var serverUrl = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
 
-  if (!eventId || !serverUrl) {
-    sheet.getRange(row, COL_STATUS).setValue('⚠️ Create the event first (Event tab)');
-    return;
-  }
+  var isFirst = true;
+  for (var row = firstRow; row <= lastRow; row++) {
+    var firstName  = getCellValue(sheet, row, COL_FIRST);
+    var lastName   = getCellValue(sheet, row, COL_LAST);
+    var email      = getCellValue(sheet, row, COL_EMAIL);
+    var ticketsRaw = getCellValue(sheet, row, COL_TICKETS);
+    var status     = getCellValue(sheet, row, COL_STATUS);
 
+    if (!firstName || !lastName || !email || !ticketsRaw) continue;
+    if (status !== '') continue; // already sent or errored
+
+    var ticketCount = parseTicketCount(ticketsRaw);
+    if (!ticketCount) {
+      sheet.getRange(row, COL_STATUS).setValue('⚠️ Invalid ticket count');
+      continue;
+    }
+
+    if (!eventId || !serverUrl) {
+      sheet.getRange(row, COL_STATUS).setValue('⚠️ Create the event first (Event tab)');
+      continue;
+    }
+
+    // 1-second gap between emails — skip delay on the very first one
+    if (!isFirst) Utilities.sleep(1000);
+    isFirst = false;
+
+    sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl);
+  }
+}
+
+// Sends a single attendee row and updates status/sent-at/tokens columns
+function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl) {
   sheet.getRange(row, COL_STATUS).setValue('⏳ Sending...');
   SpreadsheetApp.flush();
 
@@ -446,7 +562,7 @@ function sendPendingEmails() {
   }
 
   var lastRow = attSheet.getLastRow();
-  var sent = 0, errors = 0;
+  var sent = 0, errors = 0, isFirst = true;
 
   for (var row = ATT_DATA_START; row <= lastRow; row++) {
     var firstName  = getCellValue(attSheet, row, COL_FIRST);
@@ -460,32 +576,13 @@ function sendPendingEmails() {
     var ticketCount = parseTicketCount(ticketsRaw);
     if (!ticketCount) continue;
 
-    attSheet.getRange(row, COL_STATUS).setValue('⏳ Sending...');
-    SpreadsheetApp.flush();
+    if (!isFirst) Utilities.sleep(1000);
+    isFirst = false;
 
-    try {
-      var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/register-bulk', {
-        method:           'post',
-        contentType:      'application/json',
-        payload:          JSON.stringify({ firstName, lastName, email, eventId, ticketCount }),
-        muteHttpExceptions: true
-      });
-      var result = safeParseJSON(response);
-      if (result.success) {
-        attSheet.getRange(row, COL_STATUS).setValue('✅ Sent (' + ticketCount + ' ticket' + (ticketCount > 1 ? 's' : '') + ')');
-        attSheet.getRange(row, COL_SENT_AT).setValue(
-          Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy h:mm a')
-        );
-        attSheet.getRange(row, COL_TOKENS).setValue(result.tokens.join(', '));
-        sent++;
-      } else {
-        attSheet.getRange(row, COL_STATUS).setValue('❌ Error: ' + result.error);
-        errors++;
-      }
-    } catch (err) {
-      attSheet.getRange(row, COL_STATUS).setValue('❌ Error: ' + err.message);
-      errors++;
-    }
+    var statusBefore = getCellValue(attSheet, row, COL_STATUS);
+    sendOneRow(attSheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl);
+    var statusAfter = getCellValue(attSheet, row, COL_STATUS);
+    if (statusAfter.indexOf('✅') === 0) sent++; else errors++;
   }
 
   SpreadsheetApp.getUi().alert('Done!  Sent: ' + sent + '   Errors: ' + errors);

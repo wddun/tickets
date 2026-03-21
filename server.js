@@ -173,7 +173,8 @@ const requireAdmin = (req, res, next) => {
 };
 
 // Serve protected pages for admin only (scanner is PIN-protected itself, so excluded)
-app.get(['/dashboard.html', '/admin.html'], (req, res, next) => {
+app.get('/admin.html', (req, res) => res.redirect('/dashboard.html'));
+app.get('/dashboard.html', (req, res, next) => {
     if (!req.session.userId) return res.redirect('/login.html');
     const user = db.data.users.find(u => u.id === req.session.userId);
     if (!user || user.email !== process.env.ADMIN_EMAIL) return res.redirect('/login.html');
@@ -365,6 +366,53 @@ app.post('/api/register-bulk', async (req, res) => {
     } catch (error) {
         console.error('Bulk registration error:', error);
         res.status(500).json({ error: 'Failed to process registration' });
+    }
+});
+
+// API: Update Event from Google Sheet
+app.post('/api/sheet/update-event', async (req, res) => {
+    const { eventId, name, time, color, locationName, address, lat, lng, imageBase64, imageExt } = req.body;
+
+    if (!eventId) return res.status(400).json({ error: 'eventId is required' });
+
+    const event = db.data.events.find(e => e.id === eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    try {
+        if (name)         event.name = name;
+        if (time)         event.time = time;
+        if (color)        event.color = color;
+        if (locationName) event.location.name = locationName;
+        if (address)      event.location.address = address;
+        if (lat != null && !isNaN(parseFloat(lat))) event.location.lat = parseFloat(lat);
+        if (lng != null && !isNaN(parseFloat(lng))) event.location.lng = parseFloat(lng);
+
+        if (imageBase64) {
+            try {
+                const ext = (imageExt || 'png').toLowerCase().replace('jpeg', 'jpg');
+                const filename = `${Date.now()}-${nanoid(8)}.${ext}`;
+                const filepath = path.join(uploadsDir, filename);
+                await fs.promises.writeFile(filepath, Buffer.from(imageBase64, 'base64'));
+
+                if (ext === 'jpg') {
+                    const pngName = filename.replace(/\.[^.]+$/, '.png');
+                    const pngPath = path.join(uploadsDir, pngName);
+                    await sharp(filepath).png().toFile(pngPath);
+                    await fs.promises.unlink(filepath);
+                    event.imageUrl = `/uploads/${pngName}`;
+                } else {
+                    event.imageUrl = `/uploads/${filename}`;
+                }
+            } catch (imgErr) {
+                console.warn('Image update failed:', imgErr.message);
+            }
+        }
+
+        await db.write();
+        res.json({ success: true, event });
+    } catch (error) {
+        console.error('Update event error:', error);
+        res.status(500).json({ error: 'Failed to update event' });
     }
 });
 

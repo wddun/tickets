@@ -1,365 +1,485 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard | TicketCheckin</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Events</title>
     <style>
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 20px;
-            margin-top: 30px;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
 
-        .event-list {
+        /* ── Top bar ── */
+        .topbar {
+            background: #fff;
+            border-bottom: 1px solid #e8e8e8;
+            padding: 0 28px;
+            height: 58px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        .topbar-title { font-size: 18px; font-weight: 700; color: #1a1a2e; letter-spacing: -0.3px; }
+        .topbar-title span { color: #6366f1; }
+        .logout-btn {
+            background: none; border: 1px solid #e0e0e0; color: #666;
+            padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+        }
+        .logout-btn:hover { background: #f4f5f7; }
+
+        /* ── Layout ── */
+        .layout { display: flex; height: calc(100vh - 58px); overflow: hidden; }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: 300px;
+            min-width: 300px;
+            background: #fff;
+            border-right: 1px solid #e8e8e8;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
+        }
+        .sidebar-header {
+            padding: 20px 20px 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .sidebar-header h2 { font-size: 13px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.8px; }
+        .event-list { overflow-y: auto; flex: 1; padding: 8px; }
+        .event-card {
+            padding: 14px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.15s;
+            margin-bottom: 4px;
+            border: 2px solid transparent;
+        }
+        .event-card:hover { background: #f8f8ff; }
+        .event-card.active { background: #f0f0ff; border-color: #6366f1; }
+        .event-card-name { font-weight: 600; font-size: 14px; color: #1a1a2e; margin-bottom: 4px; }
+        .event-card-meta { font-size: 12px; color: #888; }
+        .event-card-badge {
+            display: inline-block;
+            background: #6366f1;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 20px;
+            margin-top: 6px;
+        }
+        .event-card-badge.all-clear { background: #10b981; }
+
+        /* ── Main panel ── */
+        .main { flex: 1; overflow-y: auto; padding: 28px; }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #aaa;
             gap: 12px;
         }
+        .empty-state-icon { font-size: 48px; }
+        .empty-state p { font-size: 15px; }
 
-        .event-item {
-            padding: 15px;
-            background: white;
-            border-radius: 12px;
-            border: 1px solid #eee;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .event-item:hover {
-            border-color: var(--primary);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        }
-
-        .event-item.active {
-            border-color: var(--primary);
-            background: #f8faff;
-        }
-
-        .create-btn {
-            background: #10b981;
-            margin-bottom: 20px;
-        }
-
-        .stats-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .stat-box {
-            padding: 20px;
-            background: #f8fafc;
-            border-radius: 12px;
-            text-align: center;
-        }
-
-        .stat-box h4 {
-            font-size: 24px;
-            margin-bottom: 5px;
-        }
-
-        .stat-box p {
-            font-size: 12px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-        }
-
-        .ticket-row {
+        /* ── Event detail ── */
+        .detail-header {
             display: flex;
-            justify-content: space-between;
+            gap: 20px;
+            align-items: flex-start;
+            margin-bottom: 24px;
+        }
+        .detail-image {
+            width: 90px;
+            height: 90px;
+            border-radius: 14px;
+            object-fit: cover;
+            flex-shrink: 0;
+            background: #eee;
+        }
+        .detail-image-placeholder {
+            width: 90px;
+            height: 90px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            display: flex;
             align-items: center;
-            padding: 10px;
-            border-bottom: 1px solid #f1f5f9;
+            justify-content: center;
+            font-size: 32px;
+            flex-shrink: 0;
+        }
+        .detail-title { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 6px; }
+        .detail-meta { font-size: 14px; color: #666; line-height: 1.7; }
+        .detail-actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+        .btn {
+            padding: 9px 18px; border-radius: 9px; font-size: 13px; font-weight: 600;
+            cursor: pointer; border: none; transition: opacity 0.15s;
+            text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary { background: #6366f1; color: #fff; }
+        .btn-scanner { background: #0f172a; color: #fff; }
+        .btn-danger  { background: #fee2e2; color: #dc2626; }
+
+        /* ── Stats ── */
+        .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+        .stat-box {
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 12px;
+            padding: 18px 20px;
+        }
+        .stat-num { font-size: 30px; font-weight: 800; color: #1a1a2e; line-height: 1; margin-bottom: 6px; }
+        .stat-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.6px; }
+        .progress-bar-wrap { background: #f0f0f0; border-radius: 99px; height: 6px; margin-top: 8px; overflow: hidden; }
+        .progress-bar-fill { height: 100%; background: #10b981; border-radius: 99px; transition: width 0.4s; }
+
+        /* ── Attendee table ── */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+        .section-title { font-size: 16px; font-weight: 700; }
+        .refresh-hint { font-size: 12px; color: #aaa; }
+        .search-box {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #e8e8e8;
+            border-radius: 9px;
+            font-size: 14px;
+            margin-bottom: 12px;
+            outline: none;
+        }
+        .search-box:focus { border-color: #6366f1; }
+        .attendee-table {
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .attendee-row {
+            display: grid;
+            grid-template-columns: 1fr 1.4fr auto auto;
+            align-items: center;
+            padding: 12px 18px;
+            border-bottom: 1px solid #f4f5f7;
+            font-size: 13px;
+            gap: 12px;
+        }
+        .attendee-row:last-child { border-bottom: none; }
+        .attendee-row.header-row {
+            background: #f8f8ff;
+            font-size: 11px;
+            font-weight: 700;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .attendee-name { font-weight: 600; color: #1a1a2e; }
+        .attendee-email { font-size: 12px; color: #888; margin-top: 1px; }
+        .ticket-count { font-size: 12px; color: #6366f1; font-weight: 600; }
+        .status-pill {
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .status-pill.scanned  { background: #d1fae5; color: #059669; }
+        .status-pill.pending  { background: #fef9c3; color: #92400e; }
+        .status-pill.partial  { background: #e0e7ff; color: #4338ca; }
+
+        .empty-list { padding: 40px; text-align: center; color: #aaa; font-size: 14px; }
+
+        /* ── Auto-refresh indicator ── */
+        .live-dot {
+            display: inline-block;
+            width: 7px; height: 7px;
+            background: #10b981;
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 700px) {
+            .sidebar { width: 100%; min-width: unset; }
+            .layout { flex-direction: column; height: auto; overflow: visible; }
+            .main { padding: 16px; }
+            .stats-row { grid-template-columns: 1fr 1fr; }
+            .attendee-row { grid-template-columns: 1fr auto; }
+            .attendee-row .ticket-count, .attendee-row.header-row .col-tickets { display: none; }
         }
     </style>
 </head>
-
 <body>
-    <div class="container" style="max-width: 1000px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <h1>Event Dashboard</h1>
-            <div style="display: flex; gap: 10px; align-items: center;">
-                <span id="userEmail" style="font-size: 14px; color: var(--text-muted);"></span>
-                <button onclick="logout()"
-                    style="background: #ef4444; padding: 8px 15px; font-size: 12px;">Logout</button>
+
+<div class="topbar">
+    <div class="topbar-title">🎟️ <span>Ticket</span> Events</div>
+    <button class="logout-btn" onclick="logout()">Sign out</button>
+</div>
+
+<div class="layout">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2>Your Events</h2>
+        </div>
+        <div class="event-list" id="eventList">
+            <div style="padding: 20px; color: #aaa; font-size: 13px;">Loading…</div>
+        </div>
+    </div>
+
+    <!-- Main -->
+    <div class="main" id="main">
+        <div class="empty-state" id="emptyState">
+            <div class="empty-state-icon">🎟️</div>
+            <p>Select an event to view details</p>
+            <p style="font-size:13px; color:#bbb;">Events are created from your Google Sheet</p>
+        </div>
+        <div id="eventDetail" style="display:none;"></div>
+    </div>
+</div>
+
+<script>
+let events = [];
+let selectedId = null;
+let refreshTimer = null;
+let allTickets = [];
+
+async function init() {
+    const r = await fetch('/api/auth/me');
+    if (!r.ok) return location.href = '/login.html';
+    await loadEvents();
+    // Auto-refresh sidebar counts every 30s
+    setInterval(loadEvents, 30000);
+}
+
+async function loadEvents() {
+    const r = await fetch('/api/events');
+    if (!r.ok) return;
+    events = await r.json();
+    renderSidebar();
+    if (selectedId) {
+        const still = events.find(e => e.id === selectedId);
+        if (still) renderDetail(still, false); // soft refresh — don't re-fetch tickets unless needed
+    }
+}
+
+function renderSidebar() {
+    const list = document.getElementById('eventList');
+    if (!events.length) {
+        list.innerHTML = '<div style="padding:20px; color:#aaa; font-size:13px;">No events yet.<br>Create one from your Google Sheet.</div>';
+        return;
+    }
+    list.innerHTML = '';
+    // Sort newest first
+    const sorted = [...events].sort((a, b) => new Date(b.time) - new Date(a.time));
+    sorted.forEach(e => {
+        const tickets = e._tickets || [];
+        const total   = tickets.length;
+        const scanned = tickets.filter(t => t.used_at).length;
+        const allDone = total > 0 && scanned === total;
+
+        const div = document.createElement('div');
+        div.className = `event-card${selectedId === e.id ? ' active' : ''}`;
+        div.innerHTML = `
+            <div class="event-card-name">${esc(e.name)}</div>
+            <div class="event-card-meta">${fmtDate(e.time)}</div>
+            <div class="event-card-meta">${esc(e.location?.name || '')}</div>
+            ${total > 0 ? `<span class="event-card-badge${allDone ? ' all-clear' : ''}">${scanned}/${total} checked in</span>` : ''}
+        `;
+        div.onclick = () => selectEvent(e.id);
+        list.appendChild(div);
+    });
+}
+
+async function selectEvent(id) {
+    selectedId = id;
+    clearInterval(refreshTimer);
+    renderSidebar();
+
+    const event = events.find(e => e.id === id);
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('eventDetail').style.display = 'block';
+
+    // Show skeleton while loading
+    document.getElementById('eventDetail').innerHTML = `<div style="color:#aaa; padding:40px; text-align:center;">Loading…</div>`;
+
+    await fetchAndRender(event);
+
+    // Auto-refresh tickets every 15s while viewing
+    refreshTimer = setInterval(() => fetchAndRender(event, true), 15000);
+}
+
+async function fetchAndRender(event, silent = false) {
+    const r = await fetch(`/api/event/${event.id}/tickets`);
+    if (!r.ok) return;
+    const tickets = await r.json();
+    allTickets = tickets;
+
+    // Cache on the event object for sidebar counts
+    event._tickets = tickets;
+    if (!silent) renderSidebar();
+
+    renderDetail(event, tickets);
+}
+
+function renderDetail(event, tickets) {
+    if (Array.isArray(tickets)) allTickets = tickets;
+    else tickets = allTickets;
+
+    const total   = tickets.length;
+    const scanned = tickets.filter(t => t.used_at).length;
+    const pct     = total ? Math.round((scanned / total) * 100) : 0;
+
+    // Group by registrationId for multi-ticket display
+    const grouped = groupTickets(tickets);
+
+    const el = document.getElementById('eventDetail');
+    el.innerHTML = `
+        <div class="detail-header">
+            ${event.imageUrl
+                ? `<img class="detail-image" src="${event.imageUrl}" alt="">`
+                : `<div class="detail-image-placeholder">🎟️</div>`}
+            <div style="flex:1;">
+                <div class="detail-title">${esc(event.name)}</div>
+                <div class="detail-meta">
+                    📅 ${fmtDate(event.time)}<br>
+                    📍 ${esc(event.location?.name || '')}${event.location?.address ? ' — ' + esc(event.location.address) : ''}
+                </div>
+                <div class="detail-actions">
+                    <a href="/scanner.html" target="_blank" class="btn btn-scanner">📷 Open Scanner</a>
+                    <button class="btn btn-danger" onclick="deleteEvent('${event.id}')">Delete Event</button>
+                </div>
             </div>
         </div>
 
-        <div class="dashboard-grid">
-            <!-- Sidebar -->
+        <div class="stats-row">
+            <div class="stat-box">
+                <div class="stat-num">${total}</div>
+                <div class="stat-label">Total Tickets</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-num" style="color:#10b981;">${scanned}</div>
+                <div class="stat-label">Checked In</div>
+                <div class="progress-bar-wrap">
+                    <div class="progress-bar-fill" style="width:${pct}%"></div>
+                </div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-num" style="color:#f59e0b;">${total - scanned}</div>
+                <div class="stat-label">Not Yet In</div>
+            </div>
+        </div>
+
+        <div class="section-header">
+            <span class="section-title">Attendees</span>
+            <span class="refresh-hint"><span class="live-dot"></span>auto-refreshing</span>
+        </div>
+        <input class="search-box" id="searchBox" placeholder="Search by name or email…" oninput="filterAttendees()" />
+        <div class="attendee-table" id="attendeeTable">
+            ${renderAttendeeRows(grouped)}
+        </div>
+    `;
+}
+
+function groupTickets(tickets) {
+    const groups = {};
+    tickets.forEach(t => {
+        const key = t.registrationId || t.id;
+        if (!groups[key]) groups[key] = { tickets: [], name: t.name, email: t.email };
+        groups[key].tickets.push(t);
+    });
+    return Object.values(groups);
+}
+
+function renderAttendeeRows(groups, filter) {
+    let filtered = groups;
+    if (filter) {
+        const q = filter.toLowerCase();
+        filtered = groups.filter(g =>
+            g.name.toLowerCase().includes(q) || g.email.toLowerCase().includes(q)
+        );
+    }
+
+    if (!filtered.length) return `<div class="empty-list">No attendees found</div>`;
+
+    const header = `
+        <div class="attendee-row header-row">
+            <div>Name</div>
+            <div>Email</div>
+            <div class="col-tickets">Tickets</div>
+            <div>Status</div>
+        </div>`;
+
+    const rows = filtered.map(g => {
+        const total   = g.tickets.length;
+        const scanned = g.tickets.filter(t => t.used_at).length;
+        let pill;
+        if (scanned === 0)          pill = `<span class="status-pill pending">Pending</span>`;
+        else if (scanned < total)   pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
+        else                        pill = `<span class="status-pill scanned">✓ Checked In</span>`;
+
+        return `
+        <div class="attendee-row">
             <div>
-                <button class="create-btn" onclick="showCreateModal()">+ Create New Event</button>
-                <div class="event-list" id="eventList">
-                    <!-- Events will load here -->
-                </div>
+                <div class="attendee-name">${esc(g.name)}</div>
             </div>
+            <div class="attendee-email">${esc(g.email)}</div>
+            <div class="ticket-count">${total} ticket${total !== 1 ? 's' : ''}</div>
+            <div>${pill}</div>
+        </div>`;
+    }).join('');
 
-            <!-- Main Panel -->
-            <div class="card" id="eventDetail" style="display: none;">
-                <div class="header" style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div>
-                        <h2 id="detailName">Event Name</h2>
-                        <p id="detailInfo">Date • Location</p>
-                        <p id="scannerPinDisplay" style="font-size:13px; font-weight:700; color:#6366f1; margin:2px 0 0; letter-spacing:2px;"></p>
-                    </div>
-                    <button onclick="deleteEvent()"
-                        style="background: #ef4444; padding: 5px 12px; font-size: 11px; width: auto;">Delete
-                        Event</button>
-                </div>
+    return header + rows;
+}
 
-                <div class="stats-row">
-                    <div class="stat-box">
-                        <h4 id="statTotal">0</h4>
-                        <p>Total Tickets</p>
-                    </div>
-                    <div class="stat-box">
-                        <h4 id="statUsed">0</h4>
-                        <p>Checked In</p>
-                    </div>
-                </div>
+function filterAttendees() {
+    const q = document.getElementById('searchBox')?.value || '';
+    const grouped = groupTickets(allTickets);
+    document.getElementById('attendeeTable').innerHTML = renderAttendeeRows(grouped, q);
+}
 
-                <div style="margin-top: 20px;">
-                    <label>Public Registration Link:</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="text" id="regLink" readonly style="flex: 1;">
-                        <button onclick="copyLink()" style="width: auto; padding: 0 15px;">Copy</button>
-                    </div>
-                </div>
+async function deleteEvent(id) {
+    if (!confirm('Delete this event and all its tickets? This cannot be undone.')) return;
+    const r = await fetch(`/api/event/${id}`, { method: 'DELETE' });
+    if (r.ok) {
+        selectedId = null;
+        clearInterval(refreshTimer);
+        document.getElementById('eventDetail').style.display = 'none';
+        document.getElementById('emptyState').style.display = 'flex';
+        loadEvents();
+    } else {
+        alert('Could not delete event.');
+    }
+}
 
-                <div style="margin-top: 30px;">
-                    <h3>Attendee List</h3>
-                    <div id="ticketList" style="margin-top: 15px;">
-                        <!-- Tickets will load here -->
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    location.href = '/login.html';
+}
 
-    <!-- Create Event Modal -->
-    <div id="createModal"
-        style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: center; justify-content: center;">
-        <div class="card" style="max-width: 500px; width: 90%;">
-            <h2>New Event</h2>
-            <form id="createEventForm">
-                <div class="form-group">
-                    <label>Event Name</label>
-                    <input type="text" id="newName" required>
-                </div>
-                <div class="form-group">
-                    <label>Date & Time</label>
-                    <input type="datetime-local" id="newTime" required>
-                </div>
-                <div class="form-group" style="position: relative;">
-                    <label>Search Venue / Address</label>
-                    <input type="text" id="locSearch" placeholder="Type to search places..."
-                        oninput="searchPlaces(this.value)">
-                    <div id="locSuggestions"
-                        style="display: none; position: absolute; width: 100%; max-height: 200px; overflow-y: auto; background: white; border: 1px solid #ddd; border-radius: 8px; z-index: 1000; margin-top: 5px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Display Venue Name</label>
-                    <input type="text" id="newLocName" required placeholder="e.g. My Backyard">
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                    <div class="form-group">
-                        <label>Latitude</label>
-                        <input type="number" step="any" id="newLat" value="37.33182">
-                    </div>
-                    <div class="form-group">
-                        <label>Longitude</label>
-                        <input type="number" step="any" id="newLng" value="-122.03118">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Event Image (PNG/JPG)</label>
-                    <input type="file" id="newImage" accept="image/png,image/jpeg">
-                </div>
-                <div style="display: flex; gap: 10px; margin-top: 10px;">
-                    <button type="submit">Create Event</button>
-                    <button type="button" onclick="hideCreateModal()"
-                        style="background: #eee; color: #333;">Cancel</button>
-                </div>
-            </form>
-        </div>
-    </div>
+// ── Helpers ──
+function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function fmtDate(t) {
+    return new Date(t).toLocaleString(undefined, { weekday:'short', month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+}
 
-    <script>
-        let currentEvents = [];
-        let selectedEventId = null;
-
-        async function init() {
-            const res = await fetch('/api/auth/me');
-            if (!res.ok) return window.location.href = '/login.html';
-            const data = await res.json();
-            document.getElementById('userEmail').textContent = data.user.email;
-            loadEvents();
-        }
-
-        async function loadEvents() {
-            const res = await fetch('/api/events');
-            currentEvents = await res.json();
-            const list = document.getElementById('eventList');
-            list.innerHTML = '';
-
-            currentEvents.forEach(e => {
-                const div = document.createElement('div');
-                div.className = `event-item ${selectedEventId === e.id ? 'active' : ''}`;
-                div.innerHTML = `
-                    <div style="font-weight: 700;">${e.name}</div>
-                    <div style="font-size: 12px; color: #666;">${new Date(e.time).toLocaleDateString()} • ${e.location.name}</div>
-                `;
-                div.onclick = () => selectEvent(e.id);
-                list.appendChild(div);
-            });
-        }
-
-        async function selectEvent(id) {
-            selectedEventId = id;
-            loadEvents(); // for active styling
-            const event = currentEvents.find(e => e.id === id);
-            document.getElementById('eventDetail').style.display = 'block';
-            document.getElementById('detailName').textContent = event.name;
-            document.getElementById('detailInfo').textContent = `${new Date(event.time).toLocaleString()} • ${event.location.name}`;
-            document.getElementById('regLink').value = `${window.location.origin}/register.html?id=${id}`;
-            const pinEl = document.getElementById('scannerPinDisplay');
-            if (pinEl) pinEl.textContent = event.scannerPin ? `Scanner PIN: ${event.scannerPin}` : '';
-
-            const res = await fetch(`/api/event/${id}/tickets`);
-            const tickets = await res.json();
-
-            document.getElementById('statTotal').textContent = tickets.length;
-            document.getElementById('statUsed').textContent = tickets.filter(t => t.used_at).length;
-
-            const tList = document.getElementById('ticketList');
-            tList.innerHTML = '';
-            tickets.forEach(t => {
-                const div = document.createElement('div');
-                div.className = 'ticket-row';
-                div.innerHTML = `
-                    <div>
-                        <div style="font-weight: 600;">${t.name}</div>
-                        <div style="font-size: 11px; color: #888;">${t.email}</div>
-                    </div>
-                    <div style="color: ${t.used_at ? '#10b981' : '#f59e0b'}; font-weight: 700; font-size: 12px;">
-                        ${t.used_at ? 'SCANNED' : 'PENDING'}
-                    </div>
-                `;
-                tList.appendChild(div);
-            });
-        }
-
-        function showCreateModal() { document.getElementById('createModal').style.display = 'flex'; }
-        function hideCreateModal() { document.getElementById('createModal').style.display = 'none'; }
-
-        document.getElementById('createEventForm').onsubmit = async (e) => {
-            e.preventDefault();
-            const formData = new FormData();
-            formData.append('name', document.getElementById('newName').value);
-            formData.append('time', document.getElementById('newTime').value);
-            formData.append('locationName', document.getElementById('newLocName').value);
-            formData.append('lat', document.getElementById('newLat').value);
-            formData.append('lng', document.getElementById('newLng').value);
-            formData.append('color', '#6366f1');
-            const imageFile = document.getElementById('newImage').files[0];
-            if (imageFile) formData.append('image', imageFile);
-
-            const res = await fetch('/api/events', {
-                method: 'POST',
-                body: formData
-            });
-            if (res.ok) {
-                hideCreateModal();
-                loadEvents();
-            }
-        };
-
-        let userLocation = null;
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(pos => {
-                userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-            }, err => console.warn('Geolocation disabled'));
-        }
-
-        let searchTimeout;
-        async function searchPlaces(query) {
-            if (query.length < 3) return document.getElementById('locSuggestions').style.display = 'none';
-
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(async () => {
-                let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`;
-                if (userLocation) {
-                    // Bias towards user location if available
-                    url += `&viewbox=${userLocation.lon - 1},${userLocation.lat + 1},${userLocation.lon + 1},${userLocation.lat - 1}&bounded=0`;
-                }
-
-                try {
-                    const res = await fetch(url);
-                    const results = await res.json();
-                    const container = document.getElementById('locSuggestions');
-                    container.innerHTML = '';
-                    container.style.display = results.length ? 'block' : 'none';
-
-                    results.forEach(place => {
-                        const div = document.createElement('div');
-                        div.style.padding = '10px';
-                        div.style.cursor = 'pointer';
-                        div.style.borderBottom = '1px solid #f0f0f0';
-                        div.style.fontSize = '13px';
-                        div.innerHTML = `<strong>${place.display_name.split(',')[0]}</strong><br><span style="color: #888;">${place.display_name}</span>`;
-                        div.onmouseover = () => div.style.background = '#f8faff';
-                        div.onmouseout = () => div.style.background = 'white';
-                        div.onclick = () => {
-                            document.getElementById('newLocName').value = place.display_name.split(',')[0];
-                            document.getElementById('newLat').value = place.lat;
-                            document.getElementById('newLng').value = place.lon;
-                            document.getElementById('locSearch').value = place.display_name;
-                            container.style.display = 'none';
-                        };
-                        container.appendChild(div);
-                    });
-                } catch (e) { console.error('Search failed', e); }
-            }, 300);
-        }
-
-        async function logout() {
-            await fetch('/api/auth/logout', { method: 'POST' });
-            window.location.href = '/login.html';
-        }
-
-        async function deleteEvent() {
-            if (!selectedEventId) return;
-            if (!confirm('Are you sure you want to delete this event? This will also delete all tickets associated with it.')) return;
-
-            try {
-                const res = await fetch(`/api/event/${selectedEventId}`, { method: 'DELETE' });
-                if (res.ok) {
-                    selectedEventId = null;
-                    document.getElementById('eventDetail').style.display = 'none';
-                    loadEvents();
-                } else {
-                    alert('Error deleting event');
-                }
-            } catch (err) {
-                alert('Connection error');
-            }
-        }
-
-        function copyLink() {
-            const input = document.getElementById('regLink');
-            input.select();
-            document.execCommand('copy');
-            alert('Registration link copied!');
-        }
-
-        init();
-    </script>
+init();
+</script>
 </body>
-
 </html>
