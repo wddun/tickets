@@ -611,13 +611,6 @@ async function generatePassBuffer(ticket, event) {
     const signerKeyFile = path.join(certPath, 'signer.key');
     const modelPath = path.resolve(__dirname, 'pass-assets.pass');
 
-    const [icon1x, icon2x, baseLogo1x, baseLogo2x] = await Promise.all([
-        sharp(path.join(modelPath, 'icon.png')).resize(29, 29, { fit: 'cover' }).png().toBuffer(),
-        sharp(path.join(modelPath, 'icon@2x.png')).resize(58, 58, { fit: 'cover' }).png().toBuffer(),
-        sharp(path.join(modelPath, 'logo.png')).resize(160, 50, { fit: 'inside' }).png().toBuffer(),
-        sharp(path.join(modelPath, 'logo@2x.png')).resize(320, 100, { fit: 'inside' }).png().toBuffer(),
-    ]);
-
     const pass = await PKPass.from({
         model: modelPath,
         certificates: {
@@ -634,12 +627,6 @@ async function generatePassBuffer(ticket, event) {
         logoText: event.name,
         backgroundColor: event.color || "rgb(99, 102, 241)",
     });
-
-    pass.addBuffer('icon.png', icon1x);
-    pass.addBuffer('icon@2x.png', icon2x);
-    // Only use base logo if the event has no custom image (will be overridden below if it does)
-    pass.addBuffer('logo.png', baseLogo1x);
-    pass.addBuffer('logo@2x.png', baseLogo2x);
 
     pass.voided = !!ticket.used_at;
 
