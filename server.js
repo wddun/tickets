@@ -555,7 +555,9 @@ app.get('/api/event/:id/tickets', requireAuth, (req, res) => {
 
 // Delete an event
 app.delete('/api/event/:id', requireAuth, async (req, res) => {
-    const eventIndex = db.data.events.findIndex(e => e.id === req.params.id && e.userId === req.session.userId);
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const eventIndex = db.data.events.findIndex(e => e.id === req.params.id && (isAdmin || e.userId === req.session.userId));
     if (eventIndex === -1) return res.status(404).json({ error: 'Event not found' });
 
     // Remove the event
@@ -566,6 +568,31 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
 
     await db.write();
     res.json({ success: true });
+});
+
+// Bulk delete events
+app.delete('/api/events/bulk', requireAuth, async (req, res) => {
+    const { eventIds } = req.body;
+    if (!Array.isArray(eventIds) || !eventIds.length) return res.status(400).json({ error: 'eventIds required' });
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const allowed = new Set(
+        db.data.events.filter(e => eventIds.includes(e.id) && (isAdmin || e.userId === req.session.userId)).map(e => e.id)
+    );
+    db.data.events = db.data.events.filter(e => !allowed.has(e.id));
+    db.data.tickets = db.data.tickets.filter(t => !allowed.has(t.eventId));
+    await db.write();
+    res.json({ success: true, deleted: allowed.size });
+});
+
+// Bulk delete registrations (by registrationId)
+app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
+    const { registrationIds } = req.body;
+    if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
+    const before = db.data.tickets.length;
+    db.data.tickets = db.data.tickets.filter(t => !registrationIds.includes(t.registrationId));
+    await db.write();
+    res.json({ success: true, deleted: before - db.data.tickets.length });
 });
 
 // API: Validate QR Code

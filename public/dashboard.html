@@ -43,21 +43,40 @@
             overflow: hidden;
         }
         .sidebar-header {
-            padding: 20px 20px 12px;
+            padding: 14px 20px;
             border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
         }
         .sidebar-header h2 { font-size: 13px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.8px; }
+        .sidebar-bulk-bar {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            background: #fef2f2;
+        }
+        .sidebar-bulk-bar.visible { display: flex; }
+        .sidebar-bulk-count { font-size: 13px; font-weight: 600; color: #dc2626; flex: 1; }
         .event-list { overflow-y: auto; flex: 1; padding: 8px; }
         .event-card {
-            padding: 14px 16px;
+            padding: 12px 16px;
             border-radius: 10px;
             cursor: pointer;
             transition: background 0.15s;
             margin-bottom: 4px;
             border: 2px solid transparent;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
         }
         .event-card:hover { background: #f8f8ff; }
         .event-card.active { background: #f0f0ff; border-color: #6366f1; }
+        .event-card.checked { background: #fef2f2; border-color: #fca5a5; }
+        .event-card-body { flex: 1; min-width: 0; }
         .event-card-name { font-weight: 600; font-size: 14px; color: #1a1a2e; margin-bottom: 4px; }
         .event-card-meta { font-size: 12px; color: #888; }
         .event-card-badge {
@@ -71,6 +90,7 @@
             margin-top: 6px;
         }
         .event-card-badge.all-clear { background: #10b981; }
+        .event-checkbox { margin-top: 2px; accent-color: #dc2626; width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
 
         /* ── Main panel ── */
         .main { flex: 1; overflow-y: auto; padding: 28px; }
@@ -125,6 +145,7 @@
         .btn-primary { background: #6366f1; color: #fff; }
         .btn-scanner { background: #0f172a; color: #fff; }
         .btn-danger  { background: #fee2e2; color: #dc2626; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
 
         /* ── Stats ── */
         .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
@@ -145,6 +166,7 @@
             align-items: center;
             justify-content: space-between;
             margin-bottom: 14px;
+            gap: 10px;
         }
         .section-title { font-size: 16px; font-weight: 700; }
         .refresh-hint { font-size: 12px; color: #aaa; }
@@ -166,7 +188,7 @@
         }
         .attendee-row {
             display: grid;
-            grid-template-columns: 1fr 1.4fr auto auto;
+            grid-template-columns: 32px 1fr 1.4fr auto auto;
             align-items: center;
             padding: 12px 18px;
             border-bottom: 1px solid #f4f5f7;
@@ -182,6 +204,7 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
+        .attendee-row.row-selected { background: #fef2f2; }
         .attendee-name { font-weight: 600; color: #1a1a2e; }
         .attendee-email { font-size: 12px; color: #888; margin-top: 1px; }
         .ticket-count { font-size: 12px; color: #6366f1; font-weight: 600; }
@@ -195,6 +218,7 @@
         .status-pill.scanned  { background: #d1fae5; color: #059669; }
         .status-pill.pending  { background: #fef9c3; color: #92400e; }
         .status-pill.partial  { background: #e0e7ff; color: #4338ca; }
+        .ticket-checkbox { accent-color: #dc2626; width: 14px; height: 14px; cursor: pointer; }
 
         .empty-list { padding: 40px; text-align: center; color: #aaa; font-size: 14px; }
 
@@ -218,8 +242,9 @@
             .layout { flex-direction: column; height: auto; overflow: visible; }
             .main { padding: 16px; }
             .stats-row { grid-template-columns: 1fr 1fr; }
-            .attendee-row { grid-template-columns: 1fr auto; }
-            .attendee-row .ticket-count, .attendee-row.header-row .col-tickets { display: none; }
+            .attendee-row { grid-template-columns: 32px 1fr auto; }
+            .attendee-row .ticket-count, .attendee-row.header-row .col-tickets,
+            .attendee-row .attendee-email { display: none; }
         }
     </style>
 </head>
@@ -235,6 +260,14 @@
     <div class="sidebar">
         <div class="sidebar-header">
             <h2>Your Events</h2>
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;">
+                <input type="checkbox" id="selectAllEvents" onchange="toggleAllEvents(this.checked)" style="accent-color:#dc2626;">
+                All
+            </label>
+        </div>
+        <div class="sidebar-bulk-bar" id="eventBulkBar">
+            <span class="sidebar-bulk-count" id="eventBulkCount"></span>
+            <button class="btn btn-danger btn-sm" onclick="deleteSelectedEvents()">Delete Selected</button>
         </div>
         <div class="event-list" id="eventList">
             <div style="padding: 20px; color: #aaa; font-size: 13px;">Loading…</div>
@@ -257,12 +290,13 @@ let events = [];
 let selectedId = null;
 let refreshTimer = null;
 let allTickets = [];
+let checkedEventIds = new Set();
+let checkedRegIds = new Set();
 
 async function init() {
     const r = await fetch('/api/auth/me');
     if (!r.ok) return location.href = '/login.html';
     await loadEvents();
-    // Auto-refresh sidebar counts every 30s
     setInterval(loadEvents, 30000);
 }
 
@@ -273,7 +307,7 @@ async function loadEvents() {
     renderSidebar();
     if (selectedId) {
         const still = events.find(e => e.id === selectedId);
-        if (still) renderDetail(still, false); // soft refresh — don't re-fetch tickets unless needed
+        if (still) renderDetail(still, false);
     }
 }
 
@@ -284,42 +318,96 @@ function renderSidebar() {
         return;
     }
     list.innerHTML = '';
-    // Sort newest first
     const sorted = [...events].sort((a, b) => new Date(b.time) - new Date(a.time));
     sorted.forEach(e => {
         const tickets = e._tickets || [];
         const total   = tickets.length;
         const scanned = tickets.filter(t => t.used_at).length;
         const allDone = total > 0 && scanned === total;
+        const isChecked = checkedEventIds.has(e.id);
 
         const div = document.createElement('div');
-        div.className = `event-card${selectedId === e.id ? ' active' : ''}`;
+        div.className = `event-card${selectedId === e.id ? ' active' : ''}${isChecked ? ' checked' : ''}`;
         div.innerHTML = `
-            <div class="event-card-name">${esc(e.name)}</div>
-            <div class="event-card-meta">${fmtDate(e.time)}</div>
-            <div class="event-card-meta">${esc(e.location?.name || '')}</div>
-            ${total > 0 ? `<span class="event-card-badge${allDone ? ' all-clear' : ''}">${scanned}/${total} checked in</span>` : ''}
+            <input type="checkbox" class="event-checkbox" data-id="${e.id}" ${isChecked ? 'checked' : ''}
+                onclick="event.stopPropagation(); toggleEventCheck('${e.id}', this.checked)">
+            <div class="event-card-body">
+                <div class="event-card-name">${esc(e.name)}</div>
+                <div class="event-card-meta">${fmtDate(e.time)}</div>
+                <div class="event-card-meta">${esc(e.location?.name || '')}</div>
+                ${total > 0 ? `<span class="event-card-badge${allDone ? ' all-clear' : ''}">${scanned}/${total} checked in</span>` : ''}
+            </div>
         `;
         div.onclick = () => selectEvent(e.id);
         list.appendChild(div);
     });
+    updateEventBulkBar();
+}
+
+function toggleEventCheck(id, checked) {
+    if (checked) checkedEventIds.add(id);
+    else checkedEventIds.delete(id);
+    updateEventBulkBar();
+    // Update card class without full re-render
+    document.querySelectorAll('.event-card').forEach(card => {
+        const cb = card.querySelector('.event-checkbox');
+        if (cb && cb.dataset.id === id) card.classList.toggle('checked', checked);
+    });
+}
+
+function toggleAllEvents(checked) {
+    checkedEventIds.clear();
+    if (checked) events.forEach(e => checkedEventIds.add(e.id));
+    renderSidebar();
+    document.getElementById('selectAllEvents').checked = checked;
+}
+
+function updateEventBulkBar() {
+    const bar = document.getElementById('eventBulkBar');
+    const count = document.getElementById('eventBulkCount');
+    if (checkedEventIds.size > 0) {
+        bar.classList.add('visible');
+        count.textContent = `${checkedEventIds.size} selected`;
+    } else {
+        bar.classList.remove('visible');
+    }
+}
+
+async function deleteSelectedEvents() {
+    if (!checkedEventIds.size) return;
+    if (!confirm(`Delete ${checkedEventIds.size} event(s) and all their tickets? This cannot be undone.`)) return;
+    const r = await fetch('/api/events/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventIds: [...checkedEventIds] })
+    });
+    if (r.ok) {
+        if (checkedEventIds.has(selectedId)) {
+            selectedId = null;
+            clearInterval(refreshTimer);
+            document.getElementById('eventDetail').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'flex';
+        }
+        checkedEventIds.clear();
+        document.getElementById('selectAllEvents').checked = false;
+        await loadEvents();
+    } else {
+        alert('Could not delete events.');
+    }
 }
 
 async function selectEvent(id) {
     selectedId = id;
+    checkedRegIds.clear();
     clearInterval(refreshTimer);
     renderSidebar();
 
     const event = events.find(e => e.id === id);
     document.getElementById('emptyState').style.display = 'none';
     document.getElementById('eventDetail').style.display = 'block';
-
-    // Show skeleton while loading
     document.getElementById('eventDetail').innerHTML = `<div style="color:#aaa; padding:40px; text-align:center;">Loading…</div>`;
 
     await fetchAndRender(event);
-
-    // Auto-refresh tickets every 15s while viewing
     refreshTimer = setInterval(() => fetchAndRender(event, true), 15000);
 }
 
@@ -328,11 +416,8 @@ async function fetchAndRender(event, silent = false) {
     if (!r.ok) return;
     const tickets = await r.json();
     allTickets = tickets;
-
-    // Cache on the event object for sidebar counts
     event._tickets = tickets;
     if (!silent) renderSidebar();
-
     renderDetail(event, tickets);
 }
 
@@ -343,8 +428,6 @@ function renderDetail(event, tickets) {
     const total   = tickets.length;
     const scanned = tickets.filter(t => t.used_at).length;
     const pct     = total ? Math.round((scanned / total) * 100) : 0;
-
-    // Group by registrationId for multi-ticket display
     const grouped = groupTickets(tickets);
 
     const el = document.getElementById('eventDetail');
@@ -386,7 +469,12 @@ function renderDetail(event, tickets) {
 
         <div class="section-header">
             <span class="section-title">Attendees</span>
-            <span class="refresh-hint"><span class="live-dot"></span>auto-refreshing</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span id="ticketBulkDelete" style="display:none;">
+                    <button class="btn btn-danger btn-sm" onclick="deleteSelectedTickets('${event.id}')">Delete Selected</button>
+                </span>
+                <span class="refresh-hint"><span class="live-dot"></span>auto-refreshing</span>
+            </div>
         </div>
         <input class="search-box" id="searchBox" placeholder="Search by name or email…" oninput="filterAttendees()" />
         <div class="attendee-table" id="attendeeTable">
@@ -399,7 +487,7 @@ function groupTickets(tickets) {
     const groups = {};
     tickets.forEach(t => {
         const key = t.registrationId || t.id;
-        if (!groups[key]) groups[key] = { tickets: [], name: t.name, email: t.email };
+        if (!groups[key]) groups[key] = { registrationId: key, tickets: [], name: t.name, email: t.email };
         groups[key].tickets.push(t);
     });
     return Object.values(groups);
@@ -410,7 +498,7 @@ function renderAttendeeRows(groups, filter) {
     if (filter) {
         const q = filter.toLowerCase();
         filtered = groups.filter(g =>
-            g.name.toLowerCase().includes(q) || g.email.toLowerCase().includes(q)
+            g.name.toLowerCase().includes(q) || (g.email || '').toLowerCase().includes(q)
         );
     }
 
@@ -418,6 +506,7 @@ function renderAttendeeRows(groups, filter) {
 
     const header = `
         <div class="attendee-row header-row">
+            <input type="checkbox" class="ticket-checkbox" id="selectAllTickets" onchange="toggleAllTickets(this.checked, ${JSON.stringify(filtered.map(g => g.registrationId))})">
             <div>Name</div>
             <div>Email</div>
             <div class="col-tickets">Tickets</div>
@@ -427,17 +516,20 @@ function renderAttendeeRows(groups, filter) {
     const rows = filtered.map(g => {
         const total   = g.tickets.length;
         const scanned = g.tickets.filter(t => t.used_at).length;
+        const isChecked = checkedRegIds.has(g.registrationId);
         let pill;
-        if (scanned === 0)          pill = `<span class="status-pill pending">Pending</span>`;
-        else if (scanned < total)   pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
-        else                        pill = `<span class="status-pill scanned">✓ Checked In</span>`;
+        if (scanned === 0)        pill = `<span class="status-pill pending">Pending</span>`;
+        else if (scanned < total) pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
+        else                      pill = `<span class="status-pill scanned">✓ Checked In</span>`;
 
         return `
-        <div class="attendee-row">
+        <div class="attendee-row${isChecked ? ' row-selected' : ''}">
+            <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
+                onchange="toggleTicketCheck('${g.registrationId}', this.checked)">
             <div>
                 <div class="attendee-name">${esc(g.name)}</div>
             </div>
-            <div class="attendee-email">${esc(g.email)}</div>
+            <div class="attendee-email">${esc(g.email || '')}</div>
             <div class="ticket-count">${total} ticket${total !== 1 ? 's' : ''}</div>
             <div>${pill}</div>
         </div>`;
@@ -446,10 +538,59 @@ function renderAttendeeRows(groups, filter) {
     return header + rows;
 }
 
+function toggleTicketCheck(regId, checked) {
+    if (checked) checkedRegIds.add(regId);
+    else checkedRegIds.delete(regId);
+    updateTicketBulkBar();
+    document.querySelectorAll('.attendee-row').forEach(row => {
+        const cb = row.querySelector('.ticket-checkbox[data-regid]');
+        if (cb && cb.dataset.regid === regId) row.classList.toggle('row-selected', checked);
+    });
+}
+
+function toggleAllTickets(checked, regIds) {
+    checkedRegIds.clear();
+    if (checked) regIds.forEach(id => checkedRegIds.add(id));
+    updateTicketBulkBar();
+    document.querySelectorAll('.ticket-checkbox[data-regid]').forEach(cb => {
+        cb.checked = checked;
+        cb.closest('.attendee-row')?.classList.toggle('row-selected', checked);
+    });
+}
+
+function updateTicketBulkBar() {
+    const el = document.getElementById('ticketBulkDelete');
+    if (el) el.style.display = checkedRegIds.size > 0 ? 'inline' : 'none';
+    const selectAll = document.getElementById('selectAllTickets');
+    if (selectAll) {
+        const allRows = document.querySelectorAll('.ticket-checkbox[data-regid]');
+        selectAll.checked = allRows.length > 0 && checkedRegIds.size === allRows.length;
+        selectAll.indeterminate = checkedRegIds.size > 0 && checkedRegIds.size < allRows.length;
+    }
+}
+
+async function deleteSelectedTickets(eventId) {
+    if (!checkedRegIds.size) return;
+    if (!confirm(`Delete ${checkedRegIds.size} registration(s) and all their tickets?`)) return;
+    const r = await fetch('/api/registrations/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+    });
+    if (r.ok) {
+        checkedRegIds.clear();
+        const event = events.find(e => e.id === eventId);
+        if (event) await fetchAndRender(event);
+    } else {
+        alert('Could not delete registrations.');
+    }
+}
+
 function filterAttendees() {
     const q = document.getElementById('searchBox')?.value || '';
     const grouped = groupTickets(allTickets);
     document.getElementById('attendeeTable').innerHTML = renderAttendeeRows(grouped, q);
+    updateTicketBulkBar();
 }
 
 async function deleteEvent(id) {
@@ -471,7 +612,6 @@ async function logout() {
     location.href = '/login.html';
 }
 
-// ── Helpers ──
 function esc(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
