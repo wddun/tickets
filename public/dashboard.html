@@ -188,7 +188,7 @@
         }
         .attendee-row {
             display: grid;
-            grid-template-columns: 32px 1fr 1.4fr auto auto;
+            grid-template-columns: 32px 1fr 1.4fr auto auto auto;
             align-items: center;
             padding: 12px 18px;
             border-bottom: 1px solid #f4f5f7;
@@ -242,7 +242,7 @@
             .layout { flex-direction: column; height: auto; overflow: visible; }
             .main { padding: 16px; }
             .stats-row { grid-template-columns: 1fr 1fr; }
-            .attendee-row { grid-template-columns: 32px 1fr auto; }
+            .attendee-row { grid-template-columns: 32px 1fr auto auto; }
             .attendee-row .ticket-count, .attendee-row.header-row .col-tickets,
             .attendee-row .attendee-email { display: none; }
         }
@@ -518,6 +518,7 @@ function renderAttendeeRows(groups, filter) {
             <div>Email</div>
             <div class="col-tickets">Tickets</div>
             <div>Status</div>
+            <div></div>
         </div>`;
 
     const rows = filtered.map(g => {
@@ -529,6 +530,7 @@ function renderAttendeeRows(groups, filter) {
         else if (scanned < total) pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
         else                      pill = `<span class="status-pill scanned">✓ Checked In</span>`;
 
+        const allIn = scanned === total && total > 0;
         return `
         <div class="attendee-row${isChecked ? ' row-selected' : ''}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
@@ -539,6 +541,7 @@ function renderAttendeeRows(groups, filter) {
             <div class="attendee-email">${esc(g.email || '')}</div>
             <div class="ticket-count">${total} ticket${total !== 1 ? 's' : ''}</div>
             <div>${pill}</div>
+            <div>${allIn ? '' : `<button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">Check In</button>`}</div>
         </div>`;
     }).join('');
 
@@ -598,6 +601,16 @@ function filterAttendees() {
     const grouped = groupTickets(allTickets);
     document.getElementById('attendeeTable').innerHTML = renderAttendeeRows(grouped, q);
     updateTicketBulkBar();
+}
+
+async function manualCheckin(registrationId) {
+    const r = await fetch(`/api/checkin/${registrationId}`, { method: 'POST' });
+    if (r.ok) {
+        const event = events.find(e => e.id === selectedId);
+        if (event) await fetchAndRender(event, true);
+    } else {
+        alert('Check-in failed.');
+    }
 }
 
 async function deleteEvent(id) {

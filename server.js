@@ -610,6 +610,16 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
 });
 
 // API: Validate QR Code
+// Manual check-in by registrationId (marks all tickets in the group)
+app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
+    const tickets = db.data.tickets.filter(t => t.registrationId === req.params.registrationId);
+    if (!tickets.length) return res.status(404).json({ error: 'Not found' });
+    const now = new Date().toISOString();
+    tickets.forEach(t => { if (!t.used_at) t.used_at = now; });
+    await db.write();
+    res.json({ success: true });
+});
+
 app.post('/api/validate', async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'Token is required' });
