@@ -702,28 +702,13 @@ async function generatePassBuffer(ticket, event) {
     // event.name is already in logoText (top bar) — don't repeat it
     pass.primaryFields.push({ key: "attendee", label: "NAME", value: ticket.name });
 
-    // Custom fields from registration (T-Shirt Size, Meal, etc.)
-    // Up to 4 on the front as secondary fields; overflow goes to the back
     const customFields = ticket.customFields || {};
     const cfEntries = Object.entries(customFields);
-    cfEntries.slice(0, 4).forEach(([label, value], i) => {
-        pass.secondaryFields.push({
-            key: `cf_${i}`,
-            label: label.toUpperCase(),
-            value: String(value)
-        });
-    });
-    cfEntries.slice(4).forEach(([label, value], i) => {
-        pass.backFields.push({
-            key: `cf_back_${i}`,
-            label: label,
-            value: String(value)
-        });
-    });
 
+    // Secondary row: Date + up to 2 custom fields (max 3 total to avoid crowding)
     const eventDate = new Date(event.time);
     if (!Number.isNaN(eventDate.getTime())) {
-        pass.auxiliaryFields.push({
+        pass.secondaryFields.push({
             key: "date", label: "DATE", value: eventDate,
             dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
         });
@@ -733,16 +718,28 @@ async function generatePassBuffer(ticket, event) {
         pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
         pass.expirationDate = expiresAt;
     } else {
-        pass.auxiliaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
+        pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
     }
+    cfEntries.slice(0, 2).forEach(([label, value], i) => {
+        pass.secondaryFields.push({ key: `cf_${i}`, label: label.toUpperCase(), value: String(value) });
+    });
 
+    // Auxiliary row: Location + up to 2 more custom fields (max 3 total)
     if (event.location?.name) {
         pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: event.location.name });
     }
+    cfEntries.slice(2, 4).forEach(([label, value], i) => {
+        pass.auxiliaryFields.push({ key: `cf_aux_${i}`, label: label.toUpperCase(), value: String(value) });
+    });
 
     if (ticket.used_at) {
         pass.auxiliaryFields.push({ key: "status", label: "STATUS", value: "USED / SCANNED" });
     }
+
+    // Back: any remaining custom fields
+    cfEntries.slice(4).forEach(([label, value], i) => {
+        pass.backFields.push({ key: `cf_back_${i}`, label: label, value: String(value) });
+    });
 
     pass.backFields.push({
         key: 'terms',
