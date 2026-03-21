@@ -8,6 +8,11 @@
 //  4. Run: 🎟️ Ticket System > Setup Triggers    (enables auto-send)
 //  5. Fill in the yellow settings cells on the "Event" tab
 //  6. Click "Create Event" from the menu when ready
+//
+//  CUSTOM FIELDS:
+//  Add any column header between "# of Tickets" and "Status" on the
+//  Attendees tab to create a custom field (e.g. "T-Shirt Size", "Meal").
+//  Those fields automatically appear in the email and Apple Wallet pass.
 // ============================================================
 
 // ---- Sheet tab names ----
@@ -26,15 +31,13 @@ var EV_IMAGE       = 'B11';  // Google Drive file ID or share URL
 var EV_EVENT_ID    = 'B14';  // Auto-filled after create
 var EV_STATUS      = 'B15';  // Auto-filled after create
 
-// ---- Attendees sheet columns (1-based) ----
-var COL_FIRST    = 1;  // A
-var COL_LAST     = 2;  // B
-var COL_EMAIL    = 3;  // C
-var COL_TICKETS  = 4;  // D
-var COL_STATUS   = 5;  // E  (auto)
-var COL_SENT_AT  = 6;  // F  (auto)
-var COL_TOKENS   = 7;  // G  (auto)
-var COL_SCANNED  = 8;  // H  (auto — scan status)
+// ---- Attendees sheet fixed columns (1-based) ----
+// Columns A–D are always fixed. Everything after "# of Tickets" and before
+// "Status" is detected dynamically at runtime — don't hardcode those indices.
+var COL_FIRST    = 1;  // A — always fixed
+var COL_LAST     = 2;  // B — always fixed
+var COL_EMAIL    = 3;  // C — always fixed
+var COL_TICKETS  = 4;  // D — always fixed
 
 var ATT_HEADER_ROW = 1;
 var ATT_DATA_START = 2;
@@ -90,7 +93,6 @@ function initializeSheet() {
   styleInput(evSheet.getRange('B2'), 'https://yourserver.com').setNote('Your ticket server URL — no trailing slash');
 
   // Divider
-  evSheet.getRange('A3').setValue('').setBackground('#4a4a8a');
   evSheet.getRange('A3:D3').merge().setBackground('#4a4a8a');
 
   // Section header
@@ -147,7 +149,9 @@ function initializeSheet() {
   attSheet.clear();
   attSheet.clearFormats();
 
-  var headers = ['First Name', 'Last Name', 'Email', '# of Tickets', 'Status', 'Sent At', 'Ticket Tokens', 'Scan Status'];
+  // Headers: fixed columns, then one example custom field, then auto columns
+  // To add more custom fields: insert a column between "# of Tickets" and "Status"
+  var headers = ['First Name', 'Last Name', 'Email', '# of Tickets', 'T-Shirt Size', 'Status', 'Sent At', 'Ticket Tokens', 'Scan Status'];
   var headerRange = attSheet.getRange(ATT_HEADER_ROW, 1, 1, headers.length);
   headerRange.setValues([headers])
     .setFontWeight('bold')
@@ -155,19 +159,28 @@ function initializeSheet() {
     .setFontColor('#ffffff');
   attSheet.setFrozenRows(ATT_HEADER_ROW);
 
-  // Shade auto-filled columns (E through H)
-  attSheet.getRange(ATT_DATA_START, COL_STATUS, 500, 4)
+  // Mark "T-Shirt Size" as an example custom field (green header = user-editable)
+  attSheet.getRange(ATT_HEADER_ROW, 5).setBackground('#2e7d32').setNote(
+    'Example custom field — rename or delete this column.\n' +
+    'Add more custom field columns here (between "# of Tickets" and "Status").\n' +
+    'They automatically appear on tickets and Apple Wallet passes.'
+  );
+
+  // Shade auto-filled columns (Status through Scan Status = cols 6–9)
+  attSheet.getRange(ATT_DATA_START, 6, 500, 4)
     .setBackground('#f5f5f5')
     .setNote('Auto-filled by script — do not edit');
 
-  attSheet.setColumnWidth(1, 130);
-  attSheet.setColumnWidth(2, 130);
-  attSheet.setColumnWidth(3, 230);
-  attSheet.setColumnWidth(4, 120);
-  attSheet.setColumnWidth(5, 210);
-  attSheet.setColumnWidth(6, 150);
-  attSheet.setColumnWidth(7, 340);
-  attSheet.setColumnWidth(8, 150);
+  // Column widths
+  attSheet.setColumnWidth(1, 130);  // First Name
+  attSheet.setColumnWidth(2, 130);  // Last Name
+  attSheet.setColumnWidth(3, 230);  // Email
+  attSheet.setColumnWidth(4, 120);  // # of Tickets
+  attSheet.setColumnWidth(5, 130);  // T-Shirt Size (example custom field)
+  attSheet.setColumnWidth(6, 210);  // Status
+  attSheet.setColumnWidth(7, 150);  // Sent At
+  attSheet.setColumnWidth(8, 340);  // Ticket Tokens
+  attSheet.setColumnWidth(9, 150);  // Scan Status
 
   // Bring Event tab to front
   ss.setActiveSheet(evSheet);
@@ -175,10 +188,12 @@ function initializeSheet() {
   SpreadsheetApp.getUi().alert(
     '✅ Sheet initialized!\n\n' +
     'Next steps:\n' +
-    '1. Fill in your Server URL and Sheet API Key (row 2)\n' +
+    '1. Fill in your Server URL (row 2)\n' +
     '2. Fill in all Event Details (rows 5–11)\n' +
     '3. Run "Setup Triggers" from this menu\n' +
-    '4. Run "Create Event from Event tab" when ready'
+    '4. Run "Create Event from Event tab" when ready\n\n' +
+    'TIP: The green "T-Shirt Size" column is an example custom field.\n' +
+    'Rename it, delete it, or add more columns between "# of Tickets" and "Status".'
   );
 }
 
@@ -276,10 +291,9 @@ function createEventFromSheet() {
       evSheet.getRange(EV_EVENT_ID).setValue(result.eventId);
       evSheet.getRange(EV_STATUS).setValue('✅ Event created! Event ID is in B14.');
 
-      // Auto-set Event ID on Attendees tab if it has a settings cell (for backward compat)
+      // Store event ID in a named range so attendee trigger can read it
       var attSheet = ss.getSheetByName(ATTENDEES_SHEET_NAME);
       if (attSheet) {
-        // Store event ID in a named range so attendee trigger can read it
         try {
           var existing = ss.getRangeByName('EVENT_ID');
           if (existing) existing.setValue(result.eventId);
@@ -430,6 +444,7 @@ function onRowComplete(e) {
   var sheet = e.source.getActiveSheet();
   if (sheet.getName() !== ATTENDEES_SHEET_NAME) return;
 
+  var colMap   = getColumnMap(sheet);
   var firstRow = e.range.getRow();
   var lastRow  = e.range.getLastRow();
   if (lastRow < ATT_DATA_START) return;
@@ -447,19 +462,19 @@ function onRowComplete(e) {
     var lastName   = getCellValue(sheet, row, COL_LAST);
     var email      = getCellValue(sheet, row, COL_EMAIL);
     var ticketsRaw = getCellValue(sheet, row, COL_TICKETS);
-    var status     = getCellValue(sheet, row, COL_STATUS);
+    var status     = getCellValue(sheet, row, colMap.statusCol);
 
     if (!firstName || !lastName || !email || !ticketsRaw) continue;
     if (status !== '') continue; // already sent or errored
 
     var ticketCount = parseTicketCount(ticketsRaw);
     if (!ticketCount) {
-      sheet.getRange(row, COL_STATUS).setValue('⚠️ Invalid ticket count');
+      sheet.getRange(row, colMap.statusCol).setValue('⚠️ Invalid ticket count');
       continue;
     }
 
     if (!eventId || !serverUrl) {
-      sheet.getRange(row, COL_STATUS).setValue('⚠️ Create the event first (Event tab)');
+      sheet.getRange(row, colMap.statusCol).setValue('⚠️ Create the event first (Event tab)');
       continue;
     }
 
@@ -467,25 +482,38 @@ function onRowComplete(e) {
     if (!isFirst) Utilities.sleep(1000);
     isFirst = false;
 
-    sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl);
+    sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
   }
 }
 
-// Sends a single attendee row and updates status/sent-at/tokens columns
-function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl) {
-  sheet.getRange(row, COL_STATUS).setValue('⏳ Sending...');
+// ============================================================
+//  sendOneRow — sends one attendee and updates status columns
+//  colMap comes from getColumnMap() for dynamic column support
+// ============================================================
+function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap) {
+  sheet.getRange(row, colMap.statusCol).setValue('⏳ Sending...');
   SpreadsheetApp.flush();
+
+  // Collect any custom field values (columns between "# of Tickets" and "Status")
+  var customFields = {};
+  var cfNames = Object.keys(colMap.customFields);
+  for (var i = 0; i < cfNames.length; i++) {
+    var fieldName = cfNames[i];
+    var val = getCellValue(sheet, row, colMap.customFields[fieldName]);
+    if (val) customFields[fieldName] = val;
+  }
 
   try {
     var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/register-bulk', {
       method:           'post',
       contentType:      'application/json',
       payload:          JSON.stringify({
-        firstName:   firstName,
-        lastName:    lastName,
-        email:       email,
-        eventId:     eventId,
-        ticketCount: ticketCount
+        firstName:    firstName,
+        lastName:     lastName,
+        email:        email,
+        eventId:      eventId,
+        ticketCount:  ticketCount,
+        customFields: customFields
       }),
       muteHttpExceptions: true
     });
@@ -494,16 +522,16 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
 
     if (result.success) {
       var label = ticketCount + ' ticket' + (ticketCount > 1 ? 's' : '');
-      sheet.getRange(row, COL_STATUS).setValue('✅ Sent (' + label + ')');
-      sheet.getRange(row, COL_SENT_AT).setValue(
+      sheet.getRange(row, colMap.statusCol).setValue('✅ Sent (' + label + ')');
+      sheet.getRange(row, colMap.sentAtCol).setValue(
         Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy h:mm a')
       );
-      sheet.getRange(row, COL_TOKENS).setValue(result.tokens.join(', '));
+      sheet.getRange(row, colMap.tokensCol).setValue(result.tokens.join(', '));
     } else {
-      sheet.getRange(row, COL_STATUS).setValue('❌ Error: ' + result.error);
+      sheet.getRange(row, colMap.statusCol).setValue('❌ Error: ' + result.error);
     }
   } catch (err) {
-    sheet.getRange(row, COL_STATUS).setValue('❌ Error: ' + err.message);
+    sheet.getRange(row, colMap.statusCol).setValue('❌ Error: ' + err.message);
   }
 }
 
@@ -528,6 +556,7 @@ function sendPendingEmails() {
     return;
   }
 
+  var colMap  = getColumnMap(attSheet);
   var lastRow = attSheet.getLastRow();
   var sent = 0, errors = 0, isFirst = true;
 
@@ -536,7 +565,7 @@ function sendPendingEmails() {
     var lastName   = getCellValue(attSheet, row, COL_LAST);
     var email      = getCellValue(attSheet, row, COL_EMAIL);
     var ticketsRaw = getCellValue(attSheet, row, COL_TICKETS);
-    var status     = getCellValue(attSheet, row, COL_STATUS);
+    var status     = getCellValue(attSheet, row, colMap.statusCol);
 
     if (!firstName || !lastName || !email || !ticketsRaw || status) continue;
 
@@ -546,9 +575,8 @@ function sendPendingEmails() {
     if (!isFirst) Utilities.sleep(1000);
     isFirst = false;
 
-    var statusBefore = getCellValue(attSheet, row, COL_STATUS);
-    sendOneRow(attSheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl);
-    var statusAfter = getCellValue(attSheet, row, COL_STATUS);
+    sendOneRow(attSheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
+    var statusAfter = getCellValue(attSheet, row, colMap.statusCol);
     if (statusAfter.indexOf('✅') === 0) sent++; else errors++;
   }
 
@@ -572,14 +600,10 @@ function resendSelectedRow() {
   var confirm = ui.alert('Resend ticket email for row ' + row + '?', ui.ButtonSet.YES_NO);
   if (confirm !== ui.Button.YES) return;
 
-  // Clear status so it will re-send
-  sheet.getRange(row, COL_STATUS).setValue('');
-  sheet.getRange(row, COL_SENT_AT).setValue('');
-  sheet.getRange(row, COL_TOKENS).setValue('');
-
-  var evSheet   = ss.getSheetByName(EVENT_SHEET_NAME);
-  var eventId   = evSheet ? evSheet.getRange(EV_EVENT_ID).getValue().toString().trim() : '';
-  var serverUrl = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
+  var colMap     = getColumnMap(sheet);
+  var evSheet    = ss.getSheetByName(EVENT_SHEET_NAME);
+  var eventId    = evSheet ? evSheet.getRange(EV_EVENT_ID).getValue().toString().trim() : '';
+  var serverUrl  = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
   var firstName  = getCellValue(sheet, row, COL_FIRST);
   var lastName   = getCellValue(sheet, row, COL_LAST);
   var email      = getCellValue(sheet, row, COL_EMAIL);
@@ -590,29 +614,18 @@ function resendSelectedRow() {
     return;
   }
 
-  sheet.getRange(row, COL_STATUS).setValue('⏳ Sending...');
-  SpreadsheetApp.flush();
+  // Clear status so sendOneRow will treat it as a fresh send
+  sheet.getRange(row, colMap.statusCol).setValue('');
+  sheet.getRange(row, colMap.sentAtCol).setValue('');
+  sheet.getRange(row, colMap.tokensCol).setValue('');
 
-  try {
-    var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/register-bulk', {
-      method:           'post',
-      contentType:      'application/json',
-      payload:          JSON.stringify({ firstName, lastName, email, eventId, ticketCount }),
-      muteHttpExceptions: true
-    });
-    var result = safeParseJSON(response);
-    if (result.success) {
-      sheet.getRange(row, COL_STATUS).setValue('✅ Sent (' + ticketCount + ' ticket' + (ticketCount > 1 ? 's' : '') + ')');
-      sheet.getRange(row, COL_SENT_AT).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy h:mm a'));
-      sheet.getRange(row, COL_TOKENS).setValue(result.tokens.join(', '));
-      ui.alert('✅ Resent successfully!');
-    } else {
-      sheet.getRange(row, COL_STATUS).setValue('❌ Error: ' + result.error);
-      ui.alert('❌ Error: ' + result.error);
-    }
-  } catch (err) {
-    sheet.getRange(row, COL_STATUS).setValue('❌ Error: ' + err.message);
-    ui.alert('❌ Error: ' + err.message);
+  sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
+
+  var statusAfter = getCellValue(sheet, row, colMap.statusCol);
+  if (statusAfter.indexOf('✅') === 0) {
+    ui.alert('✅ Resent successfully!');
+  } else {
+    ui.alert('❌ ' + statusAfter);
   }
 }
 
@@ -635,11 +648,12 @@ function refreshScanStatus() {
     return;
   }
 
+  var colMap  = getColumnMap(attSheet);
   var lastRow = attSheet.getLastRow();
   var updated = 0;
 
   for (var row = ATT_DATA_START; row <= lastRow; row++) {
-    var tokensRaw = getCellValue(attSheet, row, COL_TOKENS);
+    var tokensRaw = getCellValue(attSheet, row, colMap.tokensCol);
     if (!tokensRaw) continue;
 
     var tokens = tokensRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
@@ -669,11 +683,11 @@ function refreshScanStatus() {
         bg    = '#e8f5e9';
       }
 
-      var cell = attSheet.getRange(row, COL_SCANNED);
+      var cell = attSheet.getRange(row, colMap.scannedCol);
       cell.setValue(label).setBackground(bg);
       updated++;
     } catch (err) {
-      attSheet.getRange(row, COL_SCANNED).setValue('⚠️ ' + err.message.substring(0, 80));
+      attSheet.getRange(row, colMap.scannedCol).setValue('⚠️ ' + err.message.substring(0, 80));
     }
   }
 
@@ -686,6 +700,43 @@ function refreshScanStatus() {
 // ============================================================
 //  HELPERS
 // ============================================================
+
+// Returns column positions for auto-filled columns and any custom fields.
+// Custom fields are any columns between "# of Tickets" and "Status" that
+// have a non-empty header. This lets users add/remove custom field columns
+// without touching the script.
+function getColumnMap(sheet) {
+  var lastCol = Math.max(sheet.getLastColumn(), 9);
+  var headers = sheet.getRange(ATT_HEADER_ROW, 1, 1, lastCol).getValues()[0];
+
+  var ticketsColIdx = -1, statusColIdx = -1;
+  for (var i = 0; i < headers.length; i++) {
+    var h = headers[i].toString().trim();
+    if (h === '# of Tickets') ticketsColIdx = i + 1;
+    if (h === 'Status')       statusColIdx  = i + 1;
+  }
+
+  // Fallback to old hardcoded layout if headers aren't found
+  if (ticketsColIdx === -1) ticketsColIdx = 4;
+  if (statusColIdx  === -1) statusColIdx  = 5;
+
+  var colMap = {
+    statusCol:    statusColIdx,
+    sentAtCol:    statusColIdx + 1,
+    tokensCol:    statusColIdx + 2,
+    scannedCol:   statusColIdx + 3,
+    customFields: {}  // { "T-Shirt Size": colIndex (1-based), ... }
+  };
+
+  // Anything between # of Tickets and Status = custom field
+  for (var c = ticketsColIdx + 1; c < statusColIdx; c++) {
+    var hdr = headers[c - 1].toString().trim();
+    if (hdr) colMap.customFields[hdr] = c;
+  }
+
+  return colMap;
+}
+
 function getCellValue(sheet, row, col) {
   return sheet.getRange(row, col).getValue().toString().trim();
 }

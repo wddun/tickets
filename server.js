@@ -272,6 +272,9 @@ app.post('/api/register-bulk', async (req, res) => {
 
     const fullName = `${firstName} ${lastName}`;
     const registrationId = nanoid(10);
+    // customFields: any extra data from the sheet e.g. { "T-Shirt Size": "M", "Meal": "Veg" }
+    const customFields = (req.body.customFields && typeof req.body.customFields === 'object')
+        ? req.body.customFields : {};
 
     // Create N tickets — all share a registrationId so they can be bundled
     const newTickets = Array.from({ length: count }, () => ({
@@ -283,6 +286,7 @@ app.post('/api/register-bulk', async (req, res) => {
         firstName,
         lastName,
         email,
+        customFields,
         created_at: new Date().toISOString(),
         used_at: null
     }));
@@ -344,6 +348,14 @@ app.post('/api/register-bulk', async (req, res) => {
                         </div>` : ''}
                         <p style="color:#555;">📍 ${event.location.name}</p>
                         <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
+                        ${Object.keys(customFields).length ? `
+                        <table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;">
+                            ${Object.entries(customFields).map(([k, v]) => `
+                            <tr>
+                                <td style="padding:7px 12px; color:#888; font-weight:600; width:40%; border-bottom:1px solid #f0f0f0;">${k}</td>
+                                <td style="padding:7px 12px; color:#333; border-bottom:1px solid #f0f0f0;">${v}</td>
+                            </tr>`).join('')}
+                        </table>` : ''}
                         <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
                         ${addAllButton}
                         <p style="font-size:13px; color:#888; text-align:center; margin-bottom:4px;">
@@ -621,8 +633,27 @@ async function generatePassBuffer(ticket, event) {
         });
     }
 
-    pass.primaryFields.push({ key: "event", label: "EVENT", value: event.name });
-    pass.secondaryFields.push({ key: "attendee", label: "ATTENDEE", value: ticket.name });
+    // event.name is already in logoText (top bar) — don't repeat it
+    pass.primaryFields.push({ key: "attendee", label: "NAME", value: ticket.name });
+
+    // Custom fields from registration (T-Shirt Size, Meal, etc.)
+    // Up to 4 on the front as secondary fields; overflow goes to the back
+    const customFields = ticket.customFields || {};
+    const cfEntries = Object.entries(customFields);
+    cfEntries.slice(0, 4).forEach(([label, value], i) => {
+        pass.secondaryFields.push({
+            key: `cf_${i}`,
+            label: label.toUpperCase(),
+            value: String(value)
+        });
+    });
+    cfEntries.slice(4).forEach(([label, value], i) => {
+        pass.backFields.push({
+            key: `cf_back_${i}`,
+            label: label,
+            value: String(value)
+        });
+    });
 
     const eventDate = new Date(event.time);
     if (!Number.isNaN(eventDate.getTime())) {
@@ -656,10 +687,10 @@ async function generatePassBuffer(ticket, event) {
         const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
         if (fs.existsSync(imagePath)) {
             const imageBuffer = fs.readFileSync(imagePath);
+            // thumbnail = event image on the right side of the pass
+            // logo is left as the default from pass-assets.pass (no override)
             pass.addBuffer('thumbnail.png', imageBuffer);
             pass.addBuffer('thumbnail@2x.png', imageBuffer);
-            pass.addBuffer('logo.png', imageBuffer);
-            pass.addBuffer('logo@2x.png', imageBuffer);
         }
     }
 
