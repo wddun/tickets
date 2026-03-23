@@ -727,8 +727,13 @@ async function generatePassBuffer(ticket, event) {
     }
 
     // Auxiliary row: Location + 1 custom field
-    if (event.location?.name) {
-        pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: event.location.name });
+    const locName    = event.location?.name || '';
+    const locAddress = event.location?.address || '';
+    const locValue   = locName && locAddress && locName !== locAddress
+        ? `${locName}\n${locAddress}`
+        : locName || locAddress;
+    if (locValue) {
+        pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
     }
     if (cfEntries[1]) {
         pass.auxiliaryFields.push({ key: 'cf_1', label: cfEntries[1][0].toUpperCase(), value: String(cfEntries[1][1]) });
@@ -742,14 +747,6 @@ async function generatePassBuffer(ticket, event) {
     cfEntries.slice(2).forEach(([label, value], i) => {
         pass.backFields.push({ key: `cf_back_${i}`, label: label, value: String(value) });
     });
-
-    if (event.location?.address) {
-        pass.backFields.push({
-            key: 'venue_address',
-            label: 'VENUE ADDRESS',
-            value: event.location.address
-        });
-    }
 
     pass.backFields.push({
         key: 'terms',
