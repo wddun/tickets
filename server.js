@@ -748,6 +748,14 @@ async function generatePassBuffer(ticket, event) {
         pass.backFields.push({ key: `cf_back_${i}`, label: label, value: String(value) });
     });
 
+    if (locAddress) {
+        pass.backFields.push({
+            key: 'venue_address',
+            label: locName || 'VENUE',
+            value: locAddress
+        });
+    }
+
     pass.backFields.push({
         key: 'terms',
         label: 'ENTRY POLICY',
