@@ -508,35 +508,51 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
     if (val) customFields[fieldName] = val;
   }
 
-  try {
-    var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/register-bulk', {
-      method:           'post',
-      contentType:      'application/json',
-      payload:          JSON.stringify({
-        firstName:    firstName,
-        lastName:     lastName,
-        email:        email,
-        eventId:      eventId,
-        ticketCount:  ticketCount,
-        customFields: customFields
-      }),
-      muteHttpExceptions: true
-    });
+  var maxAttempts = 3;
+  var lastErr = null;
+  var result = null;
 
-    var result = safeParseJSON(response);
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (attempt > 1) {
+        sheet.getRange(row, colMap.statusCol).setValue('⏳ Retrying (' + attempt + '/' + maxAttempts + ')...');
+        SpreadsheetApp.flush();
+        Utilities.sleep(2000);
+      }
 
-    if (result.success) {
-      var label = ticketCount + ' ticket' + (ticketCount > 1 ? 's' : '');
-      sheet.getRange(row, colMap.statusCol).setValue('✅ Sent (' + label + ')');
-      sheet.getRange(row, colMap.sentAtCol).setValue(
-        Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy h:mm a')
-      );
-      sheet.getRange(row, colMap.tokensCol).setValue(result.tokens.join(', '));
-    } else {
-      sheet.getRange(row, colMap.statusCol).setValue('❌ Error: ' + result.error);
+      var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/register-bulk', {
+        method:           'post',
+        contentType:      'application/json',
+        payload:          JSON.stringify({
+          firstName:    firstName,
+          lastName:     lastName,
+          email:        email,
+          eventId:      eventId,
+          ticketCount:  ticketCount,
+          customFields: customFields
+        }),
+        muteHttpExceptions: true
+      });
+
+      result = safeParseJSON(response);
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
     }
-  } catch (err) {
-    sheet.getRange(row, colMap.statusCol).setValue('❌ Error: ' + err.message);
+  }
+
+  if (lastErr) {
+    sheet.getRange(row, colMap.statusCol).setValue('❌ Error: ' + lastErr.message);
+  } else if (result.success) {
+    var label = ticketCount + ' ticket' + (ticketCount > 1 ? 's' : '');
+    sheet.getRange(row, colMap.statusCol).setValue('✅ Sent (' + label + ')');
+    sheet.getRange(row, colMap.sentAtCol).setValue(
+      Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy h:mm a')
+    );
+    sheet.getRange(row, colMap.tokensCol).setValue(result.tokens.join(', '));
+  } else {
+    sheet.getRange(row, colMap.statusCol).setValue('❌ Error: ' + result.error);
   }
 }
 

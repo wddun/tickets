@@ -359,7 +359,9 @@ app.post('/api/register-bulk', async (req, res) => {
                         <div style="text-align:center; margin:20px 0;">
                             <img src="${BASE_URL}${event.imageUrl}" alt="${event.name}" style="max-width:100%; border-radius:12px;" />
                         </div>` : ''}
-                        <p style="color:#555;">📍 ${event.location.name}</p>
+                        <p style="color:#555;">📍 ${event.location.address
+                            ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(event.location.address)}" style="color:#555;">${event.location.name || event.location.address}</a>`
+                            : event.location.name}</p>
                         <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</p>
                         ${Object.keys(customFields).length ? `
                         <table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;">
@@ -740,6 +742,14 @@ async function generatePassBuffer(ticket, event) {
     cfEntries.slice(2).forEach(([label, value], i) => {
         pass.backFields.push({ key: `cf_back_${i}`, label: label, value: String(value) });
     });
+
+    if (event.location?.address) {
+        pass.backFields.push({
+            key: 'venue_address',
+            label: 'VENUE ADDRESS',
+            value: event.location.address
+        });
+    }
 
     pass.backFields.push({
         key: 'terms',
