@@ -296,28 +296,46 @@ app.post('/api/register-bulk', async (req, res) => {
     }
 
     const fullName = `${firstName} ${lastName}`;
-    const registrationId = nanoid(10);
     // customFields: any extra data from the sheet e.g. { "T-Shirt Size": "M", "Meal": "Veg" }
     const customFields = (req.body.customFields && typeof req.body.customFields === 'object')
         ? req.body.customFields : {};
 
-    // Create N tickets — all share a registrationId so they can be bundled
-    const newTickets = Array.from({ length: count }, () => ({
-        id: nanoid(8),
-        token: nanoid(12),
-        registrationId,
-        eventId,
-        name: fullName,
-        firstName,
-        lastName,
-        email,
-        customFields,
-        created_at: new Date().toISOString(),
-        used_at: null
-    }));
+    // Reuse existing tickets for this email+event so resend doesn't create duplicates
+    const existingTickets = db.data.tickets.filter(t => t.email === email && t.eventId === eventId);
 
+    let ticketsToSend;
     try {
-        await db.update(({ tickets }) => newTickets.forEach(t => tickets.push(t)));
+    if (existingTickets.length > 0) {
+        ticketsToSend = existingTickets;
+        await db.update(({ tickets }) => {
+            ticketsToSend.forEach(t => {
+                const dbTicket = tickets.find(dt => dt.id === t.id);
+                if (dbTicket) {
+                    dbTicket.name = fullName;
+                    dbTicket.firstName = firstName;
+                    dbTicket.lastName = lastName;
+                    dbTicket.email = email;
+                    dbTicket.customFields = customFields;
+                }
+            });
+        });
+    } else {
+        const registrationId = nanoid(10);
+        ticketsToSend = Array.from({ length: count }, () => ({
+            id: nanoid(8),
+            token: nanoid(12),
+            registrationId,
+            eventId,
+            name: fullName,
+            firstName,
+            lastName,
+            email,
+            customFields,
+            created_at: new Date().toISOString(),
+            used_at: null
+        }));
+        await db.update(({ tickets }) => ticketsToSend.forEach(t => tickets.push(t)));
+    }
 
         // Build one email with all QR codes
         if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
@@ -328,7 +346,7 @@ app.post('/api/register-bulk', async (req, res) => {
                     <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
                 </a>`;
 
-            const qrBlocks = newTickets.map((ticket, i) => `
+            const qrBlocks = ticketsToSend.map((ticket, i) => `
                 <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
                     <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
                         ${count > 1 ? `Ticket ${i + 1} of ${count}` : 'Your Ticket'}
@@ -342,7 +360,7 @@ app.post('/api/register-bulk', async (req, res) => {
             const addAllButton = count > 1 ? `
                 <div style="text-align:center; margin:24px 0 8px;">
                     <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${count} passes to Apple Wallet at once:</p>
-                    <a href="${BASE_URL}/api/passes/bundle/${registrationId}" style="display:inline-block; text-decoration:none;">
+                    <a href="${BASE_URL}/api/passes/bundle/${ticketsToSend[0].registrationId}" style="display:inline-block; text-decoration:none;">
                         <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block;">
                     </a>
                 </div>
@@ -387,8 +405,8 @@ app.post('/api/register-bulk', async (req, res) => {
 
         res.json({
             success: true,
-            tokens: newTickets.map(t => t.token),
-            tickets: newTickets
+            tokens: ticketsToSend.map(t => t.token),
+            tickets: ticketsToSend
         });
     } catch (error) {
         console.error('Bulk registration error:', error);
