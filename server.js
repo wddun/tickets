@@ -401,6 +401,7 @@ app.post('/api/register-bulk', async (req, res) => {
                     </div>
                 `
             });
+            console.log(`📧 Email sent → ${email} (${fullName}, ${count} ticket${count > 1 ? 's' : ''})`);
         }
 
         res.json({
