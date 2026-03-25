@@ -665,10 +665,37 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
 // API: Validate QR Code
 // Manual check-in by registrationId (marks all tickets in the group)
 app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
-    const tickets = db.data.tickets.filter(t => t.registrationId === req.params.registrationId);
-    if (!tickets.length) return res.status(404).json({ error: 'Not found' });
+    const { registrationId } = req.params;
+
+    // Try matching by registrationId first (check in all tickets for this registration)
+    let tickets = db.data.tickets.filter(t => t.registrationId === registrationId);
+
+    // Fall back to matching a single ticket by its own id
+    if (!tickets.length) {
+        const single = db.data.tickets.find(t => t.id === registrationId);
+        if (single) tickets = [single];
+    }
+
+    if (!tickets.length) {
+        console.error(`[checkin] FAILED — no ticket or registration found for id: ${registrationId} (user: ${req.session.userId})`);
+        return res.status(404).json({ error: 'Not found' });
+    }
+
     const now = new Date().toISOString();
-    tickets.forEach(t => { if (!t.used_at) t.used_at = now; });
+    let checkedInCount = 0;
+    tickets.forEach(t => {
+        if (!t.used_at) {
+            t.used_at = now;
+            checkedInCount++;
+        }
+    });
+
+    if (checkedInCount === 0) {
+        console.log(`[checkin] already checked in — id: ${registrationId} (user: ${req.session.userId})`);
+    } else {
+        console.log(`[checkin] checked in ${checkedInCount} ticket(s) for id: ${registrationId} (user: ${req.session.userId})`);
+    }
+
     await db.write();
     res.json({ success: true });
 });
@@ -680,9 +707,13 @@ app.post('/api/validate', async (req, res) => {
     const cleanToken = token.startsWith('ticket:') ? token.split(':')[1] : token;
     const ticket = db.data.tickets.find(t => t.token === cleanToken);
 
-    if (!ticket) return res.json({ status: 'invalid', message: 'Invalid ticket' });
+    if (!ticket) {
+        console.error(`[validate] INVALID token: ${cleanToken}`);
+        return res.json({ status: 'invalid', message: 'Invalid ticket' });
+    }
 
     if (ticket.used_at) {
+        console.log(`[validate] ALREADY USED — ticket: ${ticket.id} name: ${ticket.name} used_at: ${ticket.used_at}`);
         return res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, name: ticket.name });
     }
 
