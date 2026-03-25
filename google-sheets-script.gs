@@ -342,17 +342,17 @@ function setupTriggers() {
     .onEdit()
     .create();
 
-  // Auto-refresh scan status every 5 minutes
+  // Auto-refresh scan status every 10 minutes
   ScriptApp.newTrigger('refreshScanStatus')
     .timeBased()
-    .everyMinutes(5)
+    .everyMinutes(10)
     .create();
 
   SpreadsheetApp.getUi().alert(
     '✅ Triggers installed!\n\n' +
     '• Emails send automatically when attendee rows are filled in\n' +
     '• Event details sync to server when you edit the Event tab\n' +
-    '• Scan status refreshes every 5 minutes'
+    '• Scan status refreshes every 10 minutes (skips rows already checked in)'
   );
 }
 
@@ -672,6 +672,7 @@ function refreshScanStatus() {
   var lastRow = attSheet.getLastRow();
 
   // --- Pass 1: collect all tokens and their row associations ---
+  // Skip rows already in a final state to avoid unnecessary bandwidth.
   var rowTokens = {}; // row -> [token, ...]
   var allTokens = []; // flat list of every unique token
 
@@ -680,12 +681,18 @@ function refreshScanStatus() {
     if (!tokensRaw) continue;
     var tokens = tokensRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
     if (!tokens.length) continue;
+
+    // Skip rows already fully checked in — no need to poll again
+    var existing = attSheet.getRange(row, colMap.statusCol).getValue().toString();
+    if (existing.indexOf('Checked In (scanned)') !== -1 || existing.indexOf('manual') !== -1) continue;
+
     rowTokens[row] = tokens;
     tokens.forEach(function(t) { if (allTokens.indexOf(t) === -1) allTokens.push(t); });
   }
 
   if (!allTokens.length) {
-    try { SpreadsheetApp.getUi().alert('No tokens found.'); } catch (e) {}
+    // Nothing pending — skip the HTTP call entirely
+    try { SpreadsheetApp.getUi().alert('All rows already checked in. Nothing to update.'); } catch (e) {}
     return;
   }
 
