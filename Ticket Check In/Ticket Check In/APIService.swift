@@ -32,11 +32,24 @@ enum APIError: Error, LocalizedError {
 class APIService: ObservableObject {
     static let shared = APIService()
     private let session = URLSession.shared
+    private let defaults = UserDefaults.standard
 
     @Published var currentUser: AuthUser?
     @Published var isAuthenticated = false
 
     private init() {}
+
+    // MARK: - Credential Storage
+
+    private func saveCredentials(email: String, password: String) {
+        defaults.set(email, forKey: "saved_email")
+        defaults.set(password, forKey: "saved_password")
+    }
+
+    private func clearCredentials() {
+        defaults.removeObject(forKey: "saved_email")
+        defaults.removeObject(forKey: "saved_password")
+    }
 
     // MARK: - Auth
 
@@ -46,12 +59,28 @@ class APIService: ObservableObject {
             currentUser = user
             isAuthenticated = true
         } catch {
-            currentUser = nil
-            isAuthenticated = false
+            // Session expired — try auto-login with saved credentials
+            if let email = defaults.string(forKey: "saved_email"),
+               let password = defaults.string(forKey: "saved_password") {
+                do {
+                    try await performLogin(email: email, password: password)
+                } catch {
+                    currentUser = nil
+                    isAuthenticated = false
+                }
+            } else {
+                currentUser = nil
+                isAuthenticated = false
+            }
         }
     }
 
     func login(email: String, password: String) async throws {
+        try await performLogin(email: email, password: password)
+        saveCredentials(email: email, password: password)
+    }
+
+    private func performLogin(email: String, password: String) async throws {
         guard let url = URL(string: "\(baseURL)/api/auth/login") else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -86,6 +115,7 @@ class APIService: ObservableObject {
         _ = try await session.data(for: request)
         currentUser = nil
         isAuthenticated = false
+        clearCredentials()
     }
 
     // MARK: - Events
