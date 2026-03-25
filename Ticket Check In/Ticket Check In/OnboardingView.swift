@@ -14,7 +14,7 @@ struct OnboardingView: View {
         OnboardingPage(
             icon: nil,
             useLogo: true,
-            title: "Ticket Check In",
+            title: "WTS Tickets",
             body: "Scan QR codes or manually check in attendees to your events — fast, simple, and works offline.",
             buttonLabel: "Get Started"
         ),
@@ -94,7 +94,12 @@ struct OnboardingView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
                 .padding(.horizontal, 28)
-                .padding(.bottom, 50)
+                .padding(.bottom, 8)
+
+                Text("© Will's Tech Support · support@willstechsupport.com")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.bottom, 40)
             }
         }
         .transition(.opacity)

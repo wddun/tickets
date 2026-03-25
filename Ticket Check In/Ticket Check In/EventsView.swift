@@ -57,7 +57,7 @@ struct LoginView: View {
 
                 LogoView(size: 80)
 
-                Text("Ticket Check In")
+                Text("WTS Tickets")
                     .font(.title.bold())
 
                 VStack(spacing: 16) {
@@ -107,6 +107,12 @@ struct LoginView: View {
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+                Text("© Will's Tech Support · support@willstechsupport.com")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
 
                 Spacer()
             }
