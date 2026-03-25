@@ -721,6 +721,7 @@
     <div class="topbar">
         <div class="topbar-title">🎟️ <span>WTS</span> Tickets</div>
         <button class="logout-btn" onclick="logout()">Sign out</button>
+        <button class="logout-btn" onclick="confirmDeleteAccount()" style="margin-left:8px;color:#dc2626;border-color:#dc2626;">Delete Account</button>
     </div>
 
     <div class="layout">
@@ -1247,6 +1248,16 @@
         async function logout() {
             await fetch('/api/auth/logout', { method: 'POST' });
             location.href = '/login.html';
+        }
+
+        async function confirmDeleteAccount() {
+            if (!confirm('Are you sure you want to delete your account? This will permanently delete all your events and tickets and cannot be undone.')) return;
+            const res = await fetch('/api/auth/account', { method: 'DELETE' });
+            if (res.ok) {
+                location.href = '/login.html';
+            } else {
+                alert('Failed to delete account. Please try again.');
+            }
         }
 
         function getInitials(email) {

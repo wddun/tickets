@@ -118,6 +118,19 @@ class APIService: ObservableObject {
         clearCredentials()
     }
 
+    func deleteAccount() async throws {
+        guard let url = URL(string: "\(baseURL)/api/auth/account") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        if http.statusCode == 401 { throw APIError.unauthorized }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+        currentUser = nil
+        isAuthenticated = false
+        clearCredentials()
+    }
+
     // MARK: - Events
 
     func getEvents() async throws -> [Event] {

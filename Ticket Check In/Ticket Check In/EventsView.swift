@@ -146,6 +146,7 @@ struct EventsListView: View {
     @State private var errorMessage: String?
     @State private var navigationPath = NavigationPath()
     @State private var hasAutoNavigated = false
+    @State private var showDeleteConfirm = false
     @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
 
     private var lastSelectedEvent: Event? {
@@ -188,11 +189,29 @@ struct EventsListView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Sign Out") {
-                        Task { try? await api.logout() }
+                    Menu {
+                        Button("Sign Out", role: .destructive) {
+                            Task { try? await api.logout() }
+                        }
+                        Button("Delete Account", role: .destructive) {
+                            showDeleteConfirm = true
+                        }
+                    } label: {
+                        Image(systemName: "person.circle")
                     }
-                    .foregroundStyle(.red)
                 }
+            }
+            .confirmationDialog(
+                "Delete Account",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Account", role: .destructive) {
+                    Task { try? await api.deleteAccount() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will permanently delete your account and all associated events and tickets. This cannot be undone.")
             }
         }
         .task {

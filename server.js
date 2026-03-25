@@ -186,6 +186,21 @@ app.post('/api/auth/logout', (req, res) => {
     res.json({ success: true });
 });
 
+app.delete('/api/auth/account', async (req, res) => {
+    if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const userId = req.session.userId;
+    await db.update(data => {
+        const eventIds = data.events.filter(e => e.userId === userId).map(e => e.id);
+        data.tickets = data.tickets.filter(t => !eventIds.includes(t.eventId));
+        data.events = data.events.filter(e => e.userId !== userId);
+        data.sheetLinks = (data.sheetLinks || []).filter(l => l.userId !== userId);
+        data.sheetAccess = (data.sheetAccess || []).filter(a => a.userId !== userId);
+        data.users = data.users.filter(u => u.id !== userId);
+    });
+    req.session.destroy();
+    res.json({ success: true });
+});
+
 // Middleware to protect routes
 const requireAuth = (req, res, next) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
