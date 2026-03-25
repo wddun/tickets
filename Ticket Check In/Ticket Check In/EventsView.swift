@@ -201,6 +201,8 @@ struct EventsListView: View {
         errorMessage = nil
         do {
             events = try await api.getEvents()
+        } catch is CancellationError {
+            // Silently ignore — happens when pull-to-refresh cancels a prior load
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -239,6 +241,7 @@ struct AttendeesView: View {
     @State private var errorMessage: String?
     @State private var searchText = ""
     @State private var checkingIn: Set<String> = []
+    @State private var refreshTimer: Timer?
 
     var groups: [AttendeeGroup] {
         var dict: [String: AttendeeGroup] = [:]
@@ -296,18 +299,32 @@ struct AttendeesView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+                Task { await loadTickets(showSpinner: false) }
+            }
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+            refreshTimer?.invalidate()
+            refreshTimer = nil
+        }
         .task { await loadTickets() }
     }
 
-    private func loadTickets() async {
-        isLoading = true
-        errorMessage = nil
+    private func loadTickets(showSpinner: Bool = true) async {
+        if showSpinner && tickets.isEmpty { isLoading = true }
         do {
-            tickets = try await APIService.shared.getTickets(eventId: event.id)
+            let fresh = try await APIService.shared.getTickets(eventId: event.id)
+            tickets = fresh
+            errorMessage = nil
+        } catch is CancellationError {
+            // Silently ignore — pull-to-refresh cancels the prior task
         } catch {
-            errorMessage = error.localizedDescription
+            if tickets.isEmpty {
+                errorMessage = error.localizedDescription
+            }
         }
         isLoading = false
     }
@@ -392,8 +409,9 @@ struct AttendeeGroupRow: View {
                 ProgressView()
                     .scaleEffect(0.8)
             } else {
+                let unchecked = group.totalCount - group.checkedInCount
                 HStack(spacing: 6) {
-                    if group.totalCount > 1 {
+                    if unchecked > 1 {
                         Button(action: onCheckInOne) {
                             Text("Check In 1")
                                 .font(.caption.bold())
@@ -406,7 +424,7 @@ struct AttendeeGroupRow: View {
                         .buttonStyle(.plain)
                     }
                     Button(action: onCheckInAll) {
-                        Text(group.totalCount > 1 ? "Check In All" : "Check In")
+                        Text(unchecked > 1 ? "Check In All" : "Check In")
                             .font(.caption.bold())
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
