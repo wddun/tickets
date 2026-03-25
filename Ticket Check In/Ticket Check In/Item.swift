@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct Event: Codable, Identifiable {
+struct Event: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let time: String?
@@ -15,7 +15,7 @@ struct Event: Codable, Identifiable {
     let scannerPin: String?
     let location: EventLocation?
 
-    struct EventLocation: Codable {
+    struct EventLocation: Codable, Hashable {
         let name: String?
         let address: String?
         let lat: Double?
