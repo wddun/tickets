@@ -1013,6 +1013,12 @@
                 else pill = `<span class="status-pill scanned">✓ Checked In</span>`;
 
                 const allIn = scanned === total && total > 0;
+                const unchecked = total - scanned;
+                const btns = allIn ? '' : `
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                        ${unchecked > 1 ? `<button class="btn btn-secondary btn-sm" onclick='openTicketPicker(${JSON.stringify(g.registrationId)}, ${JSON.stringify(g.tickets)})'>Check In 1</button>` : ''}
+                        <button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">${unchecked > 1 ? 'Check In All' : 'Check In'}</button>
+                    </div>`;
                 return `
         <div class="attendee-row${isChecked ? ' row-selected' : ''}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
@@ -1023,7 +1029,7 @@
             <div class="attendee-email">${esc(g.email || '')}</div>
             <div class="ticket-count">${total} ticket${total !== 1 ? 's' : ''}</div>
             <div>${pill}</div>
-            <div>${allIn ? '' : `<button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">Check In</button>`}</div>
+            <div>${btns}</div>
         </div>`;
             }).join('');
 
@@ -1093,6 +1099,35 @@
             } else {
                 alert('Check-in failed.');
             }
+        }
+
+        function openTicketPicker(registrationId, tickets) {
+            const unchecked = tickets.filter(t => !t.used_at);
+            const modal = document.getElementById('ticketPickerModal');
+            const list = document.getElementById('ticketPickerList');
+            list.innerHTML = unchecked.map(t => `
+                <label class="ticket-picker-item">
+                    <input type="checkbox" value="${esc(t.id)}" class="ticket-picker-cb">
+                    <div class="ticket-picker-info">
+                        <div class="ticket-picker-name">${esc(t.name)}</div>
+                        <div class="ticket-picker-id">${esc(t.id)}</div>
+                    </div>
+                </label>`).join('');
+            document.getElementById('ticketPickerConfirm').onclick = () => checkInSelected(registrationId);
+            modal.style.display = 'flex';
+        }
+
+        function closeTicketPicker() {
+            document.getElementById('ticketPickerModal').style.display = 'none';
+        }
+
+        async function checkInSelected(registrationId) {
+            const checked = [...document.querySelectorAll('.ticket-picker-cb:checked')].map(cb => cb.value);
+            if (!checked.length) return;
+            closeTicketPicker();
+            await Promise.all(checked.map(id => fetch(`/api/checkin/${id}`, { method: 'POST' })));
+            const event = events.find(e => e.id === selectedId);
+            if (event) await fetchAndRender(event, true);
         }
 
         async function deleteEvent(id) {
@@ -1231,6 +1266,30 @@
 
         init();
     </script>
+
+    <!-- Ticket Picker Modal -->
+    <div id="ticketPickerModal" onclick="if(event.target===this)closeTicketPicker()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
+        <div style="background:#1c1c1e;border-radius:14px;width:min(420px,92vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px">
+                <span style="font-size:17px;font-weight:600;color:#fff">Select Tickets</span>
+                <button onclick="closeTicketPicker()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;line-height:1">&times;</button>
+            </div>
+            <div id="ticketPickerList" style="overflow-y:auto;flex:1;padding:0 12px 12px"></div>
+            <div style="padding:14px 20px;border-top:1px solid #333">
+                <button id="ticketPickerConfirm" class="btn btn-primary" style="width:100%">Check In Selected</button>
+            </div>
+        </div>
+    </div>
+    <style>
+        .ticket-picker-item {
+            display:flex;align-items:center;gap:12px;padding:12px;border-radius:10px;
+            cursor:pointer;margin-bottom:6px;background:#2c2c2e;
+        }
+        .ticket-picker-item:hover { background:#3a3a3c; }
+        .ticket-picker-item input[type=checkbox] { width:18px;height:18px;accent-color:#4f8ef7;flex-shrink:0; }
+        .ticket-picker-name { color:#fff;font-size:15px; }
+        .ticket-picker-id { color:#888;font-size:11px;margin-top:2px;word-break:break-all; }
+    </style>
 </body>
 
 </html>
