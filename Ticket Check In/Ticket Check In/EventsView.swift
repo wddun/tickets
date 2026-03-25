@@ -242,6 +242,7 @@ struct AttendeesView: View {
     @State private var searchText = ""
     @State private var checkingIn: Set<String> = []
     @State private var refreshTimer: Timer?
+    @State private var pickerGroup: AttendeeGroup? = nil
 
     var groups: [AttendeeGroup] {
         var dict: [String: AttendeeGroup] = [:]
@@ -282,12 +283,18 @@ struct AttendeesView: View {
                     AttendeeGroupRow(
                         group: group,
                         isProcessing: checkingIn.contains(group.registrationId),
-                        onCheckInOne: { checkInOne(group: group) },
+                        onCheckInOne: { pickerGroup = group },
                         onCheckInAll: { checkInAll(group: group) }
                     )
                 }
                 .searchable(text: $searchText, prompt: "Search by name or email")
                 .refreshable { await loadTickets() }
+                .sheet(item: $pickerGroup) { group in
+                    TicketPickerSheet(group: group) { selectedIds in
+                        pickerGroup = nil
+                        checkInSelected(group: group, ticketIds: selectedIds)
+                    }
+                }
             }
         }
         .navigationTitle(event.name)
@@ -329,20 +336,26 @@ struct AttendeesView: View {
         isLoading = false
     }
 
-    private func checkInOne(group: AttendeeGroup) {
-        guard !checkingIn.contains(group.registrationId),
-              let ticket = group.firstUncheckedTicket else { return }
+    private func checkInSelected(group: AttendeeGroup, ticketIds: [String]) {
+        guard !ticketIds.isEmpty, !checkingIn.contains(group.registrationId) else { return }
         checkingIn.insert(group.registrationId)
         Task {
-            do {
-                try await APIService.shared.checkInTicket(ticketId: ticket.id)
-                let now = ISO8601DateFormatter().string(from: Date())
-                if let idx = tickets.firstIndex(where: { $0.id == ticket.id }) {
-                    tickets[idx].used_at = now
+            var anyFailed = false
+            let now = ISO8601DateFormatter().string(from: Date())
+            for ticketId in ticketIds {
+                do {
+                    try await APIService.shared.checkInTicket(ticketId: ticketId)
+                    if let idx = tickets.firstIndex(where: { $0.id == ticketId }) {
+                        tickets[idx].used_at = now
+                    }
+                } catch {
+                    anyFailed = true
                 }
-                CheckInFeedback.shared.success()
-            } catch {
+            }
+            if anyFailed {
                 CheckInFeedback.shared.error()
+            } else {
+                CheckInFeedback.shared.success()
             }
             checkingIn.remove(group.registrationId)
         }
@@ -364,6 +377,69 @@ struct AttendeesView: View {
             }
             checkingIn.remove(group.registrationId)
         }
+    }
+}
+
+// MARK: - Ticket Picker Sheet
+
+struct TicketPickerSheet: View {
+    let group: AttendeeGroup
+    let onConfirm: ([String]) -> Void
+
+    @State private var selected: Set<String> = []
+
+    private var uncheckedTickets: [Ticket] {
+        group.tickets.filter { !$0.isCheckedIn }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List(uncheckedTickets, id: \.id) { ticket in
+                Button {
+                    if selected.contains(ticket.id) {
+                        selected.remove(ticket.id)
+                    } else {
+                        selected.insert(ticket.id)
+                    }
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ticket.name)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                            Text(ticket.id)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        if selected.contains(ticket.id) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Color.accentColor)
+                        } else {
+                            Image(systemName: "circle")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .navigationTitle("Select Tickets")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onConfirm([]) }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Check In \(selected.isEmpty ? "" : "(\(selected.count))")") {
+                        onConfirm(Array(selected))
+                    }
+                    .disabled(selected.isEmpty)
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 
