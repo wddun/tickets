@@ -7,6 +7,21 @@
 
 import SwiftUI
 
+// MARK: - AttendeeGroup
+
+struct AttendeeGroup: Identifiable {
+    let registrationId: String
+    let name: String
+    let email: String?
+    var tickets: [Ticket]
+
+    var id: String { registrationId }
+    var checkedInCount: Int { tickets.filter(\.isCheckedIn).count }
+    var totalCount: Int { tickets.count }
+    var isFullyCheckedIn: Bool { checkedInCount == totalCount }
+    var firstUncheckedTicket: Ticket? { tickets.first(where: { !$0.isCheckedIn }) }
+}
+
 // MARK: - EventsView (root)
 
 struct EventsView: View {
@@ -117,11 +132,19 @@ struct EventsListView: View {
     @State private var events: [Event] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var navigationPath = NavigationPath()
+    @State private var hasAutoNavigated = false
+    @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
+
+    private var lastSelectedEvent: Event? {
+        guard !lastSelectedEventData.isEmpty else { return nil }
+        return try? JSONDecoder().decode(Event.self, from: lastSelectedEventData)
+    }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             Group {
-                if isLoading {
+                if isLoading && events.isEmpty {
                     ProgressView("Loading events…")
                 } else if let error = errorMessage {
                     ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -129,14 +152,28 @@ struct EventsListView: View {
                     ContentUnavailableView("No Events", systemImage: "calendar.badge.exclamationmark", description: Text("No events found."))
                 } else {
                     List(events) { event in
-                        NavigationLink(destination: AttendeesView(event: event)) {
-                            EventRow(event: event)
+                        Button {
+                            saveLastEvent(event)
+                            navigationPath.append(event)
+                        } label: {
+                            HStack {
+                                EventRow(event: event)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.primary)
                     }
                     .refreshable { await loadEvents() }
                 }
             }
             .navigationTitle("Events")
+            .navigationDestination(for: Event.self) { event in
+                AttendeesView(event: event)
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Sign Out") {
@@ -146,7 +183,17 @@ struct EventsListView: View {
                 }
             }
         }
-        .task { await loadEvents() }
+        .task {
+            if !hasAutoNavigated, let lastEvent = lastSelectedEvent {
+                hasAutoNavigated = true
+                navigationPath.append(lastEvent)
+            }
+            await loadEvents()
+        }
+    }
+
+    private func saveLastEvent(_ event: Event) {
+        lastSelectedEventData = (try? JSONEncoder().encode(event)) ?? Data()
     }
 
     private func loadEvents() async {
@@ -193,10 +240,27 @@ struct AttendeesView: View {
     @State private var searchText = ""
     @State private var checkingIn: Set<String> = []
 
-    var filtered: [Ticket] {
-        if searchText.isEmpty { return tickets }
+    var groups: [AttendeeGroup] {
+        var dict: [String: AttendeeGroup] = [:]
+        for ticket in tickets {
+            if dict[ticket.registrationId] != nil {
+                dict[ticket.registrationId]!.tickets.append(ticket)
+            } else {
+                dict[ticket.registrationId] = AttendeeGroup(
+                    registrationId: ticket.registrationId,
+                    name: ticket.name,
+                    email: ticket.email,
+                    tickets: [ticket]
+                )
+            }
+        }
+        return dict.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    var filteredGroups: [AttendeeGroup] {
+        if searchText.isEmpty { return groups }
         let q = searchText.lowercased()
-        return tickets.filter {
+        return groups.filter {
             $0.name.lowercased().contains(q) ||
             ($0.email ?? "").lowercased().contains(q)
         }
@@ -211,11 +275,12 @@ struct AttendeesView: View {
             } else if tickets.isEmpty {
                 ContentUnavailableView("No Attendees", systemImage: "person.slash", description: Text("No tickets found for this event."))
             } else {
-                List(filtered) { ticket in
-                    AttendeeRow(
-                        ticket: ticket,
-                        isProcessing: checkingIn.contains(ticket.registrationId),
-                        onCheckIn: { checkIn(ticket: ticket) }
+                List(filteredGroups) { group in
+                    AttendeeGroupRow(
+                        group: group,
+                        isProcessing: checkingIn.contains(group.registrationId),
+                        onCheckInOne: { checkInOne(group: group) },
+                        onCheckInAll: { checkInAll(group: group) }
                     )
                 }
                 .searchable(text: $searchText, prompt: "Search by name or email")
@@ -247,56 +312,101 @@ struct AttendeesView: View {
         isLoading = false
     }
 
-    private func checkIn(ticket: Ticket) {
-        guard !checkingIn.contains(ticket.registrationId) else { return }
-        checkingIn.insert(ticket.registrationId)
+    private func checkInOne(group: AttendeeGroup) {
+        guard !checkingIn.contains(group.registrationId),
+              let ticket = group.firstUncheckedTicket else { return }
+        checkingIn.insert(group.registrationId)
         Task {
             do {
-                try await APIService.shared.checkIn(registrationId: ticket.registrationId)
-                // Mark all tickets with same registrationId as checked in
+                try await APIService.shared.checkInTicket(ticketId: ticket.id)
                 let now = ISO8601DateFormatter().string(from: Date())
-                for i in tickets.indices where tickets[i].registrationId == ticket.registrationId {
+                if let idx = tickets.firstIndex(where: { $0.id == ticket.id }) {
+                    tickets[idx].used_at = now
+                }
+                CheckInFeedback.shared.success()
+            } catch {
+                CheckInFeedback.shared.error()
+            }
+            checkingIn.remove(group.registrationId)
+        }
+    }
+
+    private func checkInAll(group: AttendeeGroup) {
+        guard !checkingIn.contains(group.registrationId) else { return }
+        checkingIn.insert(group.registrationId)
+        Task {
+            do {
+                try await APIService.shared.checkIn(registrationId: group.registrationId)
+                let now = ISO8601DateFormatter().string(from: Date())
+                for i in tickets.indices where tickets[i].registrationId == group.registrationId {
                     tickets[i].used_at = now
                 }
                 CheckInFeedback.shared.success()
             } catch {
                 CheckInFeedback.shared.error()
             }
-            checkingIn.remove(ticket.registrationId)
+            checkingIn.remove(group.registrationId)
         }
     }
-
 }
 
-struct AttendeeRow: View {
-    let ticket: Ticket
+struct AttendeeGroupRow: View {
+    let group: AttendeeGroup
     let isProcessing: Bool
-    let onCheckIn: () -> Void
+    let onCheckInOne: () -> Void
+    let onCheckInAll: () -> Void
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text(ticket.name)
+                Text(group.name)
                     .font(.headline)
-                    .strikethrough(ticket.isCheckedIn, color: .secondary)
-                if let email = ticket.email {
-                    Text(email)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .strikethrough(group.isFullyCheckedIn, color: .secondary)
+                HStack(spacing: 4) {
+                    if let email = group.email {
+                        Text(email)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if group.totalCount > 1 {
+                        if group.email != nil {
+                            Text("·")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text("\(group.checkedInCount)/\(group.totalCount) tickets")
+                            .font(.caption)
+                            .foregroundStyle(
+                                group.isFullyCheckedIn ? Color.green :
+                                group.checkedInCount > 0 ? Color.orange : Color.secondary
+                            )
+                    }
                 }
             }
             Spacer()
-            if ticket.isCheckedIn {
+            if group.isFullyCheckedIn {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title3)
                     .foregroundStyle(.green)
+            } else if isProcessing {
+                ProgressView()
+                    .scaleEffect(0.8)
             } else {
-                Button(action: onCheckIn) {
-                    if isProcessing {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    } else {
-                        Text("Check In")
+                HStack(spacing: 6) {
+                    if group.totalCount > 1 {
+                        Button(action: onCheckInOne) {
+                            Text("Check In 1")
+                                .font(.caption.bold())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(Color(.systemGray5))
+                                .foregroundStyle(.primary)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Button(action: onCheckInAll) {
+                        Text(group.totalCount > 1 ? "Check In All" : "Check In")
                             .font(.caption.bold())
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
@@ -304,9 +414,8 @@ struct AttendeeRow: View {
                             .foregroundStyle(.white)
                             .clipShape(Capsule())
                     }
+                    .buttonStyle(.plain)
                 }
-                .disabled(isProcessing)
-                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 2)

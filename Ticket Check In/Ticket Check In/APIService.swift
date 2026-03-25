@@ -134,4 +134,13 @@ class APIService: ObservableObject {
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
+
+    func checkInTicket(ticketId: String) async throws {
+        guard let url = URL(string: "\(baseURL)/api/checkin/\(ticketId)") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+    }
 }
