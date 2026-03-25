@@ -19,7 +19,7 @@ struct ContentView: View {
                 ScannerView(switchToManual: { selectedTab = 1 })
                     .tabItem { Label("Scanner", systemImage: "qrcode.viewfinder") }
                     .tag(0)
-                EventsView()
+                EventsView(switchToScanner: { selectedTab = 0 })
                     .tabItem { Label("Events", systemImage: "calendar") }
                     .tag(1)
             }

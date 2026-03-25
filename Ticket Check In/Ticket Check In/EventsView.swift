@@ -25,6 +25,7 @@ struct AttendeeGroup: Identifiable {
 // MARK: - EventsView (root)
 
 struct EventsView: View {
+    var switchToScanner: () -> Void = {}
     @StateObject private var api = APIService.shared
 
     var body: some View {
@@ -32,7 +33,7 @@ struct EventsView: View {
             if api.isAuthenticated {
                 EventsListView()
             } else {
-                LoginView()
+                LoginView(switchToScanner: switchToScanner)
             }
         }
         .task { await api.checkAuth() }
@@ -42,6 +43,7 @@ struct EventsView: View {
 // MARK: - LoginView
 
 struct LoginView: View {
+    var switchToScanner: () -> Void = {}
     @StateObject private var api = APIService.shared
     @State private var email = ""
     @State private var password = ""
@@ -99,6 +101,12 @@ struct LoginView: View {
                 }
                 .disabled(isLoading || email.isEmpty || password.isEmpty)
                 .padding(.horizontal)
+
+                Button("Skip — Scanner Only") {
+                    switchToScanner()
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
 
                 Spacer()
             }

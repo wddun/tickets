@@ -11,6 +11,8 @@
     <div class="container" style="margin:0; padding:0; max-width:none;">
         <div id="reader" style="height:100vh;"></div>
 
+        <a id="dashboardBtn" href="/dashboard.html" style="position:fixed;top:16px;right:16px;z-index:100;background:rgba(0,0,0,0.6);color:#fff;padding:8px 14px;border-radius:20px;font-size:13px;font-weight:600;text-decoration:none;backdrop-filter:blur(6px);display:none;"></a>
+
         <div id="statusOverlay" class="status-overlay">
             <div class="status-icon" id="statusIcon">✓</div>
             <div class="status-msg" id="statusMsg">Valid Ticket</div>
@@ -116,6 +118,19 @@
 
         const html5QrCode = new Html5Qrcode("reader");
         html5QrCode.start({ facingMode: "environment" }, { fps: 10, aspectRatio: 1.0 }, onScanSuccess);
+
+        const dashboardBtn = document.getElementById('dashboardBtn');
+        fetch('/api/auth/me').then(r => {
+            dashboardBtn.style.display = 'block';
+            if (r.ok) {
+                dashboardBtn.textContent = 'Manual Check-In';
+            } else {
+                dashboardBtn.textContent = 'Sign In';
+            }
+        }).catch(() => {
+            dashboardBtn.textContent = 'Sign In';
+            dashboardBtn.style.display = 'block';
+        });
     </script>
 </body>
 </html>
