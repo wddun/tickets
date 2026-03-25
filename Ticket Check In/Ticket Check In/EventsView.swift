@@ -53,9 +53,7 @@ struct LoginView: View {
             VStack(spacing: 24) {
                 Spacer()
 
-                Image(systemName: "ticket.fill")
-                    .font(.system(size: 64))
-                    .foregroundStyle(Color.accentColor)
+                LogoView(size: 80)
 
                 Text("Ticket Check In")
                     .font(.title.bold())
