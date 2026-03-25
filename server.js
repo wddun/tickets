@@ -506,17 +506,33 @@ app.post('/api/sheet/create-event', async (req, res) => {
 });
 
 // API: Batch ticket scan status (for Google Sheet)
+// Cache: keyed by sorted token list, expires after 60 seconds
+const ticketStatusCache = new Map(); // key -> { result, expiresAt }
+const TICKET_STATUS_TTL = 60_000;
+
 app.post('/api/ticket-status', (req, res) => {
     const { tokens } = req.body;
     if (!tokens || !Array.isArray(tokens)) {
         return res.status(400).json({ error: 'tokens array required' });
     }
-    const statuses = tokens.map(token => {
-        const ticket = db.data.tickets.find(t => t.token === token.trim());
+
+    const trimmed = tokens.map(t => t.trim()).filter(Boolean);
+    const cacheKey = trimmed.slice().sort().join(',');
+    const cached = ticketStatusCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        return res.json(cached.result);
+    }
+
+    // Build index for O(1) lookups instead of scanning the full array per token
+    const byToken = new Map(db.data.tickets.map(t => [t.token, t]));
+    const result = trimmed.map(token => {
+        const ticket = byToken.get(token);
         if (!ticket) return { token, status: 'not found' };
         return { token, status: ticket.used_at ? 'scanned' : 'not scanned', used_at: ticket.used_at || null };
     });
-    res.json(statuses);
+
+    ticketStatusCache.set(cacheKey, { result, expiresAt: Date.now() + TICKET_STATUS_TTL });
+    res.json(result);
 });
 
 app.get('/api/events', requireAuth, (req, res) => {
@@ -697,6 +713,7 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     }
 
     await db.write();
+    ticketStatusCache.clear();
     res.json({ success: true });
 });
 
@@ -719,6 +736,7 @@ app.post('/api/validate', async (req, res) => {
 
     ticket.used_at = new Date().toISOString();
     await db.write();
+    ticketStatusCache.clear();
 
     const event = db.data.events.find(e => e.id === ticket.eventId);
     res.json({
