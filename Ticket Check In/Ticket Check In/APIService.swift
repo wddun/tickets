@@ -6,9 +6,55 @@
 //
 
 import Foundation
+import Security
 import Combine
 
 let baseURL = "https://tickets.willstechsupport.com"
+
+// MARK: - Keychain Helper
+
+private enum Keychain {
+    static let service = "com.willstechsupport.Ticket-Check-In"
+
+    static func save(_ value: String, for account: String) {
+        let data = Data(value.utf8)
+        let query: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account
+        ]
+        var update: [CFString: Any] = [kSecValueData: data]
+        if SecItemUpdate(query as CFDictionary, update as CFDictionary) == errSecItemNotFound {
+            update[kSecClass]       = kSecClassGenericPassword
+            update[kSecAttrService] = service
+            update[kSecAttrAccount] = account
+            SecItemAdd(update as CFDictionary, nil)
+        }
+    }
+
+    static func load(_ account: String) -> String? {
+        let query: [CFString: Any] = [
+            kSecClass:            kSecClassGenericPassword,
+            kSecAttrService:      service,
+            kSecAttrAccount:      account,
+            kSecReturnData:       true,
+            kSecMatchLimit:       kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func delete(_ account: String) {
+        let query: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
 
 enum APIError: Error, LocalizedError {
     case invalidURL
@@ -32,23 +78,22 @@ enum APIError: Error, LocalizedError {
 class APIService: ObservableObject {
     static let shared = APIService()
     private let session = URLSession.shared
-    private let defaults = UserDefaults.standard
 
     @Published var currentUser: AuthUser?
     @Published var isAuthenticated = false
 
     private init() {}
 
-    // MARK: - Credential Storage
+    // MARK: - Credential Storage (Keychain)
 
     private func saveCredentials(email: String, password: String) {
-        defaults.set(email, forKey: "saved_email")
-        defaults.set(password, forKey: "saved_password")
+        Keychain.save(email,    for: "email")
+        Keychain.save(password, for: "password")
     }
 
     private func clearCredentials() {
-        defaults.removeObject(forKey: "saved_email")
-        defaults.removeObject(forKey: "saved_password")
+        Keychain.delete("email")
+        Keychain.delete("password")
     }
 
     // MARK: - Auth
@@ -60,8 +105,8 @@ class APIService: ObservableObject {
             isAuthenticated = true
         } catch {
             // Session expired — try auto-login with saved credentials
-            if let email = defaults.string(forKey: "saved_email"),
-               let password = defaults.string(forKey: "saved_password") {
+            if let email    = Keychain.load("email"),
+               let password = Keychain.load("password") {
                 do {
                     try await performLogin(email: email, password: password)
                 } catch {

@@ -15,6 +15,7 @@ import sharp from 'sharp';
 import session from 'express-session';
 import FileStoreFactory from 'session-file-store';
 import bcrypt from 'bcryptjs';
+import rateLimit from 'express-rate-limit';
 
 const FileStore = FileStoreFactory(session);
 
@@ -53,6 +54,7 @@ async function sendEmail({ to, subject, html }) {
     }));
 }
 
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '20mb' }));
 app.use(express.static('public'));
 app.use(session({
@@ -60,11 +62,24 @@ app.use(session({
         path: './sessions',
         retries: 0
     }),
-    secret: process.env.SESSION_SECRET || 'ticket-secret-key',
+    secret: process.env.SESSION_SECRET || (() => { throw new Error('SESSION_SECRET env var is required'); })(),
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false } // Set to true if using HTTPS
+    cookie: {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+    }
 }));
+
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts. Please try again later.' }
+});
 
 // Initialize Database
 const defaultData = {
@@ -163,7 +178,7 @@ app.post('/api/auth/setup-admin', async (req, res) => {
     res.json({ success: true, message: `Admin account created for ${adminEmail}` });
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
     const { email, password } = req.body;
     const user = db.data.users.find(u => u.email === email);
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
