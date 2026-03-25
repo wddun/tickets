@@ -670,42 +670,63 @@ function refreshScanStatus() {
 
   var colMap  = getColumnMap(attSheet);
   var lastRow = attSheet.getLastRow();
-  var updated = 0;
+
+  // --- Pass 1: collect all tokens and their row associations ---
+  var rowTokens = {}; // row -> [token, ...]
+  var allTokens = []; // flat list of every unique token
 
   for (var row = ATT_DATA_START; row <= lastRow; row++) {
     var tokensRaw = getCellValue(attSheet, row, colMap.tokensCol);
     if (!tokensRaw) continue;
-
     var tokens = tokensRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
     if (!tokens.length) continue;
+    rowTokens[row] = tokens;
+    tokens.forEach(function(t) { if (allTokens.indexOf(t) === -1) allTokens.push(t); });
+  }
 
-    try {
-      var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/ticket-status', {
-        method:             'post',
-        contentType:        'application/json',
-        payload:            JSON.stringify({ tokens: tokens }),
-        muteHttpExceptions: true
-      });
+  if (!allTokens.length) {
+    try { SpreadsheetApp.getUi().alert('No tokens found.'); } catch (e) {}
+    return;
+  }
 
-      var statuses = safeParseJSON(response);
-      var scannedCount = statuses.filter(function(s) { return s.status === 'scanned'; }).length;
-      var total        = statuses.filter(function(s) { return s.status !== 'not found'; }).length;
+  // --- Single request for all tokens ---
+  var statusMap = {}; // token -> status object
+  try {
+    var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/ticket-status', {
+      method:             'post',
+      contentType:        'application/json',
+      payload:            JSON.stringify({ tokens: allTokens }),
+      muteHttpExceptions: true
+    });
+    var statuses = safeParseJSON(response);
+    statuses.forEach(function(s) { statusMap[s.token] = s; });
+  } catch (err) {
+    try { SpreadsheetApp.getUi().alert('Server error: ' + err.message); } catch (e) {}
+    return;
+  }
 
-      var cell = attSheet.getRange(row, colMap.statusCol);
-      var existing = cell.getValue().toString();
-      // Don't overwrite if already manually checked in
-      if (existing.indexOf('manual') !== -1) { updated++; continue; }
+  // --- Pass 2: update each row using cached results ---
+  var updated = 0;
+  for (var row in rowTokens) {
+    var tokens = rowTokens[row];
+    var cell     = attSheet.getRange(Number(row), colMap.statusCol);
+    var existing = cell.getValue().toString();
+    if (existing.indexOf('manual') !== -1) { updated++; continue; }
 
-      if (scannedCount === total && total > 0) {
-        cell.setValue('✅ Checked In (scanned)').setBackground('#e8f5e9');
-      } else if (scannedCount > 0) {
-        cell.setValue('🟡 ' + scannedCount + '/' + total + ' checked in').setBackground('#fff9c4');
-      }
-      // If nobody scanned yet, leave the existing "✅ Sent" status alone
-      updated++;
-    } catch (err) {
-      attSheet.getRange(row, colMap.statusCol).setValue('⚠️ ' + err.message.substring(0, 80));
+    var scannedCount = 0, total = 0;
+    tokens.forEach(function(t) {
+      var s = statusMap[t];
+      if (!s || s.status === 'not found') return;
+      total++;
+      if (s.status === 'scanned') scannedCount++;
+    });
+
+    if (scannedCount === total && total > 0) {
+      cell.setValue('✅ Checked In (scanned)').setBackground('#e8f5e9');
+    } else if (scannedCount > 0) {
+      cell.setValue('🟡 ' + scannedCount + '/' + total + ' checked in').setBackground('#fff9c4');
     }
+    updated++;
   }
 
   // Only show alert when run manually (time-based triggers have no UI context)
