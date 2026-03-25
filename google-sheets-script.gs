@@ -71,6 +71,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Refresh Scan Status', 'refreshScanStatus')
     .addSeparator()
+    .addItem('Link Sheet to Account', 'linkSheetToAccount')
+    .addSeparator()
     .addItem('Fix: Remove Duplicate Triggers', 'setupTriggers')
     .addToUi();
 }
@@ -796,6 +798,67 @@ function parseDriveFileId(ref) {
 function styleLabel(range, text) {
   range.setValue(text).setFontWeight('bold').setFontColor('#333');
   return range;
+}
+
+// ============================================================
+//  LINK SHEET TO ACCOUNT — generates a link URL that lets
+//  anyone open it in a browser and connect this sheet's event
+//  to their website account.
+// ============================================================
+function linkSheetToAccount() {
+  var ss      = SpreadsheetApp.getActive();
+  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
+  var ui      = SpreadsheetApp.getUi();
+
+  if (!evSheet) {
+    ui.alert('Event tab not found. Run Initialize Sheet first.');
+    return;
+  }
+
+  var serverUrl = evSheet.getRange(EV_SERVER_URL).getValue().toString().trim();
+  if (!serverUrl) {
+    ui.alert('Please fill in your Server URL in cell B2 first.');
+    return;
+  }
+
+  var eventId   = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
+  var eventName = evSheet.getRange(EV_NAME).getValue().toString().trim();
+  var spreadsheetId = ss.getId();
+
+  try {
+    var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/sheet/generate-link', {
+      method:           'post',
+      contentType:      'application/json',
+      payload:          JSON.stringify({
+        spreadsheetId: spreadsheetId,
+        sheetName:     eventName || ss.getName(),
+        eventId:       eventId || null
+      }),
+      muteHttpExceptions: true
+    });
+
+    var result = safeParseJSON(response);
+
+    if (result.success) {
+      var linkUrl = result.linkUrl;
+      var htmlOutput = HtmlService.createHtmlOutput(
+        '<div style="font-family: sans-serif; padding: 10px;">' +
+        '<p style="font-size: 14px; margin-bottom: 12px;">Share this link with anyone who should have access to this event on the website:</p>' +
+        '<input type="text" value="' + linkUrl + '" ' +
+        'style="width: 100%; padding: 10px; font-size: 14px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 12px;" ' +
+        'onclick="this.select()" readonly>' +
+        '<p style="font-size: 12px; color: #888;">Anyone who opens this link can create an account and link this event to their dashboard.</p>' +
+        '</div>'
+      )
+      .setWidth(450)
+      .setHeight(180);
+      ui.showModalDialog(htmlOutput, '🔗 Share Event Link');
+    } else {
+      ui.alert('❌ Failed to generate link:\n' + result.error);
+    }
+  } catch (err) {
+    ui.alert('❌ Request failed:\n' + err.message);
+  }
 }
 
 // Helper: style an input cell (yellow background)

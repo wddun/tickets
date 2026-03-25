@@ -1,12 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Events</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f4f5f7;
+            color: #1a1a2e;
+            min-height: 100vh;
+        }
 
         /* ── Top bar ── */
         .topbar {
@@ -21,16 +32,38 @@
             top: 0;
             z-index: 50;
         }
-        .topbar-title { font-size: 18px; font-weight: 700; color: #1a1a2e; letter-spacing: -0.3px; }
-        .topbar-title span { color: #6366f1; }
-        .logout-btn {
-            background: none; border: 1px solid #e0e0e0; color: #666;
-            padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+
+        .topbar-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a1a2e;
+            letter-spacing: -0.3px;
         }
-        .logout-btn:hover { background: #f4f5f7; }
+
+        .topbar-title span {
+            color: #6366f1;
+        }
+
+        .logout-btn {
+            background: none;
+            border: 1px solid #e0e0e0;
+            color: #666;
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .logout-btn:hover {
+            background: #f4f5f7;
+        }
 
         /* ── Layout ── */
-        .layout { display: flex; height: calc(100vh - 58px); overflow: hidden; }
+        .layout {
+            display: flex;
+            height: calc(100vh - 58px);
+            overflow: hidden;
+        }
 
         /* ── Sidebar ── */
         .sidebar {
@@ -42,6 +75,7 @@
             flex-direction: column;
             overflow: hidden;
         }
+
         .sidebar-header {
             padding: 14px 20px;
             border-bottom: 1px solid #f0f0f0;
@@ -50,7 +84,15 @@
             justify-content: space-between;
             gap: 8px;
         }
-        .sidebar-header h2 { font-size: 13px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.8px; }
+
+        .sidebar-header h2 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
         .sidebar-bulk-bar {
             display: none;
             align-items: center;
@@ -59,9 +101,24 @@
             border-bottom: 1px solid #f0f0f0;
             background: #fef2f2;
         }
-        .sidebar-bulk-bar.visible { display: flex; }
-        .sidebar-bulk-count { font-size: 13px; font-weight: 600; color: #dc2626; flex: 1; }
-        .event-list { overflow-y: auto; flex: 1; padding: 8px; }
+
+        .sidebar-bulk-bar.visible {
+            display: flex;
+        }
+
+        .sidebar-bulk-count {
+            font-size: 13px;
+            font-weight: 600;
+            color: #dc2626;
+            flex: 1;
+        }
+
+        .event-list {
+            overflow-y: auto;
+            flex: 1;
+            padding: 8px;
+        }
+
         .event-card {
             padding: 12px 16px;
             border-radius: 10px;
@@ -73,12 +130,38 @@
             align-items: flex-start;
             gap: 10px;
         }
-        .event-card:hover { background: #f8f8ff; }
-        .event-card.active { background: #f0f0ff; border-color: #6366f1; }
-        .event-card.checked { background: #fef2f2; border-color: #fca5a5; }
-        .event-card-body { flex: 1; min-width: 0; }
-        .event-card-name { font-weight: 600; font-size: 14px; color: #1a1a2e; margin-bottom: 4px; }
-        .event-card-meta { font-size: 12px; color: #888; }
+
+        .event-card:hover {
+            background: #f8f8ff;
+        }
+
+        .event-card.active {
+            background: #f0f0ff;
+            border-color: #6366f1;
+        }
+
+        .event-card.checked {
+            background: #fef2f2;
+            border-color: #fca5a5;
+        }
+
+        .event-card-body {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .event-card-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: #1a1a2e;
+            margin-bottom: 4px;
+        }
+
+        .event-card-meta {
+            font-size: 12px;
+            color: #888;
+        }
+
         .event-card-badge {
             display: inline-block;
             background: #6366f1;
@@ -89,11 +172,26 @@
             border-radius: 20px;
             margin-top: 6px;
         }
-        .event-card-badge.all-clear { background: #10b981; }
-        .event-checkbox { margin-top: 2px; accent-color: #dc2626; width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
+
+        .event-card-badge.all-clear {
+            background: #10b981;
+        }
+
+        .event-checkbox {
+            margin-top: 2px;
+            accent-color: #dc2626;
+            width: 15px;
+            height: 15px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
 
         /* ── Main panel ── */
-        .main { flex: 1; overflow-y: auto; padding: 28px; }
+        .main {
+            flex: 1;
+            overflow-y: auto;
+            padding: 28px;
+        }
 
         .empty-state {
             display: flex;
@@ -104,8 +202,14 @@
             color: #aaa;
             gap: 12px;
         }
-        .empty-state-icon { font-size: 48px; }
-        .empty-state p { font-size: 15px; }
+
+        .empty-state-icon {
+            font-size: 48px;
+        }
+
+        .empty-state p {
+            font-size: 15px;
+        }
 
         /* ── Event detail ── */
         .detail-header {
@@ -114,6 +218,7 @@
             align-items: flex-start;
             margin-bottom: 24px;
         }
+
         .detail-image {
             width: 90px;
             height: 90px;
@@ -122,6 +227,7 @@
             flex-shrink: 0;
             background: #eee;
         }
+
         .detail-image-placeholder {
             width: 90px;
             height: 90px;
@@ -133,32 +239,109 @@
             font-size: 32px;
             flex-shrink: 0;
         }
-        .detail-title { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 6px; }
-        .detail-meta { font-size: 14px; color: #666; line-height: 1.7; }
-        .detail-actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
-        .btn {
-            padding: 9px 18px; border-radius: 9px; font-size: 13px; font-weight: 600;
-            cursor: pointer; border: none; transition: opacity 0.15s;
-            text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+
+        .detail-title {
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            margin-bottom: 6px;
         }
-        .btn:hover { opacity: 0.85; }
-        .btn-primary { background: #6366f1; color: #fff; }
-        .btn-scanner { background: #0f172a; color: #fff; }
-        .btn-danger  { background: #fee2e2; color: #dc2626; }
-        .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+        .detail-meta {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.7;
+        }
+
+        .detail-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 9px 18px;
+            border-radius: 9px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: opacity 0.15s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            opacity: 0.85;
+        }
+
+        .btn-primary {
+            background: #6366f1;
+            color: #fff;
+        }
+
+        .btn-scanner {
+            background: #0f172a;
+            color: #fff;
+        }
+
+        .btn-danger {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
 
         /* ── Stats ── */
-        .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
         .stat-box {
             background: #fff;
             border: 1px solid #e8e8e8;
             border-radius: 12px;
             padding: 18px 20px;
         }
-        .stat-num { font-size: 30px; font-weight: 800; color: #1a1a2e; line-height: 1; margin-bottom: 6px; }
-        .stat-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.6px; }
-        .progress-bar-wrap { background: #f0f0f0; border-radius: 99px; height: 6px; margin-top: 8px; overflow: hidden; }
-        .progress-bar-fill { height: 100%; background: #10b981; border-radius: 99px; transition: width 0.4s; }
+
+        .stat-num {
+            font-size: 30px;
+            font-weight: 800;
+            color: #1a1a2e;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        .progress-bar-wrap {
+            background: #f0f0f0;
+            border-radius: 99px;
+            height: 6px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: #10b981;
+            border-radius: 99px;
+            transition: width 0.4s;
+        }
 
         /* ── Attendee table ── */
         .section-header {
@@ -168,8 +351,17 @@
             margin-bottom: 14px;
             gap: 10px;
         }
-        .section-title { font-size: 16px; font-weight: 700; }
-        .refresh-hint { font-size: 12px; color: #aaa; }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .refresh-hint {
+            font-size: 12px;
+            color: #aaa;
+        }
+
         .search-box {
             width: 100%;
             padding: 10px 14px;
@@ -179,13 +371,18 @@
             margin-bottom: 12px;
             outline: none;
         }
-        .search-box:focus { border-color: #6366f1; }
+
+        .search-box:focus {
+            border-color: #6366f1;
+        }
+
         .attendee-table {
             background: #fff;
             border: 1px solid #e8e8e8;
             border-radius: 12px;
             overflow: hidden;
         }
+
         .attendee-row {
             display: grid;
             grid-template-columns: 32px 1fr 1.4fr auto auto auto;
@@ -195,7 +392,11 @@
             font-size: 13px;
             gap: 12px;
         }
-        .attendee-row:last-child { border-bottom: none; }
+
+        .attendee-row:last-child {
+            border-bottom: none;
+        }
+
         .attendee-row.header-row {
             background: #f8f8ff;
             font-size: 11px;
@@ -204,10 +405,28 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        .attendee-row.row-selected { background: #fef2f2; }
-        .attendee-name { font-weight: 600; color: #1a1a2e; }
-        .attendee-email { font-size: 12px; color: #888; margin-top: 1px; }
-        .ticket-count { font-size: 12px; color: #6366f1; font-weight: 600; }
+
+        .attendee-row.row-selected {
+            background: #fef2f2;
+        }
+
+        .attendee-name {
+            font-weight: 600;
+            color: #1a1a2e;
+        }
+
+        .attendee-email {
+            font-size: 12px;
+            color: #888;
+            margin-top: 1px;
+        }
+
+        .ticket-count {
+            font-size: 12px;
+            color: #6366f1;
+            font-weight: 600;
+        }
+
         .status-pill {
             padding: 3px 10px;
             border-radius: 20px;
@@ -215,126 +434,388 @@
             font-weight: 700;
             white-space: nowrap;
         }
-        .status-pill.scanned  { background: #d1fae5; color: #059669; }
-        .status-pill.pending  { background: #fef9c3; color: #92400e; }
-        .status-pill.partial  { background: #e0e7ff; color: #4338ca; }
-        .ticket-checkbox { accent-color: #dc2626; width: 14px; height: 14px; cursor: pointer; }
 
-        .empty-list { padding: 40px; text-align: center; color: #aaa; font-size: 14px; }
+        .status-pill.scanned {
+            background: #d1fae5;
+            color: #059669;
+        }
+
+        .status-pill.pending {
+            background: #fef9c3;
+            color: #92400e;
+        }
+
+        .status-pill.partial {
+            background: #e0e7ff;
+            color: #4338ca;
+        }
+
+        .ticket-checkbox {
+            accent-color: #dc2626;
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+
+        .empty-list {
+            padding: 40px;
+            text-align: center;
+            color: #aaa;
+            font-size: 14px;
+        }
 
         /* ── Auto-refresh indicator ── */
         .live-dot {
             display: inline-block;
-            width: 7px; height: 7px;
+            width: 7px;
+            height: 7px;
             background: #10b981;
             border-radius: 50%;
             margin-right: 5px;
             animation: pulse 2s infinite;
         }
+
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
         }
 
         /* ── Responsive ── */
         @media (max-width: 700px) {
-            .sidebar { width: 100%; min-width: unset; }
-            .layout { flex-direction: column; height: auto; overflow: visible; }
-            .main { padding: 16px; }
-            .stats-row { grid-template-columns: 1fr 1fr; }
-            .attendee-row { grid-template-columns: 32px 1fr auto auto; }
-            .attendee-row .ticket-count, .attendee-row.header-row .col-tickets,
-            .attendee-row .attendee-email { display: none; }
+            .sidebar {
+                width: 100%;
+                min-width: unset;
+            }
+
+            .layout {
+                flex-direction: column;
+                height: auto;
+                overflow: visible;
+            }
+
+            .main {
+                padding: 16px;
+            }
+
+            .stats-row {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .attendee-row {
+                grid-template-columns: 32px 1fr auto auto;
+            }
+
+            .attendee-row .ticket-count,
+            .attendee-row.header-row .col-tickets,
+            .attendee-row .attendee-email {
+                display: none;
+            }
+        }
+
+        /* ── Settings modal ── */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.15s;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        .modal {
+            background: #fff;
+            border-radius: 16px;
+            padding: 28px;
+            max-width: 480px;
+            width: 92%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.15);
+            animation: slideUp 0.2s;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            color: #999;
+            padding: 4px;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .modal-section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            margin-bottom: 10px;
+        }
+
+        .access-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 0;
+            border-bottom: 1px solid #f4f5f7;
+        }
+
+        .access-item:last-child {
+            border-bottom: none;
+        }
+
+        .access-avatar {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .access-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .access-email {
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .access-date {
+            font-size: 11px;
+            color: #bbb;
+        }
+
+        .revoke-btn {
+            background: #fee2e2;
+            color: #dc2626;
+            border: none;
+            padding: 5px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .revoke-btn:hover {
+            opacity: 0.8;
+        }
+
+        .link-box {
+            background: #f8f8ff;
+            border: 1px solid #e0e0ff;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 18px;
+        }
+
+        .link-box label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #888;
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .link-box input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 13px;
+            background: #fff;
+            outline: none;
+        }
+
+        .link-box input:focus {
+            border-color: #6366f1;
+        }
+
+        .btn-settings {
+            background: #f4f5f7;
+            border: 1px solid #e0e0e0;
+            color: #666;
+            padding: 9px 14px;
+            border-radius: 9px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-settings:hover {
+            background: #eee;
+        }
+
+        .settings-empty {
+            text-align: center;
+            padding: 20px;
+            color: #bbb;
+            font-size: 13px;
         }
     </style>
 </head>
+
 <body>
 
-<div class="topbar">
-    <div class="topbar-title">🎟️ <span>Ticket</span> Events</div>
-    <button class="logout-btn" onclick="logout()">Sign out</button>
-</div>
+    <div class="topbar">
+        <div class="topbar-title">🎟️ <span>Ticket</span> Events</div>
+        <button class="logout-btn" onclick="logout()">Sign out</button>
+    </div>
 
-<div class="layout">
-    <!-- Sidebar -->
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <h2>Your Events</h2>
-            <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;">
-                <input type="checkbox" id="selectAllEvents" onchange="toggleAllEvents(this.checked)" style="accent-color:#dc2626;">
-                All
-            </label>
+    <div class="layout">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>Your Events</h2>
+                <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;">
+                    <input type="checkbox" id="selectAllEvents" onchange="toggleAllEvents(this.checked)"
+                        style="accent-color:#dc2626;">
+                    All
+                </label>
+            </div>
+            <div class="sidebar-bulk-bar" id="eventBulkBar">
+                <span class="sidebar-bulk-count" id="eventBulkCount"></span>
+                <button class="btn btn-danger btn-sm" onclick="deleteSelectedEvents()">Delete Selected</button>
+            </div>
+            <div class="event-list" id="eventList">
+                <div style="padding: 20px; color: #aaa; font-size: 13px;">Loading…</div>
+            </div>
         </div>
-        <div class="sidebar-bulk-bar" id="eventBulkBar">
-            <span class="sidebar-bulk-count" id="eventBulkCount"></span>
-            <button class="btn btn-danger btn-sm" onclick="deleteSelectedEvents()">Delete Selected</button>
-        </div>
-        <div class="event-list" id="eventList">
-            <div style="padding: 20px; color: #aaa; font-size: 13px;">Loading…</div>
+
+        <!-- Main -->
+        <div class="main" id="main">
+            <div class="empty-state" id="emptyState">
+                <div class="empty-state-icon">🎟️</div>
+                <p>Select an event to view details</p>
+                <p style="font-size:13px; color:#bbb;">Events are created from your Google Sheet</p>
+            </div>
+            <div id="eventDetail" style="display:none;"></div>
         </div>
     </div>
 
-    <!-- Main -->
-    <div class="main" id="main">
-        <div class="empty-state" id="emptyState">
-            <div class="empty-state-icon">🎟️</div>
-            <p>Select an event to view details</p>
-            <p style="font-size:13px; color:#bbb;">Events are created from your Google Sheet</p>
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal" style="display:none;"
+        onclick="if(event.target===this)closeSettings()">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>⚙️ Room Settings</h2>
+                <button class="modal-close" onclick="closeSettings()">&times;</button>
+            </div>
+            <div id="settingsContent">Loading…</div>
         </div>
-        <div id="eventDetail" style="display:none;"></div>
     </div>
-</div>
 
-<script>
-let events = [];
-let selectedId = null;
-let refreshTimer = null;
-let allTickets = [];
-let checkedEventIds = new Set();
-let checkedRegIds = new Set();
+    <script>
+        let events = [];
+        let selectedId = null;
+        let refreshTimer = null;
+        let allTickets = [];
+        let checkedEventIds = new Set();
+        let checkedRegIds = new Set();
 
-async function init() {
-    const r = await fetch('/api/auth/me');
-    if (!r.ok) return location.href = '/login.html';
-    await loadEvents();
-    setInterval(loadEvents, 30000);
-}
+        async function init() {
+            const r = await fetch('/api/auth/me');
+            if (!r.ok) return location.href = '/login.html';
+            await loadEvents();
+            setInterval(loadEvents, 30000);
+        }
 
-async function loadEvents() {
-    const [r, rc] = await Promise.all([fetch('/api/events'), fetch('/api/events/counts')]);
-    if (!r.ok) return;
-    events = await r.json();
-    if (rc.ok) {
-        const counts = await rc.json();
-        events.forEach(e => {
-            const c = counts[e.id];
-            if (c) e._counts = c;
-        });
-    }
-    renderSidebar();
-    if (selectedId) {
-        const still = events.find(e => e.id === selectedId);
-        if (still) renderDetail(still, false);
-    }
-}
+        async function loadEvents() {
+            const [r, rc] = await Promise.all([fetch('/api/events'), fetch('/api/events/counts')]);
+            if (!r.ok) return;
+            events = await r.json();
+            if (rc.ok) {
+                const counts = await rc.json();
+                events.forEach(e => {
+                    const c = counts[e.id];
+                    if (c) e._counts = c;
+                });
+            }
+            renderSidebar();
+            if (selectedId) {
+                const still = events.find(e => e.id === selectedId);
+                if (still) renderDetail(still, false);
+            }
+        }
 
-function renderSidebar() {
-    const list = document.getElementById('eventList');
-    if (!events.length) {
-        list.innerHTML = '<div style="padding:20px; color:#aaa; font-size:13px;">No events yet.<br>Create one from your Google Sheet.</div>';
-        return;
-    }
-    list.innerHTML = '';
-    const sorted = [...events].sort((a, b) => new Date(b.time) - new Date(a.time));
-    sorted.forEach(e => {
-        const total   = e._counts ? e._counts.total   : (e._tickets || []).length;
-        const scanned = e._counts ? e._counts.scanned : (e._tickets || []).filter(t => t.used_at).length;
-        const allDone = total > 0 && scanned === total;
-        const isChecked = checkedEventIds.has(e.id);
+        function renderSidebar() {
+            const list = document.getElementById('eventList');
+            if (!events.length) {
+                list.innerHTML = '<div style="padding:20px; color:#aaa; font-size:13px;">No events yet.<br>Create one from your Google Sheet.</div>';
+                return;
+            }
+            list.innerHTML = '';
+            const sorted = [...events].sort((a, b) => new Date(b.time) - new Date(a.time));
+            sorted.forEach(e => {
+                const total = e._counts ? e._counts.total : (e._tickets || []).length;
+                const scanned = e._counts ? e._counts.scanned : (e._tickets || []).filter(t => t.used_at).length;
+                const allDone = total > 0 && scanned === total;
+                const isChecked = checkedEventIds.has(e.id);
 
-        const div = document.createElement('div');
-        div.className = `event-card${selectedId === e.id ? ' active' : ''}${isChecked ? ' checked' : ''}`;
-        div.innerHTML = `
+                const div = document.createElement('div');
+                div.className = `event-card${selectedId === e.id ? ' active' : ''}${isChecked ? ' checked' : ''}`;
+                div.innerHTML = `
             <input type="checkbox" class="event-checkbox" data-id="${e.id}" ${isChecked ? 'checked' : ''}
                 onclick="event.stopPropagation(); toggleEventCheck('${e.id}', this.checked)">
             <div class="event-card-body">
@@ -344,105 +825,105 @@ function renderSidebar() {
                 ${total > 0 ? `<span class="event-card-badge${allDone ? ' all-clear' : ''}">${scanned}/${total} checked in</span>` : ''}
             </div>
         `;
-        div.onclick = () => selectEvent(e.id);
-        list.appendChild(div);
-    });
-    updateEventBulkBar();
-}
-
-function toggleEventCheck(id, checked) {
-    if (checked) checkedEventIds.add(id);
-    else checkedEventIds.delete(id);
-    updateEventBulkBar();
-    // Update card class without full re-render
-    document.querySelectorAll('.event-card').forEach(card => {
-        const cb = card.querySelector('.event-checkbox');
-        if (cb && cb.dataset.id === id) card.classList.toggle('checked', checked);
-    });
-}
-
-function toggleAllEvents(checked) {
-    checkedEventIds.clear();
-    if (checked) events.forEach(e => checkedEventIds.add(e.id));
-    renderSidebar();
-    document.getElementById('selectAllEvents').checked = checked;
-}
-
-function updateEventBulkBar() {
-    const bar = document.getElementById('eventBulkBar');
-    const count = document.getElementById('eventBulkCount');
-    if (checkedEventIds.size > 0) {
-        bar.classList.add('visible');
-        count.textContent = `${checkedEventIds.size} selected`;
-    } else {
-        bar.classList.remove('visible');
-    }
-}
-
-async function deleteSelectedEvents() {
-    if (!checkedEventIds.size) return;
-    if (!confirm(`Delete ${checkedEventIds.size} event(s) and all their tickets? This cannot be undone.`)) return;
-    const r = await fetch('/api/events/bulk', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventIds: [...checkedEventIds] })
-    });
-    if (r.ok) {
-        if (checkedEventIds.has(selectedId)) {
-            selectedId = null;
-            clearInterval(refreshTimer);
-            document.getElementById('eventDetail').style.display = 'none';
-            document.getElementById('emptyState').style.display = 'flex';
+                div.onclick = () => selectEvent(e.id);
+                list.appendChild(div);
+            });
+            updateEventBulkBar();
         }
-        checkedEventIds.clear();
-        document.getElementById('selectAllEvents').checked = false;
-        await loadEvents();
-    } else {
-        alert('Could not delete events.');
-    }
-}
 
-async function selectEvent(id) {
-    selectedId = id;
-    checkedRegIds.clear();
-    clearInterval(refreshTimer);
-    renderSidebar();
+        function toggleEventCheck(id, checked) {
+            if (checked) checkedEventIds.add(id);
+            else checkedEventIds.delete(id);
+            updateEventBulkBar();
+            // Update card class without full re-render
+            document.querySelectorAll('.event-card').forEach(card => {
+                const cb = card.querySelector('.event-checkbox');
+                if (cb && cb.dataset.id === id) card.classList.toggle('checked', checked);
+            });
+        }
 
-    const event = events.find(e => e.id === id);
-    document.getElementById('emptyState').style.display = 'none';
-    document.getElementById('eventDetail').style.display = 'block';
-    document.getElementById('eventDetail').innerHTML = `<div style="color:#aaa; padding:40px; text-align:center;">Loading…</div>`;
+        function toggleAllEvents(checked) {
+            checkedEventIds.clear();
+            if (checked) events.forEach(e => checkedEventIds.add(e.id));
+            renderSidebar();
+            document.getElementById('selectAllEvents').checked = checked;
+        }
 
-    await fetchAndRender(event);
-    refreshTimer = setInterval(() => fetchAndRender(event, true), 15000);
-}
+        function updateEventBulkBar() {
+            const bar = document.getElementById('eventBulkBar');
+            const count = document.getElementById('eventBulkCount');
+            if (checkedEventIds.size > 0) {
+                bar.classList.add('visible');
+                count.textContent = `${checkedEventIds.size} selected`;
+            } else {
+                bar.classList.remove('visible');
+            }
+        }
 
-async function fetchAndRender(event, silent = false) {
-    const r = await fetch(`/api/event/${event.id}/tickets`);
-    if (!r.ok) return;
-    const tickets = await r.json();
-    allTickets = tickets;
-    event._tickets = tickets;
-    event._counts = { total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
-    if (!silent) renderSidebar();
-    renderDetail(event, tickets);
-}
+        async function deleteSelectedEvents() {
+            if (!checkedEventIds.size) return;
+            if (!confirm(`Delete ${checkedEventIds.size} event(s) and all their tickets? This cannot be undone.`)) return;
+            const r = await fetch('/api/events/bulk', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ eventIds: [...checkedEventIds] })
+            });
+            if (r.ok) {
+                if (checkedEventIds.has(selectedId)) {
+                    selectedId = null;
+                    clearInterval(refreshTimer);
+                    document.getElementById('eventDetail').style.display = 'none';
+                    document.getElementById('emptyState').style.display = 'flex';
+                }
+                checkedEventIds.clear();
+                document.getElementById('selectAllEvents').checked = false;
+                await loadEvents();
+            } else {
+                alert('Could not delete events.');
+            }
+        }
 
-function renderDetail(event, tickets) {
-    if (Array.isArray(tickets)) allTickets = tickets;
-    else tickets = allTickets;
+        async function selectEvent(id) {
+            selectedId = id;
+            checkedRegIds.clear();
+            clearInterval(refreshTimer);
+            renderSidebar();
 
-    const total   = tickets.length;
-    const scanned = tickets.filter(t => t.used_at).length;
-    const pct     = total ? Math.round((scanned / total) * 100) : 0;
-    const grouped = groupTickets(tickets);
+            const event = events.find(e => e.id === id);
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('eventDetail').style.display = 'block';
+            document.getElementById('eventDetail').innerHTML = `<div style="color:#aaa; padding:40px; text-align:center;">Loading…</div>`;
 
-    const el = document.getElementById('eventDetail');
-    el.innerHTML = `
+            await fetchAndRender(event);
+            refreshTimer = setInterval(() => fetchAndRender(event, true), 15000);
+        }
+
+        async function fetchAndRender(event, silent = false) {
+            const r = await fetch(`/api/event/${event.id}/tickets`);
+            if (!r.ok) return;
+            const tickets = await r.json();
+            allTickets = tickets;
+            event._tickets = tickets;
+            event._counts = { total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
+            if (!silent) renderSidebar();
+            renderDetail(event, tickets);
+        }
+
+        function renderDetail(event, tickets) {
+            if (Array.isArray(tickets)) allTickets = tickets;
+            else tickets = allTickets;
+
+            const total = tickets.length;
+            const scanned = tickets.filter(t => t.used_at).length;
+            const pct = total ? Math.round((scanned / total) * 100) : 0;
+            const grouped = groupTickets(tickets);
+
+            const el = document.getElementById('eventDetail');
+            el.innerHTML = `
         <div class="detail-header">
             ${event.imageUrl
-                ? `<img class="detail-image" src="${event.imageUrl}" alt="">`
-                : `<div class="detail-image-placeholder">🎟️</div>`}
+                    ? `<img class="detail-image" src="${event.imageUrl}" alt="">`
+                    : `<div class="detail-image-placeholder">🎟️</div>`}
             <div style="flex:1;">
                 <div class="detail-title">${esc(event.name)}</div>
                 <div class="detail-meta">
@@ -451,6 +932,7 @@ function renderDetail(event, tickets) {
                 </div>
                 <div class="detail-actions">
                     <a href="/scanner.html" target="_blank" class="btn btn-scanner">📷 Open Scanner</a>
+                    <button class="btn-settings" onclick="openSettings('${event.id}')">⚙️ Settings</button>
                     <button class="btn btn-danger" onclick="deleteEvent('${event.id}')">Delete Event</button>
                 </div>
             </div>
@@ -488,30 +970,30 @@ function renderDetail(event, tickets) {
             ${renderAttendeeRows(grouped)}
         </div>
     `;
-}
+        }
 
-function groupTickets(tickets) {
-    const groups = {};
-    tickets.forEach(t => {
-        const key = t.registrationId || t.id;
-        if (!groups[key]) groups[key] = { registrationId: key, tickets: [], name: t.name, email: t.email };
-        groups[key].tickets.push(t);
-    });
-    return Object.values(groups);
-}
+        function groupTickets(tickets) {
+            const groups = {};
+            tickets.forEach(t => {
+                const key = t.registrationId || t.id;
+                if (!groups[key]) groups[key] = { registrationId: key, tickets: [], name: t.name, email: t.email };
+                groups[key].tickets.push(t);
+            });
+            return Object.values(groups);
+        }
 
-function renderAttendeeRows(groups, filter) {
-    let filtered = groups;
-    if (filter) {
-        const q = filter.toLowerCase();
-        filtered = groups.filter(g =>
-            g.name.toLowerCase().includes(q) || (g.email || '').toLowerCase().includes(q)
-        );
-    }
+        function renderAttendeeRows(groups, filter) {
+            let filtered = groups;
+            if (filter) {
+                const q = filter.toLowerCase();
+                filtered = groups.filter(g =>
+                    g.name.toLowerCase().includes(q) || (g.email || '').toLowerCase().includes(q)
+                );
+            }
 
-    if (!filtered.length) return `<div class="empty-list">No attendees found</div>`;
+            if (!filtered.length) return `<div class="empty-list">No attendees found</div>`;
 
-    const header = `
+            const header = `
         <div class="attendee-row header-row">
             <input type="checkbox" class="ticket-checkbox" id="selectAllTickets" onchange="toggleAllTickets(this.checked, ${JSON.stringify(filtered.map(g => g.registrationId))})">
             <div>Name</div>
@@ -521,17 +1003,17 @@ function renderAttendeeRows(groups, filter) {
             <div></div>
         </div>`;
 
-    const rows = filtered.map(g => {
-        const total   = g.tickets.length;
-        const scanned = g.tickets.filter(t => t.used_at).length;
-        const isChecked = checkedRegIds.has(g.registrationId);
-        let pill;
-        if (scanned === 0)        pill = `<span class="status-pill pending">Pending</span>`;
-        else if (scanned < total) pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
-        else                      pill = `<span class="status-pill scanned">✓ Checked In</span>`;
+            const rows = filtered.map(g => {
+                const total = g.tickets.length;
+                const scanned = g.tickets.filter(t => t.used_at).length;
+                const isChecked = checkedRegIds.has(g.registrationId);
+                let pill;
+                if (scanned === 0) pill = `<span class="status-pill pending">Pending</span>`;
+                else if (scanned < total) pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
+                else pill = `<span class="status-pill scanned">✓ Checked In</span>`;
 
-        const allIn = scanned === total && total > 0;
-        return `
+                const allIn = scanned === total && total > 0;
+                return `
         <div class="attendee-row${isChecked ? ' row-selected' : ''}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
                 onchange="toggleTicketCheck('${g.registrationId}', this.checked)">
@@ -543,103 +1025,212 @@ function renderAttendeeRows(groups, filter) {
             <div>${pill}</div>
             <div>${allIn ? '' : `<button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">Check In</button>`}</div>
         </div>`;
-    }).join('');
+            }).join('');
 
-    return header + rows;
-}
+            return header + rows;
+        }
 
-function toggleTicketCheck(regId, checked) {
-    if (checked) checkedRegIds.add(regId);
-    else checkedRegIds.delete(regId);
-    updateTicketBulkBar();
-    document.querySelectorAll('.attendee-row').forEach(row => {
-        const cb = row.querySelector('.ticket-checkbox[data-regid]');
-        if (cb && cb.dataset.regid === regId) row.classList.toggle('row-selected', checked);
-    });
-}
+        function toggleTicketCheck(regId, checked) {
+            if (checked) checkedRegIds.add(regId);
+            else checkedRegIds.delete(regId);
+            updateTicketBulkBar();
+            document.querySelectorAll('.attendee-row').forEach(row => {
+                const cb = row.querySelector('.ticket-checkbox[data-regid]');
+                if (cb && cb.dataset.regid === regId) row.classList.toggle('row-selected', checked);
+            });
+        }
 
-function toggleAllTickets(checked, regIds) {
-    checkedRegIds.clear();
-    if (checked) regIds.forEach(id => checkedRegIds.add(id));
-    updateTicketBulkBar();
-    document.querySelectorAll('.ticket-checkbox[data-regid]').forEach(cb => {
-        cb.checked = checked;
-        cb.closest('.attendee-row')?.classList.toggle('row-selected', checked);
-    });
-}
+        function toggleAllTickets(checked, regIds) {
+            checkedRegIds.clear();
+            if (checked) regIds.forEach(id => checkedRegIds.add(id));
+            updateTicketBulkBar();
+            document.querySelectorAll('.ticket-checkbox[data-regid]').forEach(cb => {
+                cb.checked = checked;
+                cb.closest('.attendee-row')?.classList.toggle('row-selected', checked);
+            });
+        }
 
-function updateTicketBulkBar() {
-    const el = document.getElementById('ticketBulkDelete');
-    if (el) el.style.display = checkedRegIds.size > 0 ? 'inline' : 'none';
-    const selectAll = document.getElementById('selectAllTickets');
-    if (selectAll) {
-        const allRows = document.querySelectorAll('.ticket-checkbox[data-regid]');
-        selectAll.checked = allRows.length > 0 && checkedRegIds.size === allRows.length;
-        selectAll.indeterminate = checkedRegIds.size > 0 && checkedRegIds.size < allRows.length;
-    }
-}
+        function updateTicketBulkBar() {
+            const el = document.getElementById('ticketBulkDelete');
+            if (el) el.style.display = checkedRegIds.size > 0 ? 'inline' : 'none';
+            const selectAll = document.getElementById('selectAllTickets');
+            if (selectAll) {
+                const allRows = document.querySelectorAll('.ticket-checkbox[data-regid]');
+                selectAll.checked = allRows.length > 0 && checkedRegIds.size === allRows.length;
+                selectAll.indeterminate = checkedRegIds.size > 0 && checkedRegIds.size < allRows.length;
+            }
+        }
 
-async function deleteSelectedTickets(eventId) {
-    if (!checkedRegIds.size) return;
-    if (!confirm(`Delete ${checkedRegIds.size} registration(s) and all their tickets?`)) return;
-    const r = await fetch('/api/registrations/bulk', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ registrationIds: [...checkedRegIds] })
-    });
-    if (r.ok) {
-        checkedRegIds.clear();
-        const event = events.find(e => e.id === eventId);
-        if (event) await fetchAndRender(event);
-    } else {
-        alert('Could not delete registrations.');
-    }
-}
+        async function deleteSelectedTickets(eventId) {
+            if (!checkedRegIds.size) return;
+            if (!confirm(`Delete ${checkedRegIds.size} registration(s) and all their tickets?`)) return;
+            const r = await fetch('/api/registrations/bulk', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+            });
+            if (r.ok) {
+                checkedRegIds.clear();
+                const event = events.find(e => e.id === eventId);
+                if (event) await fetchAndRender(event);
+            } else {
+                alert('Could not delete registrations.');
+            }
+        }
 
-function filterAttendees() {
-    const q = document.getElementById('searchBox')?.value || '';
-    const grouped = groupTickets(allTickets);
-    document.getElementById('attendeeTable').innerHTML = renderAttendeeRows(grouped, q);
-    updateTicketBulkBar();
-}
+        function filterAttendees() {
+            const q = document.getElementById('searchBox')?.value || '';
+            const grouped = groupTickets(allTickets);
+            document.getElementById('attendeeTable').innerHTML = renderAttendeeRows(grouped, q);
+            updateTicketBulkBar();
+        }
 
-async function manualCheckin(registrationId) {
-    const r = await fetch(`/api/checkin/${registrationId}`, { method: 'POST' });
-    if (r.ok) {
-        const event = events.find(e => e.id === selectedId);
-        if (event) await fetchAndRender(event, true);
-    } else {
-        alert('Check-in failed.');
-    }
-}
+        async function manualCheckin(registrationId) {
+            const r = await fetch(`/api/checkin/${registrationId}`, { method: 'POST' });
+            if (r.ok) {
+                const event = events.find(e => e.id === selectedId);
+                if (event) await fetchAndRender(event, true);
+            } else {
+                alert('Check-in failed.');
+            }
+        }
 
-async function deleteEvent(id) {
-    if (!confirm('Delete this event and all its tickets? This cannot be undone.')) return;
-    const r = await fetch(`/api/event/${id}`, { method: 'DELETE' });
-    if (r.ok) {
-        selectedId = null;
-        clearInterval(refreshTimer);
-        document.getElementById('eventDetail').style.display = 'none';
-        document.getElementById('emptyState').style.display = 'flex';
-        loadEvents();
-    } else {
-        alert('Could not delete event.');
-    }
-}
+        async function deleteEvent(id) {
+            if (!confirm('Delete this event and all its tickets? This cannot be undone.')) return;
+            const r = await fetch(`/api/event/${id}`, { method: 'DELETE' });
+            if (r.ok) {
+                selectedId = null;
+                clearInterval(refreshTimer);
+                document.getElementById('eventDetail').style.display = 'none';
+                document.getElementById('emptyState').style.display = 'flex';
+                loadEvents();
+            } else {
+                alert('Could not delete event.');
+            }
+        }
 
-async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    location.href = '/login.html';
-}
+        async function openSettings(id) {
+            document.getElementById('settingsModal').style.display = 'flex';
+            document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Loading access data…</div>';
+            await loadAccessData(id);
+        }
 
-function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-function fmtDate(t) {
-    return new Date(t).toLocaleString(undefined, { weekday:'short', month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
-}
+        function closeSettings() {
+            document.getElementById('settingsModal').style.display = 'none';
+        }
 
-init();
-</script>
+        async function copySettingsLink(url) {
+            try {
+                await navigator.clipboard.writeText(url);
+                const btn = event.target;
+                const orig = btn.textContent;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = orig, 2000);
+            } catch (err) {
+                alert('Could not copy link');
+            }
+        }
+
+        async function loadAccessData(eventId) {
+            try {
+                const res = await fetch(`/api/event/${eventId}/access`);
+                if (!res.ok) {
+                    if (res.status === 403) {
+                        document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Only administrators can manage access links.</div>';
+                    } else {
+                        document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Failed to load settings.</div>';
+                    }
+                    return;
+                }
+
+                const data = await res.json();
+
+                let linkHtml = '';
+                if (data.linkUrl) {
+                    linkHtml = `
+                        <div class="link-box">
+                            <label>Sharing Link</label>
+                            <div style="display:flex;gap:8px;">
+                                <input type="text" value="${esc(data.linkUrl)}" readonly onclick="this.select()">
+                                <button class="btn btn-primary btn-sm" onclick="copySettingsLink('${esc(data.linkUrl)}')">Copy</button>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    linkHtml = `
+                        <div class="settings-empty" style="padding:10px 0;text-align:left;margin-bottom:10px;">
+                            No sharing link generated yet. Use the Google Sheet menu to generate one.
+                        </div>
+                    `;
+                }
+
+                let accessHtml = '';
+                if (data.access && data.access.length > 0) {
+                    accessHtml = `
+                        <div class="modal-section-title">Users with access</div>
+                        <div>
+                            ${data.access.map(a => `
+                                <div class="access-item">
+                                    <div class="access-avatar">${getInitials(a.email)}</div>
+                                    <div class="access-info">
+                                        <div class="access-email">${esc(a.email)}</div>
+                                        <div class="access-date">Linked ${fmtDate(a.claimedAt)}</div>
+                                    </div>
+                                    <button class="revoke-btn" onclick="revokeAccess('${a.id}', '${eventId}')">Revoke</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    accessHtml = `
+                        <div class="modal-section-title">Users with access</div>
+                        <div class="settings-empty">No users have linked this room yet.</div>
+                    `;
+                }
+
+                document.getElementById('settingsContent').innerHTML = linkHtml + accessHtml;
+            } catch (err) {
+                document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
+            }
+        }
+
+        async function revokeAccess(accessId, eventId) {
+            if (!confirm('Revoke access for this user?')) return;
+            try {
+                const res = await fetch(`/api/sheet/access/${accessId}`, { method: 'DELETE' });
+                if (res.ok) {
+                    await loadAccessData(eventId); // Recalculate
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to revoke access.');
+                }
+            } catch (err) {
+                alert('Network error while revoking access.');
+            }
+        }
+
+        async function logout() {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            location.href = '/login.html';
+        }
+
+        function getInitials(email) {
+            const parts = email.split('@')[0].split(/[._-]/);
+            if (parts.length >= 2) {
+                return (parts[0][0] + parts[1][0]).toUpperCase();
+            }
+            return email.substring(0, 2).toUpperCase();
+        }
+
+        function esc(s) {
+            return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        function fmtDate(t) {
+            return new Date(t).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+        }
+
+        init();
+    </script>
 </body>
+
 </html>

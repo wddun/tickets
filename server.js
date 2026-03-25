@@ -48,7 +48,7 @@ async function sendEmail({ to, subject, html }) {
         Destination: { ToAddresses: [to] },
         Message: {
             Subject: { Data: subject, Charset: 'UTF-8' },
-            Body:    { Html:  { Data: html,    Charset: 'UTF-8' } }
+            Body: { Html: { Data: html, Charset: 'UTF-8' } }
         }
     }));
 }
@@ -70,7 +70,9 @@ app.use(session({
 const defaultData = {
     users: [],
     events: [],
-    tickets: []
+    tickets: [],
+    sheetLinks: [],
+    sheetAccess: []
 };
 const db = await JSONFilePreset(path.resolve(__dirname, 'db.json'), defaultData);
 
@@ -95,6 +97,8 @@ const upload = multer({
 if (!db.data.users) db.data.users = [];
 if (!db.data.events) db.data.events = [];
 if (!db.data.tickets) db.data.tickets = [];
+if (!db.data.sheetLinks) db.data.sheetLinks = [];
+if (!db.data.sheetAccess) db.data.sheetAccess = [];
 
 // Migration: backfill scannerPin on any events that don't have one
 const eventsMissingPin = db.data.events.filter(e => !e.scannerPin);
@@ -147,7 +151,7 @@ app.post('/api/auth/setup-admin', async (req, res) => {
     const { password } = req.body;
     const adminEmail = process.env.ADMIN_EMAIL;
     if (!adminEmail) return res.status(500).json({ error: 'ADMIN_EMAIL not set in .env' });
-    if (!password)   return res.status(400).json({ error: 'password required' });
+    if (!password) return res.status(400).json({ error: 'password required' });
 
     const existing = db.data.users.find(u => u.email === adminEmail);
     if (existing) return res.status(400).json({ error: 'Admin account already exists' });
@@ -305,37 +309,37 @@ app.post('/api/register-bulk', async (req, res) => {
 
     let ticketsToSend;
     try {
-    if (existingTickets.length > 0) {
-        ticketsToSend = existingTickets;
-        await db.update(({ tickets }) => {
-            ticketsToSend.forEach(t => {
-                const dbTicket = tickets.find(dt => dt.id === t.id);
-                if (dbTicket) {
-                    dbTicket.name = fullName;
-                    dbTicket.firstName = firstName;
-                    dbTicket.lastName = lastName;
-                    dbTicket.email = email;
-                    dbTicket.customFields = customFields;
-                }
+        if (existingTickets.length > 0) {
+            ticketsToSend = existingTickets;
+            await db.update(({ tickets }) => {
+                ticketsToSend.forEach(t => {
+                    const dbTicket = tickets.find(dt => dt.id === t.id);
+                    if (dbTicket) {
+                        dbTicket.name = fullName;
+                        dbTicket.firstName = firstName;
+                        dbTicket.lastName = lastName;
+                        dbTicket.email = email;
+                        dbTicket.customFields = customFields;
+                    }
+                });
             });
-        });
-    } else {
-        const registrationId = nanoid(10);
-        ticketsToSend = Array.from({ length: count }, () => ({
-            id: nanoid(8),
-            token: nanoid(12),
-            registrationId,
-            eventId,
-            name: fullName,
-            firstName,
-            lastName,
-            email,
-            customFields,
-            created_at: new Date().toISOString(),
-            used_at: null
-        }));
-        await db.update(({ tickets }) => ticketsToSend.forEach(t => tickets.push(t)));
-    }
+        } else {
+            const registrationId = nanoid(10);
+            ticketsToSend = Array.from({ length: count }, () => ({
+                id: nanoid(8),
+                token: nanoid(12),
+                registrationId,
+                eventId,
+                name: fullName,
+                firstName,
+                lastName,
+                email,
+                customFields,
+                created_at: new Date().toISOString(),
+                used_at: null
+            }));
+            await db.update(({ tickets }) => ticketsToSend.forEach(t => tickets.push(t)));
+        }
 
         // Build one email with all QR codes
         if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
@@ -378,8 +382,8 @@ app.post('/api/register-bulk', async (req, res) => {
                             <img src="${BASE_URL}${event.imageUrl}" alt="${event.name}" style="max-width:100%; border-radius:12px;" />
                         </div>` : ''}
                         <p style="color:#555;">📍 ${event.location.address
-                            ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(event.location.address)}" style="color:#555;">${event.location.name || event.location.address}</a>`
-                            : event.location.name}</p>
+                        ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(event.location.address)}" style="color:#555;">${event.location.name || event.location.address}</a>`
+                        : event.location.name}</p>
                         <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</p>
                         ${Object.keys(customFields).length ? `
                         <table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;">
@@ -440,11 +444,11 @@ app.post('/api/sheet/update-event', async (req, res) => {
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     try {
-        if (name)         event.name = name;
-        if (time)         event.time = time;
-        if (color)        event.color = color;
+        if (name) event.name = name;
+        if (time) event.time = time;
+        if (color) event.color = color;
         if (locationName) event.location.name = locationName;
-        if (address)      event.location.address = address;
+        if (address) event.location.address = address;
         if (lat != null && !isNaN(parseFloat(lat))) event.location.lat = parseFloat(lat);
         if (lng != null && !isNaN(parseFloat(lng))) event.location.lng = parseFloat(lng);
 
@@ -515,22 +519,39 @@ app.post('/api/ticket-status', (req, res) => {
     res.json(statuses);
 });
 
-// --- Event APIs ---
 app.get('/api/events', requireAuth, (req, res) => {
     const user = db.data.users.find(u => u.id === req.session.userId);
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const userEvents = isAdmin
-        ? db.data.events
-        : db.data.events.filter(e => e.userId === req.session.userId);
+    if (isAdmin) return res.json(db.data.events);
+
+    // Events the user created + events they have sheetAccess to
+    const myAccess = db.data.sheetAccess.filter(a => a.userId === req.session.userId);
+    const linkedEventIds = new Set(
+        myAccess.map(a => {
+            const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+            return link ? link.eventId : null;
+        }).filter(Boolean)
+    );
+    const userEvents = db.data.events.filter(e => e.userId === req.session.userId || linkedEventIds.has(e.id));
     res.json(userEvents);
 });
 
 app.get('/api/events/counts', requireAuth, (req, res) => {
     const user = db.data.users.find(u => u.id === req.session.userId);
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const userEvents = isAdmin
-        ? db.data.events
-        : db.data.events.filter(e => e.userId === req.session.userId);
+    let userEvents;
+    if (isAdmin) {
+        userEvents = db.data.events;
+    } else {
+        const myAccess = db.data.sheetAccess.filter(a => a.userId === req.session.userId);
+        const linkedEventIds = new Set(
+            myAccess.map(a => {
+                const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+                return link ? link.eventId : null;
+            }).filter(Boolean)
+        );
+        userEvents = db.data.events.filter(e => e.userId === req.session.userId || linkedEventIds.has(e.id));
+    }
     const counts = {};
     userEvents.forEach(e => {
         const tickets = db.data.tickets.filter(t => t.eventId === e.id);
@@ -582,7 +603,18 @@ app.post('/api/events', requireAuth, upload.single('image'), async (req, res) =>
 app.get('/api/event/:id/tickets', requireAuth, (req, res) => {
     const user = db.data.users.find(u => u.id === req.session.userId);
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const event = db.data.events.find(e => e.id === req.params.id && (isAdmin || e.userId === req.session.userId));
+
+    // Check if user has sheetAccess to this event
+    let hasSheetAccess = false;
+    if (!isAdmin) {
+        const myAccess = db.data.sheetAccess.filter(a => a.userId === req.session.userId);
+        hasSheetAccess = myAccess.some(a => {
+            const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+            return link && link.eventId === req.params.id;
+        });
+    }
+
+    const event = db.data.events.find(e => e.id === req.params.id && (isAdmin || e.userId === req.session.userId || hasSheetAccess));
     if (!event) return res.status(401).json({ error: 'Unauthorized or not found' });
     const tickets = db.data.tickets.filter(t => t.eventId === req.params.id);
     res.json(tickets);
@@ -733,9 +765,9 @@ async function generatePassBuffer(ticket, event) {
             key: "date", label: "DATE", value: eventDate,
             dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
         });
-        const windowStart  = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
-        const windowEnd    = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
-        const expiresAt    = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
+        const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
+        const windowEnd = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
+        const expiresAt = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
         pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
         pass.expirationDate = expiresAt;
     } else {
@@ -746,9 +778,9 @@ async function generatePassBuffer(ticket, event) {
     }
 
     // Auxiliary row: Location + 1 custom field
-    const locName    = event.location?.name || '';
+    const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
-    const locValue   = locName && locAddress && locName !== locAddress
+    const locValue = locName && locAddress && locName !== locAddress
         ? `${locName}\n${locAddress}`
         : locName || locAddress;
     if (locValue) {
@@ -804,7 +836,7 @@ async function generatePassBuffer(ticket, event) {
 function checkPassPrereqs() {
     const missing = [];
     if (!process.env.PASS_TYPE_ID) missing.push('PASS_TYPE_ID');
-    if (!process.env.TEAM_ID)      missing.push('TEAM_ID');
+    if (!process.env.TEAM_ID) missing.push('TEAM_ID');
     if (missing.length) return `Missing env vars: ${missing.join(', ')}`;
 
     const certPath = path.resolve(__dirname, 'certs');
@@ -882,6 +914,186 @@ app.get('/api/passes/bundle/:registrationId', async (req, res) => {
         console.error('Error generating pass bundle:', err);
         res.status(500).send('Error generating Apple Wallet pass bundle');
     }
+});
+
+// ============================================================
+//  SHEET LINKING — allows Google Sheet users to link a sheet
+//  to their website account so events appear in their dashboard
+// ============================================================
+
+// Generate a sharing link for a Google Sheet (called from Apps Script)
+app.post('/api/sheet/generate-link', async (req, res) => {
+    const { spreadsheetId, sheetName, eventId } = req.body;
+    if (!spreadsheetId) return res.status(400).json({ error: 'spreadsheetId is required' });
+
+    // Reuse existing link for same spreadsheet
+    let link = db.data.sheetLinks.find(l => l.spreadsheetId === spreadsheetId);
+    if (link) {
+        // Update event ID and name if provided
+        if (eventId) link.eventId = eventId;
+        if (sheetName) link.sheetName = sheetName;
+        await db.write();
+        return res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token });
+    }
+
+    link = {
+        id: nanoid(10),
+        token: nanoid(20),
+        spreadsheetId,
+        sheetName: sheetName || 'Untitled Sheet',
+        eventId: eventId || null,
+        createdAt: new Date().toISOString()
+    };
+    await db.update(data => data.sheetLinks.push(link));
+    res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token });
+});
+
+// Redirect /link/:token → link.html?token=...
+app.get('/link/:token', (req, res) => {
+    res.redirect(`/link.html?token=${req.params.token}`);
+});
+
+// Get info about a link token (public)
+app.get('/api/sheet/link-info/:token', (req, res) => {
+    const link = db.data.sheetLinks.find(l => l.token === req.params.token);
+    if (!link) return res.status(404).json({ error: 'Link not found or expired' });
+
+    const event = link.eventId ? db.data.events.find(e => e.id === link.eventId) : null;
+    let alreadyLinked = false;
+
+    if (req.session.userId) {
+        alreadyLinked = !!db.data.sheetAccess.find(
+            a => a.sheetLinkId === link.id && a.userId === req.session.userId
+        );
+    }
+
+    // Count how many users have access
+    const accessCount = db.data.sheetAccess.filter(a => a.sheetLinkId === link.id).length;
+
+    res.json({
+        sheetName: link.sheetName,
+        eventName: event ? event.name : null,
+        eventId: link.eventId,
+        alreadyLinked,
+        accessCount
+    });
+});
+
+// Claim a link — links the sheet to the current user's account
+app.post('/api/sheet/claim', requireAuth, async (req, res) => {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'token required' });
+
+    const link = db.data.sheetLinks.find(l => l.token === token);
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+
+    // Check if already claimed
+    const existing = db.data.sheetAccess.find(
+        a => a.sheetLinkId === link.id && a.userId === req.session.userId
+    );
+    if (existing) return res.json({ success: true, message: 'Already linked' });
+
+    const access = {
+        id: nanoid(10),
+        userId: req.session.userId,
+        sheetLinkId: link.id,
+        claimedAt: new Date().toISOString()
+    };
+    await db.update(data => data.sheetAccess.push(access));
+
+    res.json({ success: true, message: 'Sheet linked to your account!' });
+});
+
+// Allow account creation during claim flow (since signup is normally disabled)
+app.post('/api/auth/signup-for-link', async (req, res) => {
+    const { email, password, token } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+    if (!token) return res.status(400).json({ error: 'link token required' });
+
+    // Verify the link token is valid
+    const link = db.data.sheetLinks.find(l => l.token === token);
+    if (!link) return res.status(400).json({ error: 'Invalid link token' });
+
+    // Check if account already exists
+    const existing = db.data.users.find(u => u.email === email.toLowerCase());
+    if (existing) return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = { id: nanoid(), email: email.toLowerCase(), password: hashedPassword };
+    await db.update(data => data.users.push(newUser));
+    req.session.userId = newUser.id;
+    res.json({ success: true, user: { id: newUser.id, email: newUser.email } });
+});
+
+// My Rooms — get all rooms/events the current user has access to
+app.get('/api/my-rooms', requireAuth, (req, res) => {
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+
+    if (isAdmin) {
+        // Admin sees all events with all access entries
+        const rooms = db.data.events.map(event => {
+            const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+            const accessEntries = link
+                ? db.data.sheetAccess.filter(a => a.sheetLinkId === link.id).map(a => {
+                    const u = db.data.users.find(u2 => u2.id === a.userId);
+                    return { id: a.id, email: u ? u.email : 'Unknown', claimedAt: a.claimedAt };
+                })
+                : [];
+            return { event, sheetLink: link || null, access: accessEntries, isAdmin: true };
+        });
+        return res.json(rooms);
+    }
+
+    // Regular user: events they have access to via sheetAccess
+    const myAccess = db.data.sheetAccess.filter(a => a.userId === req.session.userId);
+    const rooms = myAccess.map(access => {
+        const link = db.data.sheetLinks.find(l => l.id === access.sheetLinkId);
+        if (!link) return null;
+        const event = link.eventId ? db.data.events.find(e => e.id === link.eventId) : null;
+        return { event, sheetLink: link, accessId: access.id, claimedAt: access.claimedAt };
+    }).filter(Boolean);
+
+    res.json(rooms);
+});
+
+// Get access entries for a specific event (for settings cog in dashboard)
+app.get('/api/event/:id/access', requireAuth, (req, res) => {
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    if (!isAdmin) return res.status(403).json({ error: 'Admin access required' });
+
+    const link = db.data.sheetLinks.find(l => l.eventId === req.params.id);
+    if (!link) return res.json({ access: [], linkUrl: null });
+
+    const accessEntries = db.data.sheetAccess
+        .filter(a => a.sheetLinkId === link.id)
+        .map(a => {
+            const u = db.data.users.find(u2 => u2.id === a.userId);
+            return { id: a.id, email: u ? u.email : 'Unknown', claimedAt: a.claimedAt };
+        });
+
+    res.json({ access: accessEntries, linkUrl: `${BASE_URL}/link/${link.token}` });
+});
+
+// Revoke access to a room
+app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+
+    const accessIdx = db.data.sheetAccess.findIndex(a => a.id === req.params.id);
+    if (accessIdx === -1) return res.status(404).json({ error: 'Access entry not found' });
+
+    const access = db.data.sheetAccess[accessIdx];
+
+    // Only admins or the user themselves can revoke
+    if (!isAdmin && access.userId !== req.session.userId) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    db.data.sheetAccess.splice(accessIdx, 1);
+    await db.write();
+    res.json({ success: true });
 });
 
 app.listen(PORT, '0.0.0.0', () => {

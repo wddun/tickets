@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Link Sheet to Account</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f4f5f7;
+            color: #1a1a2e;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 20px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.08);
+            padding: 40px 36px;
+            max-width: 440px;
+            width: 100%;
+            margin: 20px;
+        }
+
+        .card-icon {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 22px;
+            font-weight: 800;
+            margin-bottom: 6px;
+            letter-spacing: -0.3px;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+
+        .event-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #f0f0ff;
+            color: #6366f1;
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            margin-bottom: 6px;
+        }
+
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            border-color: #6366f1;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background: #6366f1;
+            color: #fff;
+        }
+
+        .btn-success {
+            background: #10b981;
+            color: #fff;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #e0e0e0;
+            color: #666;
+            margin-top: 10px;
+        }
+
+        .toggle-link {
+            display: block;
+            text-align: center;
+            margin-top: 16px;
+            color: #6366f1;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .toggle-link:hover {
+            text-decoration: underline;
+        }
+
+        .error {
+            color: #dc2626;
+            font-size: 13px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        .success-state {
+            text-align: center;
+        }
+
+        .success-state .check {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .success-state h2 {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+
+        .success-state p {
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #aaa;
+        }
+
+        .already-linked {
+            text-align: center;
+        }
+
+        .already-linked .icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="card">
+        <!-- Loading -->
+        <div id="loadingState" class="loading">
+            <p>Loading…</p>
+        </div>
+
+        <!-- Error state -->
+        <div id="errorState" class="hidden" style="text-align:center; padding: 20px;">
+            <div style="font-size:40px; margin-bottom:12px;">❌</div>
+            <h2 style="margin-bottom:8px;">Link Not Found</h2>
+            <p style="color:#888; font-size:14px;" id="errorMessage">This link may have expired or is invalid.</p>
+        </div>
+
+        <!-- Main linking form -->
+        <div id="linkForm" class="hidden">
+            <div class="card-icon">🔗</div>
+            <h1 id="pageTitle">Link Sheet to Account</h1>
+            <p class="subtitle" id="pageSubtitle">Connect this event sheet to your account to manage it from your
+                dashboard.</p>
+            <div class="event-badge" id="eventBadge">
+                <span>🎟️</span>
+                <span id="eventName">Loading…</span>
+            </div>
+
+            <!-- Login form -->
+            <div id="loginSection">
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" id="emailInput" placeholder="you@example.com" autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="passwordInput" placeholder="••••••••" autocomplete="current-password">
+                </div>
+                <div class="error" id="authError"></div>
+                <button class="btn btn-primary" id="authBtn" onclick="handleAuth()">Log In & Link</button>
+                <span class="toggle-link" id="toggleAuth" onclick="toggleMode()">Don't have an account? Sign up</span>
+            </div>
+
+            <!-- Already logged in — just claim -->
+            <div id="claimSection" class="hidden">
+                <p style="color:#666; font-size:14px; margin-bottom:16px;">
+                    You're logged in as <strong id="currentEmail"></strong>
+                </p>
+                <button class="btn btn-success" onclick="claimLink()">🔗 Link to My Account</button>
+                <button class="btn btn-outline" onclick="logoutAndSwitch()">Use a different account</button>
+            </div>
+        </div>
+
+        <!-- Already linked -->
+        <div id="alreadyLinked" class="hidden already-linked">
+            <div class="icon">✅</div>
+            <h2>Already Linked!</h2>
+            <p style="color:#888; font-size:14px; margin-bottom:20px;">This sheet is already linked to your account.</p>
+            <a href="/dashboard.html" class="btn btn-primary"
+                style="display:block; text-align:center; text-decoration:none;">Go to Dashboard</a>
+        </div>
+
+        <!-- Success -->
+        <div id="successState" class="hidden success-state">
+            <div class="check">✅</div>
+            <h2>Successfully Linked!</h2>
+            <p>This event sheet is now connected to your account.</p>
+            <a href="/dashboard.html" class="btn btn-primary"
+                style="display:block; text-align:center; text-decoration:none;">View in Dashboard</a>
+        </div>
+    </div>
+
+    <script>
+        let linkToken = null;
+        let isSignup = false;
+        let linkInfo = null;
+
+        async function init() {
+            const params = new URLSearchParams(window.location.search);
+            linkToken = params.get('token');
+
+            if (!linkToken) {
+                showError('No link token provided.');
+                return;
+            }
+
+            try {
+                // Fetch link info
+                const infoRes = await fetch(`/api/sheet/link-info/${linkToken}`);
+                if (!infoRes.ok) {
+                    showError('This link is not valid or has expired.');
+                    return;
+                }
+                linkInfo = await infoRes.json();
+
+                document.getElementById('eventName').textContent = linkInfo.eventName || linkInfo.sheetName;
+                document.getElementById('pageSubtitle').textContent =
+                    `Connect "${linkInfo.eventName || linkInfo.sheetName}" to your account to manage it from your dashboard.`;
+
+                // Check if user is logged in
+                const meRes = await fetch('/api/auth/me');
+                if (meRes.ok) {
+                    const me = await meRes.json();
+                    if (linkInfo.alreadyLinked) {
+                        showSection('alreadyLinked');
+                        return;
+                    }
+                    document.getElementById('currentEmail').textContent = me.user.email;
+                    showSection('linkForm');
+                    document.getElementById('loginSection').classList.add('hidden');
+                    document.getElementById('claimSection').classList.remove('hidden');
+                } else {
+                    showSection('linkForm');
+                    document.getElementById('loginSection').classList.remove('hidden');
+                    document.getElementById('claimSection').classList.add('hidden');
+                }
+            } catch (err) {
+                showError('Failed to load link information.');
+            }
+        }
+
+        function showSection(id) {
+            ['loadingState', 'errorState', 'linkForm', 'alreadyLinked', 'successState'].forEach(s => {
+                document.getElementById(s).classList.toggle('hidden', s !== id);
+            });
+        }
+
+        function showError(msg) {
+            document.getElementById('errorMessage').textContent = msg;
+            showSection('errorState');
+        }
+
+        function toggleMode() {
+            isSignup = !isSignup;
+            document.getElementById('authBtn').textContent = isSignup ? 'Sign Up & Link' : 'Log In & Link';
+            document.getElementById('toggleAuth').textContent = isSignup
+                ? 'Already have an account? Log in'
+                : "Don't have an account? Sign up";
+            document.getElementById('passwordInput').autocomplete = isSignup ? 'new-password' : 'current-password';
+            hideError();
+        }
+
+        function showAuthError(msg) {
+            const el = document.getElementById('authError');
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+        function hideError() {
+            document.getElementById('authError').style.display = 'none';
+        }
+
+        async function handleAuth() {
+            const email = document.getElementById('emailInput').value.trim();
+            const password = document.getElementById('passwordInput').value;
+
+            if (!email || !password) {
+                showAuthError('Please fill in both fields.');
+                return;
+            }
+
+            hideError();
+            const btn = document.getElementById('authBtn');
+            btn.disabled = true;
+            btn.textContent = isSignup ? 'Creating account…' : 'Logging in…';
+
+            try {
+                let res;
+                if (isSignup) {
+                    res = await fetch('/api/auth/signup-for-link', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password, token: linkToken })
+                    });
+                } else {
+                    res = await fetch('/api/auth/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
+                    });
+                }
+
+                const data = await res.json();
+                if (!res.ok) {
+                    showAuthError(data.error || 'Authentication failed.');
+                    btn.disabled = false;
+                    btn.textContent = isSignup ? 'Sign Up & Link' : 'Log In & Link';
+                    return;
+                }
+
+                // Now claim the link
+                await claimLink();
+            } catch (err) {
+                showAuthError('Network error. Please try again.');
+                btn.disabled = false;
+                btn.textContent = isSignup ? 'Sign Up & Link' : 'Log In & Link';
+            }
+        }
+
+        async function claimLink() {
+            try {
+                const res = await fetch('/api/sheet/claim', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: linkToken })
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    showSection('successState');
+                } else {
+                    showAuthError(data.error || 'Failed to link.');
+                }
+            } catch (err) {
+                showAuthError('Network error. Please try again.');
+            }
+        }
+
+        async function logoutAndSwitch() {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('claimSection').classList.add('hidden');
+        }
+
+        init();
+    </script>
+</body>
+
+</html>
