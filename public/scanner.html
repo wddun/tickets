@@ -2,135 +2,594 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Scanner | WTS Tickets</title>
-    <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+            height: 100dvh;
+            color: #fff;
+        }
+
+        /* ── Camera fills screen ── */
+        #reader {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            overflow: hidden !important;
+            background: #000;
+        }
+        #reader > div {
+            position: absolute !important;
+            inset: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            padding: 0 !important;
+            border: none !important;
+        }
+        #reader video {
+            position: absolute !important;
+            inset: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+        }
+        #reader canvas { display: none !important; }
+        #reader img { display: none !important; }
+        #reader__dashboard { display: none !important; }
+        /* Suppress html5-qrcode shading overlays */
+        div[id$="__box_left"], div[id$="__box_right"],
+        div[id$="__box_top"],  div[id$="__box_bottom"] {
+            background: transparent !important;
+            box-shadow: none !important;
+        }
+        /* Suppress any border html5-qrcode draws around the qr region */
+        div[id$="__qr_region"] {
+            border: none !important;
+        }
+
+        /* ── Scan guide corners ── */
+        .scan-guide {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .scan-box {
+            width: min(62vw, 240px);
+            aspect-ratio: 1;
+            position: relative;
+        }
+        .scan-box::before, .scan-box::after,
+        .scan-box > span::before, .scan-box > span::after {
+            content: '';
+            position: absolute;
+            width: 22px;
+            height: 22px;
+            border-color: rgba(255,255,255,0.85);
+            border-style: solid;
+        }
+        .scan-box::before  { top: 0;    left: 0;  border-width: 3px 0 0 3px; border-radius: 3px 0 0 0; }
+        .scan-box::after   { top: 0;    right: 0; border-width: 3px 3px 0 0; border-radius: 0 3px 0 0; }
+        .scan-box > span::before { bottom: 0; left: 0;  border-width: 0 0 3px 3px; border-radius: 0 0 0 3px; }
+        .scan-box > span::after  { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 3px 0; }
+
+        /* ── Top bar ── */
+        .top-bar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px;
+            z-index: 20;
+            display: flex;
+            justify-content: flex-end;
+        }
+        .top-btn {
+            background: rgba(0,0,0,0.55);
+            color: #fff;
+            border: none;
+            padding: 7px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            text-decoration: none;
+            display: none;
+        }
+
+        /* ── Brief flash on scan ── */
+        .status-flash {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.12s;
+            pointer-events: none;
+        }
+        .status-flash.show { opacity: 1; }
+        .flash-icon  { font-size: 80px; line-height: 1; margin-bottom: 10px; }
+        .flash-title { font-size: 26px; font-weight: 700; }
+
+        /* ── Sheet backdrop ── */
+        .sheet-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 40;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .sheet-backdrop.show { opacity: 1; pointer-events: auto; }
+
+        /* ── Bottom sheet ── */
+        .bottom-sheet {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            background: #1c1c1e;
+            border-radius: 20px 20px 0 0;
+            z-index: 45;
+            transform: translateY(100%);
+            transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+            max-height: 88dvh;
+            display: flex;
+            flex-direction: column;
+            padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+        }
+        .bottom-sheet.show { transform: translateY(0); }
+
+        .sheet-handle {
+            width: 36px; height: 4px;
+            background: rgba(255,255,255,0.25);
+            border-radius: 2px;
+            margin: 10px auto 0;
+            flex-shrink: 0;
+        }
+
+        .sheet-header {
+            padding: 14px 20px 10px;
+            flex-shrink: 0;
+        }
+        .sheet-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .badge-success { background: rgba(74,222,128,0.15); color: #4ade80; }
+        .badge-used    { background: rgba(248,113,113,0.15); color: #f87171; }
+        .badge-invalid { background: rgba(251,191,36,0.15);  color: #fbbf24; }
+
+        .sheet-person { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
+        .sheet-event  { font-size: 13px; color: rgba(255,255,255,0.45); }
+
+        /* ── Tabs ── */
+        .sheet-tabs {
+            display: flex;
+            margin: 6px 20px 0;
+            background: rgba(255,255,255,0.08);
+            border-radius: 10px;
+            padding: 3px;
+            flex-shrink: 0;
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 7px 4px;
+            border: none;
+            background: transparent;
+            color: rgba(255,255,255,0.45);
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.18s;
+        }
+        .tab-btn.active { background: rgba(255,255,255,0.15); color: #fff; }
+
+        /* ── Scrollable ticket list ── */
+        .tab-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 20px 4px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .event-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: rgba(255,255,255,0.32);
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            margin: 14px 0 6px;
+        }
+        .event-label:first-child { margin-top: 0; }
+
+        .ticket-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 11px 14px;
+            background: rgba(255,255,255,0.07);
+            border-radius: 12px;
+            margin-bottom: 6px;
+        }
+        .ticket-dot {
+            width: 9px; height: 9px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .dot-used    { background: #4ade80; }
+        .dot-pending { background: rgba(255,255,255,0.25); }
+        .ticket-info { flex: 1; min-width: 0; }
+        .ticket-name {
+            font-size: 15px; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .ticket-detail {
+            font-size: 12px;
+            color: rgba(255,255,255,0.4);
+            margin-top: 1px;
+        }
+        .ticket-tag {
+            font-size: 11px; font-weight: 700;
+            padding: 3px 8px; border-radius: 6px;
+            flex-shrink: 0;
+        }
+        .tag-scanned { background: rgba(74,222,128,0.15); color: #4ade80; }
+        .tag-pending { background: rgba(255,255,255,0.1);  color: rgba(255,255,255,0.55); }
+
+        /* ── Action buttons ── */
+        .sheet-actions {
+            padding: 8px 20px 2px;
+            flex-shrink: 0;
+        }
+        .action-btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 14px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-bottom: 8px;
+            transition: opacity 0.15s;
+        }
+        .action-btn:active { opacity: 0.75; }
+        .btn-primary   { background: #fff; color: #000; }
+        .btn-secondary { background: rgba(255,255,255,0.12); color: #fff; }
+        .btn-disabled  { opacity: 0.35; cursor: default; }
+
+        .login-hint {
+            text-align: center;
+            font-size: 12px;
+            color: rgba(255,255,255,0.3);
+            margin-bottom: 8px;
+        }
+    </style>
 </head>
-<body style="background:#000;">
-    <div class="container" style="margin:0; padding:0; max-width:none;">
-        <div id="reader" style="height:100vh;"></div>
+<body>
+    <div id="reader"></div>
 
-        <a id="dashboardBtn" href="/dashboard.html" style="position:fixed;top:16px;right:16px;z-index:100;background:rgba(0,0,0,0.6);color:#fff;padding:8px 14px;border-radius:20px;font-size:13px;font-weight:600;text-decoration:none;backdrop-filter:blur(6px);display:none;"></a>
+    <div class="scan-guide"><div class="scan-box"><span></span></div></div>
 
-        <div id="statusOverlay" class="status-overlay">
-            <div class="status-icon" id="statusIcon">✓</div>
-            <div class="status-msg" id="statusMsg">Valid Ticket</div>
-            <div class="status-sub" id="statusSub">Name Surname</div>
+    <div class="top-bar">
+        <a id="dashboardBtn" class="top-btn" href="/login.html"></a>
+    </div>
+
+    <div class="status-flash" id="statusFlash">
+        <div class="flash-icon"  id="flashIcon"></div>
+        <div class="flash-title" id="flashTitle"></div>
+    </div>
+
+    <div class="sheet-backdrop" id="sheetBackdrop" onclick="closeSheet()"></div>
+
+    <div class="bottom-sheet" id="bottomSheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-header">
+            <div class="sheet-badge"  id="sheetBadge"></div>
+            <div class="sheet-person" id="sheetPerson"></div>
+            <div class="sheet-event"  id="sheetEvent"></div>
         </div>
+        <div class="sheet-tabs" id="sheetTabs" style="display:none;">
+            <button class="tab-btn active" onclick="switchTab(0)">Ticket</button>
+            <button class="tab-btn" id="allTabBtn" onclick="switchTab(1)">All Tickets</button>
+        </div>
+        <div class="tab-content"  id="tabContent"></div>
+        <div class="sheet-actions" id="sheetActions"></div>
     </div>
 
     <script>
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const compressor = audioCtx.createDynamicsCompressor();
-        compressor.connect(audioCtx.destination);
+    // ── Audio ────────────────────────────────────────────────
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const compressor = audioCtx.createDynamicsCompressor();
+    compressor.connect(audioCtx.destination);
 
-        function playSound(type) {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            if (type === 'success') {
-                const osc1 = audioCtx.createOscillator(), gain1 = audioCtx.createGain();
-                osc1.connect(gain1); gain1.connect(compressor);
-                osc1.type = 'sine'; osc1.frequency.setValueAtTime(523.25, audioCtx.currentTime);
-                gain1.gain.setValueAtTime(3.0, audioCtx.currentTime);
-                gain1.gain.linearRampToValueAtTime(3.0, audioCtx.currentTime + 0.15);
-                gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
-                osc1.start(); osc1.stop(audioCtx.currentTime + 0.4);
+    function playSound(type) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        if (type === 'success') {
+            [[523.25, 0], [880, 150]].forEach(([freq, delay]) => {
                 setTimeout(() => {
-                    const osc2 = audioCtx.createOscillator(), gain2 = audioCtx.createGain();
-                    osc2.connect(gain2); gain2.connect(compressor);
-                    osc2.type = 'sine'; osc2.frequency.setValueAtTime(880, audioCtx.currentTime);
-                    gain2.gain.setValueAtTime(3.0, audioCtx.currentTime);
-                    gain2.gain.linearRampToValueAtTime(3.0, audioCtx.currentTime + 0.2);
-                    gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
-                    osc2.start(); osc2.stop(audioCtx.currentTime + 0.6);
-                }, 150);
-            } else {
-                const osc1 = audioCtx.createOscillator(), gain1 = audioCtx.createGain();
-                osc1.connect(gain1); gain1.connect(audioCtx.destination);
-                osc1.type = 'square'; osc1.frequency.setValueAtTime(220, audioCtx.currentTime);
-                gain1.gain.setValueAtTime(1.0, audioCtx.currentTime);
-                gain1.gain.linearRampToValueAtTime(1.0, audioCtx.currentTime + 0.2);
-                gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-                osc1.start(); osc1.stop(audioCtx.currentTime + 0.3);
+                    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+                    osc.connect(gain); gain.connect(compressor);
+                    osc.type = 'sine'; osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(3.0, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+                    osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+                }, delay);
+            });
+        } else {
+            [[220, 0], [180, 160]].forEach(([freq, delay]) => {
                 setTimeout(() => {
-                    const osc2 = audioCtx.createOscillator(), gain2 = audioCtx.createGain();
-                    osc2.connect(gain2); gain2.connect(audioCtx.destination);
-                    osc2.type = 'square'; osc2.frequency.setValueAtTime(180, audioCtx.currentTime);
-                    gain2.gain.setValueAtTime(1.0, audioCtx.currentTime);
-                    gain2.gain.linearRampToValueAtTime(1.0, audioCtx.currentTime + 0.3);
-                    gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
-                    osc2.start(); osc2.stop(audioCtx.currentTime + 0.4);
-                }, 150);
-            }
+                    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+                    osc.connect(gain); gain.connect(audioCtx.destination);
+                    osc.type = 'square'; osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(1.0, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                    osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+                }, delay);
+            });
+        }
+    }
+
+    // ── State ────────────────────────────────────────────────
+    let isProcessing = false;
+    let isLoggedIn   = false;
+    let activeTab    = 0;
+    let scanData     = null;
+
+    // ── Auth ─────────────────────────────────────────────────
+    const dashboardBtn = document.getElementById('dashboardBtn');
+    fetch('/api/auth/me').then(r => {
+        isLoggedIn = r.ok;
+        dashboardBtn.textContent = r.ok ? 'Dashboard' : 'Sign In';
+        dashboardBtn.href        = r.ok ? '/dashboard.html' : '/login.html';
+        dashboardBtn.style.display = 'block';
+    }).catch(() => {
+        dashboardBtn.textContent   = 'Sign In';
+        dashboardBtn.style.display = 'block';
+    });
+
+    // ── Helpers ──────────────────────────────────────────────
+    function esc(s) {
+        return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function fmtTime(iso) {
+        return iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+    }
+
+    // ── Sheet open/close ─────────────────────────────────────
+    function openSheet(data) {
+        scanData  = data;
+        activeTab = 0;
+        renderSheet();
+        document.getElementById('sheetBackdrop').classList.add('show');
+        document.getElementById('bottomSheet').classList.add('show');
+    }
+
+    function closeSheet() {
+        document.getElementById('sheetBackdrop').classList.remove('show');
+        document.getElementById('bottomSheet').classList.remove('show');
+        scanData = null;
+        setTimeout(() => { isProcessing = false; }, 400);
+    }
+
+    function switchTab(idx) {
+        activeTab = idx;
+        document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === idx));
+        renderTabContent();
+        renderActions();
+    }
+
+    // ── Render ───────────────────────────────────────────────
+    function renderSheet() {
+        const d = scanData;
+
+        // Badge
+        const badge = document.getElementById('sheetBadge');
+        if (d.status === 'valid') {
+            badge.className = 'sheet-badge badge-success';
+            badge.textContent = '✓ Checked In';
+        } else if (d.status === 'used') {
+            badge.className = 'sheet-badge badge-used';
+            badge.textContent = '✕ Already Scanned';
+        } else {
+            badge.className = 'sheet-badge badge-invalid';
+            badge.textContent = '⚠ Invalid Ticket';
         }
 
-        let isProcessing = false;
-        const overlay    = document.getElementById('statusOverlay');
-        const statusIcon = document.getElementById('statusIcon');
-        const statusMsg  = document.getElementById('statusMsg');
-        const statusSub  = document.getElementById('statusSub');
+        document.getElementById('sheetPerson').textContent = d.name || 'Unknown';
+        document.getElementById('sheetEvent').textContent  = d.eventName || '';
 
-        function onScanSuccess(decodedText) {
-            if (isProcessing) return;
-            isProcessing = true;
+        // Show "All Tickets" tab if the person has more than 1 ticket
+        const totalTickets = (d.personTickets || []).reduce((n, g) => n + g.tickets.length, 0);
+        const tabs = document.getElementById('sheetTabs');
+        if (totalTickets > 1) {
+            tabs.style.display = 'flex';
+            document.getElementById('allTabBtn').textContent = `All Tickets (${totalTickets})`;
+        } else {
+            tabs.style.display = 'none';
+        }
 
-            if (!decodedText.startsWith('ticket:')) {
-                showStatus('error', 'Invalid Format', 'Not a valid ticket QR code');
+        document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+        renderTabContent();
+        renderActions();
+    }
+
+    function renderTabContent() {
+        const d       = scanData;
+        const content = document.getElementById('tabContent');
+
+        if (activeTab === 0) {
+            // Single scanned ticket
+            const scanned = d.status === 'valid' || !!d.used_at;
+            const time    = fmtTime(d.used_at);
+            content.innerHTML = `
+                <div class="ticket-row">
+                    <div class="ticket-dot ${scanned ? 'dot-used' : 'dot-pending'}"></div>
+                    <div class="ticket-info">
+                        <div class="ticket-name">${esc(d.name)}</div>
+                        <div class="ticket-detail">${esc(d.eventName || '')}${time ? ` · ${time}` : ''}</div>
+                    </div>
+                    <div class="ticket-tag ${scanned ? 'tag-scanned' : 'tag-pending'}">${scanned ? 'Scanned' : 'Pending'}</div>
+                </div>`;
+        } else {
+            // All tickets for this person across all events
+            const groups = d.personTickets || [];
+            if (!groups.length) {
+                content.innerHTML = '<p style="color:rgba(255,255,255,0.35);text-align:center;padding:24px 0">No tickets found</p>';
                 return;
             }
+            const multiGroup = groups.length > 1;
+            content.innerHTML = groups.map(group => `
+                ${multiGroup ? `<div class="event-label">${esc(group.eventName)}</div>` : ''}
+                ${group.tickets.map(t => {
+                    const time = fmtTime(t.used_at);
+                    return `
+                    <div class="ticket-row">
+                        <div class="ticket-dot ${t.used_at ? 'dot-used' : 'dot-pending'}"></div>
+                        <div class="ticket-info">
+                            <div class="ticket-name">${esc(t.name)}</div>
+                            <div class="ticket-detail">${time ? `Scanned ${time}` : 'Not checked in'}</div>
+                        </div>
+                        <div class="ticket-tag ${t.used_at ? 'tag-scanned' : 'tag-pending'}">${t.used_at ? 'Scanned' : 'Pending'}</div>
+                    </div>`;
+                }).join('')}
+            `).join('');
+        }
+    }
 
-            const token = decodedText.split(':')[1];
+    function renderActions() {
+        const d       = scanData;
+        const actions = document.getElementById('sheetActions');
 
-            fetch('/api/validate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'valid') {
-                    showStatus('success', 'Valid Ticket', data.name);
-                } else if (data.status === 'used') {
-                    showStatus('error', 'Already Used', `${data.name} — scanned at ${new Date(data.used_at).toLocaleTimeString()}`);
-                } else {
-                    showStatus('error', 'Invalid Ticket', data.message || 'Ticket not found');
-                }
-            })
-            .catch(() => showStatus('error', 'System Error', 'Could not connect to server'));
+        if (!isLoggedIn) {
+            actions.innerHTML = `
+                <p class="login-hint">Sign in to check in remaining tickets</p>
+                <button class="action-btn btn-secondary" onclick="closeSheet()">Continue Scanning</button>`;
+            return;
         }
 
-        function showStatus(type, title, subtitle) {
-            isProcessing = true;
-            playSound(type);
-            overlay.className = `status-overlay active ${type}`;
-            overlay.style.backgroundColor = type === 'success' ? 'var(--success)' : 'var(--danger)';
-            overlay.style.color = 'white';
-            statusIcon.textContent = type === 'success' ? '✓' : '✕';
-            statusMsg.textContent  = title;
-            statusSub.textContent  = subtitle;
-            setTimeout(() => {
-                overlay.classList.remove('active');
-                overlay.style.backgroundColor = '';
-                overlay.style.color = '';
-                setTimeout(() => { isProcessing = false; }, 1000);
-            }, 2000);
+        if (activeTab === 0) {
+            actions.innerHTML = `<button class="action-btn btn-secondary" onclick="closeSheet()">Continue Scanning</button>`;
+            return;
         }
 
-        const html5QrCode = new Html5Qrcode("reader");
-        html5QrCode.start({ facingMode: "environment" }, { fps: 10, aspectRatio: 1.0 }, onScanSuccess);
+        // All-tickets tab — show "Check In Remaining" if any unchecked
+        const allTickets = (d.personTickets || []).flatMap(g => g.tickets);
+        const unchecked  = allTickets.filter(t => !t.used_at);
 
-        const dashboardBtn = document.getElementById('dashboardBtn');
-        fetch('/api/auth/me').then(r => {
-            dashboardBtn.style.display = 'block';
-            if (r.ok) {
-                dashboardBtn.textContent = 'Manual Check-In';
-            } else {
-                dashboardBtn.textContent = 'Sign In';
-            }
-        }).catch(() => {
-            dashboardBtn.textContent = 'Sign In';
-            dashboardBtn.style.display = 'block';
+        let html = '';
+        if (unchecked.length > 0) {
+            html += `<button class="action-btn btn-primary" id="checkAllBtn" onclick="checkInAll()">
+                Check In ${unchecked.length} Remaining Ticket${unchecked.length > 1 ? 's' : ''}
+            </button>`;
+        } else {
+            html += `<button class="action-btn btn-secondary btn-disabled" disabled>All Tickets Checked In ✓</button>`;
+        }
+        html += `<button class="action-btn btn-secondary" onclick="closeSheet()">Continue Scanning</button>`;
+        actions.innerHTML = html;
+    }
+
+    async function checkInAll() {
+        const btn = document.getElementById('checkAllBtn');
+        if (btn) { btn.textContent = 'Checking in…'; btn.disabled = true; }
+
+        const allTickets = (scanData.personTickets || []).flatMap(g => g.tickets);
+        const unchecked  = allTickets.filter(t => !t.used_at);
+        let ok = 0;
+
+        for (const t of unchecked) {
+            try {
+                const r = await fetch(`/api/checkin/${t.id}`, { method: 'POST' });
+                if (r.ok) { t.used_at = new Date().toISOString(); ok++; }
+            } catch (_) {}
+        }
+
+        if (ok > 0) playSound('success');
+        renderTabContent();
+        renderActions();
+    }
+
+    // ── Flash overlay ────────────────────────────────────────
+    function showFlash(type, icon, title) {
+        const el = document.getElementById('statusFlash');
+        document.getElementById('flashIcon').textContent  = icon;
+        document.getElementById('flashTitle').textContent = title;
+        el.style.background = type === 'success' ? 'rgba(0,160,0,0.82)' : 'rgba(190,0,0,0.82)';
+        el.classList.add('show');
+        setTimeout(() => el.classList.remove('show'), 550);
+    }
+
+    // ── Scan handler ─────────────────────────────────────────
+    function onScanSuccess(decodedText) {
+        if (isProcessing) return;
+        isProcessing = true;
+
+        if (!decodedText.startsWith('ticket:')) {
+            showFlash('error', '✕', 'Invalid QR');
+            playSound('error');
+            setTimeout(() => { isProcessing = false; }, 2500);
+            return;
+        }
+
+        const token = decodedText.split(':')[1];
+        fetch('/api/validate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+        })
+        .then(r => r.json())
+        .then(data => {
+            const ok = data.status === 'valid';
+            playSound(ok ? 'success' : 'error');
+            showFlash(ok ? 'success' : 'error',
+                ok ? '✓' : '✕',
+                ok ? 'Valid' : data.status === 'used' ? 'Already Used' : 'Invalid');
+            setTimeout(() => openSheet(data), 320);
+        })
+        .catch(() => {
+            playSound('error');
+            showFlash('error', '✕', 'Server Error');
+            setTimeout(() => { isProcessing = false; }, 2500);
         });
+    }
+
+    // ── Camera ───────────────────────────────────────────────
+    const scanner = new Html5Qrcode('reader');
+    scanner.start(
+        { facingMode: 'environment' },
+        { fps: 15 },
+        onScanSuccess
+    ).then(() => {
+        // Force video to fill screen after library creates the element
+        const video = document.querySelector('#reader video');
+        if (video) {
+            Object.assign(video.style, {
+                position: 'absolute', inset: '0',
+                width: '100%', height: '100%',
+                objectFit: 'cover'
+            });
+        }
+        // Also apply to the scan region container
+        const region = document.getElementById('reader__scan_region');
+        if (region) Object.assign(region.style, { position: 'absolute', inset: '0', width: '100%', height: '100%' });
+    }).catch(err => console.error('Camera error:', err));
     </script>
 </body>
 </html>

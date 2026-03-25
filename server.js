@@ -747,6 +747,19 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
+// Helper: group all tickets for an email by event (for web scanner "All Tickets" view)
+function buildPersonTickets(email, tickets, events) {
+    const byEvent = {};
+    for (const t of tickets.filter(t => t.email === email)) {
+        if (!byEvent[t.eventId]) {
+            const ev = events.find(e => e.id === t.eventId);
+            byEvent[t.eventId] = { eventId: t.eventId, eventName: ev ? ev.name : t.eventId, tickets: [] };
+        }
+        byEvent[t.eventId].tickets.push({ id: t.id, name: t.name, used_at: t.used_at, registrationId: t.registrationId });
+    }
+    return Object.values(byEvent);
+}
+
 app.post('/api/validate', async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'Token is required' });
@@ -759,21 +772,30 @@ app.post('/api/validate', async (req, res) => {
         return res.json({ status: 'invalid', message: 'Invalid ticket' });
     }
 
+    const event = db.data.events.find(e => e.id === ticket.eventId);
+
     if (ticket.used_at) {
         console.log(`[validate] ALREADY USED — ticket: ${ticket.id} name: ${ticket.name} used_at: ${ticket.used_at}`);
-        return res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, name: ticket.name });
+        return res.json({
+            status: 'used', message: 'Ticket already used',
+            used_at: ticket.used_at, name: ticket.name, email: ticket.email,
+            ticketId: ticket.id, registrationId: ticket.registrationId,
+            eventId: ticket.eventId, eventName: event ? event.name : null,
+            personTickets: buildPersonTickets(ticket.email, db.data.tickets, db.data.events)
+        });
     }
 
     ticket.used_at = new Date().toISOString();
     await db.write();
     ticketStatusCache.clear();
 
-    const event = db.data.events.find(e => e.id === ticket.eventId);
     res.json({
         status: 'valid',
         message: `Welcome to ${event ? event.name : 'the event'}!`,
-        name: ticket.name,
-        email: ticket.email
+        name: ticket.name, email: ticket.email,
+        ticketId: ticket.id, registrationId: ticket.registrationId,
+        eventId: ticket.eventId, eventName: event ? event.name : null,
+        personTickets: buildPersonTickets(ticket.email, db.data.tickets, db.data.events)
     });
 });
 
