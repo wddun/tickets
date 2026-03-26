@@ -316,6 +316,7 @@ app.post('/api/register_disabled', async (req, res) => {
 // API: Bulk Register Tickets (for Google Sheets integration)
 app.post('/api/register-bulk', async (req, res) => {
     const { firstName, lastName, email, eventId, ticketCount } = req.body;
+    const isResend = req.body.resend === true;
 
     if (!firstName || !lastName || !email || !eventId || !ticketCount) {
         return res.status(400).json({ error: 'firstName, lastName, email, eventId, and ticketCount are required' });
@@ -334,26 +335,89 @@ app.post('/api/register-bulk', async (req, res) => {
     const customFields = (req.body.customFields && typeof req.body.customFields === 'object')
         ? req.body.customFields : {};
 
-    // Reuse existing tickets for this email+event so resend doesn't create duplicates
     const existingTickets = db.data.tickets.filter(t => t.email === email && t.eventId === eventId);
 
     let ticketsToSend;
+    let countChanged = null;
     try {
-        if (existingTickets.length > 0) {
-            ticketsToSend = existingTickets;
-            await db.update(({ tickets }) => {
-                ticketsToSend.forEach(t => {
-                    const dbTicket = tickets.find(dt => dt.id === t.id);
-                    if (dbTicket) {
-                        dbTicket.name = fullName;
-                        dbTicket.firstName = firstName;
-                        dbTicket.lastName = lastName;
-                        dbTicket.email = email;
-                        dbTicket.customFields = customFields;
-                    }
+        if (isResend && existingTickets.length > 0) {
+            const existingCount = existingTickets.length;
+            const registrationId = existingTickets[0].registrationId;
+
+            if (count > existingCount) {
+                // Add more tickets with same registrationId
+                const newTickets = Array.from({ length: count - existingCount }, () => ({
+                    id: nanoid(8),
+                    token: nanoid(12),
+                    registrationId,
+                    eventId,
+                    name: fullName,
+                    firstName,
+                    lastName,
+                    email,
+                    customFields,
+                    created_at: new Date().toISOString(),
+                    used_at: null
+                }));
+                await db.update(({ tickets }) => {
+                    // Update existing
+                    existingTickets.forEach(t => {
+                        const dbTicket = tickets.find(dt => dt.id === t.id);
+                        if (dbTicket) {
+                            dbTicket.name = fullName;
+                            dbTicket.firstName = firstName;
+                            dbTicket.lastName = lastName;
+                            dbTicket.customFields = customFields;
+                        }
+                    });
+                    // Add new
+                    newTickets.forEach(t => tickets.push(t));
                 });
-            });
+                ticketsToSend = [...existingTickets, ...newTickets];
+                countChanged = { from: existingCount, to: count };
+            } else if (count < existingCount) {
+                // Remove extra tickets — prefer unused ones first
+                const unused = existingTickets.filter(t => !t.used_at);
+                const used = existingTickets.filter(t => t.used_at);
+                const toRemove = [...unused, ...used].slice(0, existingCount - count).map(t => t.id);
+                const toKeep = existingTickets.filter(t => !toRemove.includes(t.id));
+                await db.update(({ tickets }) => {
+                    // Remove extras
+                    toRemove.forEach(id => {
+                        const idx = tickets.findIndex(t => t.id === id);
+                        if (idx !== -1) tickets.splice(idx, 1);
+                    });
+                    // Update remaining
+                    toKeep.forEach(t => {
+                        const dbTicket = tickets.find(dt => dt.id === t.id);
+                        if (dbTicket) {
+                            dbTicket.name = fullName;
+                            dbTicket.firstName = firstName;
+                            dbTicket.lastName = lastName;
+                            dbTicket.customFields = customFields;
+                        }
+                    });
+                });
+                ticketsToSend = toKeep;
+                countChanged = { from: existingCount, to: count };
+            } else {
+                // Same count — just update name/customFields
+                ticketsToSend = existingTickets;
+                await db.update(({ tickets }) => {
+                    ticketsToSend.forEach(t => {
+                        const dbTicket = tickets.find(dt => dt.id === t.id);
+                        if (dbTicket) {
+                            dbTicket.name = fullName;
+                            dbTicket.firstName = firstName;
+                            dbTicket.lastName = lastName;
+                            dbTicket.email = email;
+                            dbTicket.customFields = customFields;
+                        }
+                    });
+                });
+            }
         } else {
+            // New row (or resend with no existing tickets) — always create fresh tickets
             const registrationId = nanoid(10);
             ticketsToSend = Array.from({ length: count }, () => ({
                 id: nanoid(8),
@@ -438,11 +502,13 @@ app.post('/api/register-bulk', async (req, res) => {
             console.log(`📧 Email sent → ${email} (${fullName}, ${count} ticket${count > 1 ? 's' : ''})`);
         }
 
-        res.json({
+        const response = {
             success: true,
             tokens: ticketsToSend.map(t => t.token),
             tickets: ticketsToSend
-        });
+        };
+        if (countChanged) response.countChanged = countChanged;
+        res.json(response);
     } catch (error) {
         console.error('Bulk registration error:', error);
         res.status(500).json({ error: 'Failed to process registration' });

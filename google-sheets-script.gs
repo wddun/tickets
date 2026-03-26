@@ -497,7 +497,7 @@ function onRowComplete(e) {
 //  sendOneRow — sends one attendee and updates status columns
 //  colMap comes from getColumnMap() for dynamic column support
 // ============================================================
-function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap) {
+function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, isResend) {
   sheet.getRange(row, colMap.statusCol).setValue('⏳ Sending...');
   SpreadsheetApp.flush();
 
@@ -531,7 +531,8 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
           email:        email,
           eventId:      eventId,
           ticketCount:  ticketCount,
-          customFields: customFields
+          customFields: customFields,
+          resend:       isResend === true
         }),
         muteHttpExceptions: true
       });
@@ -547,8 +548,15 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
   if (lastErr) {
     sheet.getRange(row, colMap.statusCol).setValue('❌ Error: ' + lastErr.message);
   } else if (result.success) {
-    var label = ticketCount + ' ticket' + (ticketCount > 1 ? 's' : '');
-    sheet.getRange(row, colMap.statusCol).setValue('✅ Sent (' + label + ')');
+    var actualCount = result.tokens.length;
+    var label = actualCount + ' ticket' + (actualCount > 1 ? 's' : '');
+    var statusText;
+    if (result.countChanged) {
+      statusText = '✅ Updated (' + result.countChanged.from + '→' + result.countChanged.to + ' tickets)';
+    } else {
+      statusText = '✅ Sent (' + label + ')';
+    }
+    sheet.getRange(row, colMap.statusCol).setValue(statusText);
     sheet.getRange(row, colMap.sentAtCol).setValue(
       Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy h:mm a')
     );
@@ -634,12 +642,24 @@ function resendSelectedRow() {
     return;
   }
 
+  // Check if ticket count has changed from what was previously sent
+  var existingTokens = getCellValue(sheet, row, colMap.tokensCol);
+  var oldCount = existingTokens ? existingTokens.split(',').length : 0;
+  if (oldCount > 0 && oldCount !== ticketCount) {
+    var countConfirm = ui.alert(
+      'Ticket count changed',
+      'Ticket count changed from ' + oldCount + ' to ' + ticketCount + ' for ' + email + '. Continue?',
+      ui.ButtonSet.YES_NO
+    );
+    if (countConfirm !== ui.Button.YES) return;
+  }
+
   // Clear status so sendOneRow will treat it as a fresh send
   sheet.getRange(row, colMap.statusCol).setValue('');
   sheet.getRange(row, colMap.sentAtCol).setValue('');
   sheet.getRange(row, colMap.tokensCol).setValue('');
 
-  sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
+  sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, true);
 
   var statusAfter = getCellValue(sheet, row, colMap.statusCol);
   if (statusAfter.indexOf('✅') === 0) {
