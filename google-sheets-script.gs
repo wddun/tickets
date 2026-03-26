@@ -473,9 +473,37 @@ function onRowComplete(e) {
     var status     = getCellValue(sheet, row, colMap.statusCol);
 
     if (!firstName || !lastName || !email || !ticketsRaw) continue;
-    if (status !== '') continue; // already sent or errored
 
     var ticketCount = parseTicketCount(ticketsRaw);
+
+    // If the row was already sent and the edit was in a data column, auto-resend as an update
+    if (status.indexOf('✅') === 0) {
+      // Only resend if the edit touched a data column (not status/sentAt/tokens)
+      var editedCol = e.range.getColumn();
+      if (editedCol >= colMap.statusCol) continue; // edited a system column, skip
+
+      // For single-cell edits, skip if the value didn't actually change
+      if (e.range.getNumRows() === 1 && e.range.getNumColumns() === 1 && e.oldValue === e.value) continue;
+
+      if (!ticketCount || !eventId || !serverUrl) continue;
+
+      var existingTokensStr = getCellValue(sheet, row, colMap.tokensCol);
+      var tokenList = existingTokensStr
+        ? existingTokensStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean)
+        : [];
+
+      // Clear status/sentAt/tokens before resending
+      sheet.getRange(row, colMap.statusCol).setValue('');
+      sheet.getRange(row, colMap.sentAtCol).setValue('');
+      sheet.getRange(row, colMap.tokensCol).setValue('');
+      SpreadsheetApp.flush();
+
+      sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, true, tokenList);
+      continue;
+    }
+
+    if (status !== '') continue; // errored or other non-✅ status, skip
+
     if (!ticketCount) {
       sheet.getRange(row, colMap.statusCol).setValue('⚠️ Invalid ticket count');
       continue;
@@ -497,7 +525,7 @@ function onRowComplete(e) {
 //  sendOneRow — sends one attendee and updates status columns
 //  colMap comes from getColumnMap() for dynamic column support
 // ============================================================
-function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, isResend) {
+function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, isResend, existingTokens) {
   sheet.getRange(row, colMap.statusCol).setValue('⏳ Sending...');
   SpreadsheetApp.flush();
 
@@ -526,13 +554,14 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
         method:           'post',
         contentType:      'application/json',
         payload:          JSON.stringify({
-          firstName:    firstName,
-          lastName:     lastName,
-          email:        email,
-          eventId:      eventId,
-          ticketCount:  ticketCount,
-          customFields: customFields,
-          resend:       isResend === true
+          firstName:      firstName,
+          lastName:       lastName,
+          email:          email,
+          eventId:        eventId,
+          ticketCount:    ticketCount,
+          customFields:   customFields,
+          resend:         isResend === true,
+          existingTokens: (isResend && existingTokens && existingTokens.length) ? existingTokens : undefined
         }),
         muteHttpExceptions: true
       });
@@ -553,6 +582,8 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
     var statusText;
     if (result.countChanged) {
       statusText = '✅ Updated (' + result.countChanged.from + '→' + result.countChanged.to + ' tickets)';
+    } else if (isResend) {
+      statusText = '✅ Updated (' + label + ')';
     } else {
       statusText = '✅ Sent (' + label + ')';
     }
@@ -642,9 +673,13 @@ function resendSelectedRow() {
     return;
   }
 
-  // Check if ticket count has changed from what was previously sent
-  var existingTokens = getCellValue(sheet, row, colMap.tokensCol);
-  var oldCount = existingTokens ? existingTokens.split(',').length : 0;
+  // Read existing tokens before clearing (to pin the resend to the right registrationId)
+  var existingTokensStr = getCellValue(sheet, row, colMap.tokensCol);
+  var tokenList = existingTokensStr
+    ? existingTokensStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean)
+    : [];
+  var oldCount = tokenList.length;
+
   if (oldCount > 0 && oldCount !== ticketCount) {
     var countConfirm = ui.alert(
       'Ticket count changed',
@@ -659,7 +694,7 @@ function resendSelectedRow() {
   sheet.getRange(row, colMap.sentAtCol).setValue('');
   sheet.getRange(row, colMap.tokensCol).setValue('');
 
-  sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, true);
+  sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, true, tokenList);
 
   var statusAfter = getCellValue(sheet, row, colMap.statusCol);
   if (statusAfter.indexOf('✅') === 0) {

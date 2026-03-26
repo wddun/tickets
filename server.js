@@ -335,14 +335,41 @@ app.post('/api/register-bulk', async (req, res) => {
     const customFields = (req.body.customFields && typeof req.body.customFields === 'object')
         ? req.body.customFields : {};
 
-    const existingTickets = db.data.tickets.filter(t => t.email === email && t.eventId === eventId);
+    // When resending, use the tokens the sheet already has to pin to the exact registrationId.
+    // Falling back to email+eventId would match ALL rows for that email (e.g. 2 different rows).
+    let existingTickets = [];
+    if (isResend && Array.isArray(req.body.existingTokens) && req.body.existingTokens.length > 0) {
+        const tokenSet = new Set(req.body.existingTokens);
+        const matched = db.data.tickets.find(t => tokenSet.has(t.token));
+        if (matched) {
+            existingTickets = db.data.tickets.filter(t => t.registrationId === matched.registrationId);
+        }
+    } else if (!isResend) {
+        // New row — no lookup needed, always create fresh
+    }
 
     let ticketsToSend;
     let countChanged = null;
+    let changes = [];
     try {
         if (isResend && existingTickets.length > 0) {
             const existingCount = existingTickets.length;
             const registrationId = existingTickets[0].registrationId;
+
+            // Compute what changed for the email
+            const oldTicket = existingTickets[0];
+            const oldName = oldTicket.name || '';
+            const oldCustomFields = oldTicket.customFields || {};
+            if (oldName !== fullName) changes.push(`Name: <strong>${oldName}</strong> → <strong>${fullName}</strong>`);
+            if (existingCount !== count) changes.push(`Ticket count: <strong>${existingCount}</strong> → <strong>${count}</strong>`);
+            const allFieldKeys = new Set([...Object.keys(oldCustomFields), ...Object.keys(customFields)]);
+            allFieldKeys.forEach(k => {
+                const oldVal = oldCustomFields[k] ?? null;
+                const newVal = customFields[k] ?? null;
+                if (oldVal !== newVal) {
+                    changes.push(`${k}: <strong>${oldVal ?? '(none)'}</strong> → <strong>${newVal ?? '(removed)'}</strong>`);
+                }
+            });
 
             if (count > existingCount) {
                 // Add more tickets with same registrationId
@@ -437,7 +464,9 @@ app.post('/api/register-bulk', async (req, res) => {
 
         // Build one email with all QR codes
         if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
-            const ticketLabel = count === 1 ? 'Ticket' : `${count} Tickets`;
+            const actualCount = ticketsToSend.length;
+            const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
+            const isUpdate = isResend && changes.length > 0;
 
             const walletButton = (token) => `
                 <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
@@ -447,7 +476,7 @@ app.post('/api/register-bulk', async (req, res) => {
             const qrBlocks = ticketsToSend.map((ticket, i) => `
                 <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
                     <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
-                        ${count > 1 ? `Ticket ${i + 1} of ${count}` : 'Your Ticket'}
+                        ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Your Ticket'}
                     </p>
                     <img src="${BASE_URL}/qr/${ticket.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
                     <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${ticket.token}</p>
@@ -455,9 +484,9 @@ app.post('/api/register-bulk', async (req, res) => {
                 </div>
             `).join('');
 
-            const addAllButton = count > 1 ? `
+            const addAllButton = actualCount > 1 ? `
                 <div style="text-align:center; margin:24px 0 8px;">
-                    <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${count} passes to Apple Wallet at once:</p>
+                    <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${actualCount} passes to Apple Wallet at once:</p>
                     <a href="${BASE_URL}/api/passes/bundle/${ticketsToSend[0].registrationId}" style="display:inline-block; text-decoration:none;">
                         <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block;">
                     </a>
@@ -466,11 +495,18 @@ app.post('/api/register-bulk', async (req, res) => {
 
             await sendEmail({
                 to: email,
-                subject: `Your ${ticketLabel} for ${event.name}`,
+                subject: isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`,
                 html: `
                     <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
                         <h2 style="color:#333; margin-bottom:4px;">Hey ${firstName}!</h2>
-                        <p style="color:#555;">You're registered for <strong>${event.name}</strong>.</p>
+                        <p style="color:#555;">${isUpdate ? `Your registration for <strong>${event.name}</strong> has been updated.` : `You're registered for <strong>${event.name}</strong>.`}</p>
+                        ${isUpdate ? `
+                        <div style="background:#fffbeb; border:1px solid #fcd34d; border-radius:8px; padding:14px 18px; margin:16px 0;">
+                            <p style="font-weight:600; color:#92400e; margin:0 0 8px;">What changed:</p>
+                            <ul style="margin:0; padding-left:20px; color:#78350f;">
+                                ${changes.map(c => `<li style="margin:4px 0;">${c}</li>`).join('')}
+                            </ul>
+                        </div>` : ''}
                         ${event.imageUrl ? `
                         <div style="text-align:center; margin:20px 0;">
                             <img src="${BASE_URL}${event.imageUrl}" alt="${event.name}" style="max-width:100%; border-radius:12px;" />
@@ -490,7 +526,7 @@ app.post('/api/register-bulk', async (req, res) => {
                         <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
                         ${addAllButton}
                         <p style="font-size:13px; color:#888; text-align:center; margin-bottom:4px;">
-                            ${count > 1 ? 'Or add tickets individually below.' : 'Show this QR code at the door.'}
+                            ${actualCount > 1 ? 'Or add tickets individually below.' : 'Show this QR code at the door.'}
                         </p>
                         <p style="font-size:12px; color:#e53e3e; text-align:center; margin-bottom:4px; font-weight:600;">
                             ⚠️ Each ticket is valid for one-time entry only and cannot be reused once scanned.
@@ -499,7 +535,7 @@ app.post('/api/register-bulk', async (req, res) => {
                     </div>
                 `
             });
-            console.log(`📧 Email sent → ${email} (${fullName}, ${count} ticket${count > 1 ? 's' : ''})`);
+            console.log(`📧 Email ${isUpdate ? 'update' : 'sent'} → ${email} (${fullName}, ${actualCount} ticket${actualCount > 1 ? 's' : ''})`);
         }
 
         const response = {
