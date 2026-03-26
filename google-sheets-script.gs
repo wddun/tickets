@@ -492,12 +492,8 @@ function onRowComplete(e) {
         ? existingTokensStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean)
         : [];
 
-      // Clear status/sentAt/tokens before resending
-      sheet.getRange(row, colMap.statusCol).setValue('');
-      sheet.getRange(row, colMap.sentAtCol).setValue('');
-      sheet.getRange(row, colMap.tokensCol).setValue('');
-      SpreadsheetApp.flush();
-
+      // Don't clear status/sentAt/tokens here — each setValue re-triggers this function.
+      // sendOneRow starts by setting "⏳ Sending..." which overwrites them anyway.
       sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, true, tokenList);
       continue;
     }
