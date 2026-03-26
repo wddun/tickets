@@ -1015,11 +1015,11 @@
 
                 const allIn = scanned === total && total > 0;
                 const unchecked = total - scanned;
-                const btns = allIn ? '' : `
-                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                const undoBtn = scanned > 0 ? `<button class="btn btn-secondary btn-sm" onclick="undoCheckin('${g.registrationId}')">Undo</button>` : '';
+                const checkInBtns = allIn ? '' : `
                         ${unchecked > 1 ? `<button class="btn btn-secondary btn-sm" onclick='openTicketPicker(${JSON.stringify(g.registrationId)}, ${JSON.stringify(g.tickets)})'>Check In 1</button>` : ''}
-                        <button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">${unchecked > 1 ? 'Check In All' : 'Check In'}</button>
-                    </div>`;
+                        <button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">${unchecked > 1 ? 'Check In All' : 'Check In'}</button>`;
+                const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap">${checkInBtns}${undoBtn}</div>`;
                 return `
         <div class="attendee-row${isChecked ? ' row-selected' : ''}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
@@ -1099,6 +1099,16 @@
                 if (event) await fetchAndRender(event, true);
             } else {
                 alert('Check-in failed.');
+            }
+        }
+
+        async function undoCheckin(registrationId) {
+            const r = await fetch(`/api/checkin/${registrationId}`, { method: 'DELETE' });
+            if (r.ok) {
+                const event = events.find(e => e.id === selectedId);
+                if (event) await fetchAndRender(event, true);
+            } else {
+                alert('Undo failed.');
             }
         }
 

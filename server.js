@@ -813,6 +813,28 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
+app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
+    const { registrationId } = req.params;
+
+    let tickets = db.data.tickets.filter(t => t.registrationId === registrationId);
+    if (!tickets.length) {
+        const single = db.data.tickets.find(t => t.id === registrationId);
+        if (single) tickets = [single];
+    }
+
+    if (!tickets.length) return res.status(404).json({ error: 'Not found' });
+
+    let clearedCount = 0;
+    tickets.forEach(t => {
+        if (t.used_at) { t.used_at = null; clearedCount++; }
+    });
+
+    console.log(`[uncheckin] cleared ${clearedCount} ticket(s) for id: ${registrationId} (user: ${req.session.userId})`);
+    await db.write();
+    ticketStatusCache.clear();
+    res.json({ success: true });
+});
+
 // Helper: group all tickets for an email by event (for web scanner "All Tickets" view)
 function buildPersonTickets(email, tickets, events) {
     const byEvent = {};
