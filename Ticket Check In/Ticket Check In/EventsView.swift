@@ -160,9 +160,17 @@ struct EventsListView: View {
                 if isLoading && events.isEmpty {
                     ProgressView("Loading events…")
                 } else if let error = errorMessage {
-                    ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
+                    if #available(iOS 17, *) {
+                        ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
+                    } else {
+                        VStack(spacing: 8) { Image(systemName: "exclamationmark.triangle").font(.largeTitle); Text("Error").font(.headline); Text(error).font(.subheadline).foregroundStyle(.secondary) }
+                    }
                 } else if events.isEmpty {
-                    ContentUnavailableView("No Events", systemImage: "calendar.badge.exclamationmark", description: Text("No events found."))
+                    if #available(iOS 17, *) {
+                        ContentUnavailableView("No Events", systemImage: "calendar.badge.exclamationmark", description: Text("No events found."))
+                    } else {
+                        VStack(spacing: 8) { Image(systemName: "calendar.badge.exclamationmark").font(.largeTitle); Text("No Events").font(.headline); Text("No events found.").font(.subheadline).foregroundStyle(.secondary) }
+                    }
                 } else {
                     List(events) { event in
                         Button {
@@ -306,9 +314,17 @@ struct AttendeesView: View {
             if isLoading {
                 ProgressView("Loading attendees…")
             } else if let error = errorMessage {
-                ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
+                if #available(iOS 17, *) {
+                    ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
+                } else {
+                    VStack(spacing: 8) { Image(systemName: "exclamationmark.triangle").font(.largeTitle); Text("Error").font(.headline); Text(error).font(.subheadline).foregroundStyle(.secondary) }
+                }
             } else if tickets.isEmpty {
-                ContentUnavailableView("No Attendees", systemImage: "person.slash", description: Text("No tickets found for this event."))
+                if #available(iOS 17, *) {
+                    ContentUnavailableView("No Attendees", systemImage: "person.slash", description: Text("No tickets found for this event."))
+                } else {
+                    VStack(spacing: 8) { Image(systemName: "person.slash").font(.largeTitle); Text("No Attendees").font(.headline); Text("No tickets found for this event.").font(.subheadline).foregroundStyle(.secondary) }
+                }
             } else {
                 List(filteredGroups) { group in
                     AttendeeGroupRow(
