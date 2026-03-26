@@ -458,6 +458,8 @@ function onRowComplete(e) {
 
   try {
   var colMap   = getColumnMap(sheet);
+  var cache    = CacheService.getScriptCache();
+  var ssId     = e.source.getId();
 
   // Get settings once up front
   var ss        = SpreadsheetApp.getActive();
@@ -492,6 +494,11 @@ function onRowComplete(e) {
         ? existingTokensStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean)
         : [];
 
+      // Guard against the trigger firing twice for the same edit (Google Sheets behavior)
+      var cacheKey = ssId + '_r' + row + '_' + ticketCount + '_' + email;
+      if (cache.get(cacheKey)) continue;
+      cache.put(cacheKey, '1', 30);
+
       sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, true, tokenList);
       continue;
     }
@@ -507,6 +514,10 @@ function onRowComplete(e) {
       sheet.getRange(row, colMap.statusCol).setValue('⚠️ Create the event first (Event tab)');
       continue;
     }
+
+    var cacheKey = ssId + '_r' + row + '_' + ticketCount + '_' + email;
+    if (cache.get(cacheKey)) continue;
+    cache.put(cacheKey, '1', 30);
 
     sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
   }
