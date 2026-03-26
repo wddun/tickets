@@ -458,6 +458,8 @@ function onRowComplete(e) {
 
   try {
   var colMap   = getColumnMap(sheet);
+  var cache    = CacheService.getScriptCache();
+  var ssId     = e.source.getId();
 
   // Get settings once up front
   var ss        = SpreadsheetApp.getActive();
@@ -487,13 +489,18 @@ function onRowComplete(e) {
 
       if (!ticketCount || !eventId || !serverUrl) continue;
 
+      // Deduplicate: skip if this row was already processed in the last 60 seconds.
+      // This catches re-triggers caused by sendOneRow writing back to the sheet,
+      // and duplicate installable triggers if the user has accidentally installed two.
+      var cacheKey = ssId + '_r' + row;
+      if (cache.get(cacheKey)) continue;
+      cache.put(cacheKey, '1', 60);
+
       var existingTokensStr = getCellValue(sheet, row, colMap.tokensCol);
       var tokenList = existingTokensStr
         ? existingTokensStr.split(',').map(function(t) { return t.trim(); }).filter(Boolean)
         : [];
 
-      // Don't clear status/sentAt/tokens here — each setValue re-triggers this function.
-      // sendOneRow starts by setting "⏳ Sending..." which overwrites them anyway.
       sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, true, tokenList);
       continue;
     }
@@ -509,6 +516,11 @@ function onRowComplete(e) {
       sheet.getRange(row, colMap.statusCol).setValue('⚠️ Create the event first (Event tab)');
       continue;
     }
+
+    // Deduplicate new-row sends the same way
+    var cacheKey = ssId + '_r' + row;
+    if (cache.get(cacheKey)) continue;
+    cache.put(cacheKey, '1', 60);
 
     sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
   }
