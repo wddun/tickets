@@ -157,9 +157,20 @@ if (db.data.event && db.data.events.length === 0) {
 }
 
 // --- Auth API ---
-// Signup disabled — admin account is created via /api/auth/setup-admin on first run
-app.post('/api/auth/signup', (req, res) => {
-    res.status(403).json({ error: 'Registration is not open' });
+// Signup enabled — creates a standard staff account
+app.post('/api/auth/signup', loginLimiter, async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+
+    const normalizedEmail = email.toLowerCase();
+    const existing = db.data.users.find(u => u.email === normalizedEmail);
+    if (existing) return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = { id: nanoid(), email: normalizedEmail, password: hashedPassword };
+    await db.update(data => data.users.push(newUser));
+    req.session.userId = newUser.id;
+    res.json({ success: true, user: { id: newUser.id, email: newUser.email } });
 });
 
 // One-time admin setup — only works if no admin account exists yet
