@@ -57,6 +57,7 @@ async function sendEmail({ to, subject, html }) {
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '20mb' }));
 app.use(express.static('public'));
+app.get('/support', (req, res) => res.redirect('/support.html'));
 app.use(session({
     store: new FileStore({
         path: './sessions',
