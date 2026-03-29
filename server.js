@@ -1023,16 +1023,12 @@ async function generatePassBuffer(ticket, event) {
     if (locValue) {
         pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
     }
-    if (cfEntries[1]) {
-        pass.auxiliaryFields.push({ key: 'cf_1', label: cfEntries[1][0].toUpperCase(), value: String(cfEntries[1][1]) });
-    }
-
     if (ticket.used_at) {
         pass.auxiliaryFields.push({ key: "status", label: "STATUS", value: "USED / SCANNED" });
     }
 
     // Back: remaining custom fields
-    cfEntries.slice(2).forEach(([label, value], i) => {
+    cfEntries.slice(1).forEach(([label, value], i) => {
         pass.backFields.push({ key: `cf_back_${i}`, label: label, value: String(value) });
     });
 
