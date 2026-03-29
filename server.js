@@ -1014,12 +1014,17 @@ async function generatePassBuffer(ticket, event) {
         pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
     }
 
-    // Auxiliary row: Location
+    // Auxiliary row: Location (with first custom field on a new line for readability)
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
-    const locValue = locName && locAddress && locName !== locAddress
+    let locValue = locName && locAddress && locName !== locAddress
         ? `${locName}\n${locAddress}`
         : locName || locAddress;
+    if (locValue && cfEntries[0]) {
+        const cfLabel = String(cfEntries[0][0]).toUpperCase();
+        const cfValue = String(cfEntries[0][1]);
+        locValue = `${locValue}\n${cfLabel}: ${cfValue}`;
+    }
     if (locValue) {
         pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
     }
