@@ -1050,14 +1050,11 @@ async function generatePassBuffer(ticket, event) {
     if (event.imageUrl) {
         const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
         if (fs.existsSync(imagePath)) {
-            const [logo1x, logo2x, thumb1x, thumb2x] = await Promise.all([
-                sharp(imagePath).resize(160, 50, { fit: 'inside' }).png().toBuffer(),
-                sharp(imagePath).resize(320, 100, { fit: 'inside' }).png().toBuffer(),
+            const [thumb1x, thumb2x] = await Promise.all([
                 sharp(imagePath).resize(90, 90, { fit: 'cover' }).png().toBuffer(),
                 sharp(imagePath).resize(180, 180, { fit: 'cover' }).png().toBuffer(),
             ]);
-            pass.addBuffer('logo.png', logo1x);
-            pass.addBuffer('logo@2x.png', logo2x);
+            // Keep the default pass logo for the top-left; only swap the right-side thumbnail.
             pass.addBuffer('thumbnail.png', thumb1x);
             pass.addBuffer('thumbnail@2x.png', thumb2x);
         }
