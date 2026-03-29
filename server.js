@@ -995,15 +995,10 @@ async function generatePassBuffer(ticket, event) {
     const customFields = ticket.customFields || {};
     const cfEntries = Object.entries(customFields);
 
-    // Header row: first custom field (notes/T-shirt size)
-    if (cfEntries[0]) {
-        pass.headerFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
-    }
-
-    // Secondary row: Date
+    // Header row: Date
     const eventDate = new Date(event.time);
     if (!Number.isNaN(eventDate.getTime())) {
-        pass.secondaryFields.push({
+        pass.headerFields.push({
             key: "date", label: "DATE", value: eventDate,
             dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
         });
@@ -1013,7 +1008,12 @@ async function generatePassBuffer(ticket, event) {
         pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
         pass.expirationDate = expiresAt;
     } else {
-        pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
+        pass.headerFields.push({ key: "date", label: "DATE", value: String(event.time) });
+    }
+
+    // Secondary row: first custom field (single line note)
+    if (cfEntries[0]) {
+        pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
     }
 
     // Auxiliary row: Location (two lines)
