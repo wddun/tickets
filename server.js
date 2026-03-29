@@ -1010,19 +1010,21 @@ async function generatePassBuffer(ticket, event) {
     } else {
         pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
     }
-    // Auxiliary row: show first custom field for more readable space
-    if (cfEntries[0]) {
-        pass.auxiliaryFields.push({ key: 'cf_0_aux', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
-    }
-
-    // Location (moved to back to avoid crowding long notes)
+    // Location + first custom field (stacked in the same field for readability)
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
-    const locValue = locName && locAddress && locName !== locAddress
+    let locValue = locName && locAddress && locName !== locAddress
         ? `${locName}\n${locAddress}`
         : locName || locAddress;
+    if (locValue && cfEntries[0]) {
+        const cfLabel = String(cfEntries[0][0]).toUpperCase();
+        const cfValue = String(cfEntries[0][1]);
+        locValue = `${locValue}\n${cfLabel}: ${cfValue}`;
+    }
     if (locValue) {
-        pass.backFields.push({ key: "loc", label: "LOCATION", value: locValue });
+        pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
+    } else if (cfEntries[0]) {
+        pass.auxiliaryFields.push({ key: 'cf_0_aux', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
     }
     if (ticket.used_at) {
         pass.auxiliaryFields.push({ key: "status", label: "STATUS", value: "USED / SCANNED" });
