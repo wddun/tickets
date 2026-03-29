@@ -1010,19 +1010,18 @@ async function generatePassBuffer(ticket, event) {
     } else {
         pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
     }
-    // Location in secondary row (to keep custom field readable on its own row)
+    if (cfEntries[0]) {
+        pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
+    }
+
+    // Auxiliary row: Location
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
     const locValue = locName && locAddress && locName !== locAddress
         ? `${locName}\n${locAddress}`
         : locName || locAddress;
     if (locValue) {
-        pass.secondaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
-    }
-
-    // First custom field on auxiliary row for maximum space
-    if (cfEntries[0]) {
-        pass.auxiliaryFields.push({ key: 'cf_0_aux', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
+        pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
     }
     if (ticket.used_at) {
         pass.auxiliaryFields.push({ key: "status", label: "STATUS", value: "USED / SCANNED" });
