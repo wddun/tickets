@@ -1015,7 +1015,7 @@ async function generatePassBuffer(ticket, event) {
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
     const locValue = locName && locAddress && locName !== locAddress
-        ? `${locName}\n${locAddress}`
+        ? `${locName} — ${locAddress}`
         : locName || locAddress;
     if (locValue) {
         pass.secondaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
