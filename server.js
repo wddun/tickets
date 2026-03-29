@@ -1010,10 +1010,6 @@ async function generatePassBuffer(ticket, event) {
     } else {
         pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
     }
-    if (cfEntries[0]) {
-        pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
-    }
-
     // Auxiliary row: Location (with first custom field on a new line for readability)
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
