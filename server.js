@@ -995,25 +995,40 @@ async function generatePassBuffer(ticket, event) {
     const customFields = ticket.customFields || {};
     const cfEntries = Object.entries(customFields);
 
-    // Header row: Date
     const eventDate = new Date(event.time);
-    if (!Number.isNaN(eventDate.getTime())) {
-        pass.headerFields.push({
-            key: "date", label: "DATE", value: eventDate,
-            dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
-        });
-        const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
-        const windowEnd = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
-        const expiresAt = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
-        pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
-        pass.expirationDate = expiresAt;
-    } else {
-        pass.headerFields.push({ key: "date", label: "DATE", value: String(event.time) });
-    }
+    const hasNote = !!cfEntries[0];
 
-    // Secondary row: first custom field (single line note)
-    if (cfEntries[0]) {
+    // If notes exist, keep date in the header and notes in secondary.
+    // If no notes, place date in secondary (so the row isn't empty).
+    if (hasNote) {
+        if (!Number.isNaN(eventDate.getTime())) {
+            pass.headerFields.push({
+                key: "date", label: "DATE", value: eventDate,
+                dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
+            });
+            const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
+            const windowEnd = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
+            const expiresAt = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
+            pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
+            pass.expirationDate = expiresAt;
+        } else {
+            pass.headerFields.push({ key: "date", label: "DATE", value: String(event.time) });
+        }
         pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
+    } else {
+        if (!Number.isNaN(eventDate.getTime())) {
+            pass.secondaryFields.push({
+                key: "date", label: "DATE", value: eventDate,
+                dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
+            });
+            const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
+            const windowEnd = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
+            const expiresAt = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
+            pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
+            pass.expirationDate = expiresAt;
+        } else {
+            pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
+        }
     }
 
     // Auxiliary row: Location (two lines)
