@@ -995,20 +995,10 @@ async function generatePassBuffer(ticket, event) {
     const customFields = ticket.customFields || {};
     const cfEntries = Object.entries(customFields);
 
-    // Header row: Location (replaces the previous date position)
-    const locName = event.location?.name || '';
-    const locAddress = event.location?.address || '';
-    const locValue = locName && locAddress && locName !== locAddress
-        ? `${locName} — ${locAddress}`
-        : locName || locAddress;
-    if (locValue) {
-        pass.headerFields.push({ key: "loc", label: "LOCATION", value: locValue });
-    }
-
-    // Secondary row: Date
+    // Header row: Date
     const eventDate = new Date(event.time);
     if (!Number.isNaN(eventDate.getTime())) {
-        pass.secondaryFields.push({
+        pass.headerFields.push({
             key: "date", label: "DATE", value: eventDate,
             dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
         });
@@ -1018,7 +1008,17 @@ async function generatePassBuffer(ticket, event) {
         pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
         pass.expirationDate = expiresAt;
     } else {
-        pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
+        pass.headerFields.push({ key: "date", label: "DATE", value: String(event.time) });
+    }
+
+    // Secondary row: Location (keep full name + address)
+    const locName = event.location?.name || '';
+    const locAddress = event.location?.address || '';
+    const locValue = locName && locAddress && locName !== locAddress
+        ? `${locName}\n${locAddress}`
+        : locName || locAddress;
+    if (locValue) {
+        pass.secondaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
     }
 
     // First custom field under location in auxiliary row
