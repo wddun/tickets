@@ -43,10 +43,14 @@ struct ValidateResponse: Codable {
     let status: String   // "valid", "used", "invalid"
     let message: String?
     let name: String?
+    let firstName: String?
+    let lastName: String?
     let email: String?
     let used_at: String?
     let ticketId: String?
     let registrationId: String?
+    let eventName: String?
+    let customFields: [String: String]?
 }
 
 struct AuthUser: Codable {
