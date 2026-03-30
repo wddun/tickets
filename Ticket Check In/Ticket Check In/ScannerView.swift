@@ -34,6 +34,7 @@ struct ScannerView: View {
             bottomBar
             resultOverlay
         }
+        .task { await api.checkAuth() }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .sheet(isPresented: $showingDetail) {
