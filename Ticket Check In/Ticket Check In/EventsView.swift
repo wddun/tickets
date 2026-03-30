@@ -275,6 +275,7 @@ struct EventRow: View {
 
 struct AttendeesView: View {
     let event: Event
+    @StateObject private var api = APIService.shared
     @State private var tickets: [Ticket] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -282,6 +283,8 @@ struct AttendeesView: View {
     @State private var checkingIn: Set<String> = []
     @State private var refreshTimer: Timer?
     @State private var pickerGroup: AttendeeGroup? = nil
+
+    private var canUndo: Bool { api.currentUser?.email == "willdunning01@gmail.com" }
 
     var groups: [AttendeeGroup] {
         var dict: [String: AttendeeGroup] = [:]
@@ -330,8 +333,10 @@ struct AttendeesView: View {
                     AttendeeGroupRow(
                         group: group,
                         isProcessing: checkingIn.contains(group.registrationId),
+                        canUndo: canUndo,
                         onCheckInOne: { pickerGroup = group },
-                        onCheckInAll: { checkInAll(group: group) }
+                        onCheckInAll: { checkInAll(group: group) },
+                        onUndo: { undoGroup(group: group) }
                     )
                 }
                 .searchable(text: $searchText, prompt: "Search by name or email")
@@ -403,6 +408,22 @@ struct AttendeesView: View {
                 CheckInFeedback.shared.error()
             } else {
                 CheckInFeedback.shared.success()
+            }
+            checkingIn.remove(group.registrationId)
+        }
+    }
+
+    private func undoGroup(group: AttendeeGroup) {
+        guard !checkingIn.contains(group.registrationId) else { return }
+        checkingIn.insert(group.registrationId)
+        Task {
+            do {
+                try await APIService.shared.undoCheckIn(registrationId: group.registrationId)
+                for i in tickets.indices where tickets[i].registrationId == group.registrationId {
+                    tickets[i].used_at = nil
+                }
+            } catch {
+                CheckInFeedback.shared.error()
             }
             checkingIn.remove(group.registrationId)
         }
@@ -493,8 +514,10 @@ struct TicketPickerSheet: View {
 struct AttendeeGroupRow: View {
     let group: AttendeeGroup
     let isProcessing: Bool
+    var canUndo: Bool = false
     let onCheckInOne: () -> Void
     let onCheckInAll: () -> Void
+    var onUndo: () -> Void = {}
 
     var body: some View {
         HStack {
@@ -525,9 +548,23 @@ struct AttendeeGroupRow: View {
             }
             Spacer()
             if group.isFullyCheckedIn {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.green)
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.green)
+                    if canUndo {
+                        Button(action: onUndo) {
+                            Text("Undo")
+                                .font(.caption.bold())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(Color(.systemGray5))
+                                .foregroundStyle(.primary)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             } else if isProcessing {
                 ProgressView()
                     .scaleEffect(0.8)
