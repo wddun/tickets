@@ -75,7 +75,8 @@ struct ScannerView: View {
     @ViewBuilder private var bottomBar: some View {
         VStack {
             Spacer()
-            HStack(spacing: 12) {
+            VStack(spacing: 10) {
+                lastScanChip
                 Button(action: switchToManual) {
                     Label("Manual Check-in", systemImage: "person.text.rectangle")
                         .font(.system(size: 16, weight: .semibold))
@@ -84,7 +85,6 @@ struct ScannerView: View {
                         .padding(.vertical, 12)
                         .background(.ultraThinMaterial, in: Capsule())
                 }
-                lastScanChip
             }
             .padding(.bottom, 40)
         }
