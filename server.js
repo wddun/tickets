@@ -885,8 +885,6 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-// Helper: group all tickets for an email by event (for web scanner "All Tickets" view)
-
 app.post('/api/validate', async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'Token is required' });
@@ -900,28 +898,23 @@ app.post('/api/validate', async (req, res) => {
     }
 
     const event = db.data.events.find(e => e.id === ticket.eventId);
+    const ticketFields = {
+        name: ticket.name, firstName: ticket.firstName ?? null, lastName: ticket.lastName ?? null,
+        email: ticket.email, customFields: ticket.customFields ?? null,
+        ticketId: ticket.id, registrationId: ticket.registrationId,
+        eventId: ticket.eventId, eventName: event ? event.name : null,
+    };
 
     if (ticket.used_at) {
         console.log(`[validate] ALREADY USED — ticket: ${ticket.id} name: ${ticket.name} used_at: ${ticket.used_at}`);
-        return res.json({
-            status: 'used', message: 'Ticket already used',
-            used_at: ticket.used_at, name: ticket.name, email: ticket.email,
-            ticketId: ticket.id, registrationId: ticket.registrationId,
-            eventId: ticket.eventId, eventName: event ? event.name : null,
-        });
+        return res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, ...ticketFields });
     }
 
     ticket.used_at = new Date().toISOString();
     await db.write();
     ticketStatusCache.clear();
 
-    res.json({
-        status: 'valid',
-        message: `Welcome to ${event ? event.name : 'the event'}!`,
-        name: ticket.name, email: ticket.email,
-        ticketId: ticket.id, registrationId: ticket.registrationId,
-        eventId: ticket.eventId, eventName: event ? event.name : null,
-    });
+    res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'}!`, ...ticketFields });
 });
 
 // Helper: QR Generation Route (Alternative for frontend display)
