@@ -91,7 +91,7 @@ struct ScannerView: View {
     }
 
     @ViewBuilder private var lastScanChip: some View {
-        if let last = lastResult, scanResult == nil {
+        if let last = lastResult {
             Button(action: { showingDetail = true }) {
                 HStack(spacing: 6) {
                     Image(systemName: last.status == .success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
@@ -105,6 +105,7 @@ struct ScannerView: View {
                 .padding(.vertical, 12)
                 .background(.ultraThinMaterial, in: Capsule())
             }
+            .opacity(scanResult == nil ? 1 : 0)
         }
     }
 
