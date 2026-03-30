@@ -54,10 +54,18 @@ struct ScannerView: View {
         }
     }
 
+    private var undoAction: (() -> Void)? {
+        guard let result = scanResult, canUndo, result.status == .success else { return nil }
+        return handleUndo
+    }
+
+    private var detailAction: (() -> Void)? {
+        guard let result = scanResult, result.status != .error else { return nil }
+        return { showingDetail = true }
+    }
+
     @ViewBuilder private var resultOverlay: some View {
         if let result = scanResult {
-            let undoAction: (() -> Void)? = (canUndo && result.status == .success) ? handleUndo : nil
-            let detailAction: (() -> Void)? = result.status != .error ? { showingDetail = true } : nil
             ScanResultOverlay(result: result, onUndo: undoAction, onViewDetails: detailAction)
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.2), value: scanResult != nil)
