@@ -231,4 +231,13 @@ class APIService: ObservableObject {
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
+
+    func undoCheckIn(registrationId: String) async throws {
+        guard let url = URL(string: "\(baseURL)/api/checkin/\(registrationId)") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+    }
 }
