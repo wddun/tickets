@@ -12,7 +12,7 @@ private let adminEmail = "willdunning01@gmail.com"
 struct ScannerView: View {
     let switchToManual: () -> Void
 
-    @StateObject private var api = APIService.shared
+    @ObservedObject private var api = APIService.shared
 
     @State private var scanResult: ScanResult?
     @State private var lastResult: ScanResult?       // persists after overlay dismisses
@@ -30,65 +30,72 @@ struct ScannerView: View {
         ZStack {
             CameraPreviewView(isScanning: $isScanning, onCode: handleCode)
                 .ignoresSafeArea()
-
-            // Viewfinder frame
-            VStack {
-                Spacer()
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.white.opacity(0.7), lineWidth: 3)
-                    .frame(width: 260, height: 260)
-                Spacer()
-                Spacer()
-            }
-
-            // Result overlay
-            if let result = scanResult {
-                ScanResultOverlay(
-                    result: result,
-                    onUndo: (canUndo && result.status == .success) ? handleUndo : nil,
-                    onViewDetails: result.status != .error ? { showingDetail = true } : nil
-                )
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.2), value: scanResult != nil)
-            }
-
-            // Bottom bar: manual check-in + last-scan chip
-            VStack {
-                Spacer()
-                HStack(spacing: 12) {
-                    Button(action: switchToManual) {
-                        Label("Manual Check-in", systemImage: "person.text.rectangle")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
-                            .background(.ultraThinMaterial, in: Capsule())
-                    }
-
-                    if let last = lastResult, scanResult == nil {
-                        Button(action: { showingDetail = true }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: last.status == .success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                    .foregroundStyle(last.status == .success ? .green : .orange)
-                                Text(last.firstName ?? last.name)
-                                    .lineLimit(1)
-                            }
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 12)
-                            .background(.ultraThinMaterial, in: Capsule())
-                        }
-                    }
-                }
-                .padding(.bottom, 40)
-            }
+            viewfinderFrame
+            resultOverlay
+            bottomBar
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .sheet(isPresented: $showingDetail) {
             if let result = lastResult {
                 TicketDetailSheet(result: result)
+            }
+        }
+    }
+
+    @ViewBuilder private var viewfinderFrame: some View {
+        VStack {
+            Spacer()
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.white.opacity(0.7), lineWidth: 3)
+                .frame(width: 260, height: 260)
+            Spacer()
+            Spacer()
+        }
+    }
+
+    @ViewBuilder private var resultOverlay: some View {
+        if let result = scanResult {
+            let undoAction: (() -> Void)? = (canUndo && result.status == .success) ? handleUndo : nil
+            let detailAction: (() -> Void)? = result.status != .error ? { showingDetail = true } : nil
+            ScanResultOverlay(result: result, onUndo: undoAction, onViewDetails: detailAction)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: scanResult != nil)
+        }
+    }
+
+    @ViewBuilder private var bottomBar: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 12) {
+                Button(action: switchToManual) {
+                    Label("Manual Check-in", systemImage: "person.text.rectangle")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                lastScanChip
+            }
+            .padding(.bottom, 40)
+        }
+    }
+
+    @ViewBuilder private var lastScanChip: some View {
+        if let last = lastResult, scanResult == nil {
+            Button(action: { showingDetail = true }) {
+                HStack(spacing: 6) {
+                    Image(systemName: last.status == .success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(last.status == .success ? .green : .orange)
+                    Text(last.firstName ?? last.name)
+                        .lineLimit(1)
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: Capsule())
             }
         }
     }
