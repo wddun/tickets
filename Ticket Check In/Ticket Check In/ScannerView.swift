@@ -119,7 +119,7 @@ struct ScannerView: View {
                 await MainActor.run { showResult(for: response) }
             } catch {
                 await MainActor.run {
-                    scanResult = ScanResult(status: .error, title: "Error", subtitle: error.localizedDescription)
+                    scanResult = ScanResult(status: .error, title: "Error", name: error.localizedDescription)
                     CheckInFeedback.shared.error()
                     scheduleDismiss()
                 }
