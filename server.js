@@ -12,6 +12,7 @@ import JSZip from 'jszip';
 import multer from 'multer';
 import sharp from 'sharp';
 
+import compression from 'compression';
 import session from 'express-session';
 import FileStoreFactory from 'session-file-store';
 import bcrypt from 'bcryptjs';
@@ -55,6 +56,7 @@ async function sendEmail({ to, subject, html }) {
 }
 
 app.set('trust proxy', 1);
+app.use(compression());
 app.use(express.json({ limit: '20mb' }));
 app.use(express.static('public'));
 app.get('/support', (req, res) => res.redirect('/support.html'));
@@ -884,17 +886,6 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
 });
 
 // Helper: group all tickets for an email by event (for web scanner "All Tickets" view)
-function buildPersonTickets(email, tickets, events) {
-    const byEvent = {};
-    for (const t of tickets.filter(t => t.email === email)) {
-        if (!byEvent[t.eventId]) {
-            const ev = events.find(e => e.id === t.eventId);
-            byEvent[t.eventId] = { eventId: t.eventId, eventName: ev ? ev.name : t.eventId, tickets: [] };
-        }
-        byEvent[t.eventId].tickets.push({ id: t.id, name: t.name, used_at: t.used_at, registrationId: t.registrationId });
-    }
-    return Object.values(byEvent);
-}
 
 app.post('/api/validate', async (req, res) => {
     const { token } = req.body;
@@ -917,7 +908,6 @@ app.post('/api/validate', async (req, res) => {
             used_at: ticket.used_at, name: ticket.name, email: ticket.email,
             ticketId: ticket.id, registrationId: ticket.registrationId,
             eventId: ticket.eventId, eventName: event ? event.name : null,
-            personTickets: buildPersonTickets(ticket.email, db.data.tickets, db.data.events)
         });
     }
 
@@ -931,7 +921,6 @@ app.post('/api/validate', async (req, res) => {
         name: ticket.name, email: ticket.email,
         ticketId: ticket.id, registrationId: ticket.registrationId,
         eventId: ticket.eventId, eventName: event ? event.name : null,
-        personTickets: buildPersonTickets(ticket.email, db.data.tickets, db.data.events)
     });
 });
 
