@@ -45,6 +45,8 @@ struct ValidateResponse: Codable {
     let name: String?
     let email: String?
     let used_at: String?
+    let ticketId: String?
+    let registrationId: String?
 }
 
 struct AuthUser: Codable {

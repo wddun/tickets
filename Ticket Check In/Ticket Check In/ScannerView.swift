@@ -15,6 +15,8 @@ struct ScannerView: View {
     @State private var scanResult: ScanResult?
     @State private var isScanning = true
     @State private var isProcessing = false
+    @State private var lastRegistrationId: String?
+    @State private var dismissTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -33,7 +35,7 @@ struct ScannerView: View {
 
             // Result overlay
             if let result = scanResult {
-                ScanResultOverlay(result: result)
+                ScanResultOverlay(result: result, onUndo: result.status == .success ? handleUndo : nil)
                     .transition(.opacity)
                     .animation(.easeInOut(duration: 0.2), value: scanResult != nil)
             }
@@ -81,6 +83,7 @@ struct ScannerView: View {
         switch response.status {
         case "valid":
             let name = response.name ?? "Guest"
+            lastRegistrationId = response.registrationId ?? response.ticketId
             scanResult = ScanResult(status: .success, title: "Checked In!", subtitle: name)
             CheckInFeedback.shared.success()
         case "used":
@@ -95,10 +98,31 @@ struct ScannerView: View {
     }
 
     private func scheduleDismiss() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        dismissTask?.cancel()
+        dismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
             withAnimation { scanResult = nil }
             isProcessing = false
             isScanning = true
+        }
+    }
+
+    private func handleUndo() {
+        dismissTask?.cancel()
+        guard let registrationId = lastRegistrationId else {
+            withAnimation { scanResult = nil }
+            isProcessing = false
+            isScanning = true
+            return
+        }
+        Task {
+            try? await APIService.shared.undoCheckIn(registrationId: registrationId)
+            await MainActor.run {
+                withAnimation { scanResult = nil }
+                isProcessing = false
+                isScanning = true
+            }
         }
     }
 
@@ -187,6 +211,7 @@ struct ScanResult: Equatable {
 
 struct ScanResultOverlay: View {
     let result: ScanResult
+    var onUndo: (() -> Void)? = nil
 
     var overlayColor: Color {
         switch result.status {
@@ -220,6 +245,17 @@ struct ScanResultOverlay: View {
                         .foregroundStyle(.white.opacity(0.9))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
+                }
+                if let onUndo {
+                    Button(action: onUndo) {
+                        Text("Undo")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(overlayColor)
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 10)
+                            .background(.white.opacity(0.9), in: Capsule())
+                    }
+                    .padding(.top, 8)
                 }
             }
         }
