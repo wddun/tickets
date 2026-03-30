@@ -31,8 +31,8 @@ struct ScannerView: View {
             CameraPreviewView(isScanning: $isScanning, onCode: handleCode)
                 .ignoresSafeArea()
             viewfinderFrame
-            resultOverlay
             bottomBar
+            resultOverlay
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
@@ -75,8 +75,7 @@ struct ScannerView: View {
     @ViewBuilder private var bottomBar: some View {
         VStack {
             Spacer()
-            VStack(spacing: 10) {
-                lastScanChip
+            HStack(spacing: 12) {
                 Button(action: switchToManual) {
                     Label("Manual Check-in", systemImage: "person.text.rectangle")
                         .font(.system(size: 16, weight: .semibold))
@@ -85,6 +84,7 @@ struct ScannerView: View {
                         .padding(.vertical, 12)
                         .background(.ultraThinMaterial, in: Capsule())
                 }
+                lastScanChip
             }
             .padding(.bottom, 40)
         }
