@@ -317,7 +317,7 @@
         }
         .stat-box:hover { border-color: #a5b4fc; box-shadow: 0 2px 8px rgba(99,102,241,0.08); }
         .stat-box.stat-active { border-color: #6366f1; background: #f5f3ff; }
-        .stat-box.stat-active .stat-label::after { content: ' ✕'; font-size: 10px; color: #6366f1; }
+        .stat-box.stat-active .stat-label { color: #6366f1; }
 
         .stat-num {
             font-size: 30px;
@@ -796,6 +796,7 @@
         let checkedRegIds = new Set();
         let activeStatFilter = 'all'; // 'all' | 'checked' | 'pending'
         let sortState = { field: null, dir: 'asc' }; // field: null|'firstname'|'lastname'|'tickets'
+        let _editOriginal = {}; // snapshot of values when edit modal opens
 
         async function init() {
             const r = await fetch('/api/auth/me');
@@ -1478,6 +1479,7 @@
             <div style="display:flex;gap:8px;margin-bottom:8px;">
                 <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket()">Save &amp; Resend</button>
                 <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Only</button>
+                <button class="btn btn-secondary" style="padding:8px 12px;" onclick="printTicketEmail()" title="Print email">🖨️</button>
             </div>
             <button class="btn btn-danger" style="width:100%;margin-top:4px;" onclick="deleteRegistrationFromModal()">Delete Registration</button>
             <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:#666;"></div>
@@ -1605,6 +1607,7 @@
             document.getElementById('editRegId').value = regId;
 
             renderCustomFieldsInputs('editTicketCustomFields', t.customFields || {});
+            _editOriginal = { name: t.name || '', email: t.email || '', customFields: JSON.stringify(t.customFields || {}) };
 
             // Build ticket QR preview
             const preview = document.getElementById('editTicketPreview');
@@ -1693,7 +1696,17 @@
             }
         }
 
+        function hasUnsavedChanges() {
+            const name = document.getElementById('editTicketName').value;
+            const email = document.getElementById('editTicketEmail').value;
+            const cf = JSON.stringify(getCustomFieldsValues('editTicketCustomFields'));
+            return name !== _editOriginal.name || email !== _editOriginal.email || cf !== _editOriginal.customFields;
+        }
+
         async function resendTicketEmail(btn) {
+            if (hasUnsavedChanges()) {
+                if (!confirm('You have unsaved changes. "Resend Only" will send the current saved data — your edits will NOT be included. Continue?')) return;
+            }
             const id = document.getElementById('editTicketId').value;
             btn.disabled = true;
             btn.textContent = 'Sending…';
@@ -1707,6 +1720,11 @@
                 const d = await r.json();
                 alert(d.error || 'Failed to resend email');
             }
+        }
+
+        function printTicketEmail() {
+            const id = document.getElementById('editTicketId').value;
+            window.open('/api/ticket/' + id + '/preview', '_blank');
         }
         async function submitEditTicket() {
             const id = document.getElementById('editTicketId').value;
