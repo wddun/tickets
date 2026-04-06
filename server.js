@@ -734,7 +734,7 @@ app.post('/api/events', requireAuth, upload.single('image'), async (req, res) =>
 
     if (req.file) {
         if (req.file.mimetype === 'image/jpeg') {
-            const pngName = req.file.filename.replace(/\.[^.]+$/, '.png');
+            const pngName = req.file.filename.replace(/.[^.]+$/, '.png');
             const pngPath = path.join(uploadsDir, pngName);
             await sharp(req.file.path).png().toFile(pngPath);
             await fs.promises.unlink(req.file.path);
@@ -818,10 +818,201 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
 app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
     const { registrationIds } = req.body;
     if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const before = db.data.tickets.length;
-    db.data.tickets = db.data.tickets.filter(t => !registrationIds.includes(t.registrationId));
+
+    const eventIds = new Set(db.data.tickets.filter(t => registrationIds.includes(t.registrationId)).map(t => t.eventId));
+    let allowedRegistrationIds = new Set();
+
+    for (const eventId of eventIds) {
+        const event = db.data.events.find(e => e.id === eventId);
+        if (!event) continue;
+        const link = db.data.sheetLinks.find(l => l.eventId === eventId);
+        const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+        if (isAdmin || event.userId === req.session.userId || (access && access.permission === 'full')) {
+            db.data.tickets.filter(t => registrationIds.includes(t.registrationId) && t.eventId === eventId)
+                .forEach(t => allowedRegistrationIds.add(t.registrationId));
+        }
+    }
+
+    db.data.tickets = db.data.tickets.filter(t => !allowedRegistrationIds.has(t.registrationId));
     await db.write();
     res.json({ success: true, deleted: before - db.data.tickets.length });
+});
+
+// Create ticket manually
+app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
+    const { name, email, ticketCount, ...customFields } = req.body;
+    if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
+
+    const event = db.data.events.find(e => e.id === req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+
+    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+        return res.status(403).json({ error: 'Not authorized to create tickets' });
+    }
+
+    const count = Math.max(1, parseInt(ticketCount) || 1);
+    const registrationId = nanoid(10);
+    const newTickets = [];
+
+    for (let i = 0; i < count; i++) {
+        newTickets.push({
+            id: nanoid(8),
+            token: nanoid(12),
+            eventId: event.id,
+            registrationId,
+            name,
+            firstName: name.split(' ')[0],
+            lastName: name.split(' ').slice(1).join(' '),
+            email,
+            customFields: customFields || {},
+            created_at: new Date().toISOString(),
+            used_at: null
+        });
+    }
+
+    await db.update(data => data.tickets.push(...newTickets));
+
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        const actualCount = newTickets.length;
+        const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
+
+        const walletButton = (token) => `
+            <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
+                <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
+            </a>`;
+
+        const qrBlocks = newTickets.map((ticket, i) => `
+            <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
+                <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
+                    ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Your Ticket'}
+                </p>
+                <img src="${BASE_URL}/qr/${ticket.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
+                <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${ticket.token}</p>
+                ${walletButton(ticket.token)}
+            </div>
+        `).join('');
+
+        const addAllButton = actualCount > 1 ? `
+            <div style="text-align:center; margin:24px 0 8px;">
+                <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${actualCount} passes to Apple Wallet at once:</p>
+                <a href="${BASE_URL}/api/passes/bundle/${registrationId}" style="display:inline-block; text-decoration:none;">
+                    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block;">
+                </a>
+            </div>
+        ` : '';
+
+        await sendEmail({
+            to: email,
+            subject: `Your ${ticketLabel} for ${event.name}`,
+            html: `
+                <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
+                    <h2 style="color:#333; margin-bottom:4px;">Hey ${newTickets[0].firstName}!</h2>
+                    <p style="color:#555;">You're registered for <strong>${event.name}</strong>.</p>
+                    <p style="color:#555;">📍 ${event.location.name}</p>
+                    <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
+                    ${qrBlocks}
+                    ${addAllButton}
+                </div>
+            `
+        }).catch(err => console.error('Email send err:', err));
+    }
+
+    res.json({ success: true, ticket: newTickets[0], tickets: newTickets });
+});
+
+// Edit ticket manually
+app.put('/api/ticket/:id', requireAuth, async (req, res) => {
+    const { name, email, ...customFields } = req.body;
+    if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
+
+    let updatedTickets = [];
+    let event = null;
+    await db.update(data => {
+        const queryTicket = data.tickets.find(t => t.id === req.params.id);
+        if (!queryTicket) throw new Error('Not found');
+        event = data.events.find(e => e.id === queryTicket.eventId);
+        if (!event) throw new Error('Event not found');
+
+        const user = data.users.find(u => u.id === req.session.userId);
+        const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+        const link = data.sheetLinks.find(l => l.eventId === event.id);
+        const access = link ? data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+
+        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+            throw new Error('Forbidden');
+        }
+
+        const groupTickets = data.tickets.filter(t => t.registrationId === queryTicket.registrationId);
+        groupTickets.forEach(ticket => {
+            ticket.name = name;
+            ticket.firstName = name.split(' ')[0];
+            ticket.lastName = name.split(' ').slice(1).join(' ');
+            ticket.email = email;
+            if (customFields) {
+                ticket.customFields = { ...ticket.customFields, ...customFields };
+            }
+            updatedTickets.push(ticket);
+        });
+    }).catch(e => {
+        if (e.message === 'Forbidden') res.status(403).json({ error: 'Not authorized to edit tickets' });
+        else res.status(404).json({ error: e.message });
+    });
+
+    if (!updatedTickets.length) return; // already sent response via catch
+
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        const actualCount = updatedTickets.length;
+
+        const walletButton = (token) => `
+            <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
+                <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
+            </a>`;
+
+        const qrBlocks = updatedTickets.map((ticket, i) => `
+            <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
+                <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
+                    ${actualCount > 1 ? `Updated Ticket ${i + 1} of ${actualCount}` : 'Your Updated Ticket'}
+                </p>
+                <img src="${BASE_URL}/qr/${ticket.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
+                <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${ticket.token}</p>
+                ${walletButton(ticket.token)}
+            </div>
+        `).join('');
+
+        const addAllButton = actualCount > 1 ? `
+            <div style="text-align:center; margin:24px 0 8px;">
+                <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${actualCount} updated passes to Apple Wallet at once:</p>
+                <a href="${BASE_URL}/api/passes/bundle/${updatedTickets[0].registrationId}" style="display:inline-block; text-decoration:none;">
+                    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block;">
+                </a>
+            </div>
+        ` : '';
+
+        await sendEmail({
+            to: email,
+            subject: `Updated registration for ${event.name}`,
+            html: `
+                <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
+                    <h2 style="color:#333; margin-bottom:4px;">Hey ${updatedTickets[0].firstName}!</h2>
+                    <p style="color:#555;">Your registration details for <strong>${event.name}</strong> have been updated by an admin.</p>
+                    <p style="color:#555;">📍 ${event.location.name}</p>
+                    <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
+                    ${qrBlocks}
+                    ${addAllButton}
+                </div>
+            `
+        }).catch(err => console.error('Email send err:', err));
+    }
+
+    res.json({ success: true, tickets: updatedTickets });
 });
 
 // API: Validate QR Code
@@ -874,6 +1065,14 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
 
     if (!tickets.length) return res.status(404).json({ error: 'Not found' });
 
+    // Only admin or event owner can undo checkin
+    const event = db.data.events.find(e => e.id === tickets[0].eventId);
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    if (!isAdmin && (!event || event.userId !== req.session.userId)) {
+        return res.status(403).json({ error: 'Only event owners or admins can undo check-ins' });
+    }
+
     let clearedCount = 0;
     tickets.forEach(t => {
         if (t.used_at) { t.used_at = null; clearedCount++; }
@@ -893,7 +1092,7 @@ app.post('/api/validate', async (req, res) => {
     const ticket = db.data.tickets.find(t => t.token === cleanToken);
 
     if (!ticket) {
-        console.error(`[validate] INVALID token: ${cleanToken}`);
+        console.error(`[validate] INVALID token: ${cleanToken} `);
         return res.json({ status: 'invalid', message: 'Invalid ticket' });
     }
 
@@ -906,7 +1105,7 @@ app.post('/api/validate', async (req, res) => {
     };
 
     if (ticket.used_at) {
-        console.log(`[validate] ALREADY USED — ticket: ${ticket.id} name: ${ticket.name} used_at: ${ticket.used_at}`);
+        console.log(`[validate] ALREADY USED — ticket: ${ticket.id} name: ${ticket.name} used_at: ${ticket.used_at} `);
         return res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, ...ticketFields });
     }
 
@@ -914,13 +1113,13 @@ app.post('/api/validate', async (req, res) => {
     await db.write();
     ticketStatusCache.clear();
 
-    res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'}!`, ...ticketFields });
+    res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
 });
 
 // Helper: QR Generation Route (Alternative for frontend display)
 app.get('/qr/:token', async (req, res) => {
     try {
-        const qrContent = `ticket:${req.params.token}`;
+        const qrContent = `ticket:${req.params.token} `;
         const qrBuffer = await QRCode.toBuffer(qrContent);
         res.type('png').send(qrBuffer);
     } catch (err) {
@@ -957,7 +1156,7 @@ async function generatePassBuffer(ticket, event) {
 
     pass.setBarcodes({
         format: "PKBarcodeFormatQR",
-        message: `ticket:${ticket.token}`,
+        message: `ticket:${ticket.token} `,
         messageEncoding: "iso-8859-1"
     });
 
@@ -1017,7 +1216,7 @@ async function generatePassBuffer(ticket, event) {
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
     const locValue = locName && locAddress && locName !== locAddress
-        ? `${locName}\n${locAddress}`
+        ? `${locName} n${locAddress} `
         : locName || locAddress;
     if (locValue) {
         pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
@@ -1029,7 +1228,7 @@ async function generatePassBuffer(ticket, event) {
 
     // Back: remaining custom fields
     cfEntries.slice(1).forEach(([label, value], i) => {
-        pass.backFields.push({ key: `cf_back_${i}`, label: label, value: String(value) });
+        pass.backFields.push({ key: `cf_back_${i} `, label: label, value: String(value) });
     });
 
     if (locAddress && (!locValue || locValue === locName)) {
@@ -1046,7 +1245,7 @@ async function generatePassBuffer(ticket, event) {
         value: 'This ticket is valid for one-time entry only. Once scanned at the door it cannot be used again.'
     });
 
-    if (event.imageUrl) {
+    if (event.imageUrl && event.imageUrl.startsWith('/assets/img/')) {
         const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
         if (fs.existsSync(imagePath)) {
             const [thumb1x, thumb2x] = await Promise.all([
@@ -1067,12 +1266,12 @@ function checkPassPrereqs() {
     const missing = [];
     if (!process.env.PASS_TYPE_ID) missing.push('PASS_TYPE_ID');
     if (!process.env.TEAM_ID) missing.push('TEAM_ID');
-    if (missing.length) return `Missing env vars: ${missing.join(', ')}`;
+    if (missing.length) return `Missing env vars: ${missing.join(', ')} `;
 
     const certPath = path.resolve(__dirname, 'certs');
     const files = ['wwdr.pem', 'signer.pem', 'signer.key'];
     const missingFiles = files.filter(f => !fs.existsSync(path.join(certPath, f)));
-    if (missingFiles.length) return `Missing cert files: ${missingFiles.join(', ')}`;
+    if (missingFiles.length) return `Missing cert files: ${missingFiles.join(', ')} `;
 
     const modelPath = path.resolve(__dirname, 'pass-assets.pass');
     if (!fs.existsSync(path.join(modelPath, 'pass.json'))) return 'Pass model missing';
@@ -1091,14 +1290,14 @@ app.get(['/api/pass/:token', '/api/pass/:token.pkpass'], async (req, res) => {
     if (!event) return res.status(404).send('Event not found');
 
     const prereqError = checkPassPrereqs();
-    if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError}`);
+    if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError} `);
 
     try {
         console.log(`🎟️ Generating pass for: ${ticket.name} (${ticket.token})`);
         const buffer = await generatePassBuffer(ticket, event);
         console.log(`📦 Buffer generated: ${buffer.length} bytes`);
         res.set('Content-Type', 'application/vnd.apple.pkpass');
-        res.set('Content-Disposition', `attachment; filename="ticket-${ticket.token}.pkpass"`);
+        res.set('Content-Disposition', `attachment; filename = "ticket-${ticket.token}.pkpass"`);
         res.set('Content-Length', buffer.length);
         res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
         res.send(buffer);
@@ -1116,11 +1315,11 @@ app.get('/api/passes/bundle/:registrationId', async (req, res) => {
 
     // Single ticket — redirect to the standard pass endpoint
     if (tickets.length === 1) {
-        return res.redirect(`/api/passes/${tickets[0].token}`);
+        return res.redirect(`/ api / passes / ${tickets[0].token} `);
     }
 
     const prereqError = checkPassPrereqs();
-    if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError}`);
+    if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError} `);
 
     const event = db.data.events.find(e => e.id === tickets[0].eventId);
     if (!event) return res.status(404).send('Event not found');
@@ -1131,12 +1330,12 @@ app.get('/api/passes/bundle/:registrationId', async (req, res) => {
 
         for (const ticket of tickets) {
             const passBuffer = await generatePassBuffer(ticket, event);
-            zip.file(`ticket-${ticket.token}.pkpass`, passBuffer);
+            zip.file(`ticket - ${ticket.token}.pkpass`, passBuffer);
         }
 
         const bundleBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE' });
         res.set('Content-Type', 'application/vnd.apple.pkpasses');
-        res.set('Content-Disposition', `attachment; filename="tickets-${registrationId}.pkpassbundle"`);
+        res.set('Content-Disposition', `attachment; filename = "tickets-${registrationId}.pkpassbundle"`);
         res.set('Content-Length', bundleBuffer.length);
         res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
         res.send(bundleBuffer);
@@ -1163,7 +1362,7 @@ app.post('/api/sheet/generate-link', async (req, res) => {
         if (eventId) link.eventId = eventId;
         if (sheetName) link.sheetName = sheetName;
         await db.write();
-        return res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token });
+        return res.json({ success: true, linkUrl: `${BASE_URL} /link/${link.token} `, token: link.token });
     }
 
     link = {
@@ -1175,12 +1374,12 @@ app.post('/api/sheet/generate-link', async (req, res) => {
         createdAt: new Date().toISOString()
     };
     await db.update(data => data.sheetLinks.push(link));
-    res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token });
+    res.json({ success: true, linkUrl: `${BASE_URL} /link/${link.token} `, token: link.token });
 });
 
 // Redirect /link/:token → link.html?token=...
 app.get('/link/:token', (req, res) => {
-    res.redirect(`/link.html?token=${req.params.token}`);
+    res.redirect(`/ link.html ? token = ${req.params.token} `);
 });
 
 // Get info about a link token (public)
@@ -1291,19 +1490,64 @@ app.get('/api/my-rooms', requireAuth, (req, res) => {
 app.get('/api/event/:id/access', requireAuth, (req, res) => {
     const user = db.data.users.find(u => u.id === req.session.userId);
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (!isAdmin) return res.status(403).json({ error: 'Admin access required' });
-
+    const event = db.data.events.find(e => e.id === req.params.id);
     const link = db.data.sheetLinks.find(l => l.eventId === req.params.id);
+
+    let hasAccess = false;
+    if (isAdmin || (event && event.userId === req.session.userId)) hasAccess = true;
+    else if (link) {
+        const myAccess = db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId);
+        if (myAccess && myAccess.permission === 'full') hasAccess = true;
+    }
+
+    if (!hasAccess) return res.status(403).json({ error: 'Admin access required' });
+
     if (!link) return res.json({ access: [], linkUrl: null });
 
     const accessEntries = db.data.sheetAccess
         .filter(a => a.sheetLinkId === link.id)
         .map(a => {
             const u = db.data.users.find(u2 => u2.id === a.userId);
-            return { id: a.id, email: u ? u.email : 'Unknown', claimedAt: a.claimedAt };
+            return { id: a.id, email: u ? u.email : 'Unknown', claimedAt: a.claimedAt, permission: a.permission || 'view' };
         });
 
-    res.json({ access: accessEntries, linkUrl: `${BASE_URL}/link/${link.token}` });
+    res.json({ access: accessEntries, linkUrl: BASE_URL + '/link/' + link.token });
+});
+
+app.post('/api/sheet/share', requireAuth, async (req, res) => {
+    const { eventId, email, permission } = req.body;
+    if (!eventId || !email || !permission) return res.status(400).json({ error: 'Missing fields' });
+
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const event = db.data.events.find(e => e.id === eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    let link = db.data.sheetLinks.find(l => l.eventId === eventId);
+    if (!link) {
+        link = { id: nanoid(10), token: nanoid(20), spreadsheetId: 'manual', sheetName: event.name, eventId: event.id, createdAt: new Date().toISOString() };
+        db.data.sheetLinks.push(link);
+    }
+
+    const myAccess = db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId);
+
+    if (!isAdmin && event.userId !== req.session.userId && (!myAccess || myAccess.permission !== 'full')) {
+        return res.status(403).json({ error: 'Permission denied to share room' });
+    }
+
+    const targetUser = db.data.users.find(u => u.email === email.toLowerCase());
+    if (!targetUser) return res.status(404).json({ error: 'User ' + email + ' does not have an account. They must register first.' });
+    if (targetUser.id === req.session.userId) return res.status(400).json({ error: 'Cannot share with yourself' });
+
+    let access = db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === targetUser.id);
+    if (access) {
+        access.permission = permission;
+    } else {
+        access = { id: nanoid(10), userId: targetUser.id, sheetLinkId: link.id, claimedAt: new Date().toISOString(), permission };
+        db.data.sheetAccess.push(access);
+    }
+    await db.write();
+    res.json({ success: true, message: 'Access granted' });
 });
 
 // Revoke access to a room
@@ -1315,10 +1559,14 @@ app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
     if (accessIdx === -1) return res.status(404).json({ error: 'Access entry not found' });
 
     const access = db.data.sheetAccess[accessIdx];
+    const link = db.data.sheetLinks.find(l => l.id === access.sheetLinkId);
+    const event = link && link.eventId ? db.data.events.find(e => e.id === link.eventId) : null;
+    const myAccess = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const isOwner = event && event.userId === req.session.userId;
+    const hasFull = myAccess && myAccess.permission === 'full';
 
-    // Only admins or the user themselves can revoke
-    if (!isAdmin && access.userId !== req.session.userId) {
-        return res.status(403).json({ error: 'Not authorized' });
+    if (!isAdmin && access.userId !== req.session.userId && !isOwner && !hasFull) {
+        return res.status(403).json({ error: 'Not authorized to revoke others' });
     }
 
     db.data.sheetAccess.splice(accessIdx, 1);
@@ -1327,5 +1575,5 @@ app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n🎟️  Ticket Check-in System running at:\n   - Local:    http://localhost:${PORT}\n   - Network:  http://0.0.0.0:${PORT}\n`);
+    console.log(`n🎟️  Ticket Check -in System running at: n - Local: http://localhost:${PORT}n   - Network:  http://0.0.0.0:${PORT}n`);
 });

@@ -721,7 +721,8 @@
     <div class="topbar">
         <div class="topbar-title">🎟️ <span>WTS</span> Tickets</div>
         <button class="logout-btn" onclick="logout()">Sign out</button>
-        <button class="logout-btn" onclick="confirmDeleteAccount()" style="margin-left:8px;color:#dc2626;border-color:#dc2626;">Delete Account</button>
+        <button class="logout-btn" onclick="confirmDeleteAccount()"
+            style="margin-left:8px;color:#dc2626;border-color:#dc2626;">Delete Account</button>
     </div>
 
     <div class="layout">
@@ -958,7 +959,10 @@
         </div>
 
         <div class="section-header">
-            <span class="section-title">Attendees</span>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <span class="section-title">Attendees</span>
+                <button class="btn btn-primary btn-sm" onclick="openCreateTicketModal()">+ Add Ticket</button>
+            </div>
             <div style="display:flex;align-items:center;gap:8px;">
                 <span id="ticketBulkDelete" style="display:none;">
                     <button class="btn btn-danger btn-sm" onclick="deleteSelectedTickets('${event.id}')">Delete Selected</button>
@@ -996,7 +1000,7 @@
 
             const header = `
         <div class="attendee-row header-row">
-            <input type="checkbox" class="ticket-checkbox" id="selectAllTickets" onchange="toggleAllTickets(this.checked, ${JSON.stringify(filtered.map(g => g.registrationId))})">
+            <input type="checkbox" class="ticket-checkbox" id="selectAllTickets" onchange="toggleAllTickets(this.checked, ${JSON.stringify(filtered.map(g => g.registrationId)).replace(/"/g, '&quot;')})">
             <div>Name</div>
             <div>Email</div>
             <div class="col-tickets">Tickets</div>
@@ -1017,9 +1021,10 @@
                 const unchecked = total - scanned;
                 const undoBtn = scanned > 0 ? `<button class="btn btn-secondary btn-sm" onclick="undoCheckin('${g.registrationId}')">Undo</button>` : '';
                 const checkInBtns = allIn ? '' : `
-                        ${unchecked > 1 ? `<button class="btn btn-secondary btn-sm" onclick='openTicketPicker(${JSON.stringify(g.registrationId)}, ${JSON.stringify(g.tickets)})'>Check In 1</button>` : ''}
+                        ${unchecked > 1 ? `<button class="btn btn-secondary btn-sm" onclick="openTicketPicker(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Check In 1</button>` : ''}
                         <button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">${unchecked > 1 ? 'Check In All' : 'Check In'}</button>`;
-                const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap">${checkInBtns}${undoBtn}</div>`;
+                const editBtn = `<button class="btn btn-secondary btn-sm" onclick="openEditTicketModal(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Edit</button>`;
+                const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap">${checkInBtns}${undoBtn}${editBtn}</div>`;
                 return `
         <div class="attendee-row${isChecked ? ' row-selected' : ''}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
@@ -1210,16 +1215,26 @@
                     `;
                 }
 
-                let accessHtml = '';
+                let accessHtml = `
+                    <div class="modal-section-title" style="margin-top:20px;">Share with user</div>
+                    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+                        <input type="email" id="shareEmail" placeholder="User email" style="flex:1;min-width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;" />
+                        <select id="sharePermission" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                            <option value="view">View / Check-in</option>
+                            <option value="full">Full Access</option>
+                        </select>
+                        <button class="btn btn-primary" onclick="shareRoom('${eventId}')">Share</button>
+                    </div>
+                `;
                 if (data.access && data.access.length > 0) {
-                    accessHtml = `
+                    accessHtml += `
                         <div class="modal-section-title">Users with access</div>
                         <div>
                             ${data.access.map(a => `
                                 <div class="access-item">
                                     <div class="access-avatar">${getInitials(a.email)}</div>
                                     <div class="access-info">
-                                        <div class="access-email">${esc(a.email)}</div>
+                                        <div class="access-email">${esc(a.email)} <span style="font-weight:normal;color:#888;font-size:11px;">(${a.permission === 'full' ? 'Full Access' : 'View only'})</span></div>
                                         <div class="access-date">Linked ${fmtDate(a.claimedAt)}</div>
                                     </div>
                                     <button class="revoke-btn" onclick="revokeAccess('${a.id}', '${eventId}')">Revoke</button>
@@ -1228,9 +1243,9 @@
                         </div>
                     `;
                 } else {
-                    accessHtml = `
+                    accessHtml += `
                         <div class="modal-section-title">Users with access</div>
-                        <div class="settings-empty">No users have linked this room yet.</div>
+                        <div class="settings-empty">No users have been added to this room yet.</div>
                     `;
                 }
 
@@ -1289,11 +1304,14 @@
     </script>
 
     <!-- Ticket Picker Modal -->
-    <div id="ticketPickerModal" onclick="if(event.target===this)closeTicketPicker()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
-        <div style="background:#1c1c1e;border-radius:14px;width:min(420px,92vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
+    <div id="ticketPickerModal" onclick="if(event.target===this)closeTicketPicker()"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center">
+        <div
+            style="background:#1c1c1e;border-radius:14px;width:min(420px,92vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
             <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px">
                 <span style="font-size:17px;font-weight:600;color:#fff">Select Tickets</span>
-                <button onclick="closeTicketPicker()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;line-height:1">&times;</button>
+                <button onclick="closeTicketPicker()"
+                    style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;line-height:1">&times;</button>
             </div>
             <div id="ticketPickerList" style="overflow-y:auto;flex:1;padding:0 12px 12px"></div>
             <div style="padding:14px 20px;border-top:1px solid #333">
@@ -1301,16 +1319,216 @@
             </div>
         </div>
     </div>
+
+    <!-- Create Ticket Modal -->
+    <div class="modal-overlay" id="createTicketModal" style="display:none;"
+        onclick="if(event.target===this)closeCreateTicketModal()">
+        <div class="modal" style="max-width:400px;background:#fff;border-radius:14px;">
+            <div class="modal-header">
+                <h2>Add Ticket</h2>
+                <button class="modal-close" onclick="closeCreateTicketModal()">&times;</button>
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Name</label>
+                <input type="text" id="createTicketName"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Email</label>
+                <input type="email" id="createTicketEmail"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+            </div>
+            <div style="margin-bottom:20px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Quantity</label>
+                <input type="number" id="createTicketCount" value="1" min="1"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+            </div>
+            <div id="createTicketCustomFields" style="margin-bottom:20px;"></div>
+            <button class="btn btn-primary" style="width:100%;" onclick="submitCreateTicket()">Create Ticket</button>
+        </div>
+    </div>
+
+    <!-- Edit Ticket Modal -->
+    <div class="modal-overlay" id="editTicketModal" style="display:none;"
+        onclick="if(event.target===this)closeEditTicketModal()">
+        <div class="modal" style="max-width:400px;background:#fff;border-radius:14px;">
+            <div class="modal-header">
+                <h2>Edit Registration Group</h2>
+                <button class="modal-close" onclick="closeEditTicketModal()">&times;</button>
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Name</label>
+                <input type="text" id="editTicketName"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+            </div>
+            <div style="margin-bottom:20px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Email</label>
+                <input type="email" id="editTicketEmail"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+            </div>
+            <div id="editTicketCustomFields" style="margin-bottom:20px;"></div>
+            <input type="hidden" id="editTicketId" />
+            <button class="btn btn-primary" style="width:100%;" onclick="submitEditTicket()">Save Changes</button>
+            <div id="editTicketExtraList" style="margin-top:16px;font-size:12px;color:#666;"></div>
+        </div>
+    </div>
+
     <style>
         .ticket-picker-item {
-            display:flex;align-items:center;gap:12px;padding:12px;border-radius:10px;
-            cursor:pointer;margin-bottom:6px;background:#2c2c2e;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-bottom: 6px;
+            background: #2c2c2e;
         }
-        .ticket-picker-item:hover { background:#3a3a3c; }
-        .ticket-picker-item input[type=checkbox] { width:18px;height:18px;accent-color:#4f8ef7;flex-shrink:0; }
-        .ticket-picker-name { color:#fff;font-size:15px; }
-        .ticket-picker-id { color:#888;font-size:11px;margin-top:2px;word-break:break-all; }
+
+        .ticket-picker-item:hover {
+            background: #3a3a3c;
+        }
+
+        .ticket-picker-item input[type=checkbox] {
+            width: 18px;
+            height: 18px;
+            accent-color: #4f8ef7;
+            flex-shrink: 0;
+        }
+
+        .ticket-picker-name {
+            color: #fff;
+            font-size: 15px;
+        }
+
+        .ticket-picker-id {
+            color: #888;
+            font-size: 11px;
+            margin-top: 2px;
+            word-break: break-all;
+        }
     </style>
+    <script>
+        function renderCustomFieldsInputs(containerId, values = {}) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            const event = events.find(e => e.id === selectedId);
+            if (!event || !event.customFields || event.customFields.length === 0) return;
+
+            let html = '<div style="margin-bottom:12px;font-weight:600;font-size:13px;color:#333;">Extra Fields</div>';
+            event.customFields.forEach(f => {
+                const val = esc(values[f] || '');
+                html += `
+                <div style="margin-bottom:12px;">
+                    <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#666;">${esc(f)}</label>
+                    <input type="text" class="custom-field-input" data-key="${esc(f)}" value="${val}" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function getCustomFieldsValues(containerId) {
+            const container = document.getElementById(containerId);
+            const inputs = container.querySelectorAll('.custom-field-input');
+            const data = {};
+            inputs.forEach(inp => data[inp.getAttribute('data-key')] = inp.value);
+            return data;
+        }
+
+        async function shareRoom(eventId) {
+            const email = document.getElementById('shareEmail').value;
+            const permission = document.getElementById('sharePermission').value;
+            if (!email) return;
+            const r = await fetch('/api/sheet/share', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ eventId, email, permission })
+            });
+            const data = await r.json();
+            if (r.ok) {
+                alert('Access granted!');
+                loadAccessData(eventId);
+            } else {
+                alert(data.error || 'Failed to share room');
+            }
+        }
+
+        function openCreateTicketModal() {
+            document.getElementById('createTicketName').value = '';
+            document.getElementById('createTicketEmail').value = '';
+            document.getElementById('createTicketCount').value = '1';
+            renderCustomFieldsInputs('createTicketCustomFields');
+            document.getElementById('createTicketModal').style.display = 'flex';
+        }
+        function closeCreateTicketModal() {
+            document.getElementById('createTicketModal').style.display = 'none';
+        }
+        async function submitCreateTicket() {
+            const name = document.getElementById('createTicketName').value;
+            const email = document.getElementById('createTicketEmail').value;
+            const ticketCount = document.getElementById('createTicketCount').value;
+            const customFields = getCustomFieldsValues('createTicketCustomFields');
+
+            if (!name || !email) return alert('Name and email required');
+            const r = await fetch('/api/event/' + selectedId + '/ticket', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, ticketCount, ...customFields })
+            });
+            const data = await r.json();
+            if (r.ok) {
+                closeCreateTicketModal();
+                const event = events.find(e => e.id === selectedId);
+                fetchAndRender(event, true);
+                alert('Ticket(s) created! Bundle has been sent by email.');
+            } else {
+                alert(data.error || 'Failed to create ticket');
+            }
+        }
+
+        function openEditTicketModal(regId, tickets) {
+            const t = tickets[0];
+            document.getElementById('editTicketName').value = t.name || '';
+            document.getElementById('editTicketEmail').value = t.email || '';
+            document.getElementById('editTicketId').value = t.id;
+
+            renderCustomFieldsInputs('editTicketCustomFields', t.customFields || {});
+
+            const extra = document.getElementById('editTicketExtraList');
+            if (tickets.length > 1) {
+                extra.innerHTML = 'Note: This registration block contains ' + tickets.length + ' bundled tickets. Editing these details will modify ALL tickets inside the group and send a single bundled update email.';
+            } else {
+                extra.innerHTML = '';
+            }
+
+            document.getElementById('editTicketModal').style.display = 'flex';
+        }
+        function closeEditTicketModal() {
+            document.getElementById('editTicketModal').style.display = 'none';
+        }
+        async function submitEditTicket() {
+            const id = document.getElementById('editTicketId').value;
+            const name = document.getElementById('editTicketName').value;
+            const email = document.getElementById('editTicketEmail').value;
+            const customFields = getCustomFieldsValues('editTicketCustomFields');
+
+            if (!name || !email) return alert('Name and email required');
+            const r = await fetch('/api/ticket/' + id, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, ...customFields })
+            });
+            const data = await r.json();
+            if (r.ok) {
+                closeEditTicketModal();
+                const event = events.find(e => e.id === selectedId);
+                fetchAndRender(event, true);
+                alert('Tickets updated and emails dispatched.');
+            } else {
+                alert(data.error || 'Failed to edit ticket');
+            }
+        }
+    </script>
 </body>
 
 </html>
