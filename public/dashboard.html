@@ -1285,6 +1285,64 @@
             }
         }
 
+        function renderSettingsCustomFields(eventId) {
+            const ev = events.find(e => e.id === eventId);
+            const fields = ev?.customFields || [];
+            const rows = fields.map((f, i) => `
+                <div class="cf-row" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                    <span style="color:#aaa;font-size:13px;cursor:ns-resize;padding:0 4px;">⠿</span>
+                    <input type="text" class="settings-cf-key" value="${esc(f)}"
+                        style="flex:1;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;">
+                    <button type="button" onclick="this.closest('.cf-row').remove()"
+                        style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;">&times;</button>
+                </div>`).join('');
+
+            return `
+                <div class="modal-section-title">Custom Fields</div>
+                <div style="margin-bottom:6px;font-size:12px;color:#aaa;">Define fields that appear when adding or editing tickets (e.g. T-Shirt Size, Meal choice).</div>
+                <div id="settingsCfRows">${rows}</div>
+                <div style="display:flex;gap:8px;margin-bottom:20px;margin-top:6px;">
+                    <button type="button" onclick="addSettingsCfRow()"
+                        style="flex:1;font-size:12px;color:#6366f1;background:none;border:1px dashed #c4b5fd;border-radius:6px;padding:7px 12px;cursor:pointer;">+ Add field</button>
+                    <button type="button" onclick="saveEventCustomFields('${eventId}')"
+                        class="btn btn-primary btn-sm" style="flex:1;">Save Fields</button>
+                </div>
+                <hr style="border:none;border-top:1px solid #f0f0f0;margin-bottom:16px;">`;
+        }
+
+        function addSettingsCfRow() {
+            const rows = document.getElementById('settingsCfRows');
+            if (!rows) return;
+            const div = document.createElement('div');
+            div.className = 'cf-row';
+            div.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px;';
+            div.innerHTML = `
+                <span style="color:#aaa;font-size:13px;padding:0 4px;">⠿</span>
+                <input type="text" class="settings-cf-key" placeholder="e.g. T-Shirt Size"
+                    style="flex:1;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;">
+                <button type="button" onclick="this.closest('.cf-row').remove()"
+                    style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;">&times;</button>`;
+            rows.appendChild(div);
+            div.querySelector('.settings-cf-key').focus();
+        }
+
+        async function saveEventCustomFields(eventId) {
+            const keys = [...document.querySelectorAll('#settingsCfRows .settings-cf-key')]
+                .map(i => i.value.trim()).filter(Boolean);
+            const r = await fetch(`/api/event/${eventId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customFields: keys })
+            });
+            if (!r.ok) { alert('Failed to save custom fields.'); return; }
+            // Update local events cache so ticket modals immediately reflect changes
+            const ev = events.find(e => e.id === eventId);
+            if (ev) ev.customFields = keys;
+            // Flash the button
+            const btn = document.querySelector(`#settingsContent .btn-primary`);
+            if (btn) { btn.textContent = '✓ Saved'; setTimeout(() => btn.textContent = 'Save Fields', 1500); }
+        }
+
         async function loadAccessData(eventId) {
             try {
                 const res = await fetch(`/api/event/${eventId}/access`);
@@ -1352,7 +1410,8 @@
                     `;
                 }
 
-                document.getElementById('settingsContent').innerHTML = linkHtml + accessHtml;
+                const cfHtml = renderSettingsCustomFields(eventId);
+                document.getElementById('settingsContent').innerHTML = cfHtml + linkHtml + accessHtml;
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
             }
@@ -1522,29 +1581,68 @@
         }
     </style>
     <script>
-        function renderCustomFieldsInputs(containerId, values = {}) {
-            const container = document.getElementById(containerId);
-            container.innerHTML = '';
-            const event = events.find(e => e.id === selectedId);
-            if (!event || !event.customFields || event.customFields.length === 0) return;
+        function cfRowHtml(key, value, isEventField) {
+            const keyAttrs = isEventField
+                ? `readonly style="width:36%;padding:7px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;background:#f8f8f8;color:#888;box-sizing:border-box;"`
+                : `placeholder="Field name" style="width:36%;padding:7px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;"`;
+            return `<div class="cf-row" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                <input type="text" class="cf-key" ${keyAttrs} value="${esc(key)}">
+                <input type="text" class="cf-value" placeholder="Value"
+                    style="flex:1;padding:7px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;" value="${esc(value)}">
+                <button type="button" onclick="this.closest('.cf-row').remove()"
+                    style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>
+            </div>`;
+        }
 
-            let html = '<div style="margin-bottom:12px;font-weight:600;font-size:13px;color:#333;">Extra Fields</div>';
-            event.customFields.forEach(f => {
-                const val = esc(values[f] || '');
-                html += `
-                <div style="margin-bottom:12px;">
-                    <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#666;">${esc(f)}</label>
-                    <input type="text" class="custom-field-input" data-key="${esc(f)}" value="${val}" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
-                </div>`;
+        function renderCustomFieldsInputs(containerId, ticketValues = {}) {
+            const container = document.getElementById(containerId);
+            const ev = events.find(e => e.id === selectedId);
+            const eventFields = ev?.customFields || [];
+            const ticketOnlyKeys = Object.keys(ticketValues).filter(k => !eventFields.includes(k));
+
+            let html = '';
+            if (eventFields.length || ticketOnlyKeys.length) {
+                html += `<div style="margin-bottom:8px;font-size:11px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.5px;">Custom Fields</div>`;
+            }
+            html += `<div id="${containerId}-rows">`;
+            eventFields.forEach(f => {
+                html += cfRowHtml(f, ticketValues[f] || '', true);
             });
+            ticketOnlyKeys.forEach(k => {
+                html += cfRowHtml(k, ticketValues[k] || '', false);
+            });
+            html += `</div>
+            <button type="button" onclick="addCustomFieldRow('${containerId}-rows')"
+                style="margin-top:4px;font-size:12px;color:#6366f1;background:none;border:1px dashed #c4b5fd;border-radius:6px;padding:5px 12px;cursor:pointer;width:100%;">+ Add field</button>`;
+
             container.innerHTML = html;
+        }
+
+        function addCustomFieldRow(rowsId) {
+            const rows = document.getElementById(rowsId);
+            if (!rows) return;
+            const div = document.createElement('div');
+            div.className = 'cf-row';
+            div.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px;';
+            div.innerHTML = `
+                <input type="text" class="cf-key" placeholder="Field name"
+                    style="width:36%;padding:7px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;">
+                <input type="text" class="cf-value" placeholder="Value"
+                    style="flex:1;padding:7px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;">
+                <button type="button" onclick="this.closest('.cf-row').remove()"
+                    style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>`;
+            rows.appendChild(div);
+            div.querySelector('.cf-key').focus();
         }
 
         function getCustomFieldsValues(containerId) {
             const container = document.getElementById(containerId);
-            const inputs = container.querySelectorAll('.custom-field-input');
             const data = {};
-            inputs.forEach(inp => data[inp.getAttribute('data-key')] = inp.value);
+            container.querySelectorAll('.cf-row').forEach(row => {
+                const key = row.querySelector('.cf-key')?.value.trim();
+                const val = row.querySelector('.cf-value')?.value ?? '';
+                if (key) data[key] = val;
+            });
             return data;
         }
 
@@ -1586,7 +1684,7 @@
             const r = await fetch('/api/event/' + selectedId + '/ticket', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email, ticketCount, ...customFields })
+                body: JSON.stringify({ name, email, ticketCount, customFields })
             });
             const data = await r.json();
             if (r.ok) {
@@ -1607,7 +1705,9 @@
             document.getElementById('editRegId').value = regId;
 
             renderCustomFieldsInputs('editTicketCustomFields', t.customFields || {});
-            _editOriginal = { name: t.name || '', email: t.email || '', customFields: JSON.stringify(t.customFields || {}) };
+            const _origCf = t.customFields || {};
+            const _sortedCf = Object.fromEntries(Object.keys(_origCf).sort().map(k => [k, _origCf[k]]));
+            _editOriginal = { name: t.name || '', email: t.email || '', customFields: JSON.stringify(_sortedCf) };
 
             // Build ticket QR preview
             const preview = document.getElementById('editTicketPreview');
@@ -1699,7 +1799,8 @@
         function hasUnsavedChanges() {
             const name = document.getElementById('editTicketName').value;
             const email = document.getElementById('editTicketEmail').value;
-            const cf = JSON.stringify(getCustomFieldsValues('editTicketCustomFields'));
+            const cfRaw = getCustomFieldsValues('editTicketCustomFields');
+            const cf = JSON.stringify(Object.fromEntries(Object.keys(cfRaw).sort().map(k => [k, cfRaw[k]])));
             return name !== _editOriginal.name || email !== _editOriginal.email || cf !== _editOriginal.customFields;
         }
 
@@ -1736,7 +1837,7 @@
             const r = await fetch('/api/ticket/' + id, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email, ...customFields })
+                body: JSON.stringify({ name, email, customFields })
             });
             const data = await r.json();
             if (r.ok) {

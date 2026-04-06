@@ -801,6 +801,30 @@ app.post('/api/events', requireAuth, upload.single('image'), async (req, res) =>
     res.json(newEvent);
 });
 
+// Update event custom field definitions
+app.patch('/api/event/:id', requireAuth, async (req, res) => {
+    const { customFields } = req.body;
+    if (!Array.isArray(customFields)) return res.status(400).json({ error: 'customFields must be an array of strings' });
+
+    const event = db.data.events.find(e => e.id === req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    if (!isAdmin && event.userId !== req.session.userId) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const cleaned = [...new Set(customFields.map(f => String(f).trim()).filter(Boolean))];
+    await db.update(data => {
+        const ev = data.events.find(e => e.id === req.params.id);
+        if (ev) ev.customFields = cleaned;
+    });
+
+    log('event-settings', `✏️  Updated customFields — event: ${event.name}  fields: [${cleaned.join(', ')}]  by: ${req.session.userId}`);
+    res.json({ success: true, customFields: cleaned });
+});
+
 app.get('/api/event/:id/tickets', requireAuth, (req, res) => {
     const user = db.data.users.find(u => u.id === req.session.userId);
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
@@ -882,7 +906,7 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
 
 // Create ticket manually
 app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
-    const { name, email, ticketCount, ...customFields } = req.body;
+    const { name, email, ticketCount, customFields = {} } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
 
     const event = db.data.events.find(e => e.id === req.params.id);
@@ -972,7 +996,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
 
 // Edit ticket manually
 app.put('/api/ticket/:id', requireAuth, async (req, res) => {
-    const { name, email, ...customFields } = req.body;
+    const { name, email, customFields = {} } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
 
     let updatedTickets = [];
@@ -998,9 +1022,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
             ticket.firstName = name.split(' ')[0];
             ticket.lastName = name.split(' ').slice(1).join(' ');
             ticket.email = email;
-            if (customFields) {
-                ticket.customFields = { ...ticket.customFields, ...customFields };
-            }
+            ticket.customFields = customFields;
             updatedTickets.push(ticket);
         });
     }).catch(e => {
