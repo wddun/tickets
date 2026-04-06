@@ -1133,6 +1133,67 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
     res.json({ success: true, count: actualCount });
 });
 
+// Print-friendly email preview
+app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
+    const ticket = db.data.tickets.find(t => t.id === req.params.id);
+    if (!ticket) return res.status(404).send('Ticket not found');
+
+    const event = db.data.events.find(e => e.id === ticket.eventId);
+    if (!event) return res.status(404).send('Event not found');
+
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+        return res.status(403).send('Not authorized');
+    }
+
+    const groupTickets = db.data.tickets.filter(t => t.registrationId === ticket.registrationId);
+    const actualCount = groupTickets.length;
+
+    const qrBlocks = groupTickets.map((t, i) => `
+        <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa; break-inside:avoid;">
+            <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
+                ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Ticket'}
+            </p>
+            <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" style="width:180px; height:180px; display:block; margin:0 auto;" />
+            <p style="font-size:11px; color:#aaa; margin:10px 0 0;">Token: ${t.token}</p>
+            ${t.used_at ? `<p style="font-size:11px; color:#059669; margin:4px 0 0;">✓ Checked in ${new Date(t.used_at).toLocaleString()}</p>` : ''}
+        </div>
+    `).join('');
+
+    const customFieldRows = Object.entries(groupTickets[0].customFields || {}).map(([k, v]) =>
+        `<tr><td style="padding:6px 12px;font-weight:600;color:#555;border-bottom:1px solid #f0f0f0;">${k}</td><td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;">${v}</td></tr>`
+    ).join('');
+
+    res.type('html').send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ticket — ${ticket.name} — ${event.name}</title>
+<style>
+    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 24px; color: #333; }
+    @media print { body { margin: 0; } .no-print { display: none; } }
+</style>
+</head>
+<body>
+<div class="no-print" style="margin-bottom:20px;">
+    <button onclick="window.print()" style="padding:8px 18px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;">🖨️ Print</button>
+</div>
+<h2 style="margin-bottom:4px;">${ticket.name}</h2>
+<p style="color:#888;margin:0 0 4px;">${ticket.email}</p>
+<p style="color:#888;margin:0 0 16px;">Registered ${new Date(groupTickets[0].created_at).toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' })}</p>
+<hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
+<p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
+<p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
+<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month:'long', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true })}</p>
+${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
+${qrBlocks}
+</body>
+</html>`);
+});
+
 // API: Validate QR Code
 // Manual check-in by registrationId (marks all tickets in the group)
 app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
