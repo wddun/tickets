@@ -1618,7 +1618,7 @@ async function generatePassBuffer(ticket, event) {
         value: 'This ticket is valid for one-time entry only. Once scanned at the door it cannot be used again.'
     });
 
-    if (event.imageUrl && event.imageUrl.startsWith('/assets/img/')) {
+    if (event.imageUrl) {
         const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
         if (fs.existsSync(imagePath)) {
             const [thumb1x, thumb2x] = await Promise.all([
