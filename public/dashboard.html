@@ -311,7 +311,13 @@
             border: 1px solid #e8e8e8;
             border-radius: 12px;
             padding: 18px 20px;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+            user-select: none;
         }
+        .stat-box:hover { border-color: #a5b4fc; box-shadow: 0 2px 8px rgba(99,102,241,0.08); }
+        .stat-box.stat-active { border-color: #6366f1; background: #f5f3ff; }
+        .stat-box.stat-active .stat-label::after { content: ' ✕'; font-size: 10px; color: #6366f1; }
 
         .stat-num {
             font-size: 30px;
@@ -405,6 +411,19 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
+        .sort-btn {
+            background: none; border: none; cursor: pointer;
+            font-size: 11px; font-weight: 700; color: #888;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            padding: 0; display: inline-flex; align-items: center; gap: 3px;
+        }
+        .sort-btn:hover { color: #333; }
+        .sort-btn.sort-active { color: #6366f1; }
+        .copy-email-btn {
+            background: none; border: none; cursor: pointer; padding: 1px 4px;
+            color: #bbb; font-size: 11px; border-radius: 4px; line-height: 1;
+        }
+        .copy-email-btn:hover { color: #6366f1; background: #f0f0ff; }
 
         .attendee-row.row-selected {
             background: #fef2f2;
@@ -775,6 +794,8 @@
         let allTickets = [];
         let checkedEventIds = new Set();
         let checkedRegIds = new Set();
+        let activeStatFilter = 'all'; // 'all' | 'checked' | 'pending'
+        let sortState = { field: null, dir: 'asc' }; // field: null|'firstname'|'lastname'|'tickets'
 
         async function init() {
             const r = await fetch('/api/auth/me');
@@ -941,20 +962,22 @@
         </div>
 
         <div class="stats-row">
-            <div class="stat-box">
-                <div class="stat-num">${total}</div>
-                <div class="stat-label">Total Tickets</div>
+            <div class="stat-box${activeStatFilter === 'all' ? ' stat-active' : ''}" onclick="setStatFilter('all')">
+                <div class="stat-num">${grouped.length}</div>
+                <div class="stat-label">Registrations</div>
+                <div style="font-size:11px;color:#bbb;margin-top:4px;">${total} ticket${total !== 1 ? 's' : ''} total</div>
             </div>
-            <div class="stat-box">
+            <div class="stat-box${activeStatFilter === 'checked' ? ' stat-active' : ''}" onclick="setStatFilter('checked')">
                 <div class="stat-num" style="color:#10b981;">${scanned}</div>
                 <div class="stat-label">Checked In</div>
                 <div class="progress-bar-wrap">
                     <div class="progress-bar-fill" style="width:${pct}%"></div>
                 </div>
             </div>
-            <div class="stat-box">
+            <div class="stat-box${activeStatFilter === 'pending' ? ' stat-active' : ''}" onclick="setStatFilter('pending')">
                 <div class="stat-num" style="color:#f59e0b;">${total - scanned}</div>
                 <div class="stat-label">Not Yet In</div>
+                <div style="font-size:11px;color:#bbb;margin-top:4px;">${pct}% checked in</div>
             </div>
         </div>
 
@@ -987,23 +1010,67 @@
             return Object.values(groups);
         }
 
-        function renderAttendeeRows(groups, filter) {
-            let filtered = groups;
-            if (filter) {
-                const q = filter.toLowerCase();
-                filtered = groups.filter(g =>
-                    g.name.toLowerCase().includes(q) || (g.email || '').toLowerCase().includes(q)
+        function getFilteredSortedGroups(groups) {
+            let result = groups;
+
+            // Search filter
+            const q = (document.getElementById('searchBox')?.value || '').toLowerCase();
+            if (q) result = result.filter(g =>
+                g.name.toLowerCase().includes(q) || (g.email || '').toLowerCase().includes(q)
+            );
+
+            // Stat filter
+            if (activeStatFilter === 'checked')
+                result = result.filter(g => g.tickets.length > 0 && g.tickets.every(t => t.used_at));
+            else if (activeStatFilter === 'pending')
+                result = result.filter(g => g.tickets.some(t => !t.used_at));
+
+            // Sort
+            if (sortState.field === 'firstname') {
+                result = [...result].sort((a, b) => {
+                    const af = (a.name || '').split(' ')[0].toLowerCase();
+                    const bf = (b.name || '').split(' ')[0].toLowerCase();
+                    return sortState.dir === 'asc' ? af.localeCompare(bf) : bf.localeCompare(af);
+                });
+            } else if (sortState.field === 'lastname') {
+                result = [...result].sort((a, b) => {
+                    const al = (a.name || '').split(' ').slice(1).join(' ').toLowerCase() || (a.name||'').toLowerCase();
+                    const bl = (b.name || '').split(' ').slice(1).join(' ').toLowerCase() || (b.name||'').toLowerCase();
+                    return sortState.dir === 'asc' ? al.localeCompare(bl) : bl.localeCompare(al);
+                });
+            } else if (sortState.field === 'tickets') {
+                result = [...result].sort((a, b) =>
+                    sortState.dir === 'asc' ? a.tickets.length - b.tickets.length : b.tickets.length - a.tickets.length
                 );
             }
 
+            return result;
+        }
+
+        function nameSortLabel() {
+            if (sortState.field === 'firstname') return sortState.dir === 'asc' ? 'First ↑' : 'First ↓';
+            if (sortState.field === 'lastname') return sortState.dir === 'asc' ? 'Last ↑' : 'Last ↓';
+            return 'Name';
+        }
+        function ticketSortLabel() {
+            if (sortState.field === 'tickets') return sortState.dir === 'asc' ? 'Tickets ↑' : 'Tickets ↓';
+            return 'Tickets';
+        }
+
+        function renderAttendeeRows(groups) {
+            const filtered = getFilteredSortedGroups(groups);
+
             if (!filtered.length) return `<div class="empty-list">No attendees found</div>`;
+
+            const nameActive = sortState.field === 'firstname' || sortState.field === 'lastname';
+            const ticketsActive = sortState.field === 'tickets';
 
             const header = `
         <div class="attendee-row header-row">
             <input type="checkbox" class="ticket-checkbox" id="selectAllTickets" onchange="toggleAllTickets(this.checked, ${JSON.stringify(filtered.map(g => g.registrationId)).replace(/"/g, '&quot;')})">
-            <div>Name</div>
+            <div><button class="sort-btn${nameActive ? ' sort-active' : ''}" onclick="cycleNameSort()">${nameSortLabel()}</button></div>
             <div>Email</div>
-            <div class="col-tickets">Tickets</div>
+            <div class="col-tickets"><button class="sort-btn${ticketsActive ? ' sort-active' : ''}" onclick="cycleTicketsSort()">${ticketSortLabel()}</button></div>
             <div>Status</div>
             <div></div>
         </div>`;
@@ -1032,7 +1099,9 @@
             <div>
                 <div class="attendee-name">${esc(g.name)}</div>
             </div>
-            <div class="attendee-email">${esc(g.email || '')}</div>
+            <div>
+                <div class="attendee-email">${esc(g.email || '')}</div>
+            </div>
             <div class="ticket-count">${total} ticket${total !== 1 ? 's' : ''}</div>
             <div>${pill}</div>
             <div>${btns}</div>
@@ -1091,10 +1160,43 @@
         }
 
         function filterAttendees() {
-            const q = document.getElementById('searchBox')?.value || '';
+            rerenderTable();
+        }
+
+        function rerenderTable() {
             const grouped = groupTickets(allTickets);
-            document.getElementById('attendeeTable').innerHTML = renderAttendeeRows(grouped, q);
+            document.getElementById('attendeeTable').innerHTML = renderAttendeeRows(grouped);
             updateTicketBulkBar();
+        }
+
+        function setStatFilter(filter) {
+            activeStatFilter = activeStatFilter === filter ? 'all' : filter;
+            // Re-render stats row active states without full refetch
+            document.querySelectorAll('.stat-box').forEach((box, i) => {
+                const filters = ['all', 'checked', 'pending'];
+                box.classList.toggle('stat-active', activeStatFilter === filters[i]);
+            });
+            rerenderTable();
+        }
+
+        const NAME_SORT_CYCLE = [
+            { field: 'firstname', dir: 'asc' },
+            { field: 'firstname', dir: 'desc' },
+            { field: 'lastname', dir: 'asc' },
+            { field: 'lastname', dir: 'desc' },
+            { field: null, dir: 'asc' },
+        ];
+        function cycleNameSort() {
+            const cur = NAME_SORT_CYCLE.findIndex(s => s.field === sortState.field && s.dir === sortState.dir);
+            const next = NAME_SORT_CYCLE[(cur + 1) % NAME_SORT_CYCLE.length];
+            sortState = next;
+            rerenderTable();
+        }
+        function cycleTicketsSort() {
+            if (sortState.field !== 'tickets') sortState = { field: 'tickets', dir: 'asc' };
+            else if (sortState.dir === 'asc') sortState = { field: 'tickets', dir: 'desc' };
+            else sortState = { field: null, dir: 'asc' };
+            rerenderTable();
         }
 
         async function manualCheckin(registrationId) {
@@ -1372,10 +1474,12 @@
             </div>
             <div id="editTicketCustomFields" style="margin-bottom:16px;"></div>
             <input type="hidden" id="editTicketId" />
-            <div style="display:flex;gap:8px;">
+            <input type="hidden" id="editRegId" />
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
                 <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket()">Save &amp; Resend</button>
-                <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail()">Resend Only</button>
+                <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Only</button>
             </div>
+            <button class="btn btn-danger" style="width:100%;margin-top:4px;" onclick="deleteRegistrationFromModal()">Delete Registration</button>
             <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:#666;"></div>
         </div>
     </div>
@@ -1498,38 +1602,44 @@
             document.getElementById('editTicketName').value = t.name || '';
             document.getElementById('editTicketEmail').value = t.email || '';
             document.getElementById('editTicketId').value = t.id;
+            document.getElementById('editRegId').value = regId;
 
             renderCustomFieldsInputs('editTicketCustomFields', t.customFields || {});
 
             // Build ticket QR preview
             const preview = document.getElementById('editTicketPreview');
-            const checkedLabel = t.used_at
-                ? `<span style="background:#d1fae5;color:#065f46;font-size:11px;font-weight:600;padding:2px 7px;border-radius:99px;">Checked in ${new Date(t.used_at).toLocaleString()}</span>`
-                : `<span style="background:#fef3c7;color:#92400e;font-size:11px;font-weight:600;padding:2px 7px;border-radius:99px;">Not yet checked in</span>`;
+            const createdStr = t.created_at ? new Date(t.created_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : null;
 
-            if (tickets.length === 1) {
-                preview.innerHTML = `
-                    <div style="text-align:center;padding:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;margin-bottom:4px;">
-                        <img src="/qr/${t.token}" style="width:120px;height:120px;display:block;margin:0 auto 8px;" />
-                        <div style="font-size:11px;color:#aaa;margin-bottom:6px;">Token: ${t.token}</div>
-                        ${checkedLabel}
-                    </div>`;
-            } else {
-                const qrItems = tickets.map((tk, i) => {
-                    const status = tk.used_at
-                        ? `<span style="color:#065f46;font-size:10px;">✓ checked in</span>`
-                        : `<span style="color:#92400e;font-size:10px;">not checked in</span>`;
-                    return `<div style="text-align:center;">
-                        <div style="font-size:11px;font-weight:600;color:#555;margin-bottom:4px;">Ticket ${i+1}</div>
-                        <img src="/qr/${tk.token}" style="width:80px;height:80px;display:block;margin:0 auto 4px;" />
-                        ${status}
-                    </div>`;
-                }).join('');
-                preview.innerHTML = `
-                    <div style="padding:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;margin-bottom:4px;">
-                        <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">${qrItems}</div>
-                    </div>`;
-            }
+            const renderTicketCard = (tk, i, showLarge) => {
+                const checkedIn = !!tk.used_at;
+                const statusBadge = checkedIn
+                    ? `<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">✓ Checked in ${new Date(tk.used_at).toLocaleString()}</span>`
+                    : `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">Not checked in</span>`;
+                const toggleBtn = checkedIn
+                    ? `<button onclick="toggleTicketInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Undo Check-in</button>`
+                    : `<button onclick="toggleTicketInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#d1fae5;color:#065f46;border:none;border-radius:6px;cursor:pointer;">Mark Checked In</button>`;
+                const size = showLarge ? 120 : 80;
+                const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:4px;">Ticket ${i+1}</div>` : '';
+                return `<div style="text-align:center;">
+                    ${label}
+                    <img src="/qr/${tk.token}" style="width:${size}px;height:${size}px;display:block;margin:0 auto 6px;" />
+                    <div style="font-size:10px;color:#aaa;margin-bottom:4px;">${tk.token}</div>
+                    ${statusBadge}
+                    ${toggleBtn}
+                </div>`;
+            };
+
+            const qrItems = tickets.map((tk, i) => renderTicketCard(tk, i, tickets.length === 1)).join('');
+            const infoBar = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px;color:#888;">
+                <span>${createdStr ? `Registered ${createdStr}` : ''}</span>
+                <button class="copy-email-btn" onclick="copyToClipboard('${esc(t.email||'')}', this)" title="Copy email">📋 Copy email</button>
+            </div>`;
+
+            preview.innerHTML = `
+                ${infoBar}
+                <div style="padding:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;margin-bottom:12px;">
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">${qrItems}</div>
+                </div>`;
 
             const extra = document.getElementById('editTicketExtraList');
             extra.innerHTML = tickets.length > 1
@@ -1541,9 +1651,50 @@
         function closeEditTicketModal() {
             document.getElementById('editTicketModal').style.display = 'none';
         }
-        async function resendTicketEmail() {
+
+        function copyToClipboard(text, btn) {
+            navigator.clipboard.writeText(text).then(() => {
+                const orig = btn.textContent;
+                btn.textContent = '✓ Copied';
+                setTimeout(() => btn.textContent = orig, 1500);
+            });
+        }
+
+        async function toggleTicketInModal(ticketId, checkIn, regId) {
+            const method = checkIn ? 'POST' : 'DELETE';
+            await fetch(`/api/checkin/${ticketId}`, { method });
+            // Refresh allTickets and re-open modal with fresh data
+            const event = events.find(e => e.id === selectedId);
+            if (event) {
+                const r = await fetch(`/api/event/${event.id}/tickets`);
+                if (r.ok) {
+                    allTickets = await r.json();
+                    rerenderTable();
+                    const freshTickets = allTickets.filter(t => t.registrationId === regId);
+                    if (freshTickets.length) openEditTicketModal(regId, freshTickets);
+                }
+            }
+        }
+
+        async function deleteRegistrationFromModal() {
+            const regId = document.getElementById('editRegId').value;
+            if (!confirm('Delete this registration and all its tickets? This cannot be undone.')) return;
+            const r = await fetch('/api/registrations/bulk', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ registrationIds: [regId] })
+            });
+            if (r.ok) {
+                closeEditTicketModal();
+                const event = events.find(e => e.id === selectedId);
+                if (event) await fetchAndRender(event, true);
+            } else {
+                alert('Could not delete registration.');
+            }
+        }
+
+        async function resendTicketEmail(btn) {
             const id = document.getElementById('editTicketId').value;
-            const btn = event.target;
             btn.disabled = true;
             btn.textContent = 'Sending…';
             const r = await fetch('/api/ticket/' + id + '/resend', { method: 'POST' });
