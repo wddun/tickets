@@ -29,6 +29,13 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
+function log(tag, msg) {
+    console.log(`[${new Date().toISOString()}] [${tag}] ${msg}`);
+}
+function getIP(req) {
+    return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+}
+
 const ses = new SESClient({
     region: process.env.AWS_REGION || 'us-east-1',
     credentials: {
@@ -162,16 +169,25 @@ if (db.data.event && db.data.events.length === 0) {
 // Signup enabled — creates a standard staff account
 app.post('/api/auth/signup', loginLimiter, async (req, res) => {
     const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+    if (!email || !password) {
+        log('signup', `❌ Missing fields — ip: ${getIP(req)}`);
+        return res.status(400).json({ error: 'email and password required' });
+    }
 
     const normalizedEmail = email.toLowerCase();
+    log('signup', `📝 Attempt — email: ${normalizedEmail}  ip: ${getIP(req)}`);
+
     const existing = db.data.users.find(u => u.email === normalizedEmail);
-    if (existing) return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
+    if (existing) {
+        log('signup', `⚠️  Already exists — email: ${normalizedEmail}`);
+        return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = { id: nanoid(), email: normalizedEmail, password: hashedPassword };
     await db.update(data => data.users.push(newUser));
     req.session.userId = newUser.id;
+    log('signup', `✅ Account created — email: ${normalizedEmail}  id: ${newUser.id}`);
     res.json({ success: true, user: { id: newUser.id, email: newUser.email } });
 });
 
@@ -179,28 +195,44 @@ app.post('/api/auth/signup', loginLimiter, async (req, res) => {
 app.post('/api/auth/setup-admin', async (req, res) => {
     const { password } = req.body;
     const adminEmail = process.env.ADMIN_EMAIL;
+    log('setup-admin', `🔧 Attempt — ip: ${getIP(req)}`);
     if (!adminEmail) return res.status(500).json({ error: 'ADMIN_EMAIL not set in .env' });
     if (!password) return res.status(400).json({ error: 'password required' });
 
     const existing = db.data.users.find(u => u.email === adminEmail);
-    if (existing) return res.status(400).json({ error: 'Admin account already exists' });
+    if (existing) {
+        log('setup-admin', `⚠️  Admin already exists — email: ${adminEmail}`);
+        return res.status(400).json({ error: 'Admin account already exists' });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = { id: nanoid(), email: adminEmail, password: hashedPassword };
     await db.update(data => data.users.push(newUser));
     req.session.userId = newUser.id;
+    log('setup-admin', `✅ Admin created — email: ${adminEmail}  id: ${newUser.id}`);
     res.json({ success: true, message: `Admin account created for ${adminEmail}` });
 });
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
     const { email, password } = req.body;
-    const user = db.data.users.find(u => u.email === email);
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    const normalizedEmail = (email || '').toLowerCase();
+    log('login', `🔑 Attempt — email: ${normalizedEmail}  ip: ${getIP(req)}`);
+
+    const user = db.data.users.find(u => u.email === normalizedEmail);
+    if (!user) {
+        log('login', `❌ No account found — email: ${normalizedEmail}  ip: ${getIP(req)}`);
+        return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
     const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!match) {
+        log('login', `❌ Wrong password — email: ${normalizedEmail}  ip: ${getIP(req)}`);
+        return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
+    const isAdmin = user.email === process.env.ADMIN_EMAIL;
     req.session.userId = user.id;
+    log('login', `✅ Success — email: ${normalizedEmail}  id: ${user.id}  role: ${isAdmin ? 'admin' : 'staff'}  ip: ${getIP(req)}`);
     res.json({ success: true, user: { id: user.id, email: user.email } });
 });
 
@@ -211,6 +243,9 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 app.post('/api/auth/logout', (req, res) => {
+    const userId = req.session.userId;
+    const user = userId ? db.data.users.find(u => u.id === userId) : null;
+    log('logout', `👋 User logged out — email: ${user?.email || 'unknown'}  id: ${userId || 'none'}  ip: ${getIP(req)}`);
     req.session.destroy();
     res.json({ success: true });
 });
@@ -218,6 +253,8 @@ app.post('/api/auth/logout', (req, res) => {
 app.delete('/api/auth/account', async (req, res) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
     const userId = req.session.userId;
+    const userToDelete = db.data.users.find(u => u.id === userId);
+    log('account', `🗑️  Account deletion — email: ${userToDelete?.email || 'unknown'}  id: ${userId}  ip: ${getIP(req)}`);
     await db.update(data => {
         const eventIds = data.events.filter(e => e.userId === userId).map(e => e.id);
         data.tickets = data.tickets.filter(t => !eventIds.includes(t.eventId));
@@ -335,6 +372,8 @@ app.post('/api/register-bulk', async (req, res) => {
     if (!firstName || !lastName || !email || !eventId || !ticketCount) {
         return res.status(400).json({ error: 'firstName, lastName, email, eventId, and ticketCount are required' });
     }
+
+    log('bulk-register', `📋 ${isResend ? 'Resend' : 'New'} registration — email: ${email}  name: ${firstName} ${lastName}  tickets: ${ticketCount}  eventId: ${eventId}  ip: ${getIP(req)}`);
 
     const event = db.data.events.find(e => e.id === eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -549,7 +588,7 @@ app.post('/api/register-bulk', async (req, res) => {
                     </div>
                 `
             });
-            console.log(`📧 Email ${isUpdate ? 'update' : 'sent'} → ${email} (${fullName}, ${actualCount} ticket${actualCount > 1 ? 's' : ''})`);
+            log('bulk-register', `📧 Email ${isUpdate ? 'updated' : 'sent'} → ${email}  name: ${fullName}  tickets: ${actualCount}  event: ${event.name}  regId: ${ticketsToSend[0].registrationId}`);
         }
 
         const response = {
@@ -879,6 +918,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     }
 
     await db.update(data => data.tickets.push(...newTickets));
+    log('ticket-create', `🎟️  Created ${newTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${registrationId}  by: ${req.session.userId}`);
 
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const actualCount = newTickets.length;
@@ -922,7 +962,9 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
                     ${addAllButton}
                 </div>
             `
-        }).catch(err => console.error('Email send err:', err));
+        }).catch(err => {
+            log('ticket-create', `❌ Email send failed — email: ${email}  err: ${err.message}`);
+        });
     }
 
     res.json({ success: true, ticket: newTickets[0], tickets: newTickets });
@@ -968,6 +1010,8 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
     if (!updatedTickets.length) return; // already sent response via catch
 
+    log('ticket-edit', `✏️  Edited ${updatedTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${updatedTickets[0].registrationId}  by: ${req.session.userId}`);
+
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const actualCount = updatedTickets.length;
 
@@ -1009,10 +1053,84 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
                     ${addAllButton}
                 </div>
             `
-        }).catch(err => console.error('Email send err:', err));
+        }).catch(err => {
+            log('ticket-edit', `❌ Email send failed — email: ${email}  err: ${err.message}`);
+        });
+    } else {
+        log('ticket-edit', `⚠️  Email skipped (SES not configured)`);
     }
 
     res.json({ success: true, tickets: updatedTickets });
+});
+
+// Resend ticket email without changing any data
+app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
+    const ticket = db.data.tickets.find(t => t.id === req.params.id);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+
+    const event = db.data.events.find(e => e.id === ticket.eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const groupTickets = db.data.tickets.filter(t => t.registrationId === ticket.registrationId);
+    log('resend-email', `📧 Resending ${groupTickets.length} ticket(s) — email: ${ticket.email}  event: ${event.name}  regId: ${ticket.registrationId}  by: ${req.session.userId}`);
+
+    if (!process.env.SES_FROM || !process.env.AWS_ACCESS_KEY_ID) {
+        return res.status(503).json({ error: 'Email not configured' });
+    }
+
+    const actualCount = groupTickets.length;
+    const walletButton = (token) => `
+        <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
+            <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
+        </a>`;
+
+    const qrBlocks = groupTickets.map((t, i) => `
+        <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
+            <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
+                ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Your Ticket'}
+            </p>
+            <img src="${BASE_URL}/qr/${t.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
+            <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${t.token}</p>
+            ${walletButton(t.token)}
+        </div>
+    `).join('');
+
+    const addAllButton = actualCount > 1 ? `
+        <div style="text-align:center; margin:24px 0 8px;">
+            <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${actualCount} passes to Apple Wallet at once:</p>
+            <a href="${BASE_URL}/api/passes/bundle/${ticket.registrationId}" style="display:inline-block; text-decoration:none;">
+                <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block;">
+            </a>
+        </div>
+    ` : '';
+
+    await sendEmail({
+        to: ticket.email,
+        subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name} (resent)`,
+        html: `
+            <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
+                <h2 style="color:#333; margin-bottom:4px;">Hey ${groupTickets[0].firstName}!</h2>
+                <p style="color:#555;">Here's a copy of your registration for <strong>${event.name}</strong>.</p>
+                <p style="color:#555;">📍 ${event.location.name}</p>
+                <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
+                ${qrBlocks}
+                ${addAllButton}
+            </div>
+        `
+    }).catch(err => {
+        log('resend-email', `❌ Send failed — email: ${ticket.email}  err: ${err.message}`);
+        return res.status(500).json({ error: 'Failed to send email' });
+    });
+
+    res.json({ success: true, count: actualCount });
 });
 
 // API: Validate QR Code
@@ -1030,10 +1148,11 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     }
 
     if (!tickets.length) {
-        console.error(`[checkin] FAILED — no ticket or registration found for id: ${registrationId} (user: ${req.session.userId})`);
+        log('checkin', `❌ FAILED — no ticket/registration found for id: ${registrationId}  by: ${req.session.userId}`);
         return res.status(404).json({ error: 'Not found' });
     }
 
+    const checkinEvent = db.data.events.find(e => e.id === tickets[0].eventId);
     const now = new Date().toISOString();
     let checkedInCount = 0;
     tickets.forEach(t => {
@@ -1044,9 +1163,9 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     });
 
     if (checkedInCount === 0) {
-        console.log(`[checkin] already checked in — id: ${registrationId} (user: ${req.session.userId})`);
+        log('checkin', `⚠️  Already checked in — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${checkinEvent?.name}  by: ${req.session.userId}`);
     } else {
-        console.log(`[checkin] checked in ${checkedInCount} ticket(s) for id: ${registrationId} (user: ${req.session.userId})`);
+        log('checkin', `✅ Checked in ${checkedInCount}/${tickets.length} ticket(s) — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${checkinEvent?.name}  by: ${req.session.userId}`);
     }
 
     await db.write();
@@ -1078,7 +1197,7 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
         if (t.used_at) { t.used_at = null; clearedCount++; }
     });
 
-    console.log(`[uncheckin] cleared ${clearedCount} ticket(s) for id: ${registrationId} (user: ${req.session.userId})`);
+    log('uncheckin', `↩️  Cleared ${clearedCount} ticket(s) — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${event?.name}  by: ${req.session.userId}`);
     await db.write();
     ticketStatusCache.clear();
     res.json({ success: true });
@@ -1092,7 +1211,7 @@ app.post('/api/validate', async (req, res) => {
     const ticket = db.data.tickets.find(t => t.token === cleanToken);
 
     if (!ticket) {
-        console.error(`[validate] INVALID token: ${cleanToken} `);
+        log('validate', `❌ INVALID token: ${cleanToken}  ip: ${getIP(req)}`);
         return res.json({ status: 'invalid', message: 'Invalid ticket' });
     }
 
@@ -1105,7 +1224,7 @@ app.post('/api/validate', async (req, res) => {
     };
 
     if (ticket.used_at) {
-        console.log(`[validate] ALREADY USED — ticket: ${ticket.id} name: ${ticket.name} used_at: ${ticket.used_at} `);
+        log('validate', `⚠️  ALREADY USED — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  used_at: ${ticket.used_at}  ip: ${getIP(req)}`);
         return res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, ...ticketFields });
     }
 
@@ -1113,6 +1232,7 @@ app.post('/api/validate', async (req, res) => {
     await db.write();
     ticketStatusCache.clear();
 
+    log('validate', `✅ VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
 });
 
