@@ -1470,12 +1470,15 @@ app.post('/api/validate', async (req, res) => {
         return res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, ...ticketFields });
     }
 
-    ticket.used_at = new Date().toISOString();
+    const validatedAt = new Date().toISOString();
+    ticket.used_at = validatedAt;
+    ticket.updated_at = validatedAt;
     await db.write();
     ticketStatusCache.clear();
 
     log('validate', `✅ VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
+    pushWalletUpdate([ticket.token]).catch(() => {});
 });
 
 // Helper: QR Generation Route (Alternative for frontend display)
@@ -1502,8 +1505,10 @@ async function generatePassBuffer(ticket, event) {
         passTypeIdentifier: process.env.PASS_TYPE_ID,
         teamIdentifier: process.env.TEAM_ID,
         description: event.name,
-        logoText: event.name,
-        backgroundColor: ticket.used_at ? "rgb(120, 120, 120)" : (event.color || "rgb(99, 102, 241)"),
+        logoText: ticket.used_at ? "✓ CHECKED IN" : event.name,
+        backgroundColor: ticket.used_at ? "rgb(90, 90, 90)" : (event.color || "rgb(99, 102, 241)"),
+        foregroundColor: "rgb(255, 255, 255)",
+        labelColor: ticket.used_at ? "rgb(180, 255, 180)" : "rgb(220, 220, 255)",
     };
     // Enable push updates if APNs is configured (authenticationToken must be ≥16 chars)
     if (process.env.APNS_KEY_ID && process.env.APNS_KEY_PATH) {
@@ -1541,13 +1546,8 @@ async function generatePassBuffer(ticket, event) {
         });
     }
 
-    // event.name is already in logoText (top bar) — don't repeat it
-    if (ticket.used_at) {
-        pass.primaryFields.push({ key: "attendee", label: "NAME", value: ticket.name });
-        pass.primaryFields.push({ key: "status", label: "STATUS", value: "✓ CHECKED IN" });
-    } else {
-        pass.primaryFields.push({ key: "attendee", label: "NAME", value: ticket.name });
-    }
+    // When checked in, show name + greyed-out event name; logoText already says "✓ CHECKED IN"
+    pass.primaryFields.push({ key: "attendee", label: ticket.used_at ? "CHECKED IN" : "NAME", value: ticket.name });
 
     const customFields = ticket.customFields || {};
     const cfEntries = Object.entries(customFields);
