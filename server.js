@@ -1137,7 +1137,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
 
 // Edit ticket manually
 app.put('/api/ticket/:id', requireAuth, async (req, res) => {
-    const { name, email, customFields = {} } = req.body;
+    const { name, email, customFields = {}, noEmail } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
 
     let updatedTickets = [];
@@ -1182,7 +1182,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
     log('ticket-edit', `✏️  Edited ${updatedTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${updatedTickets[0].registrationId}  by: ${req.session.userId}`);
 
-    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+    if (!noEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const actualCount = updatedTickets.length;
 
         const walletButton = (token) => `
@@ -1227,6 +1227,8 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
         }).catch(err => {
             log('ticket-edit', `❌ Email send failed — email: ${email}  err: ${err.message}`);
         });
+    } else if (noEmail) {
+        log('ticket-edit', `⏭️  Email skipped (save only)`);
     } else {
         log('ticket-edit', `⚠️  Email skipped (SES not configured)`);
     }
@@ -1501,7 +1503,7 @@ async function generatePassBuffer(ticket, event) {
         teamIdentifier: process.env.TEAM_ID,
         description: event.name,
         logoText: event.name,
-        backgroundColor: event.color || "rgb(99, 102, 241)",
+        backgroundColor: ticket.used_at ? "rgb(120, 120, 120)" : (event.color || "rgb(99, 102, 241)"),
     };
     // Enable push updates if APNs is configured (authenticationToken must be ≥16 chars)
     if (process.env.APNS_KEY_ID && process.env.APNS_KEY_PATH) {
@@ -1521,11 +1523,13 @@ async function generatePassBuffer(ticket, event) {
 
     pass.voided = !!ticket.used_at;
 
-    pass.setBarcodes({
-        format: "PKBarcodeFormatQR",
-        message: `ticket:${ticket.token} `,
-        messageEncoding: "iso-8859-1"
-    });
+    if (!ticket.used_at) {
+        pass.setBarcodes({
+            format: "PKBarcodeFormatQR",
+            message: `ticket:${ticket.token} `,
+            messageEncoding: "iso-8859-1"
+        });
+    }
 
     const lat = event.location?.lat;
     const lng = event.location?.lng;
@@ -1538,7 +1542,12 @@ async function generatePassBuffer(ticket, event) {
     }
 
     // event.name is already in logoText (top bar) — don't repeat it
-    pass.primaryFields.push({ key: "attendee", label: "NAME", value: ticket.name });
+    if (ticket.used_at) {
+        pass.primaryFields.push({ key: "attendee", label: "NAME", value: ticket.name });
+        pass.primaryFields.push({ key: "status", label: "STATUS", value: "✓ CHECKED IN" });
+    } else {
+        pass.primaryFields.push({ key: "attendee", label: "NAME", value: ticket.name });
+    }
 
     const customFields = ticket.customFields || {};
     const cfEntries = Object.entries(customFields);
@@ -1589,9 +1598,6 @@ async function generatePassBuffer(ticket, event) {
         pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
     }
 
-    if (ticket.used_at) {
-        pass.auxiliaryFields.push({ key: "status", label: "STATUS", value: "USED / SCANNED" });
-    }
 
     // Back: remaining custom fields
     cfEntries.slice(1).forEach(([label, value], i) => {
