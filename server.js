@@ -895,6 +895,52 @@ app.post('/api/events', requireAuth, upload.single('image'), async (req, res) =>
     res.json(newEvent);
 });
 
+// Edit event details
+app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) => {
+    const event = db.data.events.find(e => e.id === req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    if (!isAdmin && event.userId !== req.session.userId) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const { name, time, color, locationName, locationAddress, lat, lng } = req.body;
+
+    let imageUrl = event.imageUrl;
+    if (req.file) {
+        if (req.file.mimetype === 'image/jpeg') {
+            const pngName = req.file.filename.replace(/\.[^.]+$/, '.png');
+            const pngPath = path.join(uploadsDir, pngName);
+            await sharp(req.file.path).png().toFile(pngPath);
+            await fs.promises.unlink(req.file.path);
+            imageUrl = `/uploads/${pngName}`;
+        } else {
+            imageUrl = `/uploads/${req.file.filename}`;
+        }
+    }
+
+    await db.update(data => {
+        const ev = data.events.find(e => e.id === req.params.id);
+        if (!ev) return;
+        if (name) ev.name = name;
+        if (time) ev.time = time;
+        if (color) ev.color = color;
+        ev.imageUrl = imageUrl;
+        ev.location = {
+            name: locationName || ev.location?.name || 'Venue',
+            address: locationAddress || ev.location?.address || '',
+            lat: parseFloat(lat) || ev.location?.lat || 37.33182,
+            lng: parseFloat(lng) || ev.location?.lng || -122.03118,
+        };
+    });
+
+    const updated = db.data.events.find(e => e.id === req.params.id);
+    log('event-edit', `✏️  Updated event — name: ${updated.name}  id: ${updated.id}  by: ${req.session.userId}`);
+    res.json(updated);
+});
+
 // Update event custom field definitions
 app.patch('/api/event/:id', requireAuth, async (req, res) => {
     const { customFields } = req.body;
