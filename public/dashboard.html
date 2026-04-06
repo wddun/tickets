@@ -1351,25 +1351,32 @@
     <!-- Edit Ticket Modal -->
     <div class="modal-overlay" id="editTicketModal" style="display:none;"
         onclick="if(event.target===this)closeEditTicketModal()">
-        <div class="modal" style="max-width:400px;background:#fff;border-radius:14px;">
+        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
-                <h2>Edit Registration Group</h2>
+                <h2>Edit Registration</h2>
                 <button class="modal-close" onclick="closeEditTicketModal()">&times;</button>
             </div>
+
+            <!-- Ticket preview -->
+            <div id="editTicketPreview" style="margin-bottom:16px;"></div>
+
             <div style="margin-bottom:12px;">
                 <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Name</label>
                 <input type="text" id="editTicketName"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
-            <div style="margin-bottom:20px;">
+            <div style="margin-bottom:16px;">
                 <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Email</label>
                 <input type="email" id="editTicketEmail"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
-            <div id="editTicketCustomFields" style="margin-bottom:20px;"></div>
+            <div id="editTicketCustomFields" style="margin-bottom:16px;"></div>
             <input type="hidden" id="editTicketId" />
-            <button class="btn btn-primary" style="width:100%;" onclick="submitEditTicket()">Save Changes</button>
-            <div id="editTicketExtraList" style="margin-top:16px;font-size:12px;color:#666;"></div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket()">Save &amp; Resend</button>
+                <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail()">Resend Only</button>
+            </div>
+            <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:#666;"></div>
         </div>
     </div>
 
@@ -1494,17 +1501,61 @@
 
             renderCustomFieldsInputs('editTicketCustomFields', t.customFields || {});
 
-            const extra = document.getElementById('editTicketExtraList');
-            if (tickets.length > 1) {
-                extra.innerHTML = 'Note: This registration block contains ' + tickets.length + ' bundled tickets. Editing these details will modify ALL tickets inside the group and send a single bundled update email.';
+            // Build ticket QR preview
+            const preview = document.getElementById('editTicketPreview');
+            const checkedLabel = t.used_at
+                ? `<span style="background:#d1fae5;color:#065f46;font-size:11px;font-weight:600;padding:2px 7px;border-radius:99px;">Checked in ${new Date(t.used_at).toLocaleString()}</span>`
+                : `<span style="background:#fef3c7;color:#92400e;font-size:11px;font-weight:600;padding:2px 7px;border-radius:99px;">Not yet checked in</span>`;
+
+            if (tickets.length === 1) {
+                preview.innerHTML = `
+                    <div style="text-align:center;padding:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;margin-bottom:4px;">
+                        <img src="/qr/${t.token}" style="width:120px;height:120px;display:block;margin:0 auto 8px;" />
+                        <div style="font-size:11px;color:#aaa;margin-bottom:6px;">Token: ${t.token}</div>
+                        ${checkedLabel}
+                    </div>`;
             } else {
-                extra.innerHTML = '';
+                const qrItems = tickets.map((tk, i) => {
+                    const status = tk.used_at
+                        ? `<span style="color:#065f46;font-size:10px;">✓ checked in</span>`
+                        : `<span style="color:#92400e;font-size:10px;">not checked in</span>`;
+                    return `<div style="text-align:center;">
+                        <div style="font-size:11px;font-weight:600;color:#555;margin-bottom:4px;">Ticket ${i+1}</div>
+                        <img src="/qr/${tk.token}" style="width:80px;height:80px;display:block;margin:0 auto 4px;" />
+                        ${status}
+                    </div>`;
+                }).join('');
+                preview.innerHTML = `
+                    <div style="padding:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;margin-bottom:4px;">
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">${qrItems}</div>
+                    </div>`;
             }
+
+            const extra = document.getElementById('editTicketExtraList');
+            extra.innerHTML = tickets.length > 1
+                ? `Note: ${tickets.length} bundled tickets — saving will update ALL and send one email.`
+                : '';
 
             document.getElementById('editTicketModal').style.display = 'flex';
         }
         function closeEditTicketModal() {
             document.getElementById('editTicketModal').style.display = 'none';
+        }
+        async function resendTicketEmail() {
+            const id = document.getElementById('editTicketId').value;
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            const r = await fetch('/api/ticket/' + id + '/resend', { method: 'POST' });
+            btn.disabled = false;
+            btn.textContent = 'Resend Only';
+            if (r.ok) {
+                const d = await r.json();
+                alert(`Email resent (${d.count} ticket${d.count > 1 ? 's' : ''}).`);
+            } else {
+                const d = await r.json();
+                alert(d.error || 'Failed to resend email');
+            }
         }
         async function submitEditTicket() {
             const id = document.getElementById('editTicketId').value;
@@ -1523,7 +1574,7 @@
                 closeEditTicketModal();
                 const event = events.find(e => e.id === selectedId);
                 fetchAndRender(event, true);
-                alert('Tickets updated and emails dispatched.');
+                alert('Tickets updated and email sent.');
             } else {
                 alert(data.error || 'Failed to edit ticket');
             }
