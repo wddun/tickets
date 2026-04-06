@@ -17,6 +17,8 @@ import session from 'express-session';
 import FileStoreFactory from 'session-file-store';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
+import crypto from 'crypto';
+import http2 from 'http2';
 
 const FileStore = FileStoreFactory(session);
 
@@ -46,20 +48,92 @@ const ses = new SESClient({
 
 // Rate limiter: ensures at least 100ms between sends (~10/sec max)
 let lastSendTime = 0;
-async function sendEmail({ to, subject, html }) {
+async function sendEmail({ to, subject, html, registrationId }) {
     const now = Date.now();
     const wait = Math.max(0, lastSendTime + 100 - now);
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
     lastSendTime = Date.now();
+
+    // Inject 1x1 tracking pixel so we can detect email opens
+    const tracked = registrationId
+        ? html + `\n<img src="${BASE_URL}/api/track/open/${registrationId}" width="1" height="1" style="display:none;opacity:0;" alt="">`
+        : html;
 
     return ses.send(new SendEmailCommand({
         Source: process.env.SES_FROM,
         Destination: { ToAddresses: [to] },
         Message: {
             Subject: { Data: subject, Charset: 'UTF-8' },
-            Body: { Html: { Data: html, Charset: 'UTF-8' } }
+            Body: { Html: { Data: tracked, Charset: 'UTF-8' } }
         }
     }));
+}
+
+// 1x1 transparent GIF for email open tracking
+const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+
+// ── APNs push for Wallet pass updates ──────────────────────────────────────
+let _apnsJwtCache = { token: null, iat: 0 };
+
+function getApnsJwt() {
+    const now = Math.floor(Date.now() / 1000);
+    if (_apnsJwtCache.token && now - _apnsJwtCache.iat < 3300) return _apnsJwtCache.token;
+    const keyPath = process.env.APNS_KEY_PATH;
+    if (!keyPath) return null;
+    let key;
+    try { key = fs.readFileSync(keyPath, 'utf8'); } catch { return null; }
+    const keyId = process.env.APNS_KEY_ID;
+    const teamId = process.env.APNS_TEAM_ID || process.env.TEAM_ID;
+    if (!keyId || !teamId) return null;
+    const b64u = (v) => Buffer.from(typeof v === 'object' ? JSON.stringify(v) : String(v)).toString('base64url');
+    const header = b64u({ alg: 'ES256', kid: keyId });
+    const payload = b64u({ iss: teamId, iat: now });
+    const msg = `${header}.${payload}`;
+    const sig = crypto.sign('SHA256', Buffer.from(msg), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+    _apnsJwtCache = { token: `${msg}.${sig}`, iat: now };
+    return _apnsJwtCache.token;
+}
+
+async function pushWalletUpdate(serialNumbers) {
+    if (!Array.isArray(serialNumbers)) serialNumbers = [serialNumbers];
+    const passTypeId = process.env.PASS_TYPE_ID;
+    if (!passTypeId || !process.env.APNS_KEY_ID || !process.env.APNS_KEY_PATH) return;
+    const jwt = getApnsJwt();
+    if (!jwt) return;
+
+    const devices = (db.data.walletDevices || []).filter(d => serialNumbers.includes(d.serialNumber));
+    if (!devices.length) return;
+    const pushTokens = [...new Set(devices.map(d => d.pushToken))];
+
+    const host = process.env.APNS_PRODUCTION === 'true' ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
+    let client;
+    try { client = http2.connect(`https://${host}`); } catch { return; }
+
+    for (const pushToken of pushTokens) {
+        await new Promise((resolve) => {
+            try {
+                const req = client.request({
+                    ':method': 'POST', ':path': `/3/device/${pushToken}`,
+                    'authorization': `bearer ${jwt}`,
+                    'apns-topic': passTypeId, 'apns-push-type': 'background',
+                    'content-type': 'application/json', 'content-length': '2',
+                });
+                req.write('{}'); req.end();
+                req.on('response', (headers) => {
+                    const status = headers[':status'];
+                    log('apns', `📱 Push → ${pushToken.slice(0, 8)}… status: ${status}`);
+                    if (status === 410) {
+                        db.update(data => {
+                            if (data.walletDevices) data.walletDevices = data.walletDevices.filter(d => d.pushToken !== pushToken);
+                        });
+                    }
+                    resolve();
+                });
+                req.on('error', (err) => { log('apns', `❌ Push error: ${err.message}`); resolve(); });
+            } catch (e) { resolve(); }
+        });
+    }
+    try { client.close(); } catch {}
 }
 
 app.set('trust proxy', 1);
@@ -124,6 +198,7 @@ if (!db.data.events) db.data.events = [];
 if (!db.data.tickets) db.data.tickets = [];
 if (!db.data.sheetLinks) db.data.sheetLinks = [];
 if (!db.data.sheetAccess) db.data.sheetAccess = [];
+if (!db.data.walletDevices) db.data.walletDevices = [];
 
 // Migration: backfill scannerPin on any events that don't have one
 const eventsMissingPin = db.data.events.filter(e => !e.scannerPin);
@@ -281,6 +356,24 @@ const requireAdmin = (req, res, next) => {
     }
     next();
 };
+
+// Email open tracking pixel (public — no auth, called by email clients)
+app.get('/api/track/open/:registrationId', async (req, res) => {
+    res.set('Content-Type', 'image/gif');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.send(TRANSPARENT_GIF);
+    // Record after responding so we don't slow the email client
+    const { registrationId } = req.params;
+    const tickets = db.data.tickets.filter(t => t.registrationId === registrationId);
+    if (tickets.length && !tickets[0].email_opened_at) {
+        const now = new Date().toISOString();
+        await db.update(data => {
+            data.tickets.filter(t => t.registrationId === registrationId)
+                .forEach(t => { if (!t.email_opened_at) t.email_opened_at = now; });
+        });
+        log('email-open', `📬 Opened — regId: ${registrationId}  name: ${tickets[0].name}`);
+    }
+});
 
 // Serve protected pages for admin only (scanner is PIN-protected itself, so excluded)
 app.get('/admin.html', (req, res) => res.redirect('/dashboard.html'));
@@ -586,7 +679,8 @@ app.post('/api/register-bulk', async (req, res) => {
                         </p>
                         ${qrBlocks}
                     </div>
-                `
+                `,
+                registrationId: ticketsToSend[0].registrationId
             });
             log('bulk-register', `📧 Email ${isUpdate ? 'updated' : 'sent'} → ${email}  name: ${fullName}  tickets: ${actualCount}  event: ${event.name}  regId: ${ticketsToSend[0].registrationId}`);
         }
@@ -985,7 +1079,8 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
                     ${qrBlocks}
                     ${addAllButton}
                 </div>
-            `
+            `,
+            registrationId
         }).catch(err => {
             log('ticket-create', `❌ Email send failed — email: ${email}  err: ${err.message}`);
         });
@@ -1032,6 +1127,13 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
     if (!updatedTickets.length) return; // already sent response via catch
 
+    // Stamp updated_at so PassKit web service can detect changes
+    const editedAt = new Date().toISOString();
+    await db.update(data => {
+        data.tickets.filter(t => t.registrationId === updatedTickets[0].registrationId)
+            .forEach(t => { t.updated_at = editedAt; });
+    });
+
     log('ticket-edit', `✏️  Edited ${updatedTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${updatedTickets[0].registrationId}  by: ${req.session.userId}`);
 
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
@@ -1074,7 +1176,8 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
                     ${qrBlocks}
                     ${addAllButton}
                 </div>
-            `
+            `,
+            registrationId: updatedTickets[0].registrationId
         }).catch(err => {
             log('ticket-edit', `❌ Email send failed — email: ${email}  err: ${err.message}`);
         });
@@ -1083,6 +1186,8 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
     }
 
     res.json({ success: true, tickets: updatedTickets });
+    // Push wallet update to any registered devices (fire-and-forget)
+    pushWalletUpdate(updatedTickets.map(t => t.token)).catch(() => {});
 });
 
 // Resend ticket email without changing any data
@@ -1146,7 +1251,8 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
                 ${qrBlocks}
                 ${addAllButton}
             </div>
-        `
+        `,
+        registrationId: ticket.registrationId
     }).catch(err => {
         log('resend-email', `❌ Send failed — email: ${ticket.email}  err: ${err.message}`);
         return res.status(500).json({ error: 'Failed to send email' });
@@ -1251,9 +1357,11 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
         log('checkin', `✅ Checked in ${checkedInCount}/${tickets.length} ticket(s) — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${checkinEvent?.name}  by: ${req.session.userId}`);
     }
 
+    tickets.forEach(t => { t.updated_at = now; });
     await db.write();
     ticketStatusCache.clear();
     res.json({ success: true });
+    pushWalletUpdate(tickets.map(t => t.token)).catch(() => {});
 });
 
 app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
@@ -1280,10 +1388,13 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
         if (t.used_at) { t.used_at = null; clearedCount++; }
     });
 
+    const uncheckinNow = new Date().toISOString();
+    tickets.forEach(t => { t.updated_at = uncheckinNow; });
     log('uncheckin', `↩️  Cleared ${clearedCount} ticket(s) — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${event?.name}  by: ${req.session.userId}`);
     await db.write();
     ticketStatusCache.clear();
     res.json({ success: true });
+    pushWalletUpdate(tickets.map(t => t.token)).catch(() => {});
 });
 
 app.post('/api/validate', async (req, res) => {
@@ -1338,6 +1449,20 @@ async function generatePassBuffer(ticket, event) {
     const signerKeyFile = path.join(certPath, 'signer.key');
     const modelPath = path.resolve(__dirname, 'pass-assets.pass');
 
+    const passOverride = {
+        serialNumber: ticket.token,
+        passTypeIdentifier: process.env.PASS_TYPE_ID,
+        teamIdentifier: process.env.TEAM_ID,
+        description: event.name,
+        logoText: event.name,
+        backgroundColor: event.color || "rgb(99, 102, 241)",
+    };
+    // Enable push updates if APNs is configured (authenticationToken must be ≥16 chars)
+    if (process.env.APNS_KEY_ID && process.env.APNS_KEY_PATH) {
+        passOverride.webServiceURL = `${BASE_URL}/api/wallet/`;
+        passOverride.authenticationToken = ticket.id + ticket.token; // 8+12=20 chars
+    }
+
     const pass = await PKPass.from({
         model: modelPath,
         certificates: {
@@ -1346,14 +1471,7 @@ async function generatePassBuffer(ticket, event) {
             signerKey: fs.readFileSync(signerKeyFile),
             signerKeyPassphrase: process.env.PASS_CERT_PASSWORD || undefined,
         }
-    }, {
-        serialNumber: ticket.token,
-        passTypeIdentifier: process.env.PASS_TYPE_ID,
-        teamIdentifier: process.env.TEAM_ID,
-        description: event.name,
-        logoText: event.name,
-        backgroundColor: event.color || "rgb(99, 102, 241)",
-    });
+    }, passOverride);
 
     pass.voided = !!ticket.used_at;
 
@@ -1496,9 +1614,18 @@ app.get(['/api/pass/:token', '/api/pass/:token.pkpass'], async (req, res) => {
     if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError} `);
 
     try {
-        console.log(`🎟️ Generating pass for: ${ticket.name} (${ticket.token})`);
+        log('wallet-download', `🎟️  Generating pass — name: ${ticket.name}  token: ${ticket.token}`);
         const buffer = await generatePassBuffer(ticket, event);
-        console.log(`📦 Buffer generated: ${buffer.length} bytes`);
+        log('wallet-download', `📦 Buffer ${buffer.length} bytes — token: ${ticket.token}`);
+
+        // Record first download
+        if (!ticket.wallet_downloaded_at) {
+            await db.update(data => {
+                const t = data.tickets.find(t => t.token === token);
+                if (t) t.wallet_downloaded_at = new Date().toISOString();
+            });
+        }
+
         res.set('Content-Type', 'application/vnd.apple.pkpass');
         res.set('Content-Disposition', `attachment; filename = "ticket-${ticket.token}.pkpass"`);
         res.set('Content-Length', buffer.length);
@@ -1546,6 +1673,114 @@ app.get('/api/passes/bundle/:registrationId', async (req, res) => {
         console.error('Error generating pass bundle:', err);
         res.status(500).send('Error generating Apple Wallet pass bundle');
     }
+});
+
+// ============================================================
+//  APPLE WALLET PUSH UPDATE — PassKit Web Service Protocol
+//  https://developer.apple.com/documentation/walletpasses/adding_a_web_service_to_update_passes
+// ============================================================
+
+// Helper: verify ApplePass auth token and return ticket
+function walletAuth(req, serialNumber) {
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.replace(/^ApplePass\s+/i, '').trim();
+    const ticket = db.data.tickets.find(t => t.token === serialNumber);
+    if (!ticket) return null;
+    if (ticket.id + ticket.token !== token) return null; // must match passOverride.authenticationToken
+    return ticket;
+}
+
+// Register a device to receive push updates for a pass
+app.post('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId/:serialNumber', async (req, res) => {
+    const { deviceId, serialNumber } = req.params;
+    const ticket = walletAuth(req, serialNumber);
+    if (!ticket) return res.status(401).send();
+
+    const { pushToken } = req.body;
+    if (!pushToken) return res.status(400).send();
+
+    if (!db.data.walletDevices) await db.update(d => { d.walletDevices = []; });
+
+    const existing = db.data.walletDevices.find(d => d.deviceId === deviceId && d.serialNumber === serialNumber);
+    if (existing) {
+        if (existing.pushToken !== pushToken) {
+            await db.update(data => {
+                const d = data.walletDevices.find(d => d.deviceId === deviceId && d.serialNumber === serialNumber);
+                if (d) d.pushToken = pushToken;
+            });
+        }
+        return res.status(200).send();
+    }
+
+    await db.update(data => {
+        data.walletDevices.push({ id: nanoid(8), deviceId, passTypeId: req.params.passTypeId, serialNumber, pushToken, registeredAt: new Date().toISOString() });
+    });
+    log('wallet-register', `📲 Device registered — serial: ${serialNumber.slice(0, 8)}…  device: ${deviceId.slice(0, 8)}…`);
+    res.status(201).send();
+});
+
+// Unregister a device
+app.delete('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId/:serialNumber', async (req, res) => {
+    const { deviceId, serialNumber } = req.params;
+    const ticket = walletAuth(req, serialNumber);
+    if (!ticket) return res.status(401).send();
+
+    await db.update(data => {
+        if (data.walletDevices) data.walletDevices = data.walletDevices.filter(d => !(d.deviceId === deviceId && d.serialNumber === serialNumber));
+    });
+    log('wallet-register', `📲 Device unregistered — serial: ${serialNumber.slice(0, 8)}…`);
+    res.status(200).send();
+});
+
+// List passes updated since a given date for a device
+app.get('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId', async (req, res) => {
+    const { deviceId } = req.params;
+    const deviceEntries = (db.data.walletDevices || []).filter(d => d.deviceId === deviceId);
+    if (!deviceEntries.length) return res.status(404).send();
+
+    let serialNumbers = deviceEntries.map(d => d.serialNumber);
+
+    const since = req.query.passesUpdatedSince;
+    if (since) {
+        const sinceDate = new Date(since);
+        serialNumbers = serialNumbers.filter(sn => {
+            const t = db.data.tickets.find(t => t.token === sn);
+            return t && new Date(t.updated_at || t.created_at) > sinceDate;
+        });
+    }
+
+    if (!serialNumbers.length) return res.status(204).send();
+    res.json({ serialNumbers, lastUpdated: new Date().toISOString() });
+});
+
+// Return the latest version of a pass
+app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
+    const { serialNumber } = req.params;
+    const ticket = walletAuth(req, serialNumber);
+    if (!ticket) return res.status(401).send();
+
+    const event = db.data.events.find(e => e.id === ticket.eventId);
+    if (!event) return res.status(404).send();
+
+    const prereqError = checkPassPrereqs();
+    if (prereqError) return res.status(503).send();
+
+    try {
+        const buffer = await generatePassBuffer(ticket, event);
+        res.set('Content-Type', 'application/vnd.apple.pkpass');
+        res.set('Last-Modified', new Date(ticket.updated_at || ticket.created_at).toUTCString());
+        res.set('Cache-Control', 'no-store');
+        res.send(buffer);
+    } catch (err) {
+        res.status(500).send();
+    }
+});
+
+// Receive device error logs
+app.post('/api/wallet/v1/log', (req, res) => {
+    const { logs } = req.body || {};
+    if (Array.isArray(logs)) logs.forEach(l => log('wallet-device', `📱 ${l}`));
+    res.status(200).send();
 });
 
 // ============================================================

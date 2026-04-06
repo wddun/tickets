@@ -1099,6 +1099,10 @@
                 onchange="toggleTicketCheck('${g.registrationId}', this.checked)">
             <div>
                 <div class="attendee-name">${esc(g.name)}</div>
+                <div style="display:flex;gap:4px;margin-top:3px;">
+                    ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;color:#10b981;">📬</span>` : `<span title="Email not opened" style="font-size:10px;color:#d1d5db;">📧</span>`}
+                    ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;color:#6366f1;">📲</span>` : ''}
+                </div>
             </div>
             <div>
                 <div class="attendee-email">${esc(g.email || '')}</div>
@@ -1718,6 +1722,9 @@
                 const statusBadge = checkedIn
                     ? `<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">✓ Checked in ${new Date(tk.used_at).toLocaleString()}</span>`
                     : `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">Not checked in</span>`;
+                const walletBadge = tk.wallet_downloaded_at
+                    ? `<div style="font-size:10px;color:#6366f1;margin-top:3px;" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">📲 In Wallet</div>`
+                    : `<div style="font-size:10px;color:#d1d5db;margin-top:3px;">No wallet download</div>`;
                 const toggleBtn = checkedIn
                     ? `<button onclick="toggleTicketInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Undo Check-in</button>`
                     : `<button onclick="toggleTicketInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#d1fae5;color:#065f46;border:none;border-radius:6px;cursor:pointer;">Mark Checked In</button>`;
@@ -1728,14 +1735,23 @@
                     <img src="/qr/${tk.token}" style="width:${size}px;height:${size}px;display:block;margin:0 auto 6px;" />
                     <div style="font-size:10px;color:#aaa;margin-bottom:4px;">${tk.token}</div>
                     ${statusBadge}
+                    ${walletBadge}
                     ${toggleBtn}
                 </div>`;
             };
 
             const qrItems = tickets.map((tk, i) => renderTicketCard(tk, i, tickets.length === 1)).join('');
-            const infoBar = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px;color:#888;">
+            const emailOpenedAt = t.email_opened_at ? new Date(t.email_opened_at).toLocaleString() : null;
+            const emailBadge = emailOpenedAt
+                ? `<span style="background:#d1fae5;color:#065f46;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;" title="Opened ${emailOpenedAt}">📬 Email opened</span>`
+                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">📧 Not opened</span>`;
+
+            const infoBar = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px;font-size:12px;color:#888;">
                 <span>${createdStr ? `Registered ${createdStr}` : ''}</span>
-                <button class="copy-email-btn" onclick="copyToClipboard('${esc(t.email||'')}', this)" title="Copy email">📋 Copy email</button>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    ${emailBadge}
+                    <button class="copy-email-btn" onclick="copyToClipboard('${esc(t.email||'')}', this)" title="Copy email">📋 Copy</button>
+                </div>
             </div>`;
 
             preview.innerHTML = `
