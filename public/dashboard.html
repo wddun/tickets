@@ -1349,13 +1349,16 @@
 
         async function loadAccessData(eventId) {
             try {
+                // Always render custom fields first — doesn't need access API
+                const cfHtml = renderSettingsCustomFields(eventId);
+
                 const res = await fetch(`/api/event/${eventId}/access`);
                 if (!res.ok) {
-                    if (res.status === 403) {
-                        document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Only administrators can manage access links.</div>';
-                    } else {
-                        document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Failed to load settings.</div>';
-                    }
+                    // Still show custom fields even if access section is unavailable
+                    const note = res.status === 403
+                        ? '<div class="settings-empty">Only administrators can manage sharing links.</div>'
+                        : '<div class="settings-empty">Could not load sharing settings.</div>';
+                    document.getElementById('settingsContent').innerHTML = cfHtml + note;
                     return;
                 }
 
@@ -1414,7 +1417,6 @@
                     `;
                 }
 
-                const cfHtml = renderSettingsCustomFields(eventId);
                 document.getElementById('settingsContent').innerHTML = cfHtml + linkHtml + accessHtml;
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
