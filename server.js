@@ -115,7 +115,7 @@ async function pushWalletUpdate(serialNumbers) {
                 const req = client.request({
                     ':method': 'POST', ':path': `/3/device/${pushToken}`,
                     'authorization': `bearer ${jwt}`,
-                    'apns-topic': passTypeId, 'apns-push-type': 'background',
+                    'apns-topic': passTypeId, 'apns-push-type': 'background', 'apns-priority': '5',
                     'content-type': 'application/json', 'content-length': '2',
                 });
                 req.write('{}'); req.end();
@@ -1508,7 +1508,7 @@ async function generatePassBuffer(ticket, event) {
         logoText: ticket.used_at ? "✓ CHECKED IN" : event.name,
         backgroundColor: ticket.used_at ? "rgb(90, 90, 90)" : (event.color || "rgb(99, 102, 241)"),
         foregroundColor: "rgb(255, 255, 255)",
-        labelColor: ticket.used_at ? "rgb(180, 255, 180)" : "rgb(220, 220, 255)",
+        labelColor: "rgb(255, 255, 255)",
     };
     // Enable push updates if APNs is configured (authenticationToken must be ≥16 chars)
     if (process.env.APNS_KEY_ID && process.env.APNS_KEY_PATH) {
