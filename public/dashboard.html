@@ -787,6 +787,57 @@
         </div>
     </div>
 
+    <!-- Edit Event Modal -->
+    <div class="modal-overlay" id="editEventModal" style="display:none;"
+        onclick="if(event.target===this)closeEditEventModal()">
+        <div class="modal" style="max-width:480px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+                <h2>Edit Event</h2>
+                <button class="modal-close" onclick="closeEditEventModal()">&times;</button>
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name</label>
+                <input type="text" id="editEventName" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date &amp; Time</label>
+                <input type="datetime-local" id="editEventTime" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Accent Color</label>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <input type="color" id="editEventColor" style="width:44px;height:36px;padding:2px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
+                    <span style="font-size:12px;color:#888;">Used on Apple Wallet pass background</span>
+                </div>
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name</label>
+                <input type="text" id="editEventLocName" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Address</label>
+                <input type="text" id="editEventLocAddress" placeholder="123 Main St, City, State" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <div style="flex:1;">
+                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Latitude</label>
+                    <input type="number" step="any" id="editEventLat" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                </div>
+                <div style="flex:1;">
+                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Longitude</label>
+                    <input type="number" step="any" id="editEventLng" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                </div>
+            </div>
+            <div style="margin-bottom:20px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Image <span style="font-weight:400;color:#aaa;">(optional, replaces current)</span></label>
+                <div id="editEventImagePreview" style="margin-bottom:8px;"></div>
+                <input type="file" id="editEventImage" accept="image/png,image/jpeg" style="font-size:13px;">
+            </div>
+            <input type="hidden" id="editEventId">
+            <button class="btn btn-primary" style="width:100%;" onclick="submitEditEvent()">Save Changes</button>
+        </div>
+    </div>
+
     <script>
         let events = [];
         let selectedId = null;
@@ -956,6 +1007,7 @@
                 </div>
                 <div class="detail-actions">
                     <a href="/scanner.html" target="_blank" class="btn btn-scanner">📷 Open Scanner</a>
+                    <button class="btn-settings" onclick="openEditEventModal('${event.id}')">✏️ Edit Event</button>
                     <button class="btn-settings" onclick="openSettings('${event.id}')">⚙️ Settings</button>
                     <button class="btn btn-danger" onclick="deleteEvent('${event.id}')">Delete Event</button>
                 </div>
@@ -1251,6 +1303,86 @@
             await Promise.all(checked.map(id => fetch(`/api/checkin/${id}`, { method: 'POST' })));
             const event = events.find(e => e.id === selectedId);
             if (event) await fetchAndRender(event, true);
+        }
+
+        function openEditEventModal(id) {
+            const ev = events.find(e => e.id === id);
+            if (!ev) return;
+            document.getElementById('editEventId').value = id;
+            document.getElementById('editEventName').value = ev.name || '';
+            // Convert ISO to datetime-local format (YYYY-MM-DDTHH:MM)
+            const dt = ev.time ? new Date(ev.time).toISOString().slice(0, 16) : '';
+            document.getElementById('editEventTime').value = dt;
+            // Color: convert "rgb(r, g, b)" or hex to #rrggbb for color input
+            const colorRaw = ev.color || '#6366f1';
+            const hexColor = colorRaw.startsWith('rgb')
+                ? '#' + colorRaw.match(/\d+/g).map(n => parseInt(n).toString(16).padStart(2, '0')).join('')
+                : colorRaw;
+            document.getElementById('editEventColor').value = hexColor;
+            document.getElementById('editEventLocName').value = ev.location?.name || '';
+            document.getElementById('editEventLocAddress').value = ev.location?.address || '';
+            document.getElementById('editEventLat').value = ev.location?.lat || '';
+            document.getElementById('editEventLng').value = ev.location?.lng || '';
+            document.getElementById('editEventImage').value = '';
+            const preview = document.getElementById('editEventImagePreview');
+            preview.innerHTML = ev.imageUrl
+                ? `<img src="${ev.imageUrl}" style="max-width:100%;max-height:120px;border-radius:8px;border:1px solid #eee;">`
+                : '<span style="font-size:12px;color:#aaa;">No image set</span>';
+            document.getElementById('editEventModal').style.display = 'flex';
+        }
+
+        function closeEditEventModal() {
+            document.getElementById('editEventModal').style.display = 'none';
+        }
+
+        async function submitEditEvent() {
+            const id = document.getElementById('editEventId').value;
+            const name = document.getElementById('editEventName').value.trim();
+            const time = document.getElementById('editEventTime').value;
+            const colorHex = document.getElementById('editEventColor').value;
+            const locationName = document.getElementById('editEventLocName').value.trim();
+            const locationAddress = document.getElementById('editEventLocAddress').value.trim();
+            const lat = document.getElementById('editEventLat').value;
+            const lng = document.getElementById('editEventLng').value;
+            const imageFile = document.getElementById('editEventImage').files[0];
+
+            if (!name) return alert('Event name is required.');
+
+            // Convert hex to rgb() to match existing format
+            const r = parseInt(colorHex.slice(1, 3), 16);
+            const g = parseInt(colorHex.slice(3, 5), 16);
+            const b = parseInt(colorHex.slice(5, 7), 16);
+            const color = `rgb(${r}, ${g}, ${b})`;
+
+            const fd = new FormData();
+            fd.append('name', name);
+            fd.append('time', time);
+            fd.append('color', color);
+            fd.append('locationName', locationName);
+            fd.append('locationAddress', locationAddress);
+            if (lat) fd.append('lat', lat);
+            if (lng) fd.append('lng', lng);
+            if (imageFile) fd.append('image', imageFile);
+
+            const btn = document.querySelector('#editEventModal .btn-primary');
+            btn.disabled = true; btn.textContent = 'Saving…';
+
+            const r2 = await fetch(`/api/event/${id}`, { method: 'PUT', body: fd });
+            btn.disabled = false; btn.textContent = 'Save Changes';
+
+            if (r2.ok) {
+                const updated = await r2.json();
+                // Update local cache
+                const idx = events.findIndex(e => e.id === id);
+                if (idx !== -1) events[idx] = { ...events[idx], ...updated };
+                closeEditEventModal();
+                const ev = events.find(e => e.id === id);
+                if (ev) await fetchAndRender(ev);
+                renderSidebar();
+            } else {
+                const d = await r2.json();
+                alert(d.error || 'Failed to save event.');
+            }
         }
 
         async function deleteEvent(id) {
