@@ -1449,7 +1449,7 @@ app.post('/api/validate', async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'Token is required' });
 
-    const cleanToken = token.startsWith('ticket:') ? token.split(':')[1] : token;
+    const cleanToken = (token.startsWith('ticket:') ? token.split(':')[1] : token).trim();
     const ticket = db.data.tickets.find(t => t.token === cleanToken);
 
     if (!ticket) {
@@ -1481,7 +1481,7 @@ app.post('/api/validate', async (req, res) => {
 // Helper: QR Generation Route (Alternative for frontend display)
 app.get('/qr/:token', async (req, res) => {
     try {
-        const qrContent = `ticket:${req.params.token} `;
+        const qrContent = `ticket:${req.params.token}`;
         const qrBuffer = await QRCode.toBuffer(qrContent);
         res.type('png').send(qrBuffer);
     } catch (err) {
@@ -1526,7 +1526,7 @@ async function generatePassBuffer(ticket, event) {
     if (!ticket.used_at) {
         pass.setBarcodes({
             format: "PKBarcodeFormatQR",
-            message: `ticket:${ticket.token} `,
+            message: `ticket:${ticket.token}`,
             messageEncoding: "iso-8859-1"
         });
     }
