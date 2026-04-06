@@ -188,9 +188,25 @@
         }
 
         /* ── Scan result sheet ── */
-        #scanSheet { max-height: 60dvh; }
+        #scanSheet { max-height: 70dvh; }
 
-        .scan-header { padding: 14px 20px 16px; }
+        .auto-close-track {
+            height: 3px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            margin: 8px 20px 0;
+            overflow: hidden;
+        }
+        .auto-close-bar {
+            height: 100%;
+            background: rgba(255,255,255,0.45);
+            border-radius: 3px;
+            width: 100%;
+            transform-origin: left;
+            transition: transform linear;
+        }
+
+        .scan-header { padding: 14px 20px 10px; }
         .scan-badge {
             display: inline-block;
             padding: 3px 10px;
@@ -203,9 +219,35 @@
         .badge-invalid { background: rgba(251,191,36,0.15);  color: #fbbf24; }
 
         .scan-name  { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
-        .scan-event { font-size: 13px; color: rgba(255,255,255,0.45); }
+        .scan-event { font-size: 13px; color: rgba(255,255,255,0.45); margin-bottom: 12px; }
 
-        .scan-actions { padding: 0 20px 4px; }
+        .scan-fields {
+            padding: 0 20px 4px;
+        }
+        .scan-field-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding: 7px 0;
+            border-top: 1px solid rgba(255,255,255,0.07);
+        }
+        .scan-field-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.35);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            flex-shrink: 0;
+            margin-right: 12px;
+        }
+        .scan-field-value {
+            font-size: 14px;
+            font-weight: 500;
+            color: rgba(255,255,255,0.9);
+            text-align: right;
+        }
+
+        .scan-actions { padding: 8px 20px 4px; }
         .action-btn {
             width: 100%;
             padding: 14px;
@@ -409,11 +451,13 @@
 <!-- Scan result sheet (logged-in only) -->
 <div class="sheet" id="scanSheet">
     <div class="sheet-handle"></div>
+    <div class="auto-close-track"><div class="auto-close-bar" id="autoCloseBar"></div></div>
     <div class="scan-header">
         <div class="scan-badge" id="scanBadge"></div>
         <div class="scan-name"  id="scanName"></div>
         <div class="scan-event" id="scanEvent"></div>
     </div>
+    <div class="scan-fields" id="scanFields"></div>
     <div class="scan-actions">
         <button class="action-btn btn-primary"   id="viewListBtn" onclick="openListForScan()" style="display:none;">View in Check-In List</button>
         <button class="action-btn btn-secondary" onclick="closeScanSheet()">Continue Scanning</button>
@@ -696,6 +740,9 @@ async function checkInPerson(e, registrationId) {
 }
 
 // ── Scan result sheet ─────────────────────────────────────
+let autoCloseTimer = null;
+const AUTO_CLOSE_MS = 4500;
+
 function openScanSheet(data) {
     lastScannedRegistrationId = data.registrationId || null;
 
@@ -715,15 +762,37 @@ function openScanSheet(data) {
     document.getElementById('scanName').textContent  = data.name || '';
     document.getElementById('scanEvent').textContent = data.eventName || '';
 
+    // Custom fields
+    const fieldsEl = document.getElementById('scanFields');
+    const cf = data.customFields || {};
+    const cfEntries = Object.entries(cf).filter(([, v]) => v !== '' && v != null);
+    fieldsEl.innerHTML = cfEntries.map(([label, value]) => `
+        <div class="scan-field-row">
+            <span class="scan-field-label">${escHtml(label)}</span>
+            <span class="scan-field-value">${escHtml(String(value))}</span>
+        </div>`).join('');
+
     // Show "View in List" button only when logged in and we have a room selected
     const viewBtn = document.getElementById('viewListBtn');
     viewBtn.style.display = (isLoggedIn && selectedEvent()) ? 'block' : 'none';
 
     document.getElementById('scanBackdrop').classList.add('show');
     document.getElementById('scanSheet').classList.add('show');
+
+    // Auto-close progress bar
+    clearTimeout(autoCloseTimer);
+    const bar = document.getElementById('autoCloseBar');
+    bar.style.transition = 'none';
+    bar.style.transform = 'scaleX(1)';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        bar.style.transition = `transform ${AUTO_CLOSE_MS}ms linear`;
+        bar.style.transform = 'scaleX(0)';
+    }));
+    autoCloseTimer = setTimeout(() => closeScanSheet(), AUTO_CLOSE_MS);
 }
 
 function closeScanSheet() {
+    clearTimeout(autoCloseTimer);
     document.getElementById('scanBackdrop').classList.remove('show');
     document.getElementById('scanSheet').classList.remove('show');
     setTimeout(() => { isProcessing = false; }, 400);
@@ -751,7 +820,7 @@ function onScanSuccess(decodedText) {
         return;
     }
 
-    const token = decodedText.split(':')[1];
+    const token = decodedText.split(':')[1].trim();
     fetch('/api/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
