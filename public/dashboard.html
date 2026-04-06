@@ -1683,7 +1683,8 @@
             <input type="hidden" id="editTicketId" />
             <input type="hidden" id="editRegId" />
             <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket()">Save &amp; Resend</button>
+                <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket(false)">Save &amp; Resend</button>
+                <button class="btn btn-secondary" style="flex:1;" onclick="submitEditTicket(true)">Save Only</button>
                 <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Only</button>
                 <button class="btn btn-secondary" style="padding:8px 12px;" onclick="printTicketEmail()" title="Print email">🖨️</button>
             </div>
@@ -1986,7 +1987,7 @@
             const id = document.getElementById('editTicketId').value;
             window.open('/api/ticket/' + id + '/preview', '_blank');
         }
-        async function submitEditTicket() {
+        async function submitEditTicket(noEmail = false) {
             const id = document.getElementById('editTicketId').value;
             const name = document.getElementById('editTicketName').value;
             const email = document.getElementById('editTicketEmail').value;
@@ -1996,14 +1997,14 @@
             const r = await fetch('/api/ticket/' + id, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email, customFields })
+                body: JSON.stringify({ name, email, customFields, noEmail })
             });
             const data = await r.json();
             if (r.ok) {
                 closeEditTicketModal();
                 const event = events.find(e => e.id === selectedId);
                 fetchAndRender(event, true);
-                alert('Tickets updated and email sent.');
+                alert(noEmail ? 'Tickets updated.' : 'Tickets updated and email sent.');
             } else {
                 alert(data.error || 'Failed to edit ticket');
             }
