@@ -1310,9 +1310,15 @@
             if (!ev) return;
             document.getElementById('editEventId').value = id;
             document.getElementById('editEventName').value = ev.name || '';
-            // Convert ISO to datetime-local format (YYYY-MM-DDTHH:MM)
-            const dt = ev.time ? new Date(ev.time).toISOString().slice(0, 16) : '';
-            document.getElementById('editEventTime').value = dt;
+            // Convert stored time to local datetime-local format (not UTC)
+            if (ev.time) {
+                const d = new Date(ev.time);
+                const pad = n => String(n).padStart(2, '0');
+                const local = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                document.getElementById('editEventTime').value = local;
+            } else {
+                document.getElementById('editEventTime').value = '';
+            }
             // Color: convert "rgb(r, g, b)" or hex to #rrggbb for color input
             const colorRaw = ev.color || '#6366f1';
             const hexColor = colorRaw.startsWith('rgb')
@@ -1354,9 +1360,12 @@
             const b = parseInt(colorHex.slice(5, 7), 16);
             const color = `rgb(${r}, ${g}, ${b})`;
 
+            // Convert datetime-local (local time, no tz) back to full ISO string
+            const timeISO = time ? new Date(time).toISOString() : '';
+
             const fd = new FormData();
             fd.append('name', name);
-            fd.append('time', time);
+            fd.append('time', timeISO);
             fd.append('color', color);
             fd.append('locationName', locationName);
             fd.append('locationAddress', locationAddress);
