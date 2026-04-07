@@ -16,9 +16,10 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             background: #f4f5f7;
             color: #1a1a2e;
-            min-height: 100vh;
+            height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
 
         /* ── Top bar ── */
@@ -63,7 +64,8 @@
         /* ── Layout ── */
         .layout {
             display: flex;
-            height: calc(100vh - 58px);
+            flex: 1;
+            min-height: 0;
             overflow: hidden;
         }
 
