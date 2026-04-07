@@ -54,10 +54,14 @@ async function sendEmail({ to, subject, html, registrationId, fromName }) {
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
     lastSendTime = Date.now();
 
+    // Append copyright footer to every email
+    const footer = `<div style="text-align:center; margin-top:32px; padding-top:16px; border-top:1px solid #eee; font-size:11px; color:#aaa;">&copy; 2026 Will's Tech Support</div>`;
+    const withFooter = html + footer;
+
     // Inject 1x1 tracking pixel so we can detect email opens
     const tracked = registrationId
-        ? html + `\n<img src="${BASE_URL}/api/track/open/${registrationId}" width="1" height="1" style="display:none;opacity:0;" alt="">`
-        : html;
+        ? withFooter + `\n<img src="${BASE_URL}/api/track/open/${registrationId}" width="1" height="1" style="display:none;opacity:0;" alt="">`
+        : withFooter;
 
     const sesFrom = (process.env.SES_FROM || '').trim();
     // Only wrap in display-name format if sesFrom is a plain email (no angle brackets already)
@@ -1340,7 +1344,7 @@ app.post('/api/ticket/:id/direct-email', requireAuth, async (req, res) => {
 
     const html = `
         <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
-            <p style="color:#555; white-space:pre-wrap;">${message.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</p>
+            <p style="color:#555; white-space:pre-wrap;">${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</p>
         </div>
     `;
 
