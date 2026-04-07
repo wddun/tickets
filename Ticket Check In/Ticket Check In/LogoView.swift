@@ -5,9 +5,11 @@
 
 import SwiftUI
 
-/// The app logo — a ticket with a checkmark — rendered as a SwiftUI view.
+/// The app logo — a ticket with a checkmark (or custom icon) — rendered as a SwiftUI view.
+/// Pass `systemImage` to show an SF Symbol on the right half instead of the default checkmark.
 struct LogoView: View {
     var size: CGFloat = 80
+    var systemImage: String? = nil
 
     var body: some View {
         ZStack {
@@ -40,7 +42,7 @@ struct LogoView: View {
                 .frame(width: notch * 2, height: notch * 2)
                 .offset(x: size * 0.36)
 
-            // Dashed perforation
+            // Dashed perforation — centered
             VStack(spacing: size * 0.025) {
                 ForEach(0..<5, id: \.self) { _ in
                     RoundedRectangle(cornerRadius: 2)
@@ -48,16 +50,20 @@ struct LogoView: View {
                         .frame(width: size * 0.012, height: size * 0.04)
                 }
             }
-            .offset(x: -size * 0.025)
 
-            // Checkmark
-            CheckmarkShape()
-                .stroke(
-                    Color(hex: "34c759"),
-                    style: StrokeStyle(lineWidth: size * 0.055, lineCap: .round, lineJoin: .round)
-                )
-                .frame(width: size * 0.28, height: size * 0.20)
-                .offset(x: size * 0.06, y: size * 0.01)
+            // Icon centered on the perforation line
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: size * 0.22, weight: .medium))
+                    .foregroundStyle(Color(hex: "34c759"))
+            } else {
+                CheckmarkShape()
+                    .stroke(
+                        Color(hex: "34c759"),
+                        style: StrokeStyle(lineWidth: size * 0.055, lineCap: .round, lineJoin: .round)
+                    )
+                    .frame(width: size * 0.28, height: size * 0.20)
+            }
         }
     }
 }

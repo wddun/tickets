@@ -1122,8 +1122,8 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
                     <p style="color:#555;">You're registered for <strong>${event.name}</strong>.</p>
                     <p style="color:#555;">📍 ${event.location.name}</p>
                     <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
-                    ${qrBlocks}
                     ${addAllButton}
+                    ${qrBlocks}
                 </div>
             `,
             registrationId
@@ -1219,8 +1219,8 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
                     <p style="color:#555;">Your registration details for <strong>${event.name}</strong> have been updated by an admin.</p>
                     <p style="color:#555;">📍 ${event.location.name}</p>
                     <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
-                    ${qrBlocks}
                     ${addAllButton}
+                    ${qrBlocks}
                 </div>
             `,
             registrationId: updatedTickets[0].registrationId
@@ -1296,8 +1296,8 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
                 <p style="color:#555;">Here's a copy of your registration for <strong>${event.name}</strong>.</p>
                 <p style="color:#555;">📍 ${event.location.name}</p>
                 <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
-                ${qrBlocks}
                 ${addAllButton}
+                ${qrBlocks}
             </div>
         `,
         registrationId: ticket.registrationId
@@ -1592,7 +1592,7 @@ async function generatePassBuffer(ticket, event) {
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
     const locValue = locName && locAddress && locName !== locAddress
-        ? `${locName} n${locAddress} `
+        ? `${locName}\n${locAddress}`
         : locName || locAddress;
     if (locValue) {
         pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: locValue });

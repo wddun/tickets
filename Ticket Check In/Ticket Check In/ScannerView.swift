@@ -352,63 +352,70 @@ struct TicketDetailSheet: View {
         result.status == .success ? .green : Color(red: 0.9, green: 0.5, blue: 0.1)
     }
 
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+    @ViewBuilder
+    private var content: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
 
-                    // Status badge + name
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Image(systemName: result.status == .success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                .foregroundStyle(statusColor)
-                            Text(result.title)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(statusColor)
-                        }
-
-                        Text(result.name)
-                            .font(.system(size: 28, weight: .bold))
-
-                        if let email = result.email {
-                            Text(email)
-                                .font(.system(size: 15))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.top, 4)
-
-                    Divider()
-
-                    if let eventName = result.eventName {
-                        DetailRow(label: "Event", value: eventName)
+                // Status badge + name
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Image(systemName: result.status == .success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                            .foregroundStyle(statusColor)
+                        Text(result.title)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(statusColor)
                     }
 
-                    if let usedAt = result.usedAt {
-                        DetailRow(label: "Checked In", value: formattedDate(usedAt))
-                    }
+                    Text(result.name)
+                        .font(.system(size: 28, weight: .bold))
 
-                    if let fields = result.customFields, !fields.isEmpty {
-                        Divider()
-                        Text("Additional Info")
-                            .font(.system(size: 13, weight: .semibold))
+                    if let email = result.email {
+                        Text(email)
+                            .font(.system(size: 15))
                             .foregroundStyle(.secondary)
-                            .textCase(.uppercase)
-
-                        ForEach(fields.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                            DetailRow(label: key, value: value)
-                        }
                     }
                 }
-                .padding(24)
-            }
-            .navigationTitle("Ticket Details")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                .padding(.top, 4)
+
+                Divider()
+
+                if let eventName = result.eventName {
+                    DetailRow(label: "Event", value: eventName)
+                }
+
+                if let usedAt = result.usedAt {
+                    DetailRow(label: "Checked In", value: formattedDate(usedAt))
+                }
+
+                if let fields = result.customFields, !fields.isEmpty {
+                    Divider()
+                    Text("Additional Info")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+
+                    ForEach(fields.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                        DetailRow(label: key, value: value)
+                    }
                 }
             }
+            .padding(24)
+        }
+        .navigationTitle("Ticket Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, *) {
+            NavigationStack { content }
+        } else {
+            NavigationView { content }
         }
     }
 

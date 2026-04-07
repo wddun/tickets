@@ -15,7 +15,7 @@ struct OnboardingView: View {
             icon: nil,
             useLogo: true,
             title: "WTS Tickets",
-            body: "Scan QR codes or manually check in attendees to your events — fast, simple, and works offline.",
+            body: "Scan QR codes or manually check in attendees to your events — fast and simple.",
             buttonLabel: "Get Started"
         ),
         OnboardingPage(
@@ -63,9 +63,7 @@ struct OnboardingView: View {
                     if p.useLogo {
                         LogoView(size: 110)
                     } else {
-                        Image(systemName: p.icon!)
-                            .font(.system(size: 72, weight: .thin))
-                            .foregroundStyle(Color(hex: "34c759"))
+                        LogoView(size: 110, systemImage: p.icon!)
                     }
                 }
                 .padding(.bottom, 40)
