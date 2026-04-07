@@ -115,7 +115,7 @@ async function pushWalletUpdate(serialNumbers) {
                 const req = client.request({
                     ':method': 'POST', ':path': `/3/device/${pushToken}`,
                     'authorization': `bearer ${jwt}`,
-                    'apns-topic': passTypeId, 'apns-push-type': 'background', 'apns-priority': '5',
+                    'apns-topic': passTypeId,
                     'content-type': 'application/json', 'content-length': '2',
                 });
                 req.write('{}'); req.end();
@@ -133,7 +133,7 @@ async function pushWalletUpdate(serialNumbers) {
             } catch (e) { resolve(); }
         });
     }
-    try { client.close(); } catch {}
+    try { client.close(); } catch { }
 }
 
 app.set('trust proxy', 1);
@@ -1235,7 +1235,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
     res.json({ success: true, tickets: updatedTickets });
     // Push wallet update to any registered devices (fire-and-forget)
-    pushWalletUpdate(updatedTickets.map(t => t.token)).catch(() => {});
+    pushWalletUpdate(updatedTickets.map(t => t.token)).catch(() => { });
 });
 
 // Resend ticket email without changing any data
@@ -1359,11 +1359,11 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
 </div>
 <h2 style="margin-bottom:4px;">${ticket.name}</h2>
 <p style="color:#888;margin:0 0 4px;">${ticket.email}</p>
-<p style="color:#888;margin:0 0 16px;">Registered ${new Date(groupTickets[0].created_at).toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' })}</p>
+<p style="color:#888;margin:0 0 16px;">Registered ${new Date(groupTickets[0].created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
 <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
 <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
 <p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
-<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month:'long', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true })}</p>
+<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</p>
 ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
 ${qrBlocks}
 </body>
@@ -1409,7 +1409,7 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     await db.write();
     ticketStatusCache.clear();
     res.json({ success: true });
-    pushWalletUpdate(tickets.map(t => t.token)).catch(() => {});
+    pushWalletUpdate(tickets.map(t => t.token)).catch(() => { });
 });
 
 app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
@@ -1442,7 +1442,7 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     await db.write();
     ticketStatusCache.clear();
     res.json({ success: true });
-    pushWalletUpdate(tickets.map(t => t.token)).catch(() => {});
+    pushWalletUpdate(tickets.map(t => t.token)).catch(() => { });
 });
 
 app.post('/api/validate', async (req, res) => {
@@ -1478,7 +1478,7 @@ app.post('/api/validate', async (req, res) => {
 
     log('validate', `✅ VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
-    pushWalletUpdate([ticket.token]).catch(() => {});
+    pushWalletUpdate([ticket.token]).catch(() => { });
 });
 
 // Helper: QR Generation Route (Alternative for frontend display)
@@ -1788,7 +1788,10 @@ app.delete('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId/:serialNu
 app.get('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId', async (req, res) => {
     const { deviceId } = req.params;
     const deviceEntries = (db.data.walletDevices || []).filter(d => d.deviceId === deviceId);
-    if (!deviceEntries.length) return res.status(404).send();
+    if (!deviceEntries.length) {
+        log('wallet-list', `📋 Device not found — device: ${deviceId.slice(0, 8)}…`);
+        return res.status(404).send();
+    }
 
     let serialNumbers = deviceEntries.map(d => d.serialNumber);
 
@@ -1801,7 +1804,11 @@ app.get('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId', async (req
         });
     }
 
-    if (!serialNumbers.length) return res.status(204).send();
+    if (!serialNumbers.length) {
+        log('wallet-list', `📋 No updates — device: ${deviceId.slice(0, 8)}…  since: ${since || 'never'}`);
+        return res.status(204).send();
+    }
+    log('wallet-list', `📋 ${serialNumbers.length} updated — device: ${deviceId.slice(0, 8)}…  serials: ${serialNumbers.map(s => s.slice(0, 8)).join(', ')}`);
     res.json({ serialNumbers, lastUpdated: new Date().toISOString() });
 });
 
@@ -1809,7 +1816,10 @@ app.get('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId', async (req
 app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
     const { serialNumber } = req.params;
     const ticket = walletAuth(req, serialNumber);
-    if (!ticket) return res.status(401).send();
+    if (!ticket) {
+        log('wallet-pass', `🔒 Auth failed — serial: ${serialNumber.slice(0, 8)}…`);
+        return res.status(401).send();
+    }
 
     const event = db.data.events.find(e => e.id === ticket.eventId);
     if (!event) return res.status(404).send();
@@ -1817,13 +1827,23 @@ app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
     const prereqError = checkPassPrereqs();
     if (prereqError) return res.status(503).send();
 
+    // Handle If-Modified-Since — iOS sends this to skip re-download if pass hasn't changed
+    const lastMod = new Date(ticket.updated_at || ticket.created_at);
+    const ims = req.headers['if-modified-since'];
+    if (ims && new Date(ims) >= lastMod) {
+        log('wallet-pass', `⏭️  Not modified — serial: ${serialNumber.slice(0, 8)}…`);
+        return res.status(304).send();
+    }
+
     try {
         const buffer = await generatePassBuffer(ticket, event);
         res.set('Content-Type', 'application/vnd.apple.pkpass');
-        res.set('Last-Modified', new Date(ticket.updated_at || ticket.created_at).toUTCString());
+        res.set('Last-Modified', lastMod.toUTCString());
         res.set('Cache-Control', 'no-store');
+        log('wallet-pass', `📦 Serving updated pass — serial: ${serialNumber.slice(0, 8)}…  name: ${ticket.name}`);
         res.send(buffer);
     } catch (err) {
+        log('wallet-pass', `❌ Generate failed — serial: ${serialNumber.slice(0, 8)}…  err: ${err.message}`);
         res.status(500).send();
     }
 });
