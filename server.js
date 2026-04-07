@@ -46,38 +46,41 @@ const ses = new SESClient({
     }
 });
 
-// Rate limiter: ensures at least 100ms between sends (~10/sec max)
-let lastSendTime = 0;
+// Serialised email queue — guarantees a minimum gap between SES sends.
+// SES default rate for new accounts is 1/sec; set SES_MIN_INTERVAL_MS in .env to tune.
+const SES_INTERVAL_MS = parseInt(process.env.SES_MIN_INTERVAL_MS || '1000');
+let emailChain = Promise.resolve();
+
 async function sendEmail({ to, subject, html, registrationId, fromName, replyTo }) {
-    const now = Date.now();
-    const wait = Math.max(0, lastSendTime + 100 - now);
-    if (wait > 0) await new Promise(r => setTimeout(r, wait));
-    lastSendTime = Date.now();
+    const task = emailChain.then(() => new Promise(r => setTimeout(r, SES_INTERVAL_MS))).then(async () => {
+        // Append copyright footer to every email
+        const footer = `<div style="text-align:center; margin-top:32px; padding-top:16px; border-top:1px solid #eee; font-size:11px; color:#aaa;">&copy; 2026 Will's Tech Support</div>`;
+        const withFooter = html + footer;
 
-    // Append copyright footer to every email
-    const footer = `<div style="text-align:center; margin-top:32px; padding-top:16px; border-top:1px solid #eee; font-size:11px; color:#aaa;">&copy; 2026 Will's Tech Support</div>`;
-    const withFooter = html + footer;
+        // Inject 1x1 tracking pixel so we can detect email opens
+        const tracked = registrationId
+            ? withFooter + `\n<img src="${BASE_URL}/api/track/open/${registrationId}" width="1" height="1" style="display:none;opacity:0;" alt="">`
+            : withFooter;
 
-    // Inject 1x1 tracking pixel so we can detect email opens
-    const tracked = registrationId
-        ? withFooter + `\n<img src="${BASE_URL}/api/track/open/${registrationId}" width="1" height="1" style="display:none;opacity:0;" alt="">`
-        : withFooter;
+        const sesFrom = (process.env.SES_FROM || '').trim();
+        // Only wrap in display-name format if sesFrom is a plain email (no angle brackets already)
+        const source = (fromName && sesFrom && !sesFrom.includes('<'))
+            ? `"${fromName.replace(/["<>\\]/g, '').trim()}" <${sesFrom}>`
+            : sesFrom;
 
-    const sesFrom = (process.env.SES_FROM || '').trim();
-    // Only wrap in display-name format if sesFrom is a plain email (no angle brackets already)
-    const source = (fromName && sesFrom && !sesFrom.includes('<'))
-        ? `"${fromName.replace(/["<>\\]/g, '').trim()}" <${sesFrom}>`
-        : sesFrom;
-
-    return ses.send(new SendEmailCommand({
-        Source: source,
-        Destination: { ToAddresses: [to] },
-        ReplyToAddresses: replyTo ? [replyTo] : undefined,
-        Message: {
-            Subject: { Data: subject, Charset: 'UTF-8' },
-            Body: { Html: { Data: tracked, Charset: 'UTF-8' } }
-        }
-    }));
+        return ses.send(new SendEmailCommand({
+            Source: source,
+            Destination: { ToAddresses: [to] },
+            ReplyToAddresses: replyTo ? [replyTo] : undefined,
+            Message: {
+                Subject: { Data: subject, Charset: 'UTF-8' },
+                Body: { Html: { Data: tracked, Charset: 'UTF-8' } }
+            }
+        }));
+    });
+    // Keep the chain alive even if this send fails, so later sends still run
+    emailChain = task.catch(() => {});
+    return task;
 }
 
 // 1x1 transparent GIF for email open tracking
