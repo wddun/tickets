@@ -48,7 +48,7 @@ const ses = new SESClient({
 
 // Rate limiter: ensures at least 100ms between sends (~10/sec max)
 let lastSendTime = 0;
-async function sendEmail({ to, subject, html, registrationId }) {
+async function sendEmail({ to, subject, html, registrationId, fromName }) {
     const now = Date.now();
     const wait = Math.max(0, lastSendTime + 100 - now);
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
@@ -59,8 +59,12 @@ async function sendEmail({ to, subject, html, registrationId }) {
         ? html + `\n<img src="${BASE_URL}/api/track/open/${registrationId}" width="1" height="1" style="display:none;opacity:0;" alt="">`
         : html;
 
+    const source = fromName
+        ? `"${fromName}" <${process.env.SES_FROM}>`
+        : process.env.SES_FROM;
+
     return ses.send(new SendEmailCommand({
-        Source: process.env.SES_FROM,
+        Source: source,
         Destination: { ToAddresses: [to] },
         Message: {
             Subject: { Data: subject, Charset: 'UTF-8' },
@@ -641,6 +645,7 @@ app.post('/api/register-bulk', async (req, res) => {
 
             await sendEmail({
                 to: email,
+                fromName: `Tickets - ${event.name}`,
                 subject: isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`,
                 html: `
                     <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
@@ -1115,6 +1120,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
 
         await sendEmail({
             to: email,
+            fromName: `Tickets - ${event.name}`,
             subject: `Your ${ticketLabel} for ${event.name}`,
             html: `
                 <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
@@ -1212,6 +1218,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
         await sendEmail({
             to: email,
+            fromName: `Tickets - ${event.name}`,
             subject: `Updated registration for ${event.name}`,
             html: `
                 <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
@@ -1289,6 +1296,7 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
 
     await sendEmail({
         to: ticket.email,
+        fromName: `Tickets - ${event.name}`,
         subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name} (resent)`,
         html: `
             <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
@@ -1307,6 +1315,47 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
     });
 
     res.json({ success: true, count: actualCount });
+});
+
+// Send a direct custom email to a ticket holder
+app.post('/api/ticket/:id/direct-email', requireAuth, async (req, res) => {
+    const ticket = db.data.tickets.find(t => t.id === req.params.id);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+
+    const event = db.data.events.find(e => e.id === ticket.eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const { subject, message } = req.body;
+    if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required' });
+
+    const html = `
+        <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
+            <p style="color:#555; white-space:pre-wrap;">${message.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</p>
+        </div>
+    `;
+
+    try {
+        await sendEmail({
+            to: ticket.email,
+            fromName: `Tickets - ${event.name}`,
+            subject,
+            html,
+            registrationId: ticket.registrationId
+        });
+        log('direct-email', `📧 Direct email sent — ticket: ${ticket.id}  to: ${ticket.email}  event: ${event.name}  by: ${req.session.userId}`);
+        res.json({ success: true });
+    } catch (err) {
+        log('direct-email', `❌ Direct email failed — ticket: ${ticket.id}  err: ${err.message}`);
+        res.status(500).json({ error: 'Failed to send email' });
+    }
 });
 
 // Print-friendly email preview

@@ -17,6 +17,8 @@
             background: #f4f5f7;
             color: #1a1a2e;
             min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
 
         /* ── Top bar ── */
@@ -744,7 +746,7 @@
             style="margin-left:8px;color:#dc2626;border-color:#dc2626;">Delete Account</button>
     </div>
 
-    <div class="layout">
+    <div class="layout" style="flex:1;">
         <!-- Sidebar -->
         <div class="sidebar">
             <div class="sidebar-header">
@@ -772,6 +774,33 @@
                 <p style="font-size:13px; color:#bbb;">Events are created from your Google Sheet</p>
             </div>
             <div id="eventDetail" style="display:none;"></div>
+        </div>
+    </div>
+
+    <footer style="text-align:center;padding:10px;font-size:12px;color:#aaa;border-top:1px solid #e8e8e8;background:#fff;">
+        &copy; 2026 Will's Tech Support
+    </footer>
+
+    <!-- Direct Email Modal -->
+    <div class="modal-overlay" id="directEmailModal" style="display:none;"
+        onclick="if(event.target===this)closeDirectEmailModal()">
+        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;">
+            <div class="modal-header">
+                <h2>Send Email</h2>
+                <button class="modal-close" onclick="closeDirectEmailModal()">&times;</button>
+            </div>
+            <div id="directEmailTo" style="font-size:13px;color:#666;margin-bottom:12px;"></div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Subject</label>
+                <input type="text" id="directEmailSubject"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Message</label>
+                <textarea id="directEmailBody" rows="6"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
+            </div>
+            <button class="btn btn-primary" style="width:100%;" onclick="sendDirectEmail(this)">Send</button>
         </div>
     </div>
 
@@ -1688,6 +1717,7 @@
                 <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Only</button>
                 <button class="btn btn-secondary" style="padding:8px 12px;" onclick="printTicketEmail()" title="Print email">🖨️</button>
             </div>
+            <button class="btn btn-secondary" style="width:100%;margin-top:8px;" onclick="openDirectEmailModal()">Send Email</button>
             <button class="btn btn-danger" style="width:100%;margin-top:4px;" onclick="deleteRegistrationFromModal()">Delete Registration</button>
             <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:#666;"></div>
         </div>
@@ -1980,6 +2010,44 @@
             } else {
                 const d = await r.json();
                 alert(d.error || 'Failed to resend email');
+            }
+        }
+
+        function openDirectEmailModal() {
+            const id = document.getElementById('editTicketId').value;
+            const email = document.getElementById('editTicketEmail').value;
+            const name = document.getElementById('editTicketName').value;
+            document.getElementById('directEmailTo').textContent = `To: ${name} <${email}>`;
+            document.getElementById('directEmailSubject').value = '';
+            document.getElementById('directEmailBody').value = '';
+            document.getElementById('directEmailModal').dataset.ticketId = id;
+            document.getElementById('directEmailModal').style.display = 'flex';
+        }
+
+        function closeDirectEmailModal() {
+            document.getElementById('directEmailModal').style.display = 'none';
+        }
+
+        async function sendDirectEmail(btn) {
+            const id = document.getElementById('directEmailModal').dataset.ticketId;
+            const subject = document.getElementById('directEmailSubject').value.trim();
+            const message = document.getElementById('directEmailBody').value.trim();
+            if (!subject || !message) return alert('Subject and message are required.');
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            const r = await fetch('/api/ticket/' + id + '/direct-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subject, message })
+            });
+            btn.disabled = false;
+            btn.textContent = 'Send';
+            if (r.ok) {
+                closeDirectEmailModal();
+                alert('Email sent.');
+            } else {
+                const d = await r.json();
+                alert(d.error || 'Failed to send email.');
             }
         }
 
