@@ -1095,7 +1095,8 @@
                 <button class="btn btn-primary btn-sm" onclick="openCreateTicketModal()">+ Add Ticket</button>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
-                <span id="ticketBulkDelete" style="display:none;">
+                <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;">
+                    <button class="btn btn-secondary btn-sm" onclick="openBulkEmailModal('${event.id}', 0, true)">Email Selected</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteSelectedTickets('${event.id}')">Delete Selected</button>
                 </span>
                 <span class="refresh-hint"><span class="live-dot"></span>auto-refreshing</span>
@@ -1245,7 +1246,7 @@
 
         function updateTicketBulkBar() {
             const el = document.getElementById('ticketBulkDelete');
-            if (el) el.style.display = checkedRegIds.size > 0 ? 'inline' : 'none';
+            if (el) el.style.display = checkedRegIds.size > 0 ? 'flex' : 'none';
             const selectAll = document.getElementById('selectAllTickets');
             if (selectAll) {
                 const allRows = document.querySelectorAll('.ticket-checkbox[data-regid]');
@@ -2041,12 +2042,20 @@
             }
         }
 
-        function openBulkEmailModal(eventId, count) {
-            document.getElementById('bulkEmailModal').dataset.eventId = eventId;
-            document.getElementById('bulkEmailRecipientCount').textContent = `Sending to ${count} registration${count !== 1 ? 's' : ''}`;
+        function openBulkEmailModal(eventId, count, selectedOnly = false) {
+            const modal = document.getElementById('bulkEmailModal');
+            modal.dataset.eventId = eventId;
+            if (selectedOnly) {
+                const ids = [...checkedRegIds];
+                modal.dataset.selectedIds = JSON.stringify(ids);
+                document.getElementById('bulkEmailRecipientCount').textContent = `Sending to ${ids.length} selected registration${ids.length !== 1 ? 's' : ''}`;
+            } else {
+                modal.dataset.selectedIds = '';
+                document.getElementById('bulkEmailRecipientCount').textContent = `Sending to ${count} registration${count !== 1 ? 's' : ''}`;
+            }
             document.getElementById('bulkEmailSubject').value = '';
             document.getElementById('bulkEmailBody').value = '';
-            document.getElementById('bulkEmailModal').style.display = 'flex';
+            modal.style.display = 'flex';
         }
 
         function closeBulkEmailModal() {
@@ -2054,16 +2063,20 @@
         }
 
         async function sendBulkEmail(btn) {
-            const eventId = document.getElementById('bulkEmailModal').dataset.eventId;
+            const modal = document.getElementById('bulkEmailModal');
+            const eventId = modal.dataset.eventId;
             const subject = document.getElementById('bulkEmailSubject').value.trim();
             const message = document.getElementById('bulkEmailBody').value.trim();
             if (!subject || !message) return alert('Subject and message are required.');
+            const selectedIds = modal.dataset.selectedIds ? JSON.parse(modal.dataset.selectedIds) : null;
             btn.disabled = true;
             btn.textContent = 'Sending…';
+            const body = { subject, message };
+            if (selectedIds) body.registrationIds = selectedIds;
             const r = await fetch('/api/event/' + eventId + '/bulk-email', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ subject, message })
+                body: JSON.stringify(body)
             });
             btn.disabled = false;
             btn.textContent = 'Send to All';
