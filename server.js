@@ -60,7 +60,7 @@ async function sendEmail({ to, subject, html, registrationId, fromName }) {
         : html;
 
     const source = fromName
-        ? `"${fromName}" <${process.env.SES_FROM}>`
+        ? `"${fromName.replace(/["<>\\]/g, '')}" <${process.env.SES_FROM}>`
         : process.env.SES_FROM;
 
     return ses.send(new SendEmailCommand({

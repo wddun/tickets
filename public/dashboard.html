@@ -782,7 +782,7 @@
     </footer>
 
     <!-- Direct Email Modal -->
-    <div class="modal-overlay" id="directEmailModal" style="display:none;"
+    <div class="modal-overlay" id="directEmailModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeDirectEmailModal()">
         <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;">
             <div class="modal-header">
@@ -1692,7 +1692,10 @@
         <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
                 <h2>Edit Registration</h2>
-                <button class="modal-close" onclick="closeEditTicketModal()">&times;</button>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button class="btn btn-secondary" style="padding:5px 12px;font-size:13px;" onclick="printTicketEmail()">Print</button>
+                    <button class="modal-close" onclick="closeEditTicketModal()">&times;</button>
+                </div>
             </div>
 
             <!-- Ticket preview -->
@@ -1715,9 +1718,8 @@
                 <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket(false)">Save &amp; Resend</button>
                 <button class="btn btn-secondary" style="flex:1;" onclick="submitEditTicket(true)">Save Only</button>
                 <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Only</button>
-                <button class="btn btn-secondary" style="padding:8px 12px;" onclick="printTicketEmail()" title="Print email">🖨️</button>
             </div>
-            <button class="btn btn-secondary" style="width:100%;margin-top:8px;" onclick="openDirectEmailModal()">Send Email</button>
+            <button class="btn btn-secondary" style="width:100%;margin-top:4px;" onclick="openDirectEmailModal()">Send Email</button>
             <button class="btn btn-danger" style="width:100%;margin-top:4px;" onclick="deleteRegistrationFromModal()">Delete Registration</button>
             <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:#666;"></div>
         </div>
