@@ -59,9 +59,11 @@ async function sendEmail({ to, subject, html, registrationId, fromName }) {
         ? html + `\n<img src="${BASE_URL}/api/track/open/${registrationId}" width="1" height="1" style="display:none;opacity:0;" alt="">`
         : html;
 
-    const source = fromName
-        ? `"${fromName.replace(/["<>\\]/g, '')}" <${process.env.SES_FROM}>`
-        : process.env.SES_FROM;
+    const sesFrom = (process.env.SES_FROM || '').trim();
+    // Only wrap in display-name format if sesFrom is a plain email (no angle brackets already)
+    const source = (fromName && sesFrom && !sesFrom.includes('<'))
+        ? `"${fromName.replace(/["<>\\]/g, '').trim()}" <${sesFrom}>`
+        : sesFrom;
 
     return ses.send(new SendEmailCommand({
         Source: source,
