@@ -1383,13 +1383,14 @@ app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const { subject, message } = req.body;
+    const { subject, message, registrationIds } = req.body;
     if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required' });
 
-    // One email per unique registration (not per ticket)
+    // One email per unique registration (not per ticket); optionally filtered to specific regIds
     const eventTickets = db.data.tickets.filter(t => t.eventId === event.id);
     const seen = new Set();
     const registrations = eventTickets.filter(t => {
+        if (registrationIds && !registrationIds.includes(t.registrationId)) return false;
         if (seen.has(t.registrationId)) return false;
         seen.add(t.registrationId);
         return true;
