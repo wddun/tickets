@@ -783,6 +783,29 @@
         &copy; 2026 Will's Tech Support
     </footer>
 
+    <!-- Bulk Email Modal -->
+    <div class="modal-overlay" id="bulkEmailModal" style="display:none;z-index:200;"
+        onclick="if(event.target===this)closeBulkEmailModal()">
+        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;">
+            <div class="modal-header">
+                <h2>Email All Attendees</h2>
+                <button class="modal-close" onclick="closeBulkEmailModal()">&times;</button>
+            </div>
+            <div id="bulkEmailRecipientCount" style="font-size:13px;color:#666;margin-bottom:12px;"></div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Subject</label>
+                <input type="text" id="bulkEmailSubject"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Message</label>
+                <textarea id="bulkEmailBody" rows="6"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
+            </div>
+            <button class="btn btn-primary" style="width:100%;" onclick="sendBulkEmail(this)">Send to All</button>
+        </div>
+    </div>
+
     <!-- Direct Email Modal -->
     <div class="modal-overlay" id="directEmailModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeDirectEmailModal()">
@@ -1040,6 +1063,7 @@
                     <a href="/scanner.html" target="_blank" class="btn btn-scanner">📷 Open Scanner</a>
                     <button class="btn-settings" onclick="openEditEventModal('${event.id}')">✏️ Edit Event</button>
                     <button class="btn-settings" onclick="openSettings('${event.id}')">⚙️ Settings</button>
+                    <button class="btn-settings" onclick="openBulkEmailModal('${event.id}', ${grouped.length})">✉️ Email All</button>
                     <button class="btn btn-danger" onclick="deleteEvent('${event.id}')">Delete Event</button>
                 </div>
             </div>
@@ -2014,6 +2038,42 @@
             } else {
                 const d = await r.json();
                 alert(d.error || 'Failed to resend email');
+            }
+        }
+
+        function openBulkEmailModal(eventId, count) {
+            document.getElementById('bulkEmailModal').dataset.eventId = eventId;
+            document.getElementById('bulkEmailRecipientCount').textContent = `Sending to ${count} registration${count !== 1 ? 's' : ''}`;
+            document.getElementById('bulkEmailSubject').value = '';
+            document.getElementById('bulkEmailBody').value = '';
+            document.getElementById('bulkEmailModal').style.display = 'flex';
+        }
+
+        function closeBulkEmailModal() {
+            document.getElementById('bulkEmailModal').style.display = 'none';
+        }
+
+        async function sendBulkEmail(btn) {
+            const eventId = document.getElementById('bulkEmailModal').dataset.eventId;
+            const subject = document.getElementById('bulkEmailSubject').value.trim();
+            const message = document.getElementById('bulkEmailBody').value.trim();
+            if (!subject || !message) return alert('Subject and message are required.');
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            const r = await fetch('/api/event/' + eventId + '/bulk-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subject, message })
+            });
+            btn.disabled = false;
+            btn.textContent = 'Send to All';
+            if (r.ok) {
+                const d = await r.json();
+                closeBulkEmailModal();
+                alert(`Sent to ${d.sent} registration${d.sent !== 1 ? 's' : ''}${d.failed > 0 ? ` (${d.failed} failed)` : ''}.`);
+            } else {
+                const d = await r.json();
+                alert(d.error || 'Failed to send emails.');
             }
         }
 

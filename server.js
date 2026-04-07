@@ -1370,6 +1370,64 @@ app.post('/api/ticket/:id/direct-email', requireAuth, async (req, res) => {
     }
 });
 
+// Send a bulk custom email to all registrants of an event
+app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
+    const event = db.data.events.find(e => e.id === req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const { subject, message } = req.body;
+    if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required' });
+
+    // One email per unique registration (not per ticket)
+    const eventTickets = db.data.tickets.filter(t => t.eventId === event.id);
+    const seen = new Set();
+    const registrations = eventTickets.filter(t => {
+        if (seen.has(t.registrationId)) return false;
+        seen.add(t.registrationId);
+        return true;
+    });
+
+    if (registrations.length === 0) return res.status(400).json({ error: 'No registrations found for this event' });
+
+    const replyTo = db.data.users.find(u => u.id === event.userId)?.email;
+    const escapedMessage = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+
+    let sent = 0;
+    const errors = [];
+    for (const ticket of registrations) {
+        const html = `
+            <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
+                <p style="color:#555; white-space:pre-wrap;">${escapedMessage}</p>
+            </div>
+        `;
+        try {
+            await sendEmail({
+                to: ticket.email,
+                fromName: `Tickets - ${event.name}`,
+                replyTo,
+                subject,
+                html,
+                registrationId: ticket.registrationId
+            });
+            sent++;
+        } catch (err) {
+            errors.push(ticket.email);
+            log('bulk-email', `❌ Failed — email: ${ticket.email}  err: ${err.message}`);
+        }
+    }
+
+    log('bulk-email', `📧 Bulk email sent — event: ${event.name} (${event.id})  sent: ${sent}  failed: ${errors.length}  by: ${req.session.userId}`);
+    res.json({ success: true, sent, failed: errors.length });
+});
+
 // Print-friendly email preview
 app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
     const ticket = db.data.tickets.find(t => t.id === req.params.id);
