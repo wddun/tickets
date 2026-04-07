@@ -48,7 +48,7 @@ const ses = new SESClient({
 
 // Serialised email queue — guarantees a minimum gap between SES sends.
 // SES default rate for new accounts is 1/sec; set SES_MIN_INTERVAL_MS in .env to tune.
-const SES_INTERVAL_MS = parseInt(process.env.SES_MIN_INTERVAL_MS || '1000');
+const SES_INTERVAL_MS = parseInt(process.env.SES_MIN_INTERVAL_MS || '100');
 let emailChain = Promise.resolve();
 
 async function sendEmail({ to, subject, html, registrationId, fromName, replyTo }) {
