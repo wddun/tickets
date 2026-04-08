@@ -627,7 +627,7 @@ struct CameraPreviewView: UIViewRepresentable {
         Coordinator(onCode: onCode)
     }
 
-    // UIView subclass so layoutSubviews keeps preview layer sized correctly
+    // UIView subclass so layoutSubviews keeps preview layer sized and oriented correctly
     class CameraView: UIView {
         var previewLayer: AVCaptureVideoPreviewLayer?
 
@@ -659,6 +659,20 @@ struct CameraPreviewView: UIViewRepresentable {
         override func layoutSubviews() {
             super.layoutSubviews()
             previewLayer?.frame = bounds
+            updateVideoOrientation()
+        }
+
+        private func updateVideoOrientation() {
+            guard let connection = previewLayer?.connection,
+                  connection.isVideoRotationAngleSupported(90) else { return }
+            let angle: CGFloat
+            switch window?.windowScene?.interfaceOrientation {
+            case .landscapeLeft:           angle = 180
+            case .landscapeRight:          angle = 0
+            case .portraitUpsideDown:      angle = 270
+            default:                       angle = 90   // portrait (default)
+            }
+            connection.videoRotationAngle = angle
         }
     }
 
