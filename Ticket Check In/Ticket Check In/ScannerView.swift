@@ -21,6 +21,10 @@ struct ScannerView: View {
     @State private var lastRegistrationId: String?
     @State private var dismissTask: Task<Void, Never>?
     @State private var showingDetail = false
+    @State private var lastScannedToken: String?
+    @State private var lastScanTime: Date?
+    @State private var pendingCheckoutToken: String?
+    private let scanDebounceInterval: TimeInterval = 5.0
 
     private var canUndo: Bool {
         api.currentUser?.email == adminEmail
@@ -61,15 +65,31 @@ struct ScannerView: View {
     }
 
     private var detailAction: (() -> Void)? {
-        guard let result = scanResult, result.status != .error else { return nil }
+        guard let result = scanResult, result.status != .error, result.status != .reentryExitPrompt else { return nil }
         return { showingDetail = true }
+    }
+
+    private var confirmCheckoutAction: (() -> Void)? {
+        guard let result = scanResult, result.status == .reentryExitPrompt else { return nil }
+        return handleConfirmCheckout
+    }
+
+    private var cancelAction: (() -> Void)? {
+        guard let result = scanResult, result.status == .reentryExitPrompt else { return nil }
+        return dismiss
     }
 
     @ViewBuilder private var resultOverlay: some View {
         if let result = scanResult {
-            ScanResultOverlay(result: result, onUndo: undoAction, onViewDetails: detailAction)
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.2), value: scanResult != nil)
+            ScanResultOverlay(
+                result: result,
+                onUndo: undoAction,
+                onViewDetails: detailAction,
+                onConfirmCheckout: confirmCheckoutAction,
+                onCancel: cancelAction
+            )
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.2), value: scanResult != nil)
         }
     }
 
@@ -95,8 +115,9 @@ struct ScannerView: View {
         if let last = lastResult {
             Button(action: { showingDetail = true }) {
                 HStack(spacing: 6) {
-                    Image(systemName: last.status == .success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                        .foregroundStyle(last.status == .success ? .green : .orange)
+                    let isGreen = last.status == .success || last.status == .reentryEnter
+                    Image(systemName: isGreen ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(isGreen ? .green : .orange)
                     Text(last.firstName ?? last.name)
                         .lineLimit(1)
                 }
@@ -111,14 +132,23 @@ struct ScannerView: View {
     }
 
     private func handleCode(_ token: String) {
+        // 5-second same-token debounce
+        let now = Date()
+        if let lastToken = lastScannedToken, let lastTime = lastScanTime,
+           token == lastToken, now.timeIntervalSince(lastTime) < scanDebounceInterval {
+            return
+        }
+
         guard !isProcessing else { return }
         isProcessing = true
         isScanning = false
+        lastScannedToken = token
+        lastScanTime = now
 
         Task {
             do {
                 let response = try await APIService.shared.validateTicket(token: token)
-                await MainActor.run { showResult(for: response) }
+                await MainActor.run { showResult(for: response, token: token) }
             } catch {
                 await MainActor.run {
                     scanResult = ScanResult(status: .error, title: "Error", name: error.localizedDescription)
@@ -129,7 +159,7 @@ struct ScannerView: View {
         }
     }
 
-    private func showResult(for response: ValidateResponse) {
+    private func showResult(for response: ValidateResponse, token: String) {
         let name = response.name ?? "Guest"
         let result: ScanResult
         switch response.status {
@@ -137,6 +167,18 @@ struct ScannerView: View {
             lastRegistrationId = response.registrationId ?? response.ticketId
             result = ScanResult(from: response, status: .success, title: "Checked In!")
             CheckInFeedback.shared.success()
+        case "reentry_enter":
+            lastRegistrationId = response.registrationId ?? response.ticketId
+            result = ScanResult(from: response, status: .reentryEnter, title: "Checked Back In!")
+            CheckInFeedback.shared.success()
+        case "reentry_exit":
+            pendingCheckoutToken = token
+            result = ScanResult(from: response, status: .reentryExitPrompt, title: "Confirm Check-Out")
+            CheckInFeedback.shared.alreadyUsed()
+            scanResult = result
+            lastResult = result
+            // No auto-dismiss for exit confirmation — requires manual action
+            return
         case "used":
             result = ScanResult(from: response, status: .alreadyUsed, title: "Already Checked In")
             CheckInFeedback.shared.alreadyUsed()
@@ -172,9 +214,25 @@ struct ScannerView: View {
         }
     }
 
+    private func handleConfirmCheckout() {
+        dismissTask?.cancel()
+        guard let token = pendingCheckoutToken else {
+            dismiss()
+            return
+        }
+        Task {
+            try? await APIService.shared.confirmCheckout(token: token)
+            await MainActor.run {
+                CheckInFeedback.shared.success()
+                dismiss()
+            }
+        }
+    }
+
     private func dismiss() {
         withAnimation { scanResult = nil }
         lastResult = nil
+        pendingCheckoutToken = nil
         isProcessing = false
         isScanning = true
     }
@@ -183,7 +241,7 @@ struct ScannerView: View {
 // MARK: - Scan Result Model
 
 struct ScanResult: Equatable {
-    enum Status { case success, alreadyUsed, error }
+    enum Status { case success, alreadyUsed, reentryExitPrompt, reentryEnter, error }
     let status: Status
     let title: String
     let name: String
@@ -218,11 +276,13 @@ struct ScanResultOverlay: View {
     let result: ScanResult
     var onUndo: (() -> Void)? = nil
     var onViewDetails: (() -> Void)? = nil
+    var onConfirmCheckout: (() -> Void)? = nil
+    var onCancel: (() -> Void)? = nil
 
     var overlayColor: Color {
         switch result.status {
-        case .success: return .green
-        case .alreadyUsed: return Color(red: 0.9, green: 0.5, blue: 0.1)
+        case .success, .reentryEnter: return .green
+        case .alreadyUsed, .reentryExitPrompt: return Color(red: 0.9, green: 0.5, blue: 0.1)
         case .error: return .red
         }
     }
@@ -230,7 +290,9 @@ struct ScanResultOverlay: View {
     var icon: String {
         switch result.status {
         case .success: return "checkmark.circle.fill"
+        case .reentryEnter: return "arrow.right.circle.fill"
         case .alreadyUsed: return "exclamationmark.circle.fill"
+        case .reentryExitPrompt: return "door.left.hand.open"
         case .error: return "xmark.circle.fill"
         }
     }
@@ -304,30 +366,54 @@ struct ScanResultOverlay: View {
                 Spacer()
 
                 // Action buttons
-                HStack(spacing: 12) {
-                    if let onViewDetails {
-                        Button(action: onViewDetails) {
-                            Text("View Details")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(overlayColor)
-                                .padding(.horizontal, 22)
-                                .padding(.vertical, 11)
-                                .background(.white.opacity(0.9), in: Capsule())
+                if result.status == .reentryExitPrompt {
+                    VStack(spacing: 12) {
+                        if let onConfirmCheckout {
+                            Button(action: onConfirmCheckout) {
+                                Text("Confirm Check-Out")
+                                    .font(.system(size: 17, weight: .bold))
+                                    .foregroundStyle(overlayColor)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+                            }
+                        }
+                        if let onCancel {
+                            Button(action: onCancel) {
+                                Text("Cancel")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.75))
+                            }
                         }
                     }
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 56)
+                } else {
+                    HStack(spacing: 12) {
+                        if let onViewDetails {
+                            Button(action: onViewDetails) {
+                                Text("View Details")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(overlayColor)
+                                    .padding(.horizontal, 22)
+                                    .padding(.vertical, 11)
+                                    .background(.white.opacity(0.9), in: Capsule())
+                            }
+                        }
 
-                    if let onUndo {
-                        Button(action: onUndo) {
-                            Text("Undo")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(overlayColor)
-                                .padding(.horizontal, 22)
-                                .padding(.vertical, 11)
-                                .background(.white.opacity(0.9), in: Capsule())
+                        if let onUndo {
+                            Button(action: onUndo) {
+                                Text("Undo")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(overlayColor)
+                                    .padding(.horizontal, 22)
+                                    .padding(.vertical, 11)
+                                    .background(.white.opacity(0.9), in: Capsule())
+                            }
                         }
                     }
+                    .padding(.bottom, 56)
                 }
-                .padding(.bottom, 56)
             }
         }
     }

@@ -14,6 +14,7 @@ struct Event: Codable, Identifiable, Hashable {
     let color: String?
     let scannerPin: String?
     let location: EventLocation?
+    let allowReentry: Bool?
 
     struct EventLocation: Codable, Hashable {
         let name: String?
@@ -40,7 +41,7 @@ struct Ticket: Codable, Identifiable {
 }
 
 struct ValidateResponse: Codable {
-    let status: String   // "valid", "used", "invalid"
+    let status: String   // "valid", "used", "invalid", "reentry_exit", "reentry_enter"
     let message: String?
     let name: String?
     let firstName: String?

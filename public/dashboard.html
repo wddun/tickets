@@ -887,6 +887,15 @@
                 <div id="editEventImagePreview" style="margin-bottom:8px;"></div>
                 <input type="file" id="editEventImage" accept="image/png,image/jpeg" style="font-size:13px;">
             </div>
+            <div style="margin-bottom:20px;padding:14px;background:#f8f8ff;border:1px solid #e0e0f0;border-radius:10px;">
+                <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+                    <input type="checkbox" id="editEventAllowReentry" style="width:18px;height:18px;accent-color:#6366f1;cursor:pointer;flex-shrink:0;">
+                    <div>
+                        <div style="font-size:13px;font-weight:600;">Allow Reentry</div>
+                        <div style="font-size:12px;color:#888;margin-top:2px;">Attendees can exit and re-enter. Scanner must confirm each check-out. QR code stays active on Apple Wallet pass.</div>
+                    </div>
+                </label>
+            </div>
             <input type="hidden" id="editEventId">
             <button class="btn btn-primary" style="width:100%;" onclick="submitEditEvent()">Save Changes</button>
         </div>
@@ -1386,6 +1395,7 @@
             document.getElementById('editEventLat').value = ev.location?.lat || '';
             document.getElementById('editEventLng').value = ev.location?.lng || '';
             document.getElementById('editEventImage').value = '';
+            document.getElementById('editEventAllowReentry').checked = !!ev.allowReentry;
             const preview = document.getElementById('editEventImagePreview');
             preview.innerHTML = ev.imageUrl
                 ? `<img src="${ev.imageUrl}" style="max-width:100%;max-height:120px;border-radius:8px;border:1px solid #eee;">`
@@ -1419,12 +1429,15 @@
             // Convert datetime-local (local time, no tz) back to full ISO string
             const timeISO = time ? new Date(time).toISOString() : '';
 
+            const allowReentry = document.getElementById('editEventAllowReentry').checked;
+
             const fd = new FormData();
             fd.append('name', name);
             fd.append('time', timeISO);
             fd.append('color', color);
             fd.append('locationName', locationName);
             fd.append('locationAddress', locationAddress);
+            fd.append('allowReentry', String(allowReentry));
             if (lat) fd.append('lat', lat);
             if (lng) fd.append('lng', lng);
             if (imageFile) fd.append('image', imageFile);
