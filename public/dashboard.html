@@ -1090,9 +1090,8 @@
 
         <div class="stats-row">
             <div class="stat-box${activeStatFilter === 'all' ? ' stat-active' : ''}" onclick="setStatFilter('all')">
-                <div class="stat-num">${grouped.length}</div>
-                <div class="stat-label">Registrations</div>
-                <div style="font-size:11px;color:#bbb;margin-top:4px;">${total} ticket${total !== 1 ? 's' : ''} total</div>
+                <div class="stat-num">${total}</div>
+                <div class="stat-label">Tickets</div>
             </div>
             <div class="stat-box${activeStatFilter === 'checked' ? ' stat-active' : ''}" onclick="setStatFilter('checked')">
                 <div class="stat-num" style="color:#10b981;">${scanned}</div>
