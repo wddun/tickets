@@ -240,4 +240,15 @@ class APIService: ObservableObject {
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
+
+    func confirmCheckout(token: String) async throws {
+        guard let url = URL(string: "\(baseURL)/api/checkout") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["token": token])
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+    }
 }

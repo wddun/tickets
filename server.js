@@ -937,6 +937,8 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
         }
     }
 
+    const allowReentry = req.body.allowReentry === 'true';
+
     await db.update(data => {
         const ev = data.events.find(e => e.id === req.params.id);
         if (!ev) return;
@@ -944,6 +946,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
         if (time) ev.time = time;
         if (color) ev.color = color;
         ev.imageUrl = imageUrl;
+        ev.allowReentry = allowReentry;
         ev.location = {
             name: locationName || ev.location?.name || 'Venue',
             address: locationAddress || ev.location?.address || '',
@@ -1520,6 +1523,9 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
             t.used_at = now;
             checkedInCount++;
         }
+        if (checkinEvent && checkinEvent.allowReentry) {
+            t.reentry_status = 'inside';
+        }
     });
 
     if (checkedInCount === 0) {
@@ -1557,6 +1563,7 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     let clearedCount = 0;
     tickets.forEach(t => {
         if (t.used_at) { t.used_at = null; clearedCount++; }
+        t.reentry_status = null;
     });
 
     const uncheckinNow = new Date().toISOString();
@@ -1589,6 +1596,23 @@ app.post('/api/validate', async (req, res) => {
     };
 
     if (ticket.used_at) {
+        if (event && event.allowReentry) {
+            const currentStatus = ticket.reentry_status || 'inside';
+            if (currentStatus === 'inside') {
+                log('validate', `🚪 REENTRY EXIT PROMPT — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
+                return res.json({ status: 'reentry_exit', message: 'Confirm check-out?', used_at: ticket.used_at, ...ticketFields });
+            } else {
+                const reentryAt = new Date().toISOString();
+                ticket.reentry_status = 'inside';
+                ticket.updated_at = reentryAt;
+                await db.write();
+                ticketStatusCache.clear();
+                log('validate', `✅ REENTRY ENTER — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
+                res.json({ status: 'reentry_enter', message: `Welcome back to ${event ? event.name : 'the event'}!`, ...ticketFields });
+                pushWalletUpdate([ticket.token]).catch(() => { });
+                return;
+            }
+        }
         log('validate', `⚠️  ALREADY USED — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  used_at: ${ticket.used_at}  ip: ${getIP(req)}`);
         return res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, ...ticketFields });
     }
@@ -1596,11 +1620,42 @@ app.post('/api/validate', async (req, res) => {
     const validatedAt = new Date().toISOString();
     ticket.used_at = validatedAt;
     ticket.updated_at = validatedAt;
+    if (event && event.allowReentry) ticket.reentry_status = 'inside';
     await db.write();
     ticketStatusCache.clear();
 
     log('validate', `✅ VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
+    pushWalletUpdate([ticket.token]).catch(() => { });
+});
+
+// Confirm reentry check-out (no auth required — scanner uses PIN, not session)
+app.post('/api/checkout', async (req, res) => {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token is required' });
+
+    const cleanToken = (token.startsWith('ticket:') ? token.split(':')[1] : token).trim();
+    const ticket = db.data.tickets.find(t => t.token === cleanToken);
+    if (!ticket) return res.json({ status: 'invalid', message: 'Invalid ticket' });
+
+    const event = db.data.events.find(e => e.id === ticket.eventId);
+    if (!event || !event.allowReentry) return res.status(400).json({ error: 'Reentry not enabled for this event' });
+
+    const ticketFields = {
+        name: ticket.name, firstName: ticket.firstName ?? null, lastName: ticket.lastName ?? null,
+        email: ticket.email, customFields: ticket.customFields ?? null,
+        ticketId: ticket.id, registrationId: ticket.registrationId,
+        eventId: ticket.eventId, eventName: event.name,
+    };
+
+    const now = new Date().toISOString();
+    ticket.reentry_status = 'outside';
+    ticket.updated_at = now;
+    await db.write();
+    ticketStatusCache.clear();
+
+    log('checkout', `🚪 CHECKED OUT — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event.name}  ip: ${getIP(req)}`);
+    res.json({ status: 'checked_out', message: 'Checked out successfully', ...ticketFields });
     pushWalletUpdate([ticket.token]).catch(() => { });
 });
 
@@ -1623,13 +1678,17 @@ async function generatePassBuffer(ticket, event) {
     const signerKeyFile = path.join(certPath, 'signer.key');
     const modelPath = path.resolve(__dirname, 'pass-assets.pass');
 
+    const isInsideReentry = event.allowReentry && ticket.reentry_status === 'inside';
+    const isCheckedIn = !event.allowReentry && !!ticket.used_at;
+    const showCheckedInStyle = isCheckedIn || isInsideReentry;
+
     const passOverride = {
         serialNumber: ticket.token,
         passTypeIdentifier: process.env.PASS_TYPE_ID,
         teamIdentifier: process.env.TEAM_ID,
         description: event.name,
-        logoText: ticket.used_at ? "✓ CHECKED IN" : event.name,
-        backgroundColor: ticket.used_at ? "rgb(90, 90, 90)" : (event.color || "rgb(99, 102, 241)"),
+        logoText: showCheckedInStyle ? "✓ CHECKED IN" : event.name,
+        backgroundColor: showCheckedInStyle ? "rgb(90, 90, 90)" : (event.color || "rgb(99, 102, 241)"),
         foregroundColor: "rgb(255, 255, 255)",
         labelColor: "rgb(255, 255, 255)",
     };
@@ -1649,9 +1708,11 @@ async function generatePassBuffer(ticket, event) {
         }
     }, passOverride);
 
-    pass.voided = !!ticket.used_at;
+    // Reentry events: never void — keep QR so attendee can re-scan. Change color/text instead.
+    // Normal events: void and remove QR when checked in (existing behavior).
+    pass.voided = isCheckedIn;
 
-    if (!ticket.used_at) {
+    if (!isCheckedIn) {
         pass.setBarcodes({
             format: "PKBarcodeFormatQR",
             message: `ticket:${ticket.token}`,
@@ -1670,7 +1731,7 @@ async function generatePassBuffer(ticket, event) {
     }
 
     // When checked in, show name + greyed-out event name; logoText already says "✓ CHECKED IN"
-    pass.primaryFields.push({ key: "attendee", label: ticket.used_at ? "CHECKED IN" : "NAME", value: ticket.name });
+    pass.primaryFields.push({ key: "attendee", label: showCheckedInStyle ? "CHECKED IN" : "NAME", value: ticket.name });
 
     const customFields = ticket.customFields || {};
     const cfEntries = Object.entries(customFields);

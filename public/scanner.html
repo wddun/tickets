@@ -217,6 +217,7 @@
         .badge-ok      { background: rgba(74,222,128,0.15); color: #4ade80; }
         .badge-used    { background: rgba(248,113,113,0.15); color: #f87171; }
         .badge-invalid { background: rgba(251,191,36,0.15);  color: #fbbf24; }
+        .badge-exit    { background: rgba(251,146,60,0.15);  color: #fb923c; }
 
         .scan-name  { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
         .scan-event { font-size: 13px; color: rgba(255,255,255,0.45); margin-bottom: 12px; }
@@ -459,8 +460,9 @@
     </div>
     <div class="scan-fields" id="scanFields"></div>
     <div class="scan-actions">
+        <button class="action-btn" id="confirmCheckoutBtn" onclick="confirmCheckout()" style="display:none;background:#fb923c;color:#fff;">Confirm Check-Out</button>
         <button class="action-btn btn-primary"   id="viewListBtn" onclick="openListForScan()" style="display:none;">View in Check-In List</button>
-        <button class="action-btn btn-secondary" onclick="closeScanSheet()">Continue Scanning</button>
+        <button class="action-btn btn-secondary" id="continueScanBtn" onclick="closeScanSheet()">Continue Scanning</button>
     </div>
 </div>
 
@@ -516,6 +518,10 @@ let events          = [];
 let allAttendees    = [];   // grouped registrations for selected event
 let filteredAttendees = [];
 let lastScannedRegistrationId = null;
+let lastScannedToken  = null;
+let lastScanTs        = 0;
+const SCAN_DEBOUNCE_MS = 5000;
+let pendingCheckoutToken = null;
 
 // ── Init ──────────────────────────────────────────────────
 (async () => {
@@ -747,9 +753,15 @@ function openScanSheet(data) {
     lastScannedRegistrationId = data.registrationId || null;
 
     const badge = document.getElementById('scanBadge');
-    if (data.status === 'valid') {
+    const isReentryExit = data.status === 'reentry_exit';
+    const isReentryEnter = data.status === 'reentry_enter';
+
+    if (data.status === 'valid' || isReentryEnter) {
         badge.className = 'scan-badge badge-ok';
-        badge.textContent = '✓ Checked In';
+        badge.textContent = isReentryEnter ? '↩ Checked Back In' : '✓ Checked In';
+    } else if (isReentryExit) {
+        badge.className = 'scan-badge badge-exit';
+        badge.textContent = '⟳ Currently Inside — Confirm Check-Out';
     } else if (data.status === 'used') {
         badge.className = 'scan-badge badge-used';
         const time = data.used_at ? new Date(data.used_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
@@ -772,23 +784,53 @@ function openScanSheet(data) {
             <span class="scan-field-value">${escHtml(String(value))}</span>
         </div>`).join('');
 
-    // Show "View in List" button only when logged in and we have a room selected
+    // Confirm check-out button — only for reentry_exit
+    const confirmBtn = document.getElementById('confirmCheckoutBtn');
+    confirmBtn.style.display = isReentryExit ? 'block' : 'none';
+    pendingCheckoutToken = isReentryExit ? (data._token || null) : null;
+
+    // View in list button — not shown during exit confirmation
     const viewBtn = document.getElementById('viewListBtn');
-    viewBtn.style.display = (isLoggedIn && selectedEvent()) ? 'block' : 'none';
+    viewBtn.style.display = (!isReentryExit && isLoggedIn && selectedEvent()) ? 'block' : 'none';
+
+    // Continue Scanning label change for exit prompt
+    document.getElementById('continueScanBtn').textContent = isReentryExit ? 'Cancel' : 'Continue Scanning';
 
     document.getElementById('scanBackdrop').classList.add('show');
     document.getElementById('scanSheet').classList.add('show');
 
-    // Auto-close progress bar
+    // Auto-close: skip for reentry_exit (requires manual action)
     clearTimeout(autoCloseTimer);
     const bar = document.getElementById('autoCloseBar');
-    bar.style.transition = 'none';
-    bar.style.transform = 'scaleX(1)';
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-        bar.style.transition = `transform ${AUTO_CLOSE_MS}ms linear`;
-        bar.style.transform = 'scaleX(0)';
-    }));
-    autoCloseTimer = setTimeout(() => closeScanSheet(), AUTO_CLOSE_MS);
+    if (isReentryExit) {
+        bar.style.transition = 'none';
+        bar.style.transform = 'scaleX(1)';
+    } else {
+        bar.style.transition = 'none';
+        bar.style.transform = 'scaleX(1)';
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            bar.style.transition = `transform ${AUTO_CLOSE_MS}ms linear`;
+            bar.style.transform = 'scaleX(0)';
+        }));
+        autoCloseTimer = setTimeout(() => closeScanSheet(), AUTO_CLOSE_MS);
+    }
+}
+
+async function confirmCheckout() {
+    if (!pendingCheckoutToken) { closeScanSheet(); return; }
+    const btn = document.getElementById('confirmCheckoutBtn');
+    btn.textContent = 'Checking out…'; btn.disabled = true;
+    try {
+        await fetch('/api/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: pendingCheckoutToken })
+        });
+        playSound('success');
+        showFlash('success', '✓', 'Checked Out');
+    } catch (_) {}
+    btn.textContent = 'Confirm Check-Out'; btn.disabled = false;
+    closeScanSheet();
 }
 
 function closeScanSheet() {
@@ -803,7 +845,9 @@ function showFlash(type, icon, title) {
     const el = document.getElementById('flash');
     document.getElementById('flashIcon').textContent  = icon;
     document.getElementById('flashTitle').textContent = title;
-    el.style.background = type === 'success' ? 'rgba(0,155,0,0.82)' : 'rgba(185,0,0,0.82)';
+    el.style.background = type === 'success' ? 'rgba(0,155,0,0.82)'
+                        : type === 'warning'  ? 'rgba(200,110,0,0.82)'
+                        : 'rgba(185,0,0,0.82)';
     el.classList.add('show');
     setTimeout(() => el.classList.remove('show'), 550);
 }
@@ -811,16 +855,27 @@ function showFlash(type, icon, title) {
 // ── Scan handler ──────────────────────────────────────────
 function onScanSuccess(decodedText) {
     if (isProcessing) return;
-    isProcessing = true;
 
     if (!decodedText.startsWith('ticket:')) {
-        showFlash('error', '✕', 'Invalid QR');
-        playSound('error');
-        setTimeout(() => { isProcessing = false; }, 2500);
+        if (Date.now() - lastScanTs > SCAN_DEBOUNCE_MS) {
+            isProcessing = true;
+            showFlash('error', '✕', 'Invalid QR');
+            playSound('error');
+            setTimeout(() => { isProcessing = false; }, 2500);
+        }
         return;
     }
 
     const token = decodedText.split(':')[1].trim();
+    const now = Date.now();
+
+    // 5-second same-token debounce
+    if (token === lastScannedToken && (now - lastScanTs) < SCAN_DEBOUNCE_MS) return;
+
+    isProcessing = true;
+    lastScannedToken = token;
+    lastScanTs = now;
+
     fetch('/api/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -828,13 +883,23 @@ function onScanSuccess(decodedText) {
     })
     .then(r => r.json())
     .then(data => {
-        const ok = data.status === 'valid';
-        playSound(ok ? 'success' : 'error');
-        showFlash(
-            ok ? 'success' : 'error',
-            ok ? '✓' : '✕',
-            ok ? 'Valid' : data.status === 'used' ? 'Already Used' : 'Invalid'
-        );
+        // Attach token so confirmCheckout can use it
+        data._token = token;
+
+        const isSuccess = data.status === 'valid' || data.status === 'reentry_enter';
+        const isReentryExit = data.status === 'reentry_exit';
+
+        if (isSuccess) {
+            playSound('success');
+            showFlash('success', '✓', data.status === 'reentry_enter' ? 'Back In' : 'Valid');
+        } else if (isReentryExit) {
+            playSound('error');
+            showFlash('warning', '⟳', 'Confirm Exit');
+        } else {
+            playSound('error');
+            showFlash('error', '✕', data.status === 'used' ? 'Already Used' : 'Invalid');
+        }
+
         if (isLoggedIn) {
             setTimeout(() => openScanSheet(data), 320);
         } else {
