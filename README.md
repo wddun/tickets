@@ -33,6 +33,12 @@ These files should never be committed. See `certs/README.md` for a quick guide.
 - **Mobile Scanner**: Camera-based scanner with instant feedback.
 - **Security**: Single-use tickets validated against a local database.
 - **Aesthetics**: Premium UI with smooth transitions and audio cues.
+- Restore 100ms SES interval; queue still prevents exceeding it
+- Fix SES rate limiting with serialized promise queue
+- Add email selected attendees functionality
+- feat: add bulk email to all attendees of an event
+- Set reply‑to organizer email on all outgoing ticket emails
+
 
 ## Tech Stack
 - **Backend**: Node.js, Express, LowDB (pure JS JSON database).
