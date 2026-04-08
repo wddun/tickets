@@ -473,6 +473,16 @@
             color: #4338ca;
         }
 
+        .status-pill.inside {
+            background: #d1fae5;
+            color: #059669;
+        }
+
+        .status-pill.outside {
+            background: #fef3c7;
+            color: #b45309;
+        }
+
         .ticket-checkbox {
             accent-color: #dc2626;
             width: 14px;
@@ -1193,14 +1203,32 @@
             <div></div>
         </div>`;
 
+            const currentEvent = events.find(e => e.id === selectedId);
+            const useReentry = !!currentEvent?.allowReentry;
+
             const rows = filtered.map(g => {
                 const total = g.tickets.length;
                 const scanned = g.tickets.filter(t => t.used_at).length;
                 const isChecked = checkedRegIds.has(g.registrationId);
                 let pill;
-                if (scanned === 0) pill = `<span class="status-pill pending">Pending</span>`;
-                else if (scanned < total) pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
-                else pill = `<span class="status-pill scanned">✓ Checked In</span>`;
+                if (scanned === 0) {
+                    pill = `<span class="status-pill pending">Pending</span>`;
+                } else if (scanned < total) {
+                    pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
+                } else if (useReentry) {
+                    const insideCount  = g.tickets.filter(t => (t.reentry_status || 'inside') === 'inside').length;
+                    const outsideCount = g.tickets.filter(t => t.reentry_status === 'outside').length;
+                    if (total === 1) {
+                        if (outsideCount === 1)     pill = `<span class="status-pill outside">↓ Outside</span>`;
+                        else                        pill = `<span class="status-pill inside">↑ Inside</span>`;
+                    } else {
+                        if (insideCount && outsideCount) pill = `<span class="status-pill partial">${insideCount} In · ${outsideCount} Out</span>`;
+                        else if (outsideCount === total)  pill = `<span class="status-pill outside">↓ Outside</span>`;
+                        else                             pill = `<span class="status-pill inside">↑ Inside</span>`;
+                    }
+                } else {
+                    pill = `<span class="status-pill scanned">✓ Checked In</span>`;
+                }
 
                 const allIn = scanned === total && total > 0;
                 const unchecked = total - scanned;
@@ -1935,9 +1963,20 @@
 
             const renderTicketCard = (tk, i, showLarge) => {
                 const checkedIn = !!tk.used_at;
-                const statusBadge = checkedIn
-                    ? `<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">✓ Checked in ${new Date(tk.used_at).toLocaleString()}</span>`
-                    : `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">Not checked in</span>`;
+                const reentryEvent = events.find(e => e.id === tk.eventId);
+                let statusBadge;
+                if (!checkedIn) {
+                    statusBadge = `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">Not checked in</span>`;
+                } else if (reentryEvent?.allowReentry) {
+                    const rs = tk.reentry_status || 'inside';
+                    if (rs === 'outside') {
+                        statusBadge = `<span style="background:#fef3c7;color:#b45309;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">↓ Outside · checked in ${new Date(tk.used_at).toLocaleString()}</span>`;
+                    } else {
+                        statusBadge = `<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">↑ Inside · checked in ${new Date(tk.used_at).toLocaleString()}</span>`;
+                    }
+                } else {
+                    statusBadge = `<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">✓ Checked in ${new Date(tk.used_at).toLocaleString()}</span>`;
+                }
                 const walletBadge = tk.wallet_downloaded_at
                     ? `<div style="font-size:10px;font-weight:600;color:#6366f1;margin-top:3px;" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">Downloaded to Wallet</div>`
                     : `<div style="font-size:10px;color:#d1d5db;margin-top:3px;">No wallet download</div>`;

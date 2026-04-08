@@ -136,24 +136,66 @@
         }
         #roomSelect option { background: #1c1c1e; color: #fff; }
 
-        /* ── Brief flash ── */
-        .status-flash {
+        /* ── Full-screen result overlay (matches iOS) ── */
+        #resultOverlay {
             position: fixed;
             inset: 0;
             z-index: 50;
             display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+            align-items: stretch;
             opacity: 0;
-            transition: opacity 0.12s;
             pointer-events: none;
+            transition: opacity 0.2s ease-in-out;
         }
-        .status-flash.show { opacity: 1; }
-        .flash-icon  { font-size: 80px; line-height: 1; margin-bottom: 10px; }
-        .flash-title { font-size: 26px; font-weight: 700; }
+        #resultOverlay.show { opacity: 1; pointer-events: auto; }
 
-        /* ── Sheet backdrop ── */
+        .ro-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            text-align: center;
+            padding: calc(env(safe-area-inset-top,0px) + 64px) 32px calc(env(safe-area-inset-bottom,0px) + 56px);
+            overflow-y: auto;
+            gap: 24px;
+        }
+        .ro-top { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+        .ro-icon  { font-size: 72px; line-height: 1; }
+        .ro-title { font-size: 22px; font-weight: 600; color: rgba(255,255,255,0.85); }
+        .ro-name  { font-size: 38px; font-weight: 700; color: #fff; line-height: 1.1; word-break: break-word; }
+        .ro-sub   { font-size: 15px; font-weight: 500; color: rgba(255,255,255,0.75); }
+        .ro-event { font-size: 15px; font-weight: 500; color: rgba(255,255,255,0.7); margin-top: -4px; }
+
+        .ro-fields { width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+        .ro-field {
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(255,255,255,0.15); border-radius: 10px; padding: 9px 14px;
+        }
+        .ro-field-label { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.7); text-align: left; }
+        .ro-field-value { font-size: 14px; font-weight: 500; color: #fff; text-align: right; margin-left: 12px; }
+
+        .ro-bottom { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+        .ro-confirm-btn {
+            width: 100%; padding: 15px; border: none; border-radius: 14px;
+            font-size: 17px; font-weight: 700; cursor: pointer;
+            background: rgba(255,255,255,0.92);
+            transition: opacity 0.15s;
+        }
+        .ro-confirm-btn:active { opacity: 0.75; }
+        .ro-cancel-btn {
+            background: none; border: none; color: rgba(255,255,255,0.75);
+            font-size: 16px; font-weight: 600; cursor: pointer; padding: 4px 16px;
+        }
+        .ro-pill-btn {
+            background: rgba(255,255,255,0.2); border: none; color: #fff;
+            font-size: 14px; font-weight: 600; padding: 10px 22px;
+            border-radius: 22px; cursor: pointer; transition: opacity 0.15s;
+        }
+        .ro-pill-btn:active { opacity: 0.7; }
+        .ro-hint { font-size: 13px; color: rgba(255,255,255,0.35); }
+
+        /* ── Sheet backdrop (list sheet only) ── */
         .backdrop {
             position: fixed;
             inset: 0;
@@ -165,7 +207,7 @@
         }
         .backdrop.show { opacity: 1; pointer-events: auto; }
 
-        /* ── Shared bottom sheet base ── */
+        /* ── Bottom sheet base (list only) ── */
         .sheet {
             position: fixed;
             bottom: 0; left: 0; right: 0;
@@ -187,68 +229,6 @@
             flex-shrink: 0;
         }
 
-        /* ── Scan result sheet ── */
-        #scanSheet { max-height: 70dvh; }
-
-        .auto-close-track {
-            height: 3px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 3px;
-            margin: 8px 20px 0;
-            overflow: hidden;
-        }
-        .auto-close-bar {
-            height: 100%;
-            background: rgba(255,255,255,0.45);
-            border-radius: 3px;
-            width: 100%;
-            transform-origin: left;
-            transition: transform linear;
-        }
-
-        .scan-header { padding: 14px 20px 10px; }
-        .scan-badge {
-            display: inline-block;
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-size: 12px; font-weight: 700;
-            margin-bottom: 8px;
-        }
-        .badge-ok      { background: rgba(74,222,128,0.15); color: #4ade80; }
-        .badge-used    { background: rgba(248,113,113,0.15); color: #f87171; }
-        .badge-invalid { background: rgba(251,191,36,0.15);  color: #fbbf24; }
-        .badge-exit    { background: rgba(251,146,60,0.15);  color: #fb923c; }
-
-        .scan-name  { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
-        .scan-event { font-size: 13px; color: rgba(255,255,255,0.45); margin-bottom: 12px; }
-
-        .scan-fields {
-            padding: 0 20px 4px;
-        }
-        .scan-field-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            padding: 7px 0;
-            border-top: 1px solid rgba(255,255,255,0.07);
-        }
-        .scan-field-label {
-            font-size: 11px;
-            font-weight: 600;
-            color: rgba(255,255,255,0.35);
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            flex-shrink: 0;
-            margin-right: 12px;
-        }
-        .scan-field-value {
-            font-size: 14px;
-            font-weight: 500;
-            color: rgba(255,255,255,0.9);
-            text-align: right;
-        }
-
-        .scan-actions { padding: 8px 20px 4px; }
         .action-btn {
             width: 100%;
             padding: 14px;
@@ -260,7 +240,6 @@
             transition: opacity 0.15s;
         }
         .action-btn:active { opacity: 0.75; }
-        .btn-primary   { background: #fff; color: #000; }
         .btn-secondary { background: rgba(255,255,255,0.12); color: #fff; }
 
         /* ── List sheet ── */
@@ -439,32 +418,23 @@
     <button class="pill-btn" id="listBtn" style="display:none;" onclick="openList()">Manual Check-In</button>
 </div>
 
-<!-- Scan flash -->
-<div class="status-flash" id="flash">
-    <div class="flash-icon"  id="flashIcon"></div>
-    <div class="flash-title" id="flashTitle"></div>
-</div>
-
-<!-- Backdrops -->
-<div class="backdrop" id="scanBackdrop"  onclick="closeScanSheet()"></div>
-<div class="backdrop" id="listBackdrop"  onclick="closeList()"></div>
-
-<!-- Scan result sheet (logged-in only) -->
-<div class="sheet" id="scanSheet">
-    <div class="sheet-handle"></div>
-    <div class="auto-close-track"><div class="auto-close-bar" id="autoCloseBar"></div></div>
-    <div class="scan-header">
-        <div class="scan-badge" id="scanBadge"></div>
-        <div class="scan-name"  id="scanName"></div>
-        <div class="scan-event" id="scanEvent"></div>
-    </div>
-    <div class="scan-fields" id="scanFields"></div>
-    <div class="scan-actions">
-        <button class="action-btn" id="confirmCheckoutBtn" onclick="confirmCheckout()" style="display:none;background:#fb923c;color:#fff;">Confirm Check-Out</button>
-        <button class="action-btn btn-primary"   id="viewListBtn" onclick="openListForScan()" style="display:none;">View in Check-In List</button>
-        <button class="action-btn btn-secondary" id="continueScanBtn" onclick="closeScanSheet()">Continue Scanning</button>
+<!-- Full-screen scan result overlay -->
+<div id="resultOverlay" onclick="handleOverlayTap(event)">
+    <div class="ro-content">
+        <div class="ro-top">
+            <div class="ro-icon"  id="roIcon"></div>
+            <div class="ro-title" id="roTitle"></div>
+            <div class="ro-name"  id="roName"></div>
+            <div class="ro-sub"   id="roEmail"></div>
+            <div class="ro-event" id="roEvent"></div>
+            <div class="ro-fields" id="roFields"></div>
+        </div>
+        <div class="ro-bottom" id="roBottom"></div>
     </div>
 </div>
+
+<!-- Backdrop for list sheet only -->
+<div class="backdrop" id="listBackdrop" onclick="closeList()"></div>
 
 <!-- Manual check-in list sheet -->
 <div class="sheet" id="listSheet">
@@ -491,22 +461,24 @@ comp.connect(audioCtx.destination);
 function playSound(type) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
     if (type === 'success') {
-        [[523.25, 0], [880, 150]].forEach(([hz, ms]) => setTimeout(() => {
+        // C5 → A5, matching iOS timing: note at 0ms, note at 180ms
+        [[523.25, 0, 0.22], [880, 180, 0.32]].forEach(([hz, ms, dur]) => setTimeout(() => {
             const o = audioCtx.createOscillator(), g = audioCtx.createGain();
             o.connect(g); g.connect(comp);
             o.type = 'sine'; o.frequency.value = hz;
-            g.gain.setValueAtTime(3, audioCtx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
-            o.start(); o.stop(audioCtx.currentTime + 0.5);
+            g.gain.setValueAtTime(2.5, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+            o.start(); o.stop(audioCtx.currentTime + dur);
         }, ms));
     } else {
-        [[220, 0], [180, 160]].forEach(([hz, ms]) => setTimeout(() => {
+        // A3 → A#2 square, matching iOS timing: note at 0ms, note at 180ms
+        [[220, 0, 0.18], [180, 180, 0.32]].forEach(([hz, ms, dur]) => setTimeout(() => {
             const o = audioCtx.createOscillator(), g = audioCtx.createGain();
             o.connect(g); g.connect(audioCtx.destination);
             o.type = 'square'; o.frequency.value = hz;
-            g.gain.setValueAtTime(1, audioCtx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
-            o.start(); o.stop(audioCtx.currentTime + 0.4);
+            g.gain.setValueAtTime(0.8, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+            o.start(); o.stop(audioCtx.currentTime + dur);
         }, ms));
     }
 }
@@ -585,10 +557,9 @@ function closeList() {
     document.getElementById('listSheet').classList.remove('show');
 }
 
-async function openListForScan() {
-    closeScanSheet();
+async function openListFromResult() {
+    closeResult();
     await openList();
-    // Scroll to and highlight the last scanned person
     if (lastScannedRegistrationId) {
         setTimeout(() => {
             const el = document.getElementById(`reg-${lastScannedRegistrationId}`);
@@ -745,81 +716,103 @@ async function checkInPerson(e, registrationId) {
     } catch (_) { btn.textContent = 'Check In All'; btn.disabled = false; }
 }
 
-// ── Scan result sheet ─────────────────────────────────────
-let autoCloseTimer = null;
-const AUTO_CLOSE_MS = 4500;
+// ── Full-screen result overlay ────────────────────────────
+let resultAutoClose = null;
+const RESULT_AUTO_MS = 2500;
 
-function openScanSheet(data) {
+// Colors match iOS exactly
+const OVERLAY_COLORS = {
+    success:       'rgba(22,163,74,0.93)',
+    reentry_enter: 'rgba(22,163,74,0.93)',
+    reentry_exit:  'rgba(234,88,12,0.93)',
+    used:          'rgba(234,88,12,0.93)',
+    invalid:       'rgba(220,38,38,0.93)',
+    error:         'rgba(220,38,38,0.93)',
+};
+const OVERLAY_ICONS = {
+    valid: '✓', reentry_enter: '↩', reentry_exit: '↩',
+    used: '!', invalid: '✕', error: '✕',
+};
+const OVERLAY_TITLES = {
+    valid: 'Checked In!', reentry_enter: 'Checked Back In!',
+    reentry_exit: 'Confirm Check-Out', used: 'Already Checked In',
+    invalid: 'Invalid Ticket', error: 'Error',
+};
+
+function openResult(data) {
     lastScannedRegistrationId = data.registrationId || null;
 
-    const badge = document.getElementById('scanBadge');
-    const isReentryExit = data.status === 'reentry_exit';
-    const isReentryEnter = data.status === 'reentry_enter';
+    const status = data.status || 'error';
+    const isReentryExit = status === 'reentry_exit';
 
-    if (data.status === 'valid' || isReentryEnter) {
-        badge.className = 'scan-badge badge-ok';
-        badge.textContent = isReentryEnter ? '↩ Checked Back In' : '✓ Checked In';
-    } else if (isReentryExit) {
-        badge.className = 'scan-badge badge-exit';
-        badge.textContent = '⟳ Currently Inside — Confirm Check-Out';
-    } else if (data.status === 'used') {
-        badge.className = 'scan-badge badge-used';
-        const time = data.used_at ? new Date(data.used_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
-        badge.textContent = `✕ Already Scanned${time ? ` · ${time}` : ''}`;
-    } else {
-        badge.className = 'scan-badge badge-invalid';
-        badge.textContent = '⚠ Invalid Ticket';
-    }
+    const overlay = document.getElementById('resultOverlay');
+    overlay.style.background = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
 
-    document.getElementById('scanName').textContent  = data.name || '';
-    document.getElementById('scanEvent').textContent = data.eventName || '';
+    document.getElementById('roIcon').textContent  = OVERLAY_ICONS[status] || '!';
+    document.getElementById('roTitle').textContent = OVERLAY_TITLES[status] || 'Error';
 
-    // Custom fields
-    const fieldsEl = document.getElementById('scanFields');
+    // Name: prefer first name like iOS
+    const displayName = data.firstName || data.name || '';
+    document.getElementById('roName').textContent = displayName;
+
+    const emailEl = document.getElementById('roEmail');
+    emailEl.textContent = data.email || '';
+    emailEl.style.display = data.email ? '' : 'none';
+
+    const eventEl = document.getElementById('roEvent');
+    eventEl.textContent = data.eventName || '';
+    eventEl.style.display = data.eventName ? '' : 'none';
+
+    // Custom fields (matching iOS card style)
     const cf = data.customFields || {};
     const cfEntries = Object.entries(cf).filter(([, v]) => v !== '' && v != null);
-    fieldsEl.innerHTML = cfEntries.map(([label, value]) => `
-        <div class="scan-field-row">
-            <span class="scan-field-label">${escHtml(label)}</span>
-            <span class="scan-field-value">${escHtml(String(value))}</span>
+    document.getElementById('roFields').innerHTML = cfEntries.map(([label, value]) => `
+        <div class="ro-field">
+            <span class="ro-field-label">${escHtml(label)}</span>
+            <span class="ro-field-value">${escHtml(String(value))}</span>
         </div>`).join('');
 
-    // Confirm check-out button — only for reentry_exit
-    const confirmBtn = document.getElementById('confirmCheckoutBtn');
-    confirmBtn.style.display = isReentryExit ? 'block' : 'none';
-    pendingCheckoutToken = isReentryExit ? (data._token || null) : null;
-
-    // View in list button — not shown during exit confirmation
-    const viewBtn = document.getElementById('viewListBtn');
-    viewBtn.style.display = (!isReentryExit && isLoggedIn && selectedEvent()) ? 'block' : 'none';
-
-    // Continue Scanning label change for exit prompt
-    document.getElementById('continueScanBtn').textContent = isReentryExit ? 'Cancel' : 'Continue Scanning';
-
-    document.getElementById('scanBackdrop').classList.add('show');
-    document.getElementById('scanSheet').classList.add('show');
-
-    // Auto-close: skip for reentry_exit (requires manual action)
-    clearTimeout(autoCloseTimer);
-    const bar = document.getElementById('autoCloseBar');
+    // Bottom action area
+    const bottom = document.getElementById('roBottom');
     if (isReentryExit) {
-        bar.style.transition = 'none';
-        bar.style.transform = 'scaleX(1)';
+        pendingCheckoutToken = data._token || null;
+        const btnColor = OVERLAY_COLORS.reentry_exit.replace('0.93', '1');
+        bottom.innerHTML = `
+            <button class="ro-confirm-btn" id="roConfirmBtn" onclick="confirmCheckout()" style="color:rgba(180,60,0,1);">Confirm Check-Out</button>
+            <button class="ro-cancel-btn" onclick="closeResult()">Cancel</button>`;
     } else {
-        bar.style.transition = 'none';
-        bar.style.transform = 'scaleX(1)';
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            bar.style.transition = `transform ${AUTO_CLOSE_MS}ms linear`;
-            bar.style.transform = 'scaleX(0)';
-        }));
-        autoCloseTimer = setTimeout(() => closeScanSheet(), AUTO_CLOSE_MS);
+        pendingCheckoutToken = null;
+        const listBtn = (isLoggedIn && selectedEvent())
+            ? `<button class="ro-pill-btn" onclick="openListFromResult()">View in List</button>` : '';
+        bottom.innerHTML = listBtn + `<div class="ro-hint">Tap anywhere to continue</div>`;
+    }
+
+    overlay.classList.add('show');
+
+    // Auto-dismiss at 2.5s matching iOS — skip for exit confirmation
+    clearTimeout(resultAutoClose);
+    if (!isReentryExit) {
+        resultAutoClose = setTimeout(closeResult, RESULT_AUTO_MS);
     }
 }
 
+function closeResult() {
+    clearTimeout(resultAutoClose);
+    document.getElementById('resultOverlay').classList.remove('show');
+    pendingCheckoutToken = null;
+    setTimeout(() => { isProcessing = false; }, 250);
+}
+
+function handleOverlayTap(e) {
+    if (e.target.tagName === 'BUTTON') return;
+    if (pendingCheckoutToken) return; // exit confirmation active — require explicit button tap
+    closeResult();
+}
+
 async function confirmCheckout() {
-    if (!pendingCheckoutToken) { closeScanSheet(); return; }
-    const btn = document.getElementById('confirmCheckoutBtn');
-    btn.textContent = 'Checking out…'; btn.disabled = true;
+    if (!pendingCheckoutToken) { closeResult(); return; }
+    const btn = document.getElementById('roConfirmBtn');
+    if (btn) { btn.textContent = 'Checking out…'; btn.disabled = true; }
     try {
         await fetch('/api/checkout', {
             method: 'POST',
@@ -827,29 +820,8 @@ async function confirmCheckout() {
             body: JSON.stringify({ token: pendingCheckoutToken })
         });
         playSound('success');
-        showFlash('success', '✓', 'Checked Out');
     } catch (_) {}
-    btn.textContent = 'Confirm Check-Out'; btn.disabled = false;
-    closeScanSheet();
-}
-
-function closeScanSheet() {
-    clearTimeout(autoCloseTimer);
-    document.getElementById('scanBackdrop').classList.remove('show');
-    document.getElementById('scanSheet').classList.remove('show');
-    setTimeout(() => { isProcessing = false; }, 400);
-}
-
-// ── Flash ─────────────────────────────────────────────────
-function showFlash(type, icon, title) {
-    const el = document.getElementById('flash');
-    document.getElementById('flashIcon').textContent  = icon;
-    document.getElementById('flashTitle').textContent = title;
-    el.style.background = type === 'success' ? 'rgba(0,155,0,0.82)'
-                        : type === 'warning'  ? 'rgba(200,110,0,0.82)'
-                        : 'rgba(185,0,0,0.82)';
-    el.classList.add('show');
-    setTimeout(() => el.classList.remove('show'), 550);
+    closeResult();
 }
 
 // ── Scan handler ──────────────────────────────────────────
@@ -859,9 +831,8 @@ function onScanSuccess(decodedText) {
     if (!decodedText.startsWith('ticket:')) {
         if (Date.now() - lastScanTs > SCAN_DEBOUNCE_MS) {
             isProcessing = true;
-            showFlash('error', '✕', 'Invalid QR');
             playSound('error');
-            setTimeout(() => { isProcessing = false; }, 2500);
+            openResult({ status: 'invalid', name: 'Invalid QR Code' });
         }
         return;
     }
@@ -883,33 +854,14 @@ function onScanSuccess(decodedText) {
     })
     .then(r => r.json())
     .then(data => {
-        // Attach token so confirmCheckout can use it
         data._token = token;
-
         const isSuccess = data.status === 'valid' || data.status === 'reentry_enter';
-        const isReentryExit = data.status === 'reentry_exit';
-
-        if (isSuccess) {
-            playSound('success');
-            showFlash('success', '✓', data.status === 'reentry_enter' ? 'Back In' : 'Valid');
-        } else if (isReentryExit) {
-            playSound('error');
-            showFlash('warning', '⟳', 'Confirm Exit');
-        } else {
-            playSound('error');
-            showFlash('error', '✕', data.status === 'used' ? 'Already Used' : 'Invalid');
-        }
-
-        if (isLoggedIn) {
-            setTimeout(() => openScanSheet(data), 320);
-        } else {
-            setTimeout(() => { isProcessing = false; }, 2500);
-        }
+        playSound(isSuccess ? 'success' : 'error');
+        openResult(data);
     })
     .catch(() => {
         playSound('error');
-        showFlash('error', '✕', 'Server Error');
-        setTimeout(() => { isProcessing = false; }, 2500);
+        openResult({ status: 'error', name: 'Server Error' });
     });
 }
 
