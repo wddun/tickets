@@ -2123,6 +2123,12 @@ async function generatePassBuffer(ticket, event) {
     }
 
     pass.backFields.push({
+        key: 'ticket_id',
+        label: 'TICKET ID',
+        value: ticket.token
+    });
+
+    pass.backFields.push({
         key: 'terms',
         label: 'ENTRY POLICY',
         value: 'This ticket is valid for one-time entry only. Once scanned at the door it cannot be used again.'
