@@ -2541,6 +2541,133 @@ app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
+// ── 24-hour reminder emails ────────────────────────────────────────────────
+
+function buildReminderHtml(event, customMessage) {
+    const msg = (customMessage || `This is a friendly reminder that ${event.name} is coming up in 24 hours. We look forward to seeing you there!`)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    return `
+        <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
+            <h2 style="color:#333; margin-bottom:4px;">See you tomorrow!</h2>
+            <p style="color:#555;">Your event is coming up in 24 hours.</p>
+            <div style="background:#f4f5f7; border-radius:10px; padding:16px 20px; margin:20px 0;">
+                <p style="font-weight:700; font-size:16px; color:#1a1a2e; margin:0 0 6px;">${event.name}</p>
+                <p style="color:#555; margin:0 0 4px;">📅 ${new Date(event.time).toLocaleString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true })}</p>
+                <p style="color:#555; margin:0;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
+            </div>
+            <p style="color:#555; white-space:pre-wrap;">${msg}</p>
+        </div>
+    `;
+}
+
+// GET reminder settings
+app.get('/api/event/:id/reminder', requireAuth, async (req, res) => {
+    const event = db.data.events.find(e => e.id === req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    res.json({
+        enabled: !!event.reminderEnabled,
+        message: event.reminderMessage || '',
+        sentAt: event.reminderSentAt || null
+    });
+});
+
+// PUT reminder settings
+app.put('/api/event/:id/reminder', requireAuth, async (req, res) => {
+    const event = db.data.events.find(e => e.id === req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    const { enabled, message } = req.body;
+    await db.update(data => {
+        const ev = data.events.find(e => e.id === req.params.id);
+        if (ev) {
+            ev.reminderEnabled = !!enabled;
+            ev.reminderMessage = message || '';
+        }
+    });
+    log('reminder', `⚙️  Settings updated — event: ${event.name}  enabled: ${!!enabled}  by: ${req.session.userId}`);
+    res.json({ success: true });
+});
+
+// GET reminder email preview
+app.get('/api/event/:id/reminder/preview', requireAuth, async (req, res) => {
+    const event = db.data.events.find(e => e.id === req.params.id);
+    if (!event) return res.status(404).send('Event not found');
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+        return res.status(403).send('Not authorized');
+    }
+    res.type('html').send(buildReminderHtml(event, event.reminderMessage));
+});
+
+// Background job: check every 5 minutes for events ~24h away
+setInterval(async () => {
+    const now = Date.now();
+    const window_start = now + 23 * 60 * 60 * 1000;
+    const window_end   = now + 25 * 60 * 60 * 1000;
+
+    const due = db.data.events.filter(e =>
+        e.reminderEnabled &&
+        !e.reminderSentAt &&
+        new Date(e.time).getTime() >= window_start &&
+        new Date(e.time).getTime() <= window_end
+    );
+
+    for (const event of due) {
+        const tickets = db.data.tickets.filter(t => t.eventId === event.id);
+        const seen = new Set();
+        const registrations = tickets.filter(t => {
+            if (seen.has(t.registrationId)) return false;
+            seen.add(t.registrationId);
+            return true;
+        });
+
+        if (!registrations.length) continue;
+
+        const replyTo = db.data.users.find(u => u.id === event.userId)?.email;
+        const html = buildReminderHtml(event, event.reminderMessage);
+        let sent = 0;
+
+        for (const ticket of registrations) {
+            try {
+                await sendEmail({
+                    to: ticket.email,
+                    fromName: `Tickets - ${event.name}`,
+                    replyTo,
+                    subject: `Reminder: ${event.name} is tomorrow!`,
+                    html,
+                    registrationId: ticket.registrationId
+                });
+                sent++;
+            } catch (err) {
+                log('reminder', `❌ Send failed — email: ${ticket.email}  err: ${err.message}`);
+            }
+        }
+
+        await db.update(data => {
+            const ev = data.events.find(e => e.id === event.id);
+            if (ev) ev.reminderSentAt = new Date().toISOString();
+        });
+
+        log('reminder', `📧 Sent to ${sent} registrant(s) — event: ${event.name} (${event.id})`);
+    }
+}, 5 * 60 * 1000);
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`n🎟️  Ticket Check -in System running at: n - Local: http://localhost:${PORT}n   - Network:  http://0.0.0.0:${PORT}n`);
 });
