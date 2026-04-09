@@ -1480,13 +1480,6 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
     if (!updatedTickets.length) return; // already sent response via catch
 
-    // Stamp updated_at so PassKit web service can detect changes
-    const editedAt = new Date().toISOString();
-    await db.update(data => {
-        data.tickets.filter(t => t.registrationId === updatedTickets[0].registrationId)
-            .forEach(t => { t.updated_at = editedAt; });
-    });
-
     log('ticket-edit', `[edit] Edited ${updatedTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${updatedTickets[0].registrationId}  by: ${req.session.userId}`);
 
     if (!noEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
