@@ -206,6 +206,55 @@ async function pushAppNotificationToUser(userId, { title, body, data } = {}) {
     try { client.close(); } catch { }
 }
 
+async function pushAppNotificationToTokens(tokens, { title, body, data } = {}) {
+    if (!Array.isArray(tokens) || !tokens.length) return;
+    if (!APP_BUNDLE_ID || !process.env.APNS_KEY_ID || !process.env.APNS_KEY_PATH) return;
+    const jwt = getApnsJwt();
+    if (!jwt) return;
+
+    const payload = JSON.stringify({
+        aps: {
+            alert: { title: title || 'Notification', body: body || '' },
+            sound: 'default'
+        },
+        data: data || {}
+    });
+
+    const host = process.env.APNS_PRODUCTION === 'true' ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
+    let client;
+    try { client = http2.connect(`https://${host}`); } catch { return; }
+
+    for (const pushToken of [...new Set(tokens)]) {
+        await new Promise((resolve) => {
+            try {
+                const req = client.request({
+                    ':method': 'POST', ':path': `/3/device/${pushToken}`,
+                    'authorization': `bearer ${jwt}`,
+                    'apns-topic': APP_BUNDLE_ID,
+                    'apns-push-type': 'alert',
+                    'apns-priority': '10',
+                    'content-type': 'application/json',
+                    'content-length': Buffer.byteLength(payload)
+                });
+                req.write(payload);
+                req.end();
+                req.on('response', (headers) => {
+                    const status = headers[':status'];
+                    log('apns', `📲 App push → ${pushToken.slice(0, 8)}… status: ${status}`);
+                    if (status === 410) {
+                        db.update(data => {
+                            if (data.pushDevices) data.pushDevices = data.pushDevices.filter(d => d.token !== pushToken);
+                        });
+                    }
+                    resolve();
+                });
+                req.on('error', (err) => { log('apns', `❌ App push error: ${err.message}`); resolve(); });
+            } catch { resolve(); }
+        });
+    }
+    try { client.close(); } catch { }
+}
+
 app.set('trust proxy', 1);
 app.use(compression());
 app.use(express.json({ limit: '20mb' }));
@@ -476,6 +525,20 @@ function userHasEventAccess(userId, eventId) {
     });
 }
 
+function userHasEventFullAccess(userId, eventId) {
+    const user = db.data.users.find(u => u.id === userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    if (isAdmin) return true;
+    const event = db.data.events.find(e => e.id === eventId);
+    if (!event) return false;
+    if (event.userId === userId) return true;
+    const myAccess = db.data.sheetAccess.filter(a => a.userId === userId);
+    return myAccess.some(a => {
+        const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+        return link && link.eventId === eventId && a.permission === 'full';
+    });
+}
+
 app.get('/api/event/:id/push-subscription', requireAuth, (req, res) => {
     const eventId = req.params.id;
     if (!userHasEventAccess(req.session.userId, eventId)) {
@@ -509,6 +572,54 @@ app.patch('/api/event/:id/push-subscription', requireAuth, async (req, res) => {
         }
     });
     res.json({ success: true, enabled });
+});
+
+app.get('/api/event/:id/push-devices', requireAuth, (req, res) => {
+    const eventId = req.params.id;
+    if (!userHasEventFullAccess(req.session.userId, eventId)) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    const subs = (db.data.pushSubscriptions || []).filter(s => s.eventId === eventId && s.enabled);
+    const userIds = new Set(subs.map(s => s.userId));
+    const devices = (db.data.pushDevices || [])
+        .filter(d => userIds.has(d.userId))
+        .map(d => {
+            const u = db.data.users.find(u => u.id === d.userId);
+            return {
+                id: d.id,
+                token: d.token,
+                userId: d.userId,
+                email: u?.email || 'unknown',
+                lastSeenAt: d.lastSeenAt || d.createdAt
+            };
+        });
+    res.json(devices);
+});
+
+app.post('/api/event/:id/push-send', requireAuth, async (req, res) => {
+    const eventId = req.params.id;
+    if (!userHasEventFullAccess(req.session.userId, eventId)) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    const event = db.data.events.find(e => e.id === eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const title = String(req.body?.title || '').trim() || `Update • ${event.name}`;
+    const body = String(req.body?.body || '').trim();
+    const target = req.body?.target === 'devices' ? 'devices' : 'subscribers';
+
+    if (target === 'devices') {
+        const tokens = Array.isArray(req.body?.tokens) ? req.body.tokens.filter(Boolean) : [];
+        if (!tokens.length) return res.status(400).json({ error: 'No devices selected' });
+        await pushAppNotificationToTokens(tokens, { title, body });
+        return res.json({ success: true, sent: tokens.length });
+    }
+
+    const subs = (db.data.pushSubscriptions || []).filter(s => s.eventId === eventId && s.enabled);
+    const userIds = new Set(subs.map(s => s.userId));
+    const tokens = (db.data.pushDevices || []).filter(d => userIds.has(d.userId)).map(d => d.token);
+    await pushAppNotificationToTokens(tokens, { title, body });
+    res.json({ success: true, sent: tokens.length });
 });
 
 // Email open tracking pixel (public — no auth, called by email clients)
