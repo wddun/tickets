@@ -1543,8 +1543,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
     }
 
     res.json({ success: true, tickets: updatedTickets });
-    // Push wallet update to any registered devices (fire-and-forget)
-    pushWalletUpdate(updatedTickets.map(t => t.token)).catch(() => { });
+    pushWalletIfChanged(updatedTickets, db.data.events).catch(() => { });
 });
 
 // Resend ticket email without changing any data
@@ -1820,11 +1819,10 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
         log('checkin', `✅ Checked in ${checkedInCount}/${tickets.length} ticket(s) — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${checkinEvent?.name}  by: ${req.session.userId}`);
     }
 
-    tickets.forEach(t => { t.updated_at = now; });
     await db.write();
     ticketStatusCache.clear();
     res.json({ success: true });
-    pushWalletUpdate(tickets.map(t => t.token)).catch(() => { });
+    pushWalletIfChanged(tickets, checkinEvent).catch(() => { });
 });
 
 app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
@@ -1858,7 +1856,7 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     await db.write();
     ticketStatusCache.clear();
     res.json({ success: true });
-    pushWalletUpdate(tickets.map(t => t.token)).catch(() => { });
+    pushWalletIfChanged(tickets, event).catch(() => { });
 });
 
 app.post('/api/validate', async (req, res) => {
@@ -1895,7 +1893,7 @@ app.post('/api/validate', async (req, res) => {
                 ticketStatusCache.clear();
                 log('validate', `✅ REENTRY ENTER — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
                 res.json({ status: 'reentry_enter', message: `Welcome back to ${event ? event.name : 'the event'}!`, ...ticketFields });
-                pushWalletUpdate([ticket.token]).catch(() => { });
+                pushWalletIfChanged([ticket], event).catch(() => { });
                 return;
             }
         }
@@ -1912,7 +1910,7 @@ app.post('/api/validate', async (req, res) => {
 
     log('validate', `✅ VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
-    pushWalletUpdate([ticket.token]).catch(() => { });
+    pushWalletIfChanged([ticket], event).catch(() => { });
 });
 
 // Confirm reentry check-out (no auth required — scanner uses PIN, not session)
@@ -1942,7 +1940,7 @@ app.post('/api/checkout', async (req, res) => {
 
     log('checkout', `🚪 CHECKED OUT — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event.name}  ip: ${getIP(req)}`);
     res.json({ status: 'checked_out', message: 'Checked out successfully', ...ticketFields });
-    pushWalletUpdate([ticket.token]).catch(() => { });
+    pushWalletIfChanged([ticket], event).catch(() => { });
 });
 
 // Helper: QR Generation Route (Alternative for frontend display)
@@ -1955,6 +1953,48 @@ app.get('/qr/:token', async (req, res) => {
         res.status(500).send('Error generating QR');
     }
 });
+
+// Stamp updated_at and push to Wallet only when pass content actually changed.
+// Returns true if a push was triggered.
+async function pushWalletIfChanged(tickets, events) {
+    if (!Array.isArray(tickets)) tickets = [tickets];
+    const changed = [];
+    const now = new Date().toISOString();
+    for (const ticket of tickets) {
+        const event = events.find ? events.find(e => e.id === ticket.eventId) : events;
+        if (!event) continue;
+        const newHash = passContentHash(ticket, event);
+        if (ticket.passHash !== newHash) {
+            ticket.passHash = newHash;
+            ticket.updated_at = now;
+            changed.push(ticket.token);
+        }
+    }
+    if (changed.length) {
+        await db.write();
+        pushWalletUpdate(changed).catch(() => {});
+    }
+    return changed.length > 0;
+}
+
+// Compute a short hash of the fields that actually affect pass content.
+// Only when this changes should we stamp updated_at and push to Wallet.
+function passContentHash(ticket, event) {
+    const data = JSON.stringify({
+        name: ticket.name,
+        token: ticket.token,
+        used_at: ticket.used_at ?? null,
+        reentry_status: ticket.reentry_status ?? null,
+        customFields: ticket.customFields ?? {},
+        eventName: event.name,
+        eventColor: event.color,
+        eventTime: event.time,
+        eventLat: event.location?.lat,
+        eventLng: event.location?.lng,
+        allowReentry: !!event.allowReentry
+    });
+    return crypto.createHash('sha256').update(data).digest('hex').slice(0, 16);
+}
 
 // Shared helper — builds and returns a .pkpass Buffer for a ticket+event
 async function generatePassBuffer(ticket, event) {
@@ -2297,16 +2337,22 @@ app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
     const prereqError = checkPassPrereqs();
     if (prereqError) return res.status(503).send();
 
-    // Handle If-Modified-Since — iOS sends this to skip re-download if pass hasn't changed
-    const lastMod = new Date(ticket.updated_at || ticket.created_at);
+    // Use content hash so we only serve a new pass when something actually changed
+    const currentHash = passContentHash(ticket, event);
     const ims = req.headers['if-modified-since'];
-    if (ims && new Date(ims) >= lastMod) {
+    if (ims && ticket.passHash === currentHash) {
         log('wallet-pass', `⏭️  Not modified — serial: ${serialNumber.slice(0, 8)}…`);
         return res.status(304).send();
     }
 
     try {
         const buffer = await generatePassBuffer(ticket, event);
+        // Store hash so future requests can short-circuit
+        if (ticket.passHash !== currentHash) {
+            ticket.passHash = currentHash;
+            db.write().catch(() => {});
+        }
+        const lastMod = new Date(ticket.updated_at || ticket.created_at);
         res.set('Content-Type', 'application/vnd.apple.pkpass');
         res.set('Last-Modified', lastMod.toUTCString());
         res.set('Cache-Control', 'no-store');
