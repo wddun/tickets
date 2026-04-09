@@ -263,7 +263,7 @@ async function pushAppNotificationToTokens(tokens, { title, body, data } = {}) {
 app.set('trust proxy', 1);
 app.use(compression());
 app.use(express.json({ limit: '20mb' }));
-app.use(express.static('public'));
+app.use(express.static('public', { extensions: ['html'] }));
 app.get('/support', (req, res) => res.redirect('/support.html'));
 app.use(session({
     store: new FileStore({
