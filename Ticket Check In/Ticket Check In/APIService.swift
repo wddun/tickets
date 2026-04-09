@@ -103,6 +103,8 @@ class APIService: ObservableObject {
             let user = try await getCurrentUser()
             currentUser = user
             isAuthenticated = true
+            NotificationManager.shared.requestAuthorizationIfNeeded()
+            Task { await NotificationManager.shared.syncTokenIfPossible() }
         } catch {
             // Session expired — try auto-login with saved credentials
             if let email    = Keychain.load("email"),
@@ -141,6 +143,8 @@ class APIService: ObservableObject {
         let user = try await getCurrentUser()
         currentUser = user
         isAuthenticated = true
+        NotificationManager.shared.requestAuthorizationIfNeeded()
+        Task { await NotificationManager.shared.syncTokenIfPossible() }
     }
 
     func getCurrentUser() async throws -> AuthUser {
@@ -249,6 +253,20 @@ class APIService: ObservableObject {
         request.httpBody = try JSONEncoder().encode(["token": token])
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+    }
+
+    // MARK: - Push Notifications
+
+    func registerPushToken(_ token: String) async throws {
+        guard let url = URL(string: "\(baseURL)/api/push/register") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["token": token])
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        if http.statusCode == 401 { throw APIError.unauthorized }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
 }

@@ -88,6 +88,7 @@ const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAA
 
 // ── APNs push for Wallet pass updates ──────────────────────────────────────
 let _apnsJwtCache = { token: null, iat: 0 };
+const APP_BUNDLE_ID = process.env.APP_BUNDLE_ID || 'com.willstechsupport.wtstickets';
 
 function getApnsJwt() {
     const now = Math.floor(Date.now() / 1000);
@@ -150,6 +151,61 @@ async function pushWalletUpdate(serialNumbers) {
     try { client.close(); } catch { }
 }
 
+async function pushAppNotificationToUser(userId, { title, body, data } = {}) {
+    if (!userId) return;
+    if (!APP_BUNDLE_ID || !process.env.APNS_KEY_ID || !process.env.APNS_KEY_PATH) return;
+    const jwt = getApnsJwt();
+    if (!jwt) return;
+
+    const user = db.data.users.find(u => u.id === userId);
+    if (!user || !user.pushEnabled) return;
+    const devices = (db.data.pushDevices || []).filter(d => d.userId === user.id);
+    if (!devices.length) return;
+
+    const pushTokens = [...new Set(devices.map(d => d.token))];
+    const payload = JSON.stringify({
+        aps: {
+            alert: { title: title || 'New Registration', body: body || '' },
+            sound: 'default'
+        },
+        data: data || {}
+    });
+
+    const host = process.env.APNS_PRODUCTION === 'true' ? 'api.push.apple.com' : 'api.sandbox.push.apple.com';
+    let client;
+    try { client = http2.connect(`https://${host}`); } catch { return; }
+
+    for (const pushToken of pushTokens) {
+        await new Promise((resolve) => {
+            try {
+                const req = client.request({
+                    ':method': 'POST', ':path': `/3/device/${pushToken}`,
+                    'authorization': `bearer ${jwt}`,
+                    'apns-topic': APP_BUNDLE_ID,
+                    'apns-push-type': 'alert',
+                    'apns-priority': '10',
+                    'content-type': 'application/json',
+                    'content-length': Buffer.byteLength(payload)
+                });
+                req.write(payload);
+                req.end();
+                req.on('response', (headers) => {
+                    const status = headers[':status'];
+                    log('apns', `📲 App push → ${pushToken.slice(0, 8)}… status: ${status}`);
+                    if (status === 410) {
+                        db.update(data => {
+                            if (data.pushDevices) data.pushDevices = data.pushDevices.filter(d => d.token !== pushToken);
+                        });
+                    }
+                    resolve();
+                });
+                req.on('error', (err) => { log('apns', `❌ App push error: ${err.message}`); resolve(); });
+            } catch { resolve(); }
+        });
+    }
+    try { client.close(); } catch { }
+}
+
 app.set('trust proxy', 1);
 app.use(compression());
 app.use(express.json({ limit: '20mb' }));
@@ -185,7 +241,8 @@ const defaultData = {
     events: [],
     tickets: [],
     sheetLinks: [],
-    sheetAccess: []
+    sheetAccess: [],
+    pushDevices: []
 };
 const db = await JSONFilePreset(path.resolve(__dirname, 'db.json'), defaultData);
 
@@ -213,6 +270,7 @@ if (!db.data.tickets) db.data.tickets = [];
 if (!db.data.sheetLinks) db.data.sheetLinks = [];
 if (!db.data.sheetAccess) db.data.sheetAccess = [];
 if (!db.data.walletDevices) db.data.walletDevices = [];
+if (!db.data.pushDevices) db.data.pushDevices = [];
 
 // Migration: backfill scannerPin on any events that don't have one
 const eventsMissingPin = db.data.events.filter(e => !e.scannerPin);
@@ -273,7 +331,7 @@ app.post('/api/auth/signup', loginLimiter, async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = { id: nanoid(), email: normalizedEmail, password: hashedPassword };
+    const newUser = { id: nanoid(), email: normalizedEmail, password: hashedPassword, pushEnabled: false };
     await db.update(data => data.users.push(newUser));
     req.session.userId = newUser.id;
     log('signup', `✅ Account created — email: ${normalizedEmail}  id: ${newUser.id}`);
@@ -295,7 +353,7 @@ app.post('/api/auth/setup-admin', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = { id: nanoid(), email: adminEmail, password: hashedPassword };
+    const newUser = { id: nanoid(), email: adminEmail, password: hashedPassword, pushEnabled: false };
     await db.update(data => data.users.push(newUser));
     req.session.userId = newUser.id;
     log('setup-admin', `✅ Admin created — email: ${adminEmail}  id: ${newUser.id}`);
@@ -331,6 +389,7 @@ app.get('/api/auth/me', (req, res) => {
     res.json({ user: { id: user.id, email: user.email } });
 });
 
+
 app.post('/api/auth/logout', (req, res) => {
     const userId = req.session.userId;
     const user = userId ? db.data.users.find(u => u.id === userId) : null;
@@ -350,6 +409,7 @@ app.delete('/api/auth/account', async (req, res) => {
         data.events = data.events.filter(e => e.userId !== userId);
         data.sheetLinks = (data.sheetLinks || []).filter(l => l.userId !== userId);
         data.sheetAccess = (data.sheetAccess || []).filter(a => a.userId !== userId);
+        data.pushDevices = (data.pushDevices || []).filter(d => d.userId !== userId);
         data.users = data.users.filter(u => u.id !== userId);
     });
     req.session.destroy();
@@ -362,6 +422,34 @@ const requireAuth = (req, res, next) => {
     next();
 };
 
+// Register device for app push notifications
+app.post('/api/push/register', requireAuth, async (req, res) => {
+    const token = String(req.body?.token || '').trim();
+    if (!token) return res.status(400).json({ error: 'token required' });
+
+    const userId = req.session.userId;
+    const now = new Date().toISOString();
+
+    await db.update(data => {
+        if (!data.pushDevices) data.pushDevices = [];
+        const existing = data.pushDevices.find(d => d.token === token);
+        if (existing) {
+            existing.userId = userId;
+            existing.lastSeenAt = now;
+        } else {
+            data.pushDevices.push({
+                id: nanoid(8),
+                userId,
+                token,
+                createdAt: now,
+                lastSeenAt: now
+            });
+        }
+    });
+
+    res.json({ success: true });
+});
+
 const requireAdmin = (req, res, next) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
     const user = db.data.users.find(u => u.id === req.session.userId);
@@ -370,6 +458,20 @@ const requireAdmin = (req, res, next) => {
     }
     next();
 };
+
+app.get('/api/user/settings', requireAuth, (req, res) => {
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    res.json({ pushEnabled: !!user?.pushEnabled });
+});
+
+app.patch('/api/user/settings', requireAuth, async (req, res) => {
+    const pushEnabled = !!req.body?.pushEnabled;
+    await db.update(data => {
+        const user = data.users.find(u => u.id === req.session.userId);
+        if (user) user.pushEnabled = pushEnabled;
+    });
+    res.json({ success: true, pushEnabled });
+});
 
 // Email open tracking pixel (public — no auth, called by email clients)
 app.get('/api/track/open/:registrationId', async (req, res) => {
@@ -620,6 +722,14 @@ app.post('/api/register-bulk', async (req, res) => {
                 used_at: null
             }));
             await db.update(({ tickets }) => ticketsToSend.forEach(t => tickets.push(t)));
+        }
+
+        if (!isResend && event.userId) {
+            const actualCount = ticketsToSend.length;
+            pushAppNotificationToUser(event.userId, {
+                title: `New registration • ${event.name}`,
+                body: `${fullName} • ${actualCount} ticket${actualCount === 1 ? '' : 's'}`
+            }).catch(() => { });
         }
 
         // Build one email with all QR codes
@@ -1102,6 +1212,13 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
 
     await db.update(data => data.tickets.push(...newTickets));
     log('ticket-create', `🎟️  Created ${newTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${registrationId}  by: ${req.session.userId}`);
+
+    if (event.userId) {
+        pushAppNotificationToUser(event.userId, {
+            title: `New registration • ${event.name}`,
+            body: `${name} • ${newTickets.length} ticket${newTickets.length === 1 ? '' : 's'}`
+        }).catch(() => { });
+    }
 
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const actualCount = newTickets.length;
