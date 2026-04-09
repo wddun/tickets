@@ -1596,7 +1596,12 @@
                     const note = res.status === 403
                         ? '<div class="settings-empty">Only administrators can manage sharing links.</div>'
                         : '<div class="settings-empty">Could not load sharing settings.</div>';
-                    document.getElementById('settingsContent').innerHTML = cfHtml + note;
+                    const devices = await loadPushDevices(eventId);
+                    const pushHtml = devices === null
+                        ? '<div class="settings-empty" style="padding:10px 0;text-align:left;">Push settings unavailable.</div>'
+                        : renderPushSection(eventId, devices);
+                    document.getElementById('settingsContent').innerHTML = cfHtml + note + pushHtml;
+                    togglePushDeviceList();
                     return;
                 }
 
@@ -1655,9 +1660,99 @@
                     `;
                 }
 
-                document.getElementById('settingsContent').innerHTML = cfHtml + linkHtml + accessHtml;
+                const devices = await loadPushDevices(eventId);
+                const pushHtml = devices === null
+                    ? '<div class="settings-empty" style="padding:10px 0;text-align:left;">Push settings unavailable.</div>'
+                    : renderPushSection(eventId, devices);
+                document.getElementById('settingsContent').innerHTML = cfHtml + linkHtml + accessHtml + pushHtml;
+                togglePushDeviceList();
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
+            }
+        }
+
+        async function loadPushDevices(eventId) {
+            try {
+                const res = await fetch(`/api/event/${eventId}/push-devices`);
+                if (!res.ok) return null;
+                return await res.json();
+            } catch {
+                return null;
+            }
+        }
+
+        function renderPushSection(eventId, devices) {
+            const hasDevices = Array.isArray(devices) && devices.length > 0;
+            const deviceRows = hasDevices
+                ? devices.map(d => `
+                    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f3f3f3;">
+                        <input type="checkbox" class="push-device-cb" value="${esc(d.token)}" style="accent-color:#6366f1;">
+                        <div style="font-size:12px;">
+                            <div style="font-weight:600;color:#333;">${esc(d.email)}</div>
+                            <div style="color:#888;">Token: ${esc(d.token.slice(0, 10))}…</div>
+                        </div>
+                    </label>
+                `).join('')
+                : '<div class="settings-empty" style="padding:8px 0;text-align:left;">No subscribed devices found.</div>';
+
+            return `
+                <div class="modal-section-title" style="margin-top:20px;">Push Notifications</div>
+                <div style="margin-bottom:10px;font-size:12px;color:#888;">
+                    Send a notification to event subscribers or selected devices.
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                    <select id="pushTarget" onchange="togglePushDeviceList()" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                        <option value="subscribers">Everyone subscribed</option>
+                        <option value="devices">Select devices</option>
+                    </select>
+                </div>
+                <div id="pushDeviceList" style="display:none;border:1px solid #eee;border-radius:8px;padding:8px;max-height:180px;overflow:auto;margin-bottom:10px;">
+                    ${deviceRows}
+                </div>
+                <div style="margin-bottom:8px;">
+                    <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Title</label>
+                    <input type="text" id="pushTitle" placeholder="Update • ${esc(events.find(e => e.id === eventId)?.name || 'Event')}"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;font-size:13px;" />
+                </div>
+                <div style="margin-bottom:12px;">
+                    <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Message</label>
+                    <textarea id="pushBody" rows="3" placeholder="Message…" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"></textarea>
+                </div>
+                <button class="btn btn-primary" onclick="sendPush('${eventId}', this)">Send Push</button>
+            `;
+        }
+
+        function togglePushDeviceList() {
+            const target = document.getElementById('pushTarget')?.value || 'subscribers';
+            const list = document.getElementById('pushDeviceList');
+            if (list) list.style.display = target === 'devices' ? 'block' : 'none';
+        }
+
+        async function sendPush(eventId, btn) {
+            const target = document.getElementById('pushTarget')?.value || 'subscribers';
+            const title = document.getElementById('pushTitle')?.value || '';
+            const body = document.getElementById('pushBody')?.value || '';
+            let tokens = [];
+            if (target === 'devices') {
+                tokens = [...document.querySelectorAll('.push-device-cb:checked')].map(cb => cb.value);
+                if (!tokens.length) return alert('Select at least one device.');
+            }
+            if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+            try {
+                const res = await fetch(`/api/event/${eventId}/push-send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target, title, body, tokens })
+                });
+                if (!res.ok) {
+                    const d = await res.json().catch(() => ({}));
+                    throw new Error(d.error || 'Failed to send');
+                }
+                if (btn) btn.textContent = '✓ Sent';
+                setTimeout(() => { if (btn) { btn.textContent = 'Send Push'; btn.disabled = false; } }, 1200);
+            } catch (err) {
+                alert(err.message || 'Failed to send push.');
+                if (btn) { btn.textContent = 'Send Push'; btn.disabled = false; }
             }
         }
 
