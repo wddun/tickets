@@ -789,6 +789,18 @@
         </div>
     </div>
 
+    <!-- Admin Logs Panel (admin only, shown via JS) -->
+    <div id="adminLogsPanel" style="display:none;background:#0f172a;border-top:2px solid #1e293b;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px;border-bottom:1px solid #1e293b;">
+            <span style="color:#94a3b8;font-size:12px;font-weight:600;letter-spacing:.5px;">SERVER LOGS</span>
+            <button id="adminLogsToggle" onclick="toggleLogsPanel()"
+                style="background:none;border:none;color:#64748b;cursor:pointer;font-size:13px;padding:2px 6px;">▼</button>
+        </div>
+        <div id="adminLogsBody" style="height:180px;overflow-y:auto;padding:8px 14px;">
+            <div id="adminLogsContent" style="font-family:monospace;"></div>
+        </div>
+    </div>
+
     <footer style="text-align:center;padding:10px;font-size:12px;color:#aaa;border-top:1px solid #e8e8e8;background:#fff;">
         &copy; 2026 Will's Tech Support
     </footer>
@@ -923,9 +935,15 @@
         let sortState = { field: null, dir: 'asc' }; // field: null|'firstname'|'lastname'|'tickets'
         let _editOriginal = {}; // snapshot of values when edit modal opens
 
+        let currentUser = null;
+        let logsInterval = null;
+
         async function init() {
             const r = await fetch('/api/auth/me');
             if (!r.ok) return location.href = '/login.html';
+            const d = await r.json();
+            currentUser = d.user;
+            if (currentUser.isAdmin) initLogsPanel();
             await loadEvents();
             setInterval(loadEvents, 30000);
         }
@@ -1611,6 +1629,12 @@
                         </label>
                         ${statusText}
                     </div>
+                    <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;">
+                        <label style="font-size:13px;font-weight:600;white-space:nowrap;">Send</label>
+                        <input type="number" id="reminderHoursBefore" value="${d.hoursBefore}" min="1" max="168" ${d.sentAt ? 'disabled' : ''}
+                            style="width:70px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                        <label style="font-size:13px;font-weight:600;white-space:nowrap;">hours before event</label>
+                    </div>
                     <div style="margin-bottom:8px;">
                         <label style="display:block;margin-bottom:6px;font-size:12px;color:#888;">Custom message (optional — leave blank for default)</label>
                         <textarea id="reminderMessage" rows="3" ${d.sentAt ? 'disabled' : ''}
@@ -1628,10 +1652,11 @@
         async function saveReminder(eventId) {
             const enabled = document.getElementById('reminderEnabled').checked;
             const message = document.getElementById('reminderMessage').value.trim();
+            const hoursBefore = parseInt(document.getElementById('reminderHoursBefore').value) || 24;
             const r = await fetch(`/api/event/${eventId}/reminder`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled, message })
+                body: JSON.stringify({ enabled, message, hoursBefore })
             });
             if (r.ok) {
                 const btn = document.querySelector('#settingsContent .btn-primary');
@@ -2245,6 +2270,37 @@
                 const d = await r.json();
                 alert(d.error || 'Failed to resend email');
             }
+        }
+
+        function initLogsPanel() {
+            document.getElementById('adminLogsPanel').style.display = 'block';
+            fetchLogs();
+            logsInterval = setInterval(fetchLogs, 5000);
+        }
+
+        async function fetchLogs() {
+            const r = await fetch('/api/admin/logs');
+            if (!r.ok) return;
+            const logs = await r.json();
+            const el = document.getElementById('adminLogsContent');
+            if (!el) return;
+            el.innerHTML = logs.map(l => {
+                const isErr = l.msg.includes('❌') || l.tag.includes('error');
+                const isOk  = l.msg.includes('✅') || l.msg.includes('📧') || l.msg.includes('✓');
+                const color = isErr ? '#f87171' : isOk ? '#34d399' : '#cbd5e1';
+                return `<div style="color:${color};font-size:11px;padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(l.msg)}">`
+                    + `<span style="color:#64748b;">${l.time.replace('T',' ').replace('Z','')}</span> `
+                    + `<span style="color:#818cf8;">[${esc(l.tag)}]</span> ${esc(l.msg)}`
+                    + `</div>`;
+            }).join('') || '<div style="color:#64748b;font-size:11px;">No logs yet.</div>';
+        }
+
+        function toggleLogsPanel() {
+            const body = document.getElementById('adminLogsBody');
+            const btn  = document.getElementById('adminLogsToggle');
+            const collapsed = body.style.display === 'none';
+            body.style.display = collapsed ? 'block' : 'none';
+            btn.textContent = collapsed ? '▼' : '▲';
         }
 
         function openBulkEmailModal(eventId, count, selectedOnly = false) {

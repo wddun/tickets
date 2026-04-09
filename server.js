@@ -31,8 +31,13 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
+const logBuffer = [];
+const MAX_LOG_ENTRIES = 500;
 function log(tag, msg) {
-    console.log(`[${new Date().toISOString()}] [${tag}] ${msg}`);
+    const entry = { time: new Date().toISOString(), tag, msg };
+    console.log(`[${entry.time}] [${tag}] ${msg}`);
+    logBuffer.unshift(entry);
+    if (logBuffer.length > MAX_LOG_ENTRIES) logBuffer.pop();
 }
 function getIP(req) {
     return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
@@ -437,7 +442,14 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 app.get('/api/auth/me', (req, res) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
     const user = db.data.users.find(u => u.id === req.session.userId);
-    res.json({ user: { id: user.id, email: user.email } });
+    const isAdmin = user.email === process.env.ADMIN_EMAIL;
+    res.json({ user: { id: user.id, email: user.email, isAdmin } });
+});
+
+app.get('/api/admin/logs', requireAuth, (req, res) => {
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    if (!user || user.email !== process.env.ADMIN_EMAIL) return res.status(403).json({ error: 'Forbidden' });
+    res.json(logBuffer);
 });
 
 
@@ -2544,18 +2556,21 @@ app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
 // ── 24-hour reminder emails ────────────────────────────────────────────────
 
 function buildReminderHtml(event, customMessage) {
-    const msg = (customMessage || `This is a friendly reminder that ${event.name} is coming up in 24 hours. We look forward to seeing you there!`)
+    const hours = event.reminderHoursBefore ?? 24;
+    const timeLabel = hours === 24 ? 'tomorrow' : hours < 24 ? `in ${hours} hour${hours !== 1 ? 's' : ''}` : `in ${Math.round(hours / 24)} day${Math.round(hours / 24) !== 1 ? 's' : ''}`;
+    const msg = (customMessage || `This is a friendly reminder that ${event.name} is coming up ${timeLabel}. We look forward to seeing you there!`)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
     return `
         <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
-            <h2 style="color:#333; margin-bottom:4px;">See you tomorrow!</h2>
-            <p style="color:#555;">Your event is coming up in 24 hours.</p>
+            <h2 style="color:#333; margin-bottom:4px;">See you ${timeLabel}!</h2>
+            <p style="color:#555;">Your event is coming up ${timeLabel}.</p>
             <div style="background:#f4f5f7; border-radius:10px; padding:16px 20px; margin:20px 0;">
                 <p style="font-weight:700; font-size:16px; color:#1a1a2e; margin:0 0 6px;">${event.name}</p>
                 <p style="color:#555; margin:0 0 4px;">📅 ${new Date(event.time).toLocaleString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true })}</p>
                 <p style="color:#555; margin:0;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
             </div>
             <p style="color:#555; white-space:pre-wrap;">${msg}</p>
+            <p style="color:#aaa; font-size:12px; margin-top:24px;">Can't find your ticket? Reply to this email and we'll send it again.</p>
         </div>
     `;
 }
@@ -2574,6 +2589,7 @@ app.get('/api/event/:id/reminder', requireAuth, async (req, res) => {
     res.json({
         enabled: !!event.reminderEnabled,
         message: event.reminderMessage || '',
+        hoursBefore: event.reminderHoursBefore ?? 24,
         sentAt: event.reminderSentAt || null
     });
 });
@@ -2589,12 +2605,17 @@ app.put('/api/event/:id/reminder', requireAuth, async (req, res) => {
     if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
-    const { enabled, message } = req.body;
+    const { enabled, message, hoursBefore } = req.body;
     await db.update(data => {
         const ev = data.events.find(e => e.id === req.params.id);
         if (ev) {
             ev.reminderEnabled = !!enabled;
             ev.reminderMessage = message || '';
+            ev.reminderHoursBefore = Math.max(1, Math.min(168, parseInt(hoursBefore) || 24));
+            // Reset sentAt if hours changed so it can resend at the new time
+            if (ev.reminderSentAt && ev.reminderHoursBefore !== (event.reminderHoursBefore ?? 24)) {
+                ev.reminderSentAt = null;
+            }
         }
     });
     log('reminder', `⚙️  Settings updated — event: ${event.name}  enabled: ${!!enabled}  by: ${req.session.userId}`);
@@ -2618,15 +2639,15 @@ app.get('/api/event/:id/reminder/preview', requireAuth, async (req, res) => {
 // Background job: check every 5 minutes for events ~24h away
 setInterval(async () => {
     const now = Date.now();
-    const window_start = now + 23 * 60 * 60 * 1000;
-    const window_end   = now + 25 * 60 * 60 * 1000;
 
-    const due = db.data.events.filter(e =>
-        e.reminderEnabled &&
-        !e.reminderSentAt &&
-        new Date(e.time).getTime() >= window_start &&
-        new Date(e.time).getTime() <= window_end
-    );
+    const due = db.data.events.filter(e => {
+        if (!e.reminderEnabled || e.reminderSentAt) return false;
+        const hours = e.reminderHoursBefore ?? 24;
+        const eventMs = new Date(e.time).getTime();
+        const windowStart = now + (hours - 1) * 60 * 60 * 1000;
+        const windowEnd   = now + (hours + 1) * 60 * 60 * 1000;
+        return eventMs >= windowStart && eventMs <= windowEnd;
+    });
 
     for (const event of due) {
         const tickets = db.data.tickets.filter(t => t.eventId === event.id);
@@ -2649,7 +2670,7 @@ setInterval(async () => {
                     to: ticket.email,
                     fromName: `Tickets - ${event.name}`,
                     replyTo,
-                    subject: `Reminder: ${event.name} is tomorrow!`,
+                    subject: `Reminder: ${event.name} is ${(event.reminderHoursBefore ?? 24) === 24 ? 'tomorrow' : 'coming up soon'}!`,
                     html,
                     registrationId: ticket.registrationId
                 });
