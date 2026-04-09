@@ -62,3 +62,7 @@ struct AuthUser: Codable {
 struct AuthUserResponse: Codable {
     let user: AuthUser
 }
+
+struct PushSubscriptionResponse: Codable {
+    let enabled: Bool
+}

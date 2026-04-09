@@ -158,7 +158,7 @@ async function pushAppNotificationToUser(userId, { title, body, data } = {}) {
     if (!jwt) return;
 
     const user = db.data.users.find(u => u.id === userId);
-    if (!user || !user.pushEnabled) return;
+    if (!user) return;
     const devices = (db.data.pushDevices || []).filter(d => d.userId === user.id);
     if (!devices.length) return;
 
@@ -242,7 +242,8 @@ const defaultData = {
     tickets: [],
     sheetLinks: [],
     sheetAccess: [],
-    pushDevices: []
+    pushDevices: [],
+    pushSubscriptions: []
 };
 const db = await JSONFilePreset(path.resolve(__dirname, 'db.json'), defaultData);
 
@@ -271,6 +272,7 @@ if (!db.data.sheetLinks) db.data.sheetLinks = [];
 if (!db.data.sheetAccess) db.data.sheetAccess = [];
 if (!db.data.walletDevices) db.data.walletDevices = [];
 if (!db.data.pushDevices) db.data.pushDevices = [];
+if (!db.data.pushSubscriptions) db.data.pushSubscriptions = [];
 
 // Migration: backfill scannerPin on any events that don't have one
 const eventsMissingPin = db.data.events.filter(e => !e.scannerPin);
@@ -331,7 +333,7 @@ app.post('/api/auth/signup', loginLimiter, async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = { id: nanoid(), email: normalizedEmail, password: hashedPassword, pushEnabled: false };
+    const newUser = { id: nanoid(), email: normalizedEmail, password: hashedPassword };
     await db.update(data => data.users.push(newUser));
     req.session.userId = newUser.id;
     log('signup', `✅ Account created — email: ${normalizedEmail}  id: ${newUser.id}`);
@@ -353,7 +355,7 @@ app.post('/api/auth/setup-admin', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = { id: nanoid(), email: adminEmail, password: hashedPassword, pushEnabled: false };
+    const newUser = { id: nanoid(), email: adminEmail, password: hashedPassword };
     await db.update(data => data.users.push(newUser));
     req.session.userId = newUser.id;
     log('setup-admin', `✅ Admin created — email: ${adminEmail}  id: ${newUser.id}`);
@@ -410,6 +412,7 @@ app.delete('/api/auth/account', async (req, res) => {
         data.sheetLinks = (data.sheetLinks || []).filter(l => l.userId !== userId);
         data.sheetAccess = (data.sheetAccess || []).filter(a => a.userId !== userId);
         data.pushDevices = (data.pushDevices || []).filter(d => d.userId !== userId);
+        data.pushSubscriptions = (data.pushSubscriptions || []).filter(s => s.userId !== userId);
         data.users = data.users.filter(u => u.id !== userId);
     });
     req.session.destroy();
@@ -459,18 +462,53 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-app.get('/api/user/settings', requireAuth, (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
-    res.json({ pushEnabled: !!user?.pushEnabled });
+function userHasEventAccess(userId, eventId) {
+    const user = db.data.users.find(u => u.id === userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    if (isAdmin) return true;
+    const event = db.data.events.find(e => e.id === eventId);
+    if (!event) return false;
+    if (event.userId === userId) return true;
+    const myAccess = db.data.sheetAccess.filter(a => a.userId === userId);
+    return myAccess.some(a => {
+        const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+        return link && link.eventId === eventId;
+    });
+}
+
+app.get('/api/event/:id/push-subscription', requireAuth, (req, res) => {
+    const eventId = req.params.id;
+    if (!userHasEventAccess(req.session.userId, eventId)) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    const sub = (db.data.pushSubscriptions || []).find(s => s.userId === req.session.userId && s.eventId === eventId);
+    res.json({ enabled: !!sub?.enabled });
 });
 
-app.patch('/api/user/settings', requireAuth, async (req, res) => {
-    const pushEnabled = !!req.body?.pushEnabled;
+app.patch('/api/event/:id/push-subscription', requireAuth, async (req, res) => {
+    const eventId = req.params.id;
+    if (!userHasEventAccess(req.session.userId, eventId)) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    const enabled = !!req.body?.enabled;
     await db.update(data => {
-        const user = data.users.find(u => u.id === req.session.userId);
-        if (user) user.pushEnabled = pushEnabled;
+        if (!data.pushSubscriptions) data.pushSubscriptions = [];
+        const sub = data.pushSubscriptions.find(s => s.userId === req.session.userId && s.eventId === eventId);
+        if (sub) {
+            sub.enabled = enabled;
+            sub.updatedAt = new Date().toISOString();
+        } else {
+            data.pushSubscriptions.push({
+                id: nanoid(8),
+                userId: req.session.userId,
+                eventId,
+                enabled,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            });
+        }
     });
-    res.json({ success: true, pushEnabled });
+    res.json({ success: true, enabled });
 });
 
 // Email open tracking pixel (public — no auth, called by email clients)
@@ -724,12 +762,16 @@ app.post('/api/register-bulk', async (req, res) => {
             await db.update(({ tickets }) => ticketsToSend.forEach(t => tickets.push(t)));
         }
 
-        if (!isResend && event.userId) {
+        if (!isResend) {
             const actualCount = ticketsToSend.length;
-            pushAppNotificationToUser(event.userId, {
-                title: `New registration • ${event.name}`,
-                body: `${fullName} • ${actualCount} ticket${actualCount === 1 ? '' : 's'}`
-            }).catch(() => { });
+            const subs = (db.data.pushSubscriptions || []).filter(s => s.eventId === event.id && s.enabled);
+            const userIds = [...new Set(subs.map(s => s.userId))];
+            userIds.forEach(userId => {
+                pushAppNotificationToUser(userId, {
+                    title: `New registration • ${event.name}`,
+                    body: `${fullName} • ${actualCount} ticket${actualCount === 1 ? '' : 's'}`
+                }).catch(() => { });
+            });
         }
 
         // Build one email with all QR codes
@@ -1123,6 +1165,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
 
     // Remove the event
     db.data.events.splice(eventIndex, 1);
+    db.data.pushSubscriptions = (db.data.pushSubscriptions || []).filter(s => s.eventId !== req.params.id);
 
     // Clean up associated tickets
     db.data.tickets = db.data.tickets.filter(t => t.eventId !== req.params.id);
@@ -1213,12 +1256,14 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     await db.update(data => data.tickets.push(...newTickets));
     log('ticket-create', `🎟️  Created ${newTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${registrationId}  by: ${req.session.userId}`);
 
-    if (event.userId) {
-        pushAppNotificationToUser(event.userId, {
+    const subs = (db.data.pushSubscriptions || []).filter(s => s.eventId === event.id && s.enabled);
+    const userIds = [...new Set(subs.map(s => s.userId))];
+    userIds.forEach(userId => {
+        pushAppNotificationToUser(userId, {
             title: `New registration • ${event.name}`,
             body: `${name} • ${newTickets.length} ticket${newTickets.length === 1 ? '' : 's'}`
         }).catch(() => { });
-    }
+    });
 
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const actualCount = newTickets.length;
