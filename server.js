@@ -879,8 +879,8 @@ app.post('/api/register-bulk', async (req, res) => {
             const userIds = [...new Set(subs.map(s => s.userId))];
             userIds.forEach(userId => {
                 pushAppNotificationToUser(userId, {
-                    title: `New registration • ${event.name}`,
-                    body: `${fullName} • ${actualCount} ticket${actualCount === 1 ? '' : 's'}`
+                    title: 'New registration',
+                    body: `${event.name} — ${fullName} • ${actualCount} ticket${actualCount === 1 ? '' : 's'}`
                 }).catch(() => { });
             });
         }
@@ -1371,8 +1371,8 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     const userIds = [...new Set(subs.map(s => s.userId))];
     userIds.forEach(userId => {
         pushAppNotificationToUser(userId, {
-            title: `New registration • ${event.name}`,
-            body: `${name} • ${newTickets.length} ticket${newTickets.length === 1 ? '' : 's'}`
+            title: 'New registration',
+            body: `${event.name} — ${name} • ${newTickets.length} ticket${newTickets.length === 1 ? '' : 's'}`
         }).catch(() => { });
     });
 
