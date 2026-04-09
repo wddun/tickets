@@ -1585,6 +1585,62 @@
             if (btn) { btn.textContent = '✓ Saved'; setTimeout(() => btn.textContent = 'Save Fields', 1500); }
         }
 
+        async function loadReminderSection(eventId) {
+            try {
+                const r = await fetch(`/api/event/${eventId}/reminder`);
+                if (!r.ok) return '';
+                const d = await r.json();
+                const eventObj = events.find(e => e.id === eventId);
+                const isPast = eventObj && new Date(eventObj.time) < new Date();
+                let statusText = '';
+                if (d.sentAt) {
+                    statusText = `<span style="color:#10b981;font-size:12px;">✓ Sent ${fmtDate(d.sentAt)}</span>`;
+                } else if (isPast) {
+                    statusText = `<span style="color:#aaa;font-size:12px;">Event has passed</span>`;
+                } else if (d.enabled) {
+                    statusText = `<span style="color:#6366f1;font-size:12px;">Will send ~24h before event</span>`;
+                } else {
+                    statusText = `<span style="color:#aaa;font-size:12px;">Disabled</span>`;
+                }
+                return `
+                    <div class="modal-section-title" style="margin-top:20px;">24-Hour Reminder Email</div>
+                    <div style="margin-bottom:10px;display:flex;align-items:center;gap:12px;">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;">
+                            <input type="checkbox" id="reminderEnabled" ${d.enabled ? 'checked' : ''} ${d.sentAt ? 'disabled' : ''} style="accent-color:#6366f1;width:16px;height:16px;">
+                            Enable reminder
+                        </label>
+                        ${statusText}
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;margin-bottom:6px;font-size:12px;color:#888;">Custom message (optional — leave blank for default)</label>
+                        <textarea id="reminderMessage" rows="3" ${d.sentAt ? 'disabled' : ''}
+                            style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"
+                            placeholder="Your event is coming up in 24 hours. We look forward to seeing you!">${esc(d.message)}</textarea>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-bottom:4px;">
+                        ${d.sentAt ? '' : `<button class="btn btn-primary btn-sm" onclick="saveReminder('${eventId}')">Save</button>`}
+                        <button class="btn btn-secondary btn-sm" onclick="window.open('/api/event/${eventId}/reminder/preview','_blank')">Preview</button>
+                    </div>
+                `;
+            } catch { return ''; }
+        }
+
+        async function saveReminder(eventId) {
+            const enabled = document.getElementById('reminderEnabled').checked;
+            const message = document.getElementById('reminderMessage').value.trim();
+            const r = await fetch(`/api/event/${eventId}/reminder`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled, message })
+            });
+            if (r.ok) {
+                const btn = document.querySelector('#settingsContent .btn-primary');
+                if (btn) { btn.textContent = '✓ Saved'; setTimeout(() => btn.textContent = 'Save', 1500); }
+            } else {
+                alert('Failed to save reminder settings.');
+            }
+        }
+
         async function loadAccessData(eventId) {
             try {
                 // Always render custom fields first — doesn't need access API
@@ -1600,7 +1656,8 @@
                     const pushHtml = devices === null
                         ? '<div class="settings-empty" style="padding:10px 0;text-align:left;">Push settings unavailable.</div>'
                         : renderPushSection(eventId, devices);
-                    document.getElementById('settingsContent').innerHTML = cfHtml + note + pushHtml;
+                    const reminderHtml = await loadReminderSection(eventId);
+                    document.getElementById('settingsContent').innerHTML = cfHtml + note + pushHtml + reminderHtml;
                     togglePushDeviceList();
                     return;
                 }
@@ -1664,7 +1721,8 @@
                 const pushHtml = devices === null
                     ? '<div class="settings-empty" style="padding:10px 0;text-align:left;">Push settings unavailable.</div>'
                     : renderPushSection(eventId, devices);
-                document.getElementById('settingsContent').innerHTML = cfHtml + linkHtml + accessHtml + pushHtml;
+                const reminderHtml = await loadReminderSection(eventId);
+                document.getElementById('settingsContent').innerHTML = cfHtml + linkHtml + accessHtml + pushHtml + reminderHtml;
                 togglePushDeviceList();
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
