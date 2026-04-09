@@ -446,11 +446,6 @@ app.get('/api/auth/me', (req, res) => {
     res.json({ user: { id: user.id, email: user.email, isAdmin } });
 });
 
-app.get('/api/admin/logs', requireAuth, (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
-    if (!user || user.email !== process.env.ADMIN_EMAIL) return res.status(403).json({ error: 'Forbidden' });
-    res.json(logBuffer);
-});
 
 
 app.post('/api/auth/logout', (req, res) => {
@@ -485,6 +480,12 @@ const requireAuth = (req, res, next) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
     next();
 };
+
+app.get('/api/admin/logs', requireAuth, (req, res) => {
+    const user = db.data.users.find(u => u.id === req.session.userId);
+    if (!user || user.email !== process.env.ADMIN_EMAIL) return res.status(403).json({ error: 'Forbidden' });
+    res.json(logBuffer);
+});
 
 // Register device for app push notifications
 app.post('/api/push/register', requireAuth, async (req, res) => {
