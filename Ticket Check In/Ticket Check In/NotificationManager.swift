@@ -16,24 +16,27 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         super.init()
     }
 
-    func requestAuthorizationIfNeeded() {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            switch settings.authorizationStatus {
-            case .notDetermined:
+    func requestAuthorization() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            await MainActor.run { UIApplication.shared.registerForRemoteNotifications() }
+            return true
+        case .denied:
+            return false
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
                 UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
                     if granted {
                         DispatchQueue.main.async {
                             UIApplication.shared.registerForRemoteNotifications()
                         }
                     }
+                    continuation.resume(returning: granted)
                 }
-            case .authorized, .provisional, .ephemeral:
-                DispatchQueue.main.async {
-                    UIApplication.shared.registerForRemoteNotifications()
-                }
-            default:
-                break
             }
+        @unknown default:
+            return false
         }
     }
 

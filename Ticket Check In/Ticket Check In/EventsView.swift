@@ -388,6 +388,10 @@ struct AttendeesView: View {
     @State private var checkingIn: Set<String> = []
     @State private var refreshTimer: Timer?
     @State private var pickerGroup: AttendeeGroup? = nil
+    @State private var showNotifSettings = false
+    @State private var pushEnabled: Bool = false
+    @State private var pushLoading = true
+    @State private var pushError: String? = nil
 
     private var canUndo: Bool { api.currentUser?.email == "willdunning01@gmail.com" }
 
@@ -463,6 +467,14 @@ struct AttendeesView: View {
         .navigationTitle(event.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showNotifSettings = true
+                } label: {
+                    Image(systemName: pushEnabled ? "bell.fill" : "bell")
+                }
+                .accessibilityLabel("Notification Settings")
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 let checked = tickets.filter(\.isCheckedIn).count
                 let total = tickets.count
@@ -486,6 +498,18 @@ struct AttendeesView: View {
             refreshTimer = nil
         }
         .task { await loadTickets() }
+        .task { await loadPushSetting() }
+        .sheet(isPresented: $showNotifSettings) {
+            NotificationSettingsSheet(
+                eventName: event.name,
+                enabled: pushEnabled,
+                isLoading: pushLoading,
+                errorMessage: pushError,
+                onToggle: { newValue in
+                    Task { await togglePush(newValue) }
+                }
+            )
+        }
     }
 
     private func loadTickets(showSpinner: Bool = true) async {
@@ -502,6 +526,37 @@ struct AttendeesView: View {
             }
         }
         isLoading = false
+    }
+
+    private func loadPushSetting() async {
+        pushLoading = true
+        pushError = nil
+        do {
+            pushEnabled = try await APIService.shared.getPushSubscription(eventId: event.id)
+        } catch {
+            pushError = "Could not load notification setting."
+        }
+        pushLoading = false
+    }
+
+    private func togglePush(_ newValue: Bool) async {
+        pushError = nil
+        if newValue {
+            let granted = await NotificationManager.shared.requestAuthorization()
+            if !granted {
+                pushEnabled = false
+                pushError = "Notifications are disabled in iOS Settings."
+                return
+            }
+            await NotificationManager.shared.syncTokenIfPossible()
+        }
+        do {
+            try await APIService.shared.setPushSubscription(eventId: event.id, enabled: newValue)
+            pushEnabled = newValue
+        } catch {
+            pushError = "Failed to save setting."
+            pushEnabled = !newValue
+        }
     }
 
     private func checkInSelected(group: AttendeeGroup, ticketIds: [String]) {
@@ -560,6 +615,58 @@ struct AttendeesView: View {
                 CheckInFeedback.shared.error()
             }
             checkingIn.remove(group.registrationId)
+        }
+    }
+}
+
+private struct NotificationSettingsSheet: View {
+    let eventName: String
+    let enabled: Bool
+    let isLoading: Bool
+    let errorMessage: String?
+    let onToggle: (Bool) -> Void
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { enabled },
+                        set: { onToggle($0) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("New registrations")
+                                .font(.headline)
+                            Text("Get a push when someone registers for this event.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(isLoading)
+                } header: {
+                    Text(eventName)
+                }
+
+                if isLoading {
+                    Section {
+                        HStack {
+                            ProgressView()
+                            Text("Loading…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if let errorMessage = errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Notifications")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
