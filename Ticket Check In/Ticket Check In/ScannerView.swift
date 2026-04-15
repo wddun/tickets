@@ -177,7 +177,6 @@ struct ScannerView: View {
             CheckInFeedback.shared.alreadyUsed()
             scanResult = result
             lastResult = result
-            if #available(iOS 16.2, *) { TicketLiveActivityManager.shared.start(for: result) }
             // No auto-dismiss for exit confirmation — requires manual action
             return
         case "used":
@@ -189,7 +188,6 @@ struct ScannerView: View {
         }
         scanResult = result
         lastResult = result
-        if #available(iOS 16.2, *) { TicketLiveActivityManager.shared.start(for: result) }
         scheduleDismiss()
     }
 
@@ -237,7 +235,6 @@ struct ScannerView: View {
         pendingCheckoutToken = nil
         isProcessing = false
         isScanning = true
-        if #available(iOS 16.2, *) { Task { await TicketLiveActivityManager.shared.end() } }
     }
 }
 
@@ -273,7 +270,7 @@ struct ScanResult: Equatable {
     }
 }
 
-// MARK: - Result Overlay (Ticketmaster-style)
+// MARK: - Result Overlay
 
 struct ScanResultOverlay: View {
     let result: ScanResult
@@ -282,306 +279,143 @@ struct ScanResultOverlay: View {
     var onConfirmCheckout: (() -> Void)? = nil
     var onCancel: (() -> Void)? = nil
 
-    private var accentColor: Color {
+    var overlayColor: Color {
         switch result.status {
         case .success, .reentryEnter: return .green
-        case .alreadyUsed, .reentryExitPrompt: return Color(red: 1, green: 0.62, blue: 0.1)
+        case .alreadyUsed, .reentryExitPrompt: return Color(red: 0.9, green: 0.5, blue: 0.1)
         case .error: return .red
         }
     }
 
-    private var statusIcon: String {
+    var icon: String {
         switch result.status {
-        case .success, .reentryEnter: return "checkmark.seal.fill"
-        case .alreadyUsed, .reentryExitPrompt: return "exclamationmark.circle.fill"
+        case .success: return "checkmark.circle.fill"
+        case .reentryEnter: return "arrow.right.circle.fill"
+        case .alreadyUsed: return "exclamationmark.circle.fill"
+        case .reentryExitPrompt: return "door.left.hand.open"
         case .error: return "xmark.circle.fill"
-        }
-    }
-
-    private var verifiedLabel: String {
-        switch result.status {
-        case .success, .reentryEnter: return "Verified Ticket"
-        case .alreadyUsed: return "Already Checked In"
-        case .reentryExitPrompt: return "Checking Out"
-        case .error: return "Invalid Ticket"
         }
     }
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.9).ignoresSafeArea()
+            overlayColor.opacity(0.92).ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer()
 
-                // Status pill
-                HStack(spacing: 7) {
-                    Image(systemName: statusIcon)
-                        .font(.system(size: 15, weight: .bold))
-                    Text(result.title)
-                        .font(.system(size: 15, weight: .bold))
-                }
-                .foregroundStyle(accentColor)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(accentColor.opacity(0.15), in: Capsule())
-                .overlay(Capsule().strokeBorder(accentColor.opacity(0.45), lineWidth: 1))
-                .padding(.bottom, 14)
+                // Icon + name
+                VStack(spacing: 12) {
+                    Image(systemName: icon)
+                        .font(.system(size: 64))
+                        .foregroundStyle(.white)
 
-                // Ticket card
-                ticketCard
-                    .padding(.horizontal, 20)
-                    .shadow(color: .black.opacity(0.55), radius: 22, y: 10)
+                    Text(result.title)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+
+                    Text(result.firstName ?? result.name)
+                        .font(.system(size: 38, weight: .bold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+
+                    if let email = result.email {
+                        Text(email)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+
+                    if let eventName = result.eventName {
+                        Text(eventName)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.top, 2)
+                    }
+                }
+
+                // Custom fields
+                if let fields = result.customFields, !fields.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(fields.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                            HStack {
+                                Text(key)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                Spacer()
+                                Text(value)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 6)
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.top, 20)
+                }
+
+                if let usedAt = result.usedAt, result.status == .alreadyUsed {
+                    Text("Scanned \(formattedDate(usedAt))")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .padding(.top, 12)
+                }
 
                 Spacer()
 
                 // Action buttons
-                actionArea
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 44)
-            }
-        }
-    }
-
-    // MARK: Card
-
-    private var ticketCard: some View {
-        VStack(spacing: 0) {
-            ticketHeader
-            ticketPerforation
-            ticketFooter
-        }
-        .clipShape(TicketShape())
-    }
-
-    // Top section: dark gradient with attendee name, date, and event branding
-    private var ticketHeader: some View {
-        ZStack(alignment: .bottom) {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.14, green: 0.13, blue: 0.17),
-                    Color(red: 0.08, green: 0.08, blue: 0.10)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            VStack(spacing: 0) {
-                // Name (top-left) + date (top-right)
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(result.firstName ?? result.name)
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(.white)
-                        if let email = result.email {
-                            Text(email)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.55))
-                                .lineLimit(1)
+                if result.status == .reentryExitPrompt {
+                    VStack(spacing: 12) {
+                        if let onConfirmCheckout {
+                            Button(action: onConfirmCheckout) {
+                                Text("Confirm Check-Out")
+                                    .font(.system(size: 17, weight: .bold))
+                                    .foregroundStyle(overlayColor)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+                            }
+                        }
+                        if let onCancel {
+                            Button(action: onCancel) {
+                                Text("Cancel")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.75))
+                            }
                         }
                     }
-                    Spacer()
-                    Text(formattedNow())
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.trailing)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 56)
+                } else {
+                    HStack(spacing: 12) {
+                        if let onViewDetails {
+                            Button(action: onViewDetails) {
+                                Text("View Details")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(overlayColor)
+                                    .padding(.horizontal, 22)
+                                    .padding(.vertical, 11)
+                                    .background(.white.opacity(0.9), in: Capsule())
+                            }
+                        }
 
-                Spacer()
-
-                // Center event icon + name
-                VStack(spacing: 7) {
-                    ZStack {
-                        Circle()
-                            .strokeBorder(.white.opacity(0.65), lineWidth: 1.5)
-                            .frame(width: 44, height: 44)
-                        Image(systemName: "music.note")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.9))
+                        if let onUndo {
+                            Button(action: onUndo) {
+                                Text("Undo")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(overlayColor)
+                                    .padding(.horizontal, 22)
+                                    .padding(.vertical, 11)
+                                    .background(.white.opacity(0.9), in: Capsule())
+                            }
+                        }
                     }
-                    if let eventName = result.eventName {
-                        Text(eventName.uppercased())
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .padding(.horizontal, 12)
-                    }
-                }
-                .padding(.bottom, 18)
-            }
-        }
-        .frame(height: 172)
-    }
-
-    // Perforated divider between header and footer
-    private var ticketPerforation: some View {
-        ZStack {
-            // Gradient bridging the two sections
-            LinearGradient(
-                colors: [
-                    Color(red: 0.14, green: 0.13, blue: 0.17),
-                    Color(red: 0.18, green: 0.18, blue: 0.20)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            // Dashed perforation line
-            HStack(spacing: 5) {
-                ForEach(0..<20, id: \.self) { _ in
-                    Capsule()
-                        .fill(Color(white: 0.35))
-                        .frame(width: 6, height: 1.5)
+                    .padding(.bottom, 56)
                 }
             }
         }
-        .frame(height: 24)
-    }
-
-    // Bottom section: ticket type, section, verified badge
-    private var ticketFooter: some View {
-        let ticketType = result.customFields?["Ticket Type"]
-            ?? result.customFields?["ticket_type"]
-            ?? result.customFields?["Type"]
-            ?? "GENERAL ADMISSN"
-        let section = result.customFields?["Section"]
-            ?? result.customFields?["section"]
-            ?? result.customFields?["Seat"]
-            ?? result.customFields?["Row"]
-
-        return VStack(spacing: 0) {
-            HStack(alignment: .bottom) {
-                Text(ticketType.uppercased())
-                    .font(.system(size: 22, weight: .heavy))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                if let sec = section {
-                    VStack(alignment: .trailing, spacing: -4) {
-                        Text("Sec")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.6))
-                        Text(sec)
-                            .font(.system(size: 30, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-
-            // "Verified Resale Ticket  Venue" style secondary info
-            if let eventName = result.eventName {
-                HStack {
-                    Text(verifiedLabel)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                    Spacer()
-                    Text(eventName)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-            }
-
-            Divider()
-                .background(Color(white: 0.3))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-
-            HStack {
-                // Verified / status badge
-                HStack(spacing: 5) {
-                    Image(systemName: statusIcon)
-                        .font(.system(size: 12))
-                        .foregroundStyle(accentColor)
-                    Text(verifiedLabel)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-                Spacer()
-                Text("ticket check in")
-                    .font(.system(size: 11, weight: .medium))
-                    .italic()
-                    .foregroundStyle(.white.opacity(0.4))
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 14)
-
-            // "Already used" timestamp
-            if let usedAt = result.usedAt, result.status == .alreadyUsed {
-                Text("First scanned \(formattedDate(usedAt))")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .padding(.bottom, 10)
-            }
-        }
-        .background(Color(red: 0.18, green: 0.18, blue: 0.20))
-    }
-
-    // MARK: Actions
-
-    @ViewBuilder
-    private var actionArea: some View {
-        if result.status == .reentryExitPrompt {
-            VStack(spacing: 12) {
-                if let onConfirmCheckout {
-                    Button(action: onConfirmCheckout) {
-                        Text("Confirm Check-Out")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(.black)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 14))
-                    }
-                }
-                if let onCancel {
-                    Button(action: onCancel) {
-                        Text("Cancel")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                }
-            }
-        } else {
-            HStack(spacing: 12) {
-                if let onViewDetails {
-                    Button(action: onViewDetails) {
-                        Text("View Details")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 11)
-                            .background(Color(white: 0.22), in: Capsule())
-                    }
-                }
-                if let onUndo {
-                    Button(action: onUndo) {
-                        Text("Undo")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 11)
-                            .background(Color(white: 0.22), in: Capsule())
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: Helpers
-
-    private func formattedNow() -> String {
-        let now = Date()
-        let d = DateFormatter(); d.dateFormat = "MMM d"
-        let t = DateFormatter(); t.dateFormat = "h:mm a"
-        return "\(d.string(from: now).uppercased())\n\(t.string(from: now))"
     }
 
     private func formattedDate(_ iso: String) -> String {
@@ -591,57 +425,6 @@ struct ScanResultOverlay: View {
         fmt.dateStyle = .short
         fmt.timeStyle = .short
         return fmt.string(from: date)
-    }
-}
-
-// MARK: - Ticket Shape (rounded rect with side notches at perforation)
-
-private struct TicketShape: Shape {
-    var cornerRadius: CGFloat = 16
-    var notchRadius: CGFloat = 11
-    // Fraction of total height where the perforation sits
-    var notchRatio: CGFloat = 0.565
-
-    func path(in rect: CGRect) -> Path {
-        let ny = rect.height * notchRatio  // Y-centre of notches
-        let r = cornerRadius
-        let nr = notchRadius
-
-        var p = Path()
-
-        // Top-left arc
-        p.move(to: CGPoint(x: r, y: 0))
-        p.addLine(to: CGPoint(x: rect.maxX - r, y: 0))
-        p.addArc(center: CGPoint(x: rect.maxX - r, y: r), radius: r,
-                 startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
-
-        // Right edge → right notch (concave inward)
-        p.addLine(to: CGPoint(x: rect.maxX, y: ny - nr))
-        p.addArc(center: CGPoint(x: rect.maxX, y: ny), radius: nr,
-                 startAngle: .degrees(-90), endAngle: .degrees(90), clockwise: true)
-
-        // Right edge → bottom-right arc
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
-        p.addArc(center: CGPoint(x: rect.maxX - r, y: rect.maxY - r), radius: r,
-                 startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
-
-        // Bottom edge
-        p.addLine(to: CGPoint(x: r, y: rect.maxY))
-        p.addArc(center: CGPoint(x: r, y: rect.maxY - r), radius: r,
-                 startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
-
-        // Left edge → left notch (concave inward)
-        p.addLine(to: CGPoint(x: 0, y: ny + nr))
-        p.addArc(center: CGPoint(x: 0, y: ny), radius: nr,
-                 startAngle: .degrees(90), endAngle: .degrees(-90), clockwise: true)
-
-        // Left edge → top-left arc
-        p.addLine(to: CGPoint(x: 0, y: r))
-        p.addArc(center: CGPoint(x: r, y: r), radius: r,
-                 startAngle: .degrees(180), endAngle: .degrees(-90), clockwise: false)
-
-        p.closeSubpath()
-        return p
     }
 }
 
