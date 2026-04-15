@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>Your Ticket</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #0a0a0c;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+            padding: 32px 0 48px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 360px;
+            padding: 0 20px;
+        }
+
+        /* ── Checked-in banner ───────────────────────────── */
+        .checked-in-banner {
+            display: none;
+            align-items: center;
+            gap: 7px;
+            background: rgba(255, 159, 10, 0.12);
+            border: 1px solid rgba(255, 159, 10, 0.35);
+            border-radius: 22px;
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #ff9f0a;
+            margin-bottom: 20px;
+        }
+
+        /* ── Ticket wrapper (positions the side notches) ─── */
+        .ticket-wrapper {
+            position: relative;
+        }
+
+        .notch {
+            position: absolute;
+            width: 28px;
+            height: 28px;
+            background: #0a0a0c;
+            border-radius: 50%;
+            /* centres on the perforation line: header(172px) + half-perf(13px) - half-notch(14px) = 171px */
+            top: 171px;
+            z-index: 10;
+        }
+        .notch-left  { left:  -14px; }
+        .notch-right { right: -14px; }
+
+        /* ── Card ────────────────────────────────────────── */
+        .ticket-card {
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 24px 56px rgba(0, 0, 0, 0.75);
+        }
+
+        /* ── Header ──────────────────────────────────────── */
+        .ticket-header {
+            background: linear-gradient(145deg, #231f2c 0%, #13121a 100%);
+            padding: 16px 16px 0;
+            height: 172px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .attendee-name {
+            font-size: 17px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: -0.2px;
+        }
+
+        .attendee-email {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: 3px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 180px;
+        }
+
+        .event-date {
+            font-size: 12px;
+            font-weight: 600;
+            color: #fff;
+            text-align: right;
+            white-space: pre-line;
+            line-height: 1.45;
+            flex-shrink: 0;
+        }
+
+        .header-center {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            padding-bottom: 18px;
+            gap: 7px;
+        }
+
+        .venue-circle {
+            width: 44px;
+            height: 44px;
+            border: 1.5px solid rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .venue-circle svg {
+            width: 20px;
+            height: 20px;
+            fill: rgba(255, 255, 255, 0.9);
+        }
+
+        .event-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            max-width: 240px;
+            line-height: 1.3;
+        }
+
+        /* ── Perforation ─────────────────────────────────── */
+        .ticket-perforation {
+            height: 26px;
+            background: linear-gradient(to bottom, #231f2c, #29292f);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .perf-line {
+            width: calc(100% - 32px);
+            border-top: 1.5px dashed rgba(255, 255, 255, 0.2);
+        }
+
+        /* ── Footer ──────────────────────────────────────── */
+        .ticket-footer {
+            background: #29292f;
+            padding: 14px 16px 0;
+        }
+
+        .ticket-main-row {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .ticket-type {
+            font-size: 22px;
+            font-weight: 900;
+            color: #fff;
+            letter-spacing: -0.5px;
+            line-height: 1.1;
+            max-width: 200px;
+        }
+
+        .ticket-section {
+            text-align: right;
+        }
+
+        .sec-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.55);
+        }
+
+        .sec-value {
+            font-size: 30px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: -0.5px;
+            line-height: 1;
+        }
+
+        .ticket-sub-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.45);
+            margin: 4px 0 10px;
+        }
+
+        .divider {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.1);
+            margin-bottom: 10px;
+        }
+
+        .ticket-verified-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .verified-badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        .verified-dot {
+            width: 15px;
+            height: 15px;
+            background: #30d158;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .verified-dot svg {
+            width: 9px;
+            height: 9px;
+        }
+
+        .app-brand {
+            font-size: 11px;
+            font-style: italic;
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        /* ── QR Code ─────────────────────────────────────── */
+        .qr-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 0 0 18px;
+        }
+
+        .qr-frame {
+            width: 168px;
+            height: 168px;
+            background: #fff;
+            border-radius: 14px;
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .qr-frame img {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .qr-hint {
+            margin-top: 9px;
+            font-size: 11px;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.35);
+        }
+
+        /* ── Already-used state ──────────────────────────── */
+        .used .ticket-type { color: rgba(255,255,255,0.55); }
+        .used .verified-dot { background: #ff9f0a; }
+        .used .qr-frame { opacity: 0.4; }
+
+        /* ── Apple Wallet button ─────────────────────────── */
+        .wallet-section {
+            display: flex;
+            justify-content: center;
+            margin-top: 24px;
+        }
+
+        .wallet-section img { height: 50px; }
+
+        /* ── Loading / error ─────────────────────────────── */
+        .state-screen {
+            text-align: center;
+            padding: 60px 0;
+        }
+
+        .state-screen p {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 15px;
+        }
+
+        .state-screen h2 {
+            color: #fff;
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <div id="loadingState" class="state-screen">
+        <p>Loading your ticket…</p>
+    </div>
+
+    <div id="errorState" class="state-screen" style="display:none">
+        <h2>Ticket Not Found</h2>
+        <p>This link may be invalid or expired.</p>
+    </div>
+
+    <div id="ticketView" style="display:none">
+
+        <div class="checked-in-banner" id="checkedInBanner">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M2.5 7L5.5 10L11.5 4" stroke="#ff9f0a" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Already Checked In
+        </div>
+
+        <div class="ticket-wrapper">
+            <div class="notch notch-left"></div>
+            <div class="notch notch-right"></div>
+
+            <div class="ticket-card" id="ticketCard">
+
+                <!-- Header -->
+                <div class="ticket-header">
+                    <div class="header-top">
+                        <div>
+                            <div class="attendee-name" id="attendeeName"></div>
+                            <div class="attendee-email" id="attendeeEmail"></div>
+                        </div>
+                        <div class="event-date" id="eventDate"></div>
+                    </div>
+                    <div class="header-center">
+                        <div class="venue-circle">
+                            <!-- Music note icon -->
+                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
+                            </svg>
+                        </div>
+                        <div class="event-name" id="eventName"></div>
+                    </div>
+                </div>
+
+                <!-- Perforated divider -->
+                <div class="ticket-perforation">
+                    <div class="perf-line"></div>
+                </div>
+
+                <!-- Footer -->
+                <div class="ticket-footer">
+                    <div class="ticket-main-row">
+                        <div class="ticket-type" id="ticketType">GENERAL ADMISSN</div>
+                        <div class="ticket-section" id="sectionBlock" style="display:none">
+                            <span class="sec-label">Sec</span>
+                            <span class="sec-value" id="sectionValue"></span>
+                        </div>
+                    </div>
+
+                    <div class="ticket-sub-row">
+                        <span id="subLeft"></span>
+                        <span id="subRight"></span>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <div class="ticket-verified-row">
+                        <div class="verified-badge" id="verifiedBadge">
+                            <div class="verified-dot">
+                                <svg viewBox="0 0 9 9" fill="none">
+                                    <path d="M1.5 4.5L3.5 6.5L7.5 2.5"
+                                          stroke="#fff" stroke-width="1.3"
+                                          stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </div>
+                            Verified Ticket
+                        </div>
+                        <span class="app-brand">ticket check in</span>
+                    </div>
+
+                    <!-- QR Code -->
+                    <div class="qr-section">
+                        <div class="qr-frame">
+                            <img id="qrImage" src="" alt="QR Code">
+                        </div>
+                        <div class="qr-hint">Scan to Enter</div>
+                    </div>
+                </div>
+
+            </div><!-- /ticket-card -->
+        </div><!-- /ticket-wrapper -->
+
+        <!-- Apple Wallet button (iOS only) -->
+        <div class="wallet-section" id="walletSection" style="display:none">
+            <a id="walletLink" href="#">
+                <img src="/apple-wallet-badge.png" alt="Add to Apple Wallet">
+            </a>
+        </div>
+
+    </div><!-- /ticketView -->
+</div>
+
+<script>
+    (async function () {
+        const params = new URLSearchParams(location.search);
+        const token = params.get('token');
+        if (!token) { showError(); return; }
+
+        let data;
+        try {
+            const res = await fetch('/api/ticket-view/' + encodeURIComponent(token));
+            if (!res.ok) { showError(); return; }
+            data = await res.json();
+        } catch (_) { showError(); return; }
+
+        render(data, token);
+    })();
+
+    function render(data, token) {
+        // Name + email
+        document.getElementById('attendeeName').textContent = data.firstName || data.name;
+        document.getElementById('attendeeEmail').textContent = data.email || '';
+
+        // Event name
+        document.getElementById('eventName').textContent = data.event.name;
+
+        // Date
+        if (data.event.time) {
+            const d = new Date(data.event.time);
+            const mo  = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+            const day = d.getDate();
+            const hr  = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            document.getElementById('eventDate').textContent = mo + ' ' + day + '\n' + hr;
+        }
+
+        // Ticket type + section
+        const cf = data.customFields || {};
+        const ticketType = cf['Ticket Type'] || cf['ticket_type'] || cf['Type'] || 'GENERAL ADMISSN';
+        document.getElementById('ticketType').textContent = ticketType.toUpperCase();
+
+        const section = cf['Section'] || cf['section'] || cf['Seat'] || cf['Row'];
+        if (section) {
+            document.getElementById('sectionBlock').style.display = '';
+            document.getElementById('sectionValue').textContent = section;
+        }
+
+        // Sub-row
+        const locName = (data.event.location && data.event.location.name) || '';
+        document.getElementById('subLeft').textContent = 'Verified Ticket';
+        document.getElementById('subRight').textContent = locName;
+
+        // QR code
+        document.getElementById('qrImage').src = '/qr/' + token;
+
+        // Already checked-in state
+        if (data.isCheckedIn) {
+            document.getElementById('checkedInBanner').style.display = 'flex';
+            document.getElementById('ticketCard').classList.add('used');
+            const badge = document.getElementById('verifiedBadge');
+            badge.innerHTML =
+                '<div class="verified-dot" style="background:#ff9f0a">' +
+                    '<svg viewBox="0 0 9 9" fill="none">' +
+                        '<path d="M4.5 2v2.5M4.5 6v.5" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/>' +
+                    '</svg>' +
+                '</div>Already Checked In';
+        }
+
+        // Apple Wallet (iOS only)
+        if (/iPad|iPhone|iPod/.test(navigator.userAgent) && !/CriOS/.test(navigator.userAgent)) {
+            document.getElementById('walletLink').href = '/api/pass/' + token + '.pkpass';
+            document.getElementById('walletSection').style.display = 'flex';
+        }
+
+        // Show
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('ticketView').style.display = '';
+    }
+
+    function showError() {
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('errorState').style.display = '';
+    }
+</script>
+</body>
+</html>

@@ -715,6 +715,11 @@ app.post('/api/register_disabled', async (req, res) => {
                         <div style="text-align: center; margin: 30px 0;">
                             <img src="${qrDataUrl}" alt="QR Code" style="width: 200px; height: 200px;" />
                         </div>
+                        <div style="text-align: center; margin-bottom: 16px;">
+                            <a href="${BASE_URL}/ticket.html?token=${token}" style="display:inline-block; background:#111; color:#fff; text-decoration:none; border-radius:12px; padding:12px 24px; font-family:-apple-system,sans-serif; font-weight:700; font-size:15px;">
+                                🎟️ View Your Ticket
+                            </a>
+                        </div>
                         <div style="text-align: center; margin-bottom: 20px;">
                             <a href="${BASE_URL}/api/pass/${token}.pkpass">
                                 <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height: 40px;">
@@ -905,7 +910,12 @@ app.post('/api/register-bulk', async (req, res) => {
             const isUpdate = isResend && changes.length > 0;
 
             const walletButton = (token) => `
-                <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
+                <div style="text-align:center; margin:6px 0 2px;">
+                    <a href="${BASE_URL}/ticket.html?token=${token}" style="display:inline-block; background:#111; color:#fff; text-decoration:none; border-radius:12px; padding:11px 22px; font-family:-apple-system,sans-serif; font-weight:700; font-size:14px;">
+                        🎟️ View Your Ticket
+                    </a>
+                </div>
+                <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none; margin-top:8px;">
                     <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
                 </a>`;
 
@@ -1395,7 +1405,12 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
         const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
 
         const walletButton = (token) => `
-            <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
+            <div style="text-align:center; margin:6px 0 2px;">
+                <a href="${BASE_URL}/ticket.html?token=${token}" style="display:inline-block; background:#111; color:#fff; text-decoration:none; border-radius:12px; padding:11px 22px; font-family:-apple-system,sans-serif; font-weight:700; font-size:14px;">
+                    🎟️ View Your Ticket
+                </a>
+            </div>
+            <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none; margin-top:8px;">
                 <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
             </a>`;
 
@@ -1488,7 +1503,12 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
         const actualCount = updatedTickets.length;
 
         const walletButton = (token) => `
-            <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
+            <div style="text-align:center; margin:6px 0 2px;">
+                <a href="${BASE_URL}/ticket.html?token=${token}" style="display:inline-block; background:#111; color:#fff; text-decoration:none; border-radius:12px; padding:11px 22px; font-family:-apple-system,sans-serif; font-weight:700; font-size:14px;">
+                    🎟️ View Your Ticket
+                </a>
+            </div>
+            <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none; margin-top:8px;">
                 <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
             </a>`;
 
@@ -1567,7 +1587,12 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
 
     const actualCount = groupTickets.length;
     const walletButton = (token) => `
-        <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
+        <div style="text-align:center; margin:6px 0 2px;">
+            <a href="${BASE_URL}/ticket.html?token=${token}" style="display:inline-block; background:#111; color:#fff; text-decoration:none; border-radius:12px; padding:11px 22px; font-family:-apple-system,sans-serif; font-weight:700; font-size:14px;">
+                🎟️ View Your Ticket
+            </a>
+        </div>
+        <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none; margin-top:8px;">
             <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
         </a>`;
 
@@ -2164,6 +2189,32 @@ function checkPassPrereqs() {
 
     return null;
 }
+
+// API: Public ticket view data — no auth, token IS the credential (same trust level as the pass URL)
+app.get('/api/ticket-view/:token', async (req, res) => {
+    const token = req.params.token;
+    const ticket = db.data.tickets.find(t => t.token === token);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    const event = db.data.events.find(e => e.id === ticket.eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const isInsideReentry = event.allowReentry && ticket.reentry_status === 'inside';
+    const isCheckedIn = (!event.allowReentry && !!ticket.used_at) || isInsideReentry;
+
+    res.json({
+        name: ticket.name,
+        firstName: ticket.firstName,
+        email: ticket.email,
+        token: ticket.token,
+        isCheckedIn,
+        customFields: ticket.customFields || {},
+        event: {
+            name: event.name,
+            time: event.time,
+            location: event.location || {}
+        }
+    });
+});
 
 // API: Generate single Apple Wallet Pass
 app.get(['/api/pass/:token', '/api/pass/:token.pkpass'], async (req, res) => {
