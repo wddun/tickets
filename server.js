@@ -88,6 +88,70 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo 
     return task;
 }
 
+// Shared HTML email template used by all ticket confirmation emails
+function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '' }) {
+    const dateStr = (() => {
+        try {
+            return new Date(event.time).toLocaleString('en-US', {
+                weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+                hour: 'numeric', minute: '2-digit', hour12: true
+            });
+        } catch (_) { return String(event.time); }
+    })();
+    const locName = event.location?.name || '';
+    const locAddress = event.location?.address || '';
+    const locHtml = locAddress
+        ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(locAddress)}" style="color:rgba(255,255,255,.9);text-decoration:none;">${locName || locAddress}</a>`
+        : (locName ? `<span style="color:rgba(255,255,255,.9);">${locName}</span>` : '');
+    const headerColor = event.color || '#4f46e5';
+    const imageHtml = event.imageUrl
+        ? `<img src="${BASE_URL}${event.imageUrl}" alt="" style="width:100%;max-height:200px;object-fit:cover;display:block;">`
+        : '';
+    const n = tickets.length;
+    const qrBlocksHtml = tickets.map((t, i) => `
+<div style="border:1px solid #ebebeb;border-radius:12px;padding:22px 20px;text-align:center;margin:0 0 16px;">
+  ${n > 1 ? `<p style="font-size:11px;font-weight:700;color:#aaa;letter-spacing:.08em;text-transform:uppercase;margin:0 0 14px;">Ticket ${i + 1} of ${n}</p>` : ''}
+  <div style="display:inline-block;padding:8px;border:1px solid #e8e8e8;border-radius:10px;margin-bottom:14px;">
+    <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" style="width:176px;height:176px;display:block;">
+  </div>
+  <p style="font-size:11px;color:#ccc;margin:0 0 14px;font-family:monospace;letter-spacing:.03em;">${t.token}</p>
+  <a href="${BASE_URL}/api/pass/${t.token}.pkpass" style="display:inline-block;text-decoration:none;">
+    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px;display:block;margin:0 auto;">
+  </a>
+</div>`).join('');
+    const addAllHtml = n > 1 ? `
+<div style="background:#f9fafb;border-radius:10px;padding:16px 20px;text-align:center;margin:0 0 20px;">
+  <p style="font-size:13px;font-weight:600;color:#555;margin:0 0 10px;">Add all ${n} tickets to Apple Wallet at once:</p>
+  <a href="${BASE_URL}/api/passes/bundle/${tickets[0].registrationId}" style="display:inline-block;text-decoration:none;">
+    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px;display:block;margin:0 auto;">
+  </a>
+</div>` : '';
+
+    return `<div style="background:#f0f0f2;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;margin:0;">
+<div style="max-width:540px;margin:0 auto;">
+<div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.07);">
+${imageHtml}
+<div style="background:${headerColor};padding:24px 28px 22px;">
+  <p style="color:rgba(255,255,255,.6);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin:0 0 6px;">Event Ticket</p>
+  <h1 style="color:#fff;font-size:22px;font-weight:800;margin:0 0 16px;line-height:1.25;">${event.name}</h1>
+  <p style="color:rgba(255,255,255,.8);font-size:13px;margin:0 0 5px;">📅&nbsp; ${dateStr}</p>
+  ${locHtml ? `<p style="font-size:13px;margin:0;">📍&nbsp; ${locHtml}</p>` : ''}
+</div>
+<div style="padding:28px 28px 24px;">
+  <p style="font-size:20px;font-weight:700;color:#111;margin:0 0 6px;">Hey ${firstName}!</p>
+  <p style="font-size:15px;color:#555;margin:0 0 24px;line-height:1.55;">${intro}</p>
+  ${changesHtml}
+  ${customFieldsHtml}
+  <hr style="border:none;border-top:1px solid #f0f0f0;margin:0 0 24px;">
+  ${addAllHtml}
+  ${qrBlocksHtml}
+</div>
+</div>
+<p style="text-align:center;font-size:12px;color:#aaa;margin:16px 0 0;line-height:1.5;">Keep this email — it&rsquo;s your entry ticket. Don&rsquo;t share your QR code.</p>
+</div>
+</div>`;
+}
+
 // 1x1 transparent GIF for email open tracking
 const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
 
@@ -904,74 +968,36 @@ app.post('/api/register-bulk', async (req, res) => {
             const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
             const isUpdate = isResend && changes.length > 0;
 
-            const walletButton = (token) => `
-                <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
-                    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
-                </a>`;
-
-            const qrBlocks = ticketsToSend.map((ticket, i) => `
-                <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
-                    <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
-                        ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Your Ticket'}
-                    </p>
-                    <img src="${BASE_URL}/qr/${ticket.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
-                    <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${ticket.token}</p>
-                    ${walletButton(ticket.token)}
-                </div>
-            `).join('');
-
-            const addAllButton = actualCount > 1 ? `
-                <div style="text-align:center; margin:24px 0 8px;">
-                    <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${actualCount} passes to Apple Wallet at once:</p>
-                    <a href="${BASE_URL}/api/passes/bundle/${ticketsToSend[0].registrationId}" style="display:inline-block; text-decoration:none;">
-                        <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block;">
-                    </a>
-                </div>
-            ` : '';
-
+            const changesHtml = isUpdate && changes.length > 0 ? `
+<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:14px 18px;margin:0 0 24px;">
+  <p style="font-weight:700;color:#92400e;font-size:14px;margin:0 0 8px;">What changed:</p>
+  <ul style="margin:0;padding-left:20px;color:#78350f;font-size:14px;">
+    ${changes.map(c => `<li style="margin:4px 0;">${c}</li>`).join('')}
+  </ul>
+</div>` : '';
+            const customFieldsHtml = Object.keys(customFields).length > 0 ? `
+<div style="border:1px solid #f0f0f0;border-radius:10px;overflow:hidden;margin:0 0 24px;font-size:14px;">
+  ${Object.entries(customFields).map(([k, v]) => `
+  <div style="display:flex;padding:10px 14px;border-bottom:1px solid #f8f8f8;">
+    <span style="color:#999;font-weight:600;min-width:38%;flex-shrink:0;">${k}</span>
+    <span style="color:#333;">${v}</span>
+  </div>`).join('')}
+</div>` : '';
             await sendEmail({
                 to: email,
                 fromName: `Tickets - ${event.name}`,
                 replyTo: db.data.users.find(u => u.id === event.userId)?.email,
                 subject: isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`,
-                html: `
-                    <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
-                        <h2 style="color:#333; margin-bottom:4px;">Hey ${firstName}!</h2>
-                        <p style="color:#555;">${isUpdate ? `Your registration for <strong>${event.name}</strong> has been updated.` : `You're registered for <strong>${event.name}</strong>.`}</p>
-                        ${isUpdate ? `
-                        <div style="background:#fffbeb; border:1px solid #fcd34d; border-radius:8px; padding:14px 18px; margin:16px 0;">
-                            <p style="font-weight:600; color:#92400e; margin:0 0 8px;">What changed:</p>
-                            <ul style="margin:0; padding-left:20px; color:#78350f;">
-                                ${changes.map(c => `<li style="margin:4px 0;">${c}</li>`).join('')}
-                            </ul>
-                        </div>` : ''}
-                        ${event.imageUrl ? `
-                        <div style="text-align:center; margin:20px 0;">
-                            <img src="${BASE_URL}${event.imageUrl}" alt="${event.name}" style="max-width:100%; border-radius:12px;" />
-                        </div>` : ''}
-                        <p style="color:#555;">📍 ${event.location.address
-                        ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(event.location.address)}" style="color:#555;">${event.location.name || event.location.address}</a>`
-                        : event.location.name}</p>
-                        <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</p>
-                        ${Object.keys(customFields).length ? `
-                        <table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;">
-                            ${Object.entries(customFields).map(([k, v]) => `
-                            <tr>
-                                <td style="padding:7px 12px; color:#888; font-weight:600; width:40%; border-bottom:1px solid #f0f0f0;">${k}</td>
-                                <td style="padding:7px 12px; color:#333; border-bottom:1px solid #f0f0f0;">${v}</td>
-                            </tr>`).join('')}
-                        </table>` : ''}
-                        <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
-                        ${addAllButton}
-                        <p style="font-size:13px; color:#888; text-align:center; margin-bottom:4px;">
-                            ${actualCount > 1 ? 'Or add tickets individually below.' : 'Show this QR code at the door.'}
-                        </p>
-                        <p style="font-size:12px; color:#e53e3e; text-align:center; margin-bottom:4px; font-weight:600;">
-                            ⚠️ Each ticket is valid for one-time entry only and cannot be reused once scanned.
-                        </p>
-                        ${qrBlocks}
-                    </div>
-                `,
+                html: buildTicketEmailHtml({
+                    firstName,
+                    intro: isUpdate
+                        ? `Your registration for <strong>${event.name}</strong> has been updated.`
+                        : `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+                    event,
+                    tickets: ticketsToSend,
+                    changesHtml,
+                    customFieldsHtml,
+                }),
                 registrationId: ticketsToSend[0].registrationId
             });
             log('bulk-register', `[email] Email ${isUpdate ? 'updated' : 'sent'} → ${email}  name: ${fullName}  tickets: ${actualCount}  event: ${event.name}  regId: ${ticketsToSend[0].registrationId}`);
@@ -1393,46 +1419,17 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
         const actualCount = newTickets.length;
         const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
 
-        const walletButton = (token) => `
-            <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
-                <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
-            </a>`;
-
-        const qrBlocks = newTickets.map((ticket, i) => `
-            <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
-                <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
-                    ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Your Ticket'}
-                </p>
-                <img src="${BASE_URL}/qr/${ticket.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
-                <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${ticket.token}</p>
-                ${walletButton(ticket.token)}
-            </div>
-        `).join('');
-
-        const addAllButton = actualCount > 1 ? `
-            <div style="text-align:center; margin:24px 0 8px;">
-                <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${actualCount} passes to Apple Wallet at once:</p>
-                <a href="${BASE_URL}/api/passes/bundle/${registrationId}" style="display:inline-block; text-decoration:none;">
-                    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block;">
-                </a>
-            </div>
-        ` : '';
-
         await sendEmail({
             to: email,
             fromName: `Tickets - ${event.name}`,
             replyTo: db.data.users.find(u => u.id === event.userId)?.email,
             subject: `Your ${ticketLabel} for ${event.name}`,
-            html: `
-                <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
-                    <h2 style="color:#333; margin-bottom:4px;">Hey ${newTickets[0].firstName}!</h2>
-                    <p style="color:#555;">You're registered for <strong>${event.name}</strong>.</p>
-                    <p style="color:#555;">📍 ${event.location.name}</p>
-                    <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
-                    ${addAllButton}
-                    ${qrBlocks}
-                </div>
-            `,
+            html: buildTicketEmailHtml({
+                firstName: newTickets[0].firstName,
+                intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+                event,
+                tickets: newTickets,
+            }),
             registrationId
         }).catch(err => {
             log('ticket-create', `[ERR] Email send failed — email: ${email}  err: ${err.message}`);
@@ -1485,46 +1482,17 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
     if (!noEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const actualCount = updatedTickets.length;
 
-        const walletButton = (token) => `
-            <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
-                <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
-            </a>`;
-
-        const qrBlocks = updatedTickets.map((ticket, i) => `
-            <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
-                <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
-                    ${actualCount > 1 ? `Updated Ticket ${i + 1} of ${actualCount}` : 'Your Updated Ticket'}
-                </p>
-                <img src="${BASE_URL}/qr/${ticket.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
-                <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${ticket.token}</p>
-                ${walletButton(ticket.token)}
-            </div>
-        `).join('');
-
-        const addAllButton = actualCount > 1 ? `
-            <div style="text-align:center; margin:24px 0 8px;">
-                <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${actualCount} updated passes to Apple Wallet at once:</p>
-                <a href="${BASE_URL}/api/passes/bundle/${updatedTickets[0].registrationId}" style="display:inline-block; text-decoration:none;">
-                    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block;">
-                </a>
-            </div>
-        ` : '';
-
         await sendEmail({
             to: email,
             fromName: `Tickets - ${event.name}`,
             replyTo: db.data.users.find(u => u.id === event.userId)?.email,
             subject: `Updated registration for ${event.name}`,
-            html: `
-                <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
-                    <h2 style="color:#333; margin-bottom:4px;">Hey ${updatedTickets[0].firstName}!</h2>
-                    <p style="color:#555;">Your registration details for <strong>${event.name}</strong> have been updated by an admin.</p>
-                    <p style="color:#555;">📍 ${event.location.name}</p>
-                    <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
-                    ${addAllButton}
-                    ${qrBlocks}
-                </div>
-            `,
+            html: buildTicketEmailHtml({
+                firstName: updatedTickets[0].firstName,
+                intro: `Your registration details for <strong>${event.name}</strong> have been updated.`,
+                event,
+                tickets: updatedTickets,
+            }),
             registrationId: updatedTickets[0].registrationId
         }).catch(err => {
             log('ticket-edit', `[ERR] Email send failed — email: ${email}  err: ${err.message}`);
@@ -1563,46 +1531,17 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
     }
 
     const actualCount = groupTickets.length;
-    const walletButton = (token) => `
-        <a href="${BASE_URL}/api/pass/${token}.pkpass" style="display:inline-block; text-decoration:none;">
-            <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block;">
-        </a>`;
-
-    const qrBlocks = groupTickets.map((t, i) => `
-        <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
-            <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
-                ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Your Ticket'}
-            </p>
-            <img src="${BASE_URL}/qr/${t.token}" alt="QR Code ${i + 1}" style="width:200px; height:200px; display:block; margin:0 auto;" />
-            <p style="font-size:11px; color:#aaa; margin:10px 0 12px;">Token: ${t.token}</p>
-            ${walletButton(t.token)}
-        </div>
-    `).join('');
-
-    const addAllButton = actualCount > 1 ? `
-        <div style="text-align:center; margin:24px 0 8px;">
-            <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${actualCount} passes to Apple Wallet at once:</p>
-            <a href="${BASE_URL}/api/passes/bundle/${ticket.registrationId}" style="display:inline-block; text-decoration:none;">
-                <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block;">
-            </a>
-        </div>
-    ` : '';
-
     await sendEmail({
         to: ticket.email,
         fromName: `Tickets - ${event.name}`,
         replyTo: db.data.users.find(u => u.id === event.userId)?.email,
-        subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name} (resent)`,
-        html: `
-            <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
-                <h2 style="color:#333; margin-bottom:4px;">Hey ${groupTickets[0].firstName}!</h2>
-                <p style="color:#555;">Here's a copy of your registration for <strong>${event.name}</strong>.</p>
-                <p style="color:#555;">📍 ${event.location.name}</p>
-                <p style="color:#555;">🕐 ${new Date(event.time).toLocaleString()}</p>
-                ${addAllButton}
-                ${qrBlocks}
-            </div>
-        `,
+        subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
+        html: buildTicketEmailHtml({
+            firstName: groupTickets[0].firstName,
+            intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
+            event,
+            tickets: groupTickets,
+        }),
         registrationId: ticket.registrationId
     }).catch(err => {
         log('resend-email', `[ERR] Send failed — email: ${ticket.email}  err: ${err.message}`);

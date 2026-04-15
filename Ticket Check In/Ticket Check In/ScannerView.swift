@@ -14,21 +14,21 @@ struct ScannerView: View {
 
     @ObservedObject private var api = APIService.shared
 
+    // Full-screen overlay state (reentry exit confirm only)
     @State private var scanResult: ScanResult?
-    @State private var lastResult: ScanResult?       // persists after overlay dismisses
+    // Slide-down banner state
+    @State private var bannerResult: ScanResult?
+    @State private var bannerVisible = false
+    // History strip at bottom
+    @State private var recentScans: [ScanResult] = []
     @State private var isScanning = true
-    @State private var isProcessing = false
     @State private var lastRegistrationId: String?
-    @State private var dismissTask: Task<Void, Never>?
+    @State private var bannerDismissTask: Task<Void, Never>?
     @State private var showingDetail = false
     @State private var lastScannedToken: String?
     @State private var lastScanTime: Date?
     @State private var pendingCheckoutToken: String?
     private let scanDebounceInterval: TimeInterval = 5.0
-
-    private var canUndo: Bool {
-        api.currentUser?.email == adminEmail
-    }
 
     var body: some View {
         ZStack {
@@ -36,13 +36,25 @@ struct ScannerView: View {
                 .ignoresSafeArea()
             viewfinderFrame
             bottomBar
-            resultOverlay
+            // Slide-down banner — non-blocking, camera stays live
+            VStack {
+                if bannerVisible, let result = bannerResult {
+                    ScanBanner(result: result)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                Spacer()
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .animation(.spring(response: 0.32, dampingFraction: 0.78), value: bannerVisible)
+            // Full-screen overlay only for reentry exit confirmation
+            exitConfirmOverlay
         }
         .task { await api.checkAuth() }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .sheet(isPresented: $showingDetail) {
-            if let result = lastResult {
+            if let result = recentScans.first {
                 TicketDetailSheet(result: result)
             }
         }
@@ -59,34 +71,13 @@ struct ScannerView: View {
         }
     }
 
-    private var undoAction: (() -> Void)? {
-        guard let result = scanResult, canUndo, result.status == .success else { return nil }
-        return handleUndo
-    }
-
-    private var detailAction: (() -> Void)? {
-        guard let result = scanResult, result.status != .error, result.status != .reentryExitPrompt else { return nil }
-        return { showingDetail = true }
-    }
-
-    private var confirmCheckoutAction: (() -> Void)? {
-        guard let result = scanResult, result.status == .reentryExitPrompt else { return nil }
-        return handleConfirmCheckout
-    }
-
-    private var cancelAction: (() -> Void)? {
-        guard let result = scanResult, result.status == .reentryExitPrompt else { return nil }
-        return dismiss
-    }
-
-    @ViewBuilder private var resultOverlay: some View {
-        if let result = scanResult {
+    // Full-screen confirm overlay — reentry exit only
+    @ViewBuilder private var exitConfirmOverlay: some View {
+        if let result = scanResult, result.status == .reentryExitPrompt {
             ScanResultOverlay(
                 result: result,
-                onUndo: undoAction,
-                onViewDetails: detailAction,
-                onConfirmCheckout: confirmCheckoutAction,
-                onCancel: cancelAction
+                onConfirmCheckout: handleConfirmCheckout,
+                onCancel: dismissExitOverlay
             )
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.2), value: scanResult != nil)
@@ -94,9 +85,33 @@ struct ScannerView: View {
     }
 
     @ViewBuilder private var bottomBar: some View {
-        VStack {
+        VStack(spacing: 0) {
             Spacer()
-            HStack(spacing: 12) {
+            VStack(spacing: 6) {
+                // Recent scan history — last 3, newest on top
+                ForEach(Array(recentScans.prefix(3).enumerated()), id: \.offset) { idx, scan in
+                    Button(action: { showingDetail = true }) {
+                        HStack(spacing: 8) {
+                            let isGreen = scan.status == .success || scan.status == .reentryEnter
+                            Circle()
+                                .fill(isGreen ? Color.green : Color(red: 0.9, green: 0.5, blue: 0.1))
+                                .frame(width: 8, height: 8)
+                            Text(scan.firstName ?? scan.name)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            Text("· \(scan.title)")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.white.opacity(0.55))
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.55), in: Capsule())
+                    }
+                    .opacity(1.0 - Double(idx) * 0.22)
+                }
                 Button(action: switchToManual) {
                     Label("Manual Check-in", systemImage: "person.text.rectangle")
                         .font(.system(size: 16, weight: .semibold))
@@ -105,45 +120,22 @@ struct ScannerView: View {
                         .padding(.vertical, 12)
                         .background(.ultraThinMaterial, in: Capsule())
                 }
-                lastScanChip
             }
+            .padding(.horizontal, 20)
             .padding(.bottom, 40)
         }
     }
 
-    @ViewBuilder private var lastScanChip: some View {
-        if let last = lastResult {
-            Button(action: { showingDetail = true }) {
-                HStack(spacing: 6) {
-                    let isGreen = last.status == .success || last.status == .reentryEnter
-                    Image(systemName: isGreen ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                        .foregroundStyle(isGreen ? .green : .orange)
-                    Text(last.firstName ?? last.name)
-                        .lineLimit(1)
-                }
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(.ultraThinMaterial, in: Capsule())
-            }
-            .opacity(scanResult == nil ? 1 : 0)
-        }
-    }
-
     private func handleCode(_ token: String) {
-        // 5-second same-token debounce
+        // 5-second same-token debounce — prevents accidental double-scan
         let now = Date()
         if let lastToken = lastScannedToken, let lastTime = lastScanTime,
            token == lastToken, now.timeIntervalSince(lastTime) < scanDebounceInterval {
             return
         }
-
-        guard !isProcessing else { return }
-        isProcessing = true
-        isScanning = false
         lastScannedToken = token
         lastScanTime = now
+        // Camera keeps running — no isScanning = false
 
         Task {
             do {
@@ -151,90 +143,72 @@ struct ScannerView: View {
                 await MainActor.run { showResult(for: response, token: token) }
             } catch {
                 await MainActor.run {
-                    scanResult = ScanResult(status: .error, title: "Error", name: error.localizedDescription)
+                    showBanner(ScanResult(status: .error, title: "Error", name: error.localizedDescription))
                     CheckInFeedback.shared.error()
-                    scheduleDismiss()
                 }
             }
         }
     }
 
     private func showResult(for response: ValidateResponse, token: String) {
-        let name = response.name ?? "Guest"
         let result: ScanResult
         switch response.status {
         case "valid":
             lastRegistrationId = response.registrationId ?? response.ticketId
             result = ScanResult(from: response, status: .success, title: "Checked In!")
             CheckInFeedback.shared.success()
+            showBanner(result)
         case "reentry_enter":
             lastRegistrationId = response.registrationId ?? response.ticketId
             result = ScanResult(from: response, status: .reentryEnter, title: "Checked Back In!")
             CheckInFeedback.shared.success()
+            showBanner(result)
         case "reentry_exit":
             pendingCheckoutToken = token
             result = ScanResult(from: response, status: .reentryExitPrompt, title: "Confirm Check-Out")
             CheckInFeedback.shared.alreadyUsed()
-            scanResult = result
-            lastResult = result
-            // No auto-dismiss for exit confirmation — requires manual action
-            return
+            withAnimation { scanResult = result }
+            // No banner — full-screen prompt requires explicit action
         case "used":
             result = ScanResult(from: response, status: .alreadyUsed, title: "Already Checked In")
             CheckInFeedback.shared.alreadyUsed()
+            showBanner(result)
         default:
-            result = ScanResult(status: .error, title: "Invalid Ticket", name: name)
+            result = ScanResult(status: .error, title: "Invalid Ticket", name: response.name ?? "")
             CheckInFeedback.shared.error()
+            showBanner(result)
         }
-        scanResult = result
-        lastResult = result
-        scheduleDismiss()
     }
 
-    private func scheduleDismiss() {
-        dismissTask?.cancel()
-        dismissTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
+    private func showBanner(_ result: ScanResult) {
+        recentScans.insert(result, at: 0)
+        if recentScans.count > 3 { recentScans.removeLast() }
+        bannerResult = result
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+            bannerVisible = true
+        }
+        bannerDismissTask?.cancel()
+        bannerDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_300_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation { scanResult = nil }
-            isProcessing = false
-            isScanning = true
-        }
-    }
-
-    private func handleUndo() {
-        dismissTask?.cancel()
-        guard let registrationId = lastRegistrationId else {
-            dismiss()
-            return
-        }
-        Task {
-            try? await APIService.shared.undoCheckIn(registrationId: registrationId)
-            await MainActor.run { dismiss() }
+            withAnimation(.easeIn(duration: 0.22)) { bannerVisible = false }
         }
     }
 
     private func handleConfirmCheckout() {
-        dismissTask?.cancel()
-        guard let token = pendingCheckoutToken else {
-            dismiss()
-            return
-        }
+        guard let token = pendingCheckoutToken else { dismissExitOverlay(); return }
         Task {
             try? await APIService.shared.confirmCheckout(token: token)
             await MainActor.run {
                 CheckInFeedback.shared.success()
-                dismiss()
+                dismissExitOverlay()
             }
         }
     }
 
-    private func dismiss() {
+    private func dismissExitOverlay() {
         withAnimation { scanResult = nil }
-        lastResult = nil
         pendingCheckoutToken = nil
-        isProcessing = false
-        isScanning = true
     }
 }
 
@@ -270,12 +244,54 @@ struct ScanResult: Equatable {
     }
 }
 
-// MARK: - Result Overlay
+// MARK: - Slide-Down Scan Banner
+
+struct ScanBanner: View {
+    let result: ScanResult
+
+    private var color: Color {
+        switch result.status {
+        case .success, .reentryEnter: return Color(red: 0.09, green: 0.64, blue: 0.29)
+        case .alreadyUsed, .reentryExitPrompt: return Color(red: 0.9, green: 0.5, blue: 0.1)
+        case .error: return Color(red: 0.86, green: 0.15, blue: 0.15)
+        }
+    }
+
+    private var icon: String {
+        switch result.status {
+        case .success, .reentryEnter: return "checkmark.circle.fill"
+        case .alreadyUsed:            return "exclamationmark.circle.fill"
+        default:                      return "xmark.circle.fill"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.firstName ?? result.name)
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(result.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .background(color)
+    }
+}
+
+// MARK: - Full-Screen Result Overlay (exit confirm only)
 
 struct ScanResultOverlay: View {
     let result: ScanResult
-    var onUndo: (() -> Void)? = nil
-    var onViewDetails: (() -> Void)? = nil
     var onConfirmCheckout: (() -> Void)? = nil
     var onCancel: (() -> Void)? = nil
 
@@ -365,55 +381,28 @@ struct ScanResultOverlay: View {
 
                 Spacer()
 
-                // Action buttons
-                if result.status == .reentryExitPrompt {
-                    VStack(spacing: 12) {
-                        if let onConfirmCheckout {
-                            Button(action: onConfirmCheckout) {
-                                Text("Confirm Check-Out")
-                                    .font(.system(size: 17, weight: .bold))
-                                    .foregroundStyle(overlayColor)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                                    .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
-                            }
-                        }
-                        if let onCancel {
-                            Button(action: onCancel) {
-                                Text("Cancel")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.75))
-                            }
+                // Action buttons — exit confirm only
+                VStack(spacing: 12) {
+                    if let onConfirmCheckout {
+                        Button(action: onConfirmCheckout) {
+                            Text("Confirm Check-Out")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(overlayColor)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
                         }
                     }
-                    .padding(.horizontal, 32)
-                    .padding(.bottom, 56)
-                } else {
-                    HStack(spacing: 12) {
-                        if let onViewDetails {
-                            Button(action: onViewDetails) {
-                                Text("View Details")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(overlayColor)
-                                    .padding(.horizontal, 22)
-                                    .padding(.vertical, 11)
-                                    .background(.white.opacity(0.9), in: Capsule())
-                            }
-                        }
-
-                        if let onUndo {
-                            Button(action: onUndo) {
-                                Text("Undo")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(overlayColor)
-                                    .padding(.horizontal, 22)
-                                    .padding(.vertical, 11)
-                                    .background(.white.opacity(0.9), in: Capsule())
-                            }
+                    if let onCancel {
+                        Button(action: onCancel) {
+                            Text("Cancel")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.75))
                         }
                     }
-                    .padding(.bottom, 56)
                 }
+                .padding(.horizontal, 32)
+                .padding(.bottom, 56)
             }
         }
     }

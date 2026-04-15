@@ -136,7 +136,62 @@
         }
         #roomSelect option { background: #1c1c1e; color: #fff; }
 
-        /* ── Full-screen result overlay (matches iOS) ── */
+        /* ── Slide-down scan banner (non-blocking) ── */
+        #scanBanner {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 60;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: calc(env(safe-area-inset-top, 0px) + 10px) 18px 14px;
+            transform: translateY(-110%);
+            transition: transform 0.32s cubic-bezier(0.34, 1.4, 0.64, 1);
+            pointer-events: none;
+        }
+        #scanBanner.show {
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+        .sb-icon { font-size: 26px; line-height: 1; flex-shrink: 0; }
+        .sb-text { flex: 1; min-width: 0; }
+        .sb-name { font-size: 19px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sb-status { font-size: 13px; color: rgba(255,255,255,0.75); font-weight: 500; margin-top: 1px; }
+
+        /* ── Recent scans history strip ── */
+        #recentScans {
+            position: fixed;
+            bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+            left: 16px; right: 16px;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            pointer-events: none;
+        }
+        .scan-history-item {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-radius: 10px;
+            padding: 8px 13px;
+            animation: slideUp 0.25s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(12px); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+        .shi-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .shi-dot-green  { background: #4ade80; }
+        .shi-dot-orange { background: #fb923c; }
+        .shi-dot-red    { background: #f87171; }
+        .shi-name { font-size: 14px; font-weight: 600; color: #fff; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .shi-meta { font-size: 12px; color: rgba(255,255,255,0.45); white-space: nowrap; }
+
+        /* ── Full-screen result overlay — reentry exit confirm only ── */
         #resultOverlay {
             position: fixed;
             inset: 0;
@@ -408,6 +463,18 @@
 
 <div class="scan-guide"><div class="scan-box"><span></span></div></div>
 
+<!-- Slide-down scan result banner -->
+<div id="scanBanner">
+    <div class="sb-icon" id="sbIcon"></div>
+    <div class="sb-text">
+        <div class="sb-name"   id="sbName"></div>
+        <div class="sb-status" id="sbStatus"></div>
+    </div>
+</div>
+
+<!-- Recent scan history strip (bottom) -->
+<div id="recentScans"></div>
+
 <!-- Top bar: anon shows sign-in, auth shows room picker + list btn -->
 <div class="top-bar" id="topBar">
     <a id="signInBtn" class="pill-btn" href="/login.html" style="display:none;">Sign In</a>
@@ -485,7 +552,6 @@ function playSound(type) {
 
 // ── State ─────────────────────────────────────────────────
 let isLoggedIn      = false;
-let isProcessing    = false;
 let events          = [];
 let allAttendees    = [];   // grouped registrations for selected event
 let filteredAttendees = [];
@@ -716,96 +782,78 @@ async function checkInPerson(e, registrationId) {
     } catch (_) { btn.textContent = 'Check In All'; btn.disabled = false; }
 }
 
-// ── Full-screen result overlay ────────────────────────────
-let resultAutoClose = null;
-const RESULT_AUTO_MS = 2500;
-
-// Colors match iOS exactly
+// ── Scan result display ───────────────────────────────────
 const OVERLAY_COLORS = {
-    success:       'rgba(22,163,74,0.93)',
-    reentry_enter: 'rgba(22,163,74,0.93)',
-    reentry_exit:  'rgba(234,88,12,0.93)',
-    used:          'rgba(234,88,12,0.93)',
-    invalid:       'rgba(220,38,38,0.93)',
-    error:         'rgba(220,38,38,0.93)',
+    valid:         'rgba(22,163,74,0.95)',
+    reentry_enter: 'rgba(22,163,74,0.95)',
+    reentry_exit:  'rgba(234,88,12,0.95)',
+    used:          'rgba(234,88,12,0.95)',
+    invalid:       'rgba(220,38,38,0.95)',
+    error:         'rgba(220,38,38,0.95)',
 };
-const OVERLAY_ICONS = {
-    valid: '✓', reentry_enter: '↩', reentry_exit: '↩',
-    used: '!', invalid: '✕', error: '✕',
-};
-const OVERLAY_TITLES = {
-    valid: 'Checked In!', reentry_enter: 'Checked Back In!',
-    reentry_exit: 'Confirm Check-Out', used: 'Already Checked In',
-    invalid: 'Invalid Ticket', error: 'Error',
-};
+const STATUS_ICONS   = { valid:'✓', reentry_enter:'↩', reentry_exit:'↩', used:'!', invalid:'✕', error:'✕' };
+const STATUS_TITLES  = { valid:'Checked In!', reentry_enter:'Checked Back In!', reentry_exit:'Confirm Check-Out', used:'Already Checked In', invalid:'Invalid QR', error:'Error' };
+const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', invalid:'shi-dot-red', error:'shi-dot-red' };
 
-function openResult(data) {
-    lastScannedRegistrationId = data.registrationId || null;
+let recentScansList = [];
+let bannerTimer = null;
 
+// Non-blocking slide-down banner (used for everything except reentry_exit)
+function showBanner(data) {
     const status = data.status || 'error';
-    const isReentryExit = status === 'reentry_exit';
+    const banner = document.getElementById('scanBanner');
+    banner.style.background = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
+    document.getElementById('sbIcon').textContent   = STATUS_ICONS[status]  || '!';
+    document.getElementById('sbName').textContent   = data.firstName || data.name || '';
+    document.getElementById('sbStatus').textContent = STATUS_TITLES[status] || 'Error';
+    banner.classList.add('show');
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(hideBanner, 1400);
+    addToHistory(data, status);
+}
+function hideBanner() { document.getElementById('scanBanner').classList.remove('show'); }
 
-    const overlay = document.getElementById('resultOverlay');
-    overlay.style.background = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
-
-    document.getElementById('roIcon').textContent  = OVERLAY_ICONS[status] || '!';
-    document.getElementById('roTitle').textContent = OVERLAY_TITLES[status] || 'Error';
-
-    // Name: prefer first name like iOS
-    const displayName = data.firstName || data.name || '';
-    document.getElementById('roName').textContent = displayName;
-
-    const emailEl = document.getElementById('roEmail');
-    emailEl.textContent = data.email || '';
-    emailEl.style.display = data.email ? '' : 'none';
-
-    const eventEl = document.getElementById('roEvent');
-    eventEl.textContent = data.eventName || '';
-    eventEl.style.display = data.eventName ? '' : 'none';
-
-    // Custom fields (matching iOS card style)
-    const cf = data.customFields || {};
-    const cfEntries = Object.entries(cf).filter(([, v]) => v !== '' && v != null);
-    document.getElementById('roFields').innerHTML = cfEntries.map(([label, value]) => `
-        <div class="ro-field">
-            <span class="ro-field-label">${escHtml(label)}</span>
-            <span class="ro-field-value">${escHtml(String(value))}</span>
+function addToHistory(data, status) {
+    recentScansList.unshift({
+        dotCls: STATUS_DOT_CLS[status] || 'shi-dot-red',
+        name:   data.firstName || data.name || 'Unknown',
+        meta:   `${STATUS_TITLES[status] || 'Error'} · ${new Date().toLocaleTimeString([], { hour:'numeric', minute:'2-digit' })}`
+    });
+    if (recentScansList.length > 3) recentScansList.pop();
+    document.getElementById('recentScans').innerHTML = recentScansList.map((s, i) => `
+        <div class="scan-history-item" style="opacity:${+(1 - i * 0.22).toFixed(2)};">
+            <div class="shi-dot ${s.dotCls}"></div>
+            <div class="shi-name">${escHtml(s.name)}</div>
+            <div class="shi-meta">${escHtml(s.meta)}</div>
         </div>`).join('');
+}
 
-    // Bottom action area
-    const bottom = document.getElementById('roBottom');
-    if (isReentryExit) {
-        pendingCheckoutToken = data._token || null;
-        const btnColor = OVERLAY_COLORS.reentry_exit.replace('0.93', '1');
-        bottom.innerHTML = `
-            <button class="ro-confirm-btn" id="roConfirmBtn" onclick="confirmCheckout()" style="color:rgba(180,60,0,1);">Confirm Check-Out</button>
-            <button class="ro-cancel-btn" onclick="closeResult()">Cancel</button>`;
-    } else {
-        pendingCheckoutToken = null;
-        const listBtn = (isLoggedIn && selectedEvent())
-            ? `<button class="ro-pill-btn" onclick="openListFromResult()">View in List</button>` : '';
-        bottom.innerHTML = listBtn + `<div class="ro-hint">Tap anywhere to continue</div>`;
-    }
-
+// Full-screen overlay — reentry exit only (needs explicit confirm)
+function openExitConfirm(data) {
+    lastScannedRegistrationId = data.registrationId || null;
+    pendingCheckoutToken = data._token || null;
+    const overlay = document.getElementById('resultOverlay');
+    overlay.style.background = OVERLAY_COLORS.reentry_exit;
+    document.getElementById('roIcon').textContent  = '↩';
+    document.getElementById('roTitle').textContent = 'Confirm Check-Out';
+    document.getElementById('roName').textContent  = data.firstName || data.name || '';
+    document.getElementById('roEmail').style.display = 'none';
+    document.getElementById('roEvent').style.display = 'none';
+    document.getElementById('roFields').innerHTML = '';
+    document.getElementById('roBottom').innerHTML = `
+        <button class="ro-confirm-btn" id="roConfirmBtn" onclick="confirmCheckout()" style="color:rgba(180,60,0,1);">Confirm Check-Out</button>
+        <button class="ro-cancel-btn" onclick="closeResult()">Cancel</button>`;
     overlay.classList.add('show');
-
-    // Auto-dismiss at 2.5s matching iOS — skip for exit confirmation
-    clearTimeout(resultAutoClose);
-    if (!isReentryExit) {
-        resultAutoClose = setTimeout(closeResult, RESULT_AUTO_MS);
-    }
 }
 
 function closeResult() {
-    clearTimeout(resultAutoClose);
     document.getElementById('resultOverlay').classList.remove('show');
     pendingCheckoutToken = null;
-    setTimeout(() => { isProcessing = false; }, 250);
 }
 
 function handleOverlayTap(e) {
     if (e.target.tagName === 'BUTTON') return;
-    if (pendingCheckoutToken) return; // exit confirmation active — require explicit button tap
+    if (pendingCheckoutToken) return;
     closeResult();
 }
 
@@ -826,26 +874,17 @@ async function confirmCheckout() {
 
 // ── Scan handler ──────────────────────────────────────────
 function onScanSuccess(decodedText) {
-    if (isProcessing) return;
-
-    if (!decodedText.startsWith('ticket:')) {
-        if (Date.now() - lastScanTs > SCAN_DEBOUNCE_MS) {
-            isProcessing = true;
-            playSound('error');
-            openResult({ status: 'invalid', name: 'Invalid QR Code' });
-        }
-        return;
-    }
+    if (!decodedText.startsWith('ticket:')) return;
 
     const token = decodedText.split(':')[1].trim();
     const now = Date.now();
 
-    // 5-second same-token debounce
+    // Per-token debounce — same QR within 5s is ignored
     if (token === lastScannedToken && (now - lastScanTs) < SCAN_DEBOUNCE_MS) return;
-
-    isProcessing = true;
     lastScannedToken = token;
     lastScanTs = now;
+
+    // Camera keeps running — no isProcessing block
 
     fetch('/api/validate', {
         method: 'POST',
@@ -857,11 +896,15 @@ function onScanSuccess(decodedText) {
         data._token = token;
         const isSuccess = data.status === 'valid' || data.status === 'reentry_enter';
         playSound(isSuccess ? 'success' : 'error');
-        openResult(data);
+        if (data.status === 'reentry_exit') {
+            openExitConfirm(data);
+        } else {
+            showBanner(data);
+        }
     })
     .catch(() => {
         playSound('error');
-        openResult({ status: 'error', name: 'Server Error' });
+        showBanner({ status: 'error', name: 'Server Error' });
     });
 }
 
