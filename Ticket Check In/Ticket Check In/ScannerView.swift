@@ -88,8 +88,8 @@ struct ScannerView: View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: 6) {
-                // Recent scan history — last 3, newest on top
-                ForEach(Array(recentScans.prefix(3).enumerated()), id: \.offset) { idx, scan in
+                // Last scan chip
+                ForEach(Array(recentScans.prefix(1).enumerated()), id: \.offset) { idx, scan in
                     Button(action: { showingDetail = true }) {
                         HStack(spacing: 8) {
                             let isGreen = scan.status == .success || scan.status == .reentryEnter
@@ -182,7 +182,7 @@ struct ScannerView: View {
 
     private func showBanner(_ result: ScanResult) {
         recentScans.insert(result, at: 0)
-        if recentScans.count > 3 { recentScans.removeLast() }
+        if recentScans.count > 1 { recentScans.removeLast() }
         bannerResult = result
         withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
             bannerVisible = true
