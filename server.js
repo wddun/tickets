@@ -84,7 +84,7 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo 
         }));
     });
     // Keep the chain alive even if this send fails, so later sends still run
-    emailChain = task.catch(() => {});
+    emailChain = task.catch(() => { });
     return task;
 }
 
@@ -101,54 +101,52 @@ function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = 
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
     const locHtml = locAddress
-        ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(locAddress)}" style="color:rgba(255,255,255,.9);text-decoration:none;">${locName || locAddress}</a>`
-        : (locName ? `<span style="color:rgba(255,255,255,.9);">${locName}</span>` : '');
-    const headerColor = event.color || '#4f46e5';
-    const imageHtml = event.imageUrl
-        ? `<img src="${BASE_URL}${event.imageUrl}" alt="" style="width:100%;max-height:200px;object-fit:cover;display:block;">`
-        : '';
+        ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(locAddress)}" style="color:#666;text-decoration:underline;">${locName || locAddress}</a>`
+        : (locName ? `<span style="color:#666;">${locName}</span>` : '');
+
     const n = tickets.length;
     const qrBlocksHtml = tickets.map((t, i) => `
-<div style="border:1px solid #ebebeb;border-radius:12px;padding:22px 20px;text-align:center;margin:0 0 16px;">
-  ${n > 1 ? `<p style="font-size:11px;font-weight:700;color:#aaa;letter-spacing:.08em;text-transform:uppercase;margin:0 0 14px;">Ticket ${i + 1} of ${n}</p>` : ''}
-  <div style="display:inline-block;padding:8px;border:1px solid #e8e8e8;border-radius:10px;margin-bottom:14px;">
-    <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" style="width:176px;height:176px;display:block;">
-  </div>
-  <p style="font-size:11px;color:#ccc;margin:0 0 14px;font-family:monospace;letter-spacing:.03em;">${t.token}</p>
-  <a href="${BASE_URL}/api/pass/${t.token}.pkpass" style="display:inline-block;text-decoration:none;">
-    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px;display:block;margin:0 auto;">
+<div style="border:1px solid #eee; border-radius:12px; padding:24px; text-align:center; margin-bottom:16px; background:#fafafa;">
+  ${n > 1 ? `<p style="font-size:12px; font-weight:700; color:#aaa; text-transform:uppercase; letter-spacing:1px; margin:0 0 12px;">Ticket ${i + 1} of ${n}</p>` : ''}
+  <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" style="width:200px; height:200px; display:block; margin:0 auto 12px; border:1px solid #eee; border-radius:8px; background:#fff; padding:8px;">
+  <p style="font-size:11px; color:#aaa; font-family:monospace; margin:0 0 12px;">${t.token}</p>
+  <a href="${BASE_URL}/api/pass/${t.token}.pkpass" style="display:inline-block; text-decoration:none;">
+    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block; margin:0 auto;">
   </a>
 </div>`).join('');
+
     const addAllHtml = n > 1 ? `
-<div style="background:#f9fafb;border-radius:10px;padding:16px 20px;text-align:center;margin:0 0 20px;">
-  <p style="font-size:13px;font-weight:600;color:#555;margin:0 0 10px;">Add all ${n} tickets to Apple Wallet at once:</p>
-  <a href="${BASE_URL}/api/passes/bundle/${tickets[0].registrationId}" style="display:inline-block;text-decoration:none;">
-    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px;display:block;margin:0 auto;">
+<div style="text-align:center; margin-bottom:24px; padding:16px; background:#f9fafb; border-radius:12px; border:1px solid #eee;">
+  <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${n} tickets to Apple Wallet at once:</p>
+  <a href="${BASE_URL}/api/passes/bundle/${tickets[0].registrationId}" style="display:inline-block; text-decoration:none;">
+    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block; margin:0 auto;">
   </a>
 </div>` : '';
 
-    return `<div style="background:#f0f0f2;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;margin:0;">
-<div style="max-width:540px;margin:0 auto;">
-<div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.07);">
-${imageHtml}
-<div style="background:${headerColor};padding:24px 28px 22px;">
-  <p style="color:rgba(255,255,255,.6);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin:0 0 6px;">Event Ticket</p>
-  <h1 style="color:#fff;font-size:22px;font-weight:800;margin:0 0 16px;line-height:1.25;">${event.name}</h1>
-  <p style="color:rgba(255,255,255,.8);font-size:13px;margin:0 0 5px;">📅&nbsp; ${dateStr}</p>
-  ${locHtml ? `<p style="font-size:13px;margin:0;">📍&nbsp; ${locHtml}</p>` : ''}
-</div>
-<div style="padding:28px 28px 24px;">
-  <p style="font-size:20px;font-weight:700;color:#111;margin:0 0 6px;">Hey ${firstName}!</p>
-  <p style="font-size:15px;color:#555;margin:0 0 24px;line-height:1.55;">${intro}</p>
-  ${changesHtml}
-  ${customFieldsHtml}
-  <hr style="border:none;border-top:1px solid #f0f0f0;margin:0 0 24px;">
-  ${addAllHtml}
-  ${qrBlocksHtml}
-</div>
-</div>
-<p style="text-align:center;font-size:12px;color:#aaa;margin:16px 0 0;line-height:1.5;">Keep this email — it&rsquo;s your entry ticket. Don&rsquo;t share your QR code.</p>
-</div>
+    return `
+<div style="background:#fff; padding:24px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#333; line-height:1.5;">
+  <div style="max-width:600px; margin:0 auto; border:1px solid #eee; border-radius:16px; padding:32px; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
+    <h2 style="font-size:24px; font-weight:800; margin:0 0 8px; color:#111;">Hey ${firstName}!</h2>
+    <p style="font-size:16px; color:#555; margin:0 0 20px;">${intro}</p>
+    
+    <div style="margin-bottom:24px; padding:16px 20px; background:#f8f9fa; border-radius:12px; border:1px solid #eee;">
+      <p style="font-weight:700; font-size:16px; color:#111; margin:0 0 4px;">${event.name}</p>
+      <p style="font-size:14px; color:#666; margin:0 0 2px;">📅 ${dateStr}</p>
+      ${locHtml ? `<p style="font-size:14px; color:#666; margin:0;">📍 ${locHtml}</p>` : ''}
+    </div>
+
+    ${changesHtml}
+    ${customFieldsHtml}
+
+    <div style="margin-top:24px;">
+      ${addAllHtml}
+      ${qrBlocksHtml}
+    </div>
+
+    <p style="text-align:center; font-size:12px; color:#aaa; margin-top:24px;">
+      Keep this email — it&rsquo;s your entry ticket. Don&rsquo;t share your QR code.
+    </p>
+  </div>
 </div>`;
 }
 
@@ -1904,7 +1902,7 @@ async function pushWalletIfChanged(tickets, events) {
     }
     if (changed.length) {
         await db.write();
-        pushWalletUpdate(changed).catch(() => {});
+        pushWalletUpdate(changed).catch(() => { });
     }
     return changed.length > 0;
 }
@@ -2288,7 +2286,7 @@ app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
         // Store hash so future requests can short-circuit
         if (ticket.passHash !== currentHash) {
             ticket.passHash = currentHash;
-            db.write().catch(() => {});
+            db.write().catch(() => { });
         }
         const lastMod = new Date(ticket.updated_at || ticket.created_at);
         res.set('Content-Type', 'application/vnd.apple.pkpass');
@@ -2551,7 +2549,7 @@ function buildReminderHtml(event, customMessage) {
             <p style="color:#555;">Your event is coming up ${timeLabel}.</p>
             <div style="background:#f4f5f7; border-radius:10px; padding:16px 20px; margin:20px 0;">
                 <p style="font-weight:700; font-size:16px; color:#1a1a2e; margin:0 0 6px;">${event.name}</p>
-                <p style="color:#555; margin:0 0 4px;">📅 ${new Date(event.time).toLocaleString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true })}</p>
+                <p style="color:#555; margin:0 0 4px;">📅 ${new Date(event.time).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</p>
                 <p style="color:#555; margin:0;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
             </div>
             <p style="color:#555; white-space:pre-wrap;">${msg}</p>
@@ -2630,7 +2628,7 @@ setInterval(async () => {
         const hours = e.reminderHoursBefore ?? 24;
         const eventMs = new Date(e.time).getTime();
         const windowStart = now + (hours - 1) * 60 * 60 * 1000;
-        const windowEnd   = now + (hours + 1) * 60 * 60 * 1000;
+        const windowEnd = now + (hours + 1) * 60 * 60 * 1000;
         return eventMs >= windowStart && eventMs <= windowEnd;
     });
 
