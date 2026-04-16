@@ -88,29 +88,32 @@ struct ScannerView: View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: 6) {
-                // Last scan chip
-                ForEach(Array(recentScans.prefix(1).enumerated()), id: \.offset) { idx, scan in
+                // Last scan — tappable card
+                if let last = recentScans.first {
                     Button(action: { showingDetail = true }) {
-                        HStack(spacing: 8) {
-                            let isGreen = scan.status == .success || scan.status == .reentryEnter
-                            Circle()
-                                .fill(isGreen ? Color.green : Color(red: 0.9, green: 0.5, blue: 0.1))
-                                .frame(width: 8, height: 8)
-                            Text(scan.firstName ?? scan.name)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                            Text("· \(scan.title)")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white.opacity(0.55))
-                                .lineLimit(1)
+                        HStack(spacing: 12) {
+                            let isGreen = last.status == .success || last.status == .reentryEnter
+                            Image(systemName: isGreen ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(isGreen ? .green : Color(red: 0.9, green: 0.5, blue: 0.1))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(last.firstName ?? last.name)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                Text(last.title)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
                             Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.35))
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(.black.opacity(0.55), in: Capsule())
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
                     }
-                    .opacity(1.0 - Double(idx) * 0.22)
                 }
                 Button(action: switchToManual) {
                     Label("Manual Check-in", systemImage: "person.text.rectangle")
@@ -248,6 +251,7 @@ struct ScanResult: Equatable {
 
 struct ScanBanner: View {
     let result: ScanResult
+    @State private var iconScale: CGFloat = 0.5
 
     private var color: Color {
         switch result.status {
@@ -266,24 +270,31 @@ struct ScanBanner: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 18) {
             Image(systemName: icon)
-                .font(.system(size: 28, weight: .bold))
+                .font(.system(size: 52, weight: .bold))
                 .foregroundStyle(.white)
-            VStack(alignment: .leading, spacing: 2) {
+                .scaleEffect(iconScale)
+                .onAppear {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
+                        iconScale = 1.0
+                    }
+                }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(result.title.uppercased())
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .tracking(1.0)
                 Text(result.firstName ?? result.name)
-                    .font(.system(size: 19, weight: .bold))
+                    .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Text(result.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.8))
             }
             Spacer()
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
+        .padding(.horizontal, 22)
+        .padding(.top, 18)
+        .padding(.bottom, 22)
         .background(color)
     }
 }
