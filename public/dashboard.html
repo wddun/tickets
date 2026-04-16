@@ -319,9 +319,20 @@
             transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
             user-select: none;
         }
-        .stat-box:hover { border-color: #a5b4fc; box-shadow: 0 2px 8px rgba(99,102,241,0.08); }
-        .stat-box.stat-active { border-color: #6366f1; background: #f5f3ff; }
-        .stat-box.stat-active .stat-label { color: #6366f1; }
+
+        .stat-box:hover {
+            border-color: #a5b4fc;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
+        }
+
+        .stat-box.stat-active {
+            border-color: #6366f1;
+            background: #f5f3ff;
+        }
+
+        .stat-box.stat-active .stat-label {
+            color: #6366f1;
+        }
 
         .stat-num {
             font-size: 30px;
@@ -415,19 +426,45 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
+
         .sort-btn {
-            background: none; border: none; cursor: pointer;
-            font-size: 11px; font-weight: 700; color: #888;
-            text-transform: uppercase; letter-spacing: 0.5px;
-            padding: 0; display: inline-flex; align-items: center; gap: 3px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 700;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
         }
-        .sort-btn:hover { color: #333; }
-        .sort-btn.sort-active { color: #6366f1; }
+
+        .sort-btn:hover {
+            color: #333;
+        }
+
+        .sort-btn.sort-active {
+            color: #6366f1;
+        }
+
         .copy-email-btn {
-            background: none; border: none; cursor: pointer; padding: 1px 4px;
-            color: #bbb; font-size: 11px; border-radius: 4px; line-height: 1;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 1px 4px;
+            color: #bbb;
+            font-size: 11px;
+            border-radius: 4px;
+            line-height: 1;
         }
-        .copy-email-btn:hover { color: #6366f1; background: #f0f0ff; }
+
+        .copy-email-btn:hover {
+            color: #6366f1;
+            background: #f0f0ff;
+        }
 
         .attendee-row.row-selected {
             background: #fef2f2;
@@ -746,6 +783,57 @@
             color: #bbb;
             font-size: 13px;
         }
+
+        /* ── Grid Styles ── */
+        .igr-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 52px 28px;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .igr-inp {
+            width: 100%;
+            padding: 7px 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 13px;
+            outline: none;
+            box-sizing: border-box;
+            background: #fff;
+            transition: border-color 0.1s, background 0.1s;
+        }
+
+        .igr-inp:focus {
+            border-color: #6366f1;
+            z-index: 2;
+        }
+
+        .igr-inp.err {
+            border-color: #ef4444;
+            background: #fef2f2;
+        }
+
+        .igr-qty {
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .igr-del {
+            background: none;
+            border: none;
+            color: #ccc;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .igr-del:hover {
+            color: #dc2626;
+        }
     </style>
 </head>
 
@@ -791,7 +879,8 @@
 
     <!-- Admin Logs Panel (admin only, shown via JS) -->
     <div id="adminLogsPanel" style="display:none;background:#0f172a;border-top:2px solid #1e293b;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px;border-bottom:1px solid #1e293b;">
+        <div
+            style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px;border-bottom:1px solid #1e293b;">
             <span style="color:#94a3b8;font-size:12px;font-weight:600;letter-spacing:.5px;">SERVER LOGS</span>
             <button id="adminLogsToggle" onclick="toggleLogsPanel()"
                 style="background:none;border:none;color:#64748b;cursor:pointer;font-size:13px;padding:2px 6px;">▼</button>
@@ -801,7 +890,8 @@
         </div>
     </div>
 
-    <footer style="text-align:center;padding:10px;font-size:12px;color:#aaa;border-top:1px solid #e8e8e8;background:#fff;">
+    <footer
+        style="text-align:center;padding:10px;font-size:12px;color:#aaa;border-top:1px solid #e8e8e8;background:#fff;">
         &copy; 2026 Will's Tech Support
     </footer>
 
@@ -874,48 +964,59 @@
             </div>
             <div style="margin-bottom:12px;">
                 <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name</label>
-                <input type="text" id="editEventName" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                <input type="text" id="editEventName"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
             </div>
             <div style="margin-bottom:12px;">
                 <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date &amp; Time</label>
-                <input type="datetime-local" id="editEventTime" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                <input type="datetime-local" id="editEventTime"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
             </div>
             <div style="margin-bottom:12px;">
                 <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Accent Color</label>
                 <div style="display:flex;align-items:center;gap:10px;">
-                    <input type="color" id="editEventColor" style="width:44px;height:36px;padding:2px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
+                    <input type="color" id="editEventColor"
+                        style="width:44px;height:36px;padding:2px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
                     <span style="font-size:12px;color:#888;">Used on Apple Wallet pass background</span>
                 </div>
             </div>
             <div style="margin-bottom:12px;">
                 <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name</label>
-                <input type="text" id="editEventLocName" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                <input type="text" id="editEventLocName"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
             </div>
             <div style="margin-bottom:12px;">
                 <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Address</label>
-                <input type="text" id="editEventLocAddress" placeholder="123 Main St, City, State" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                <input type="text" id="editEventLocAddress" placeholder="123 Main St, City, State"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
             </div>
             <div style="display:flex;gap:8px;margin-bottom:16px;">
                 <div style="flex:1;">
                     <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Latitude</label>
-                    <input type="number" step="any" id="editEventLat" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                    <input type="number" step="any" id="editEventLat"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="flex:1;">
                     <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Longitude</label>
-                    <input type="number" step="any" id="editEventLng" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                    <input type="number" step="any" id="editEventLng"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
             </div>
             <div style="margin-bottom:20px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Image <span style="font-weight:400;color:#aaa;">(optional, replaces current)</span></label>
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Image <span
+                        style="font-weight:400;color:#aaa;">(optional, replaces current)</span></label>
                 <div id="editEventImagePreview" style="margin-bottom:8px;"></div>
                 <input type="file" id="editEventImage" accept="image/png,image/jpeg" style="font-size:13px;">
             </div>
-            <div style="margin-bottom:20px;padding:14px;background:#f8f8ff;border:1px solid #e0e0f0;border-radius:10px;">
+            <div
+                style="margin-bottom:20px;padding:14px;background:#f8f8ff;border:1px solid #e0e0f0;border-radius:10px;">
                 <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
-                    <input type="checkbox" id="editEventAllowReentry" style="width:18px;height:18px;accent-color:#6366f1;cursor:pointer;flex-shrink:0;">
+                    <input type="checkbox" id="editEventAllowReentry"
+                        style="width:18px;height:18px;accent-color:#6366f1;cursor:pointer;flex-shrink:0;">
                     <div>
                         <div style="font-size:13px;font-weight:600;">Allow Reentry</div>
-                        <div style="font-size:12px;color:#888;margin-top:2px;">Attendees can exit and re-enter. Scanner must confirm each check-out. QR code stays active on Apple Wallet pass.</div>
+                        <div style="font-size:12px;color:#888;margin-top:2px;">Attendees can exit and re-enter. Scanner
+                            must confirm each check-out. QR code stays active on Apple Wallet pass.</div>
                     </div>
                 </label>
             </div>
@@ -1129,7 +1230,7 @@
         <div class="section-header">
             <div style="display:flex;align-items:center;gap:12px;">
                 <span class="section-title">Attendees</span>
-                <button class="btn btn-primary btn-sm" onclick="openCreateTicketModal()">+ Add Ticket</button>
+                <button class="btn btn-primary btn-sm" onclick="openBulkImportModal()">➕ Add Tickets</button>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
                 <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;">
@@ -1180,8 +1281,8 @@
                 });
             } else if (sortState.field === 'lastname') {
                 result = [...result].sort((a, b) => {
-                    const al = (a.name || '').split(' ').slice(1).join(' ').toLowerCase() || (a.name||'').toLowerCase();
-                    const bl = (b.name || '').split(' ').slice(1).join(' ').toLowerCase() || (b.name||'').toLowerCase();
+                    const al = (a.name || '').split(' ').slice(1).join(' ').toLowerCase() || (a.name || '').toLowerCase();
+                    const bl = (b.name || '').split(' ').slice(1).join(' ').toLowerCase() || (b.name || '').toLowerCase();
                     return sortState.dir === 'asc' ? al.localeCompare(bl) : bl.localeCompare(al);
                 });
             } else if (sortState.field === 'tickets') {
@@ -1234,15 +1335,15 @@
                 } else if (scanned < total) {
                     pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
                 } else if (useReentry) {
-                    const insideCount  = g.tickets.filter(t => (t.reentry_status || 'inside') === 'inside').length;
+                    const insideCount = g.tickets.filter(t => (t.reentry_status || 'inside') === 'inside').length;
                     const outsideCount = g.tickets.filter(t => t.reentry_status === 'outside').length;
                     if (total === 1) {
-                        if (outsideCount === 1)     pill = `<span class="status-pill outside">↓ Outside</span>`;
-                        else                        pill = `<span class="status-pill inside">↑ Inside</span>`;
+                        if (outsideCount === 1) pill = `<span class="status-pill outside">↓ Outside</span>`;
+                        else pill = `<span class="status-pill inside">↑ Inside</span>`;
                     } else {
                         if (insideCount && outsideCount) pill = `<span class="status-pill partial">${insideCount} In · ${outsideCount} Out</span>`;
-                        else if (outsideCount === total)  pill = `<span class="status-pill outside">↓ Outside</span>`;
-                        else                             pill = `<span class="status-pill inside">↑ Inside</span>`;
+                        else if (outsideCount === total) pill = `<span class="status-pill outside">↓ Outside</span>`;
+                        else pill = `<span class="status-pill inside">↑ Inside</span>`;
                     }
                 } else {
                     pill = `<span class="status-pill scanned">✓ Checked In</span>`;
@@ -1425,7 +1526,7 @@
             if (ev.time) {
                 const d = new Date(ev.time);
                 const pad = n => String(n).padStart(2, '0');
-                const local = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
                 document.getElementById('editEventTime').value = local;
             } else {
                 document.getElementById('editEventTime').value = '';
@@ -1904,31 +2005,63 @@
         </div>
     </div>
 
-    <!-- Create Ticket Modal -->
-    <div class="modal-overlay" id="createTicketModal" style="display:none;"
-        onclick="if(event.target===this)closeCreateTicketModal()">
-        <div class="modal" style="max-width:400px;background:#fff;border-radius:14px;">
+    <!-- Bulk Import Modal -->
+    <div class="modal-overlay" id="bulkImportModal" style="display:none;z-index:200;"
+        onclick="if(event.target===this)closeBulkImportModal()">
+        <div class="modal" style="max-width:560px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
-                <h2>Add Ticket</h2>
-                <button class="modal-close" onclick="closeCreateTicketModal()">&times;</button>
+                <h2>➕ Add Tickets</h2>
+                <button class="modal-close" onclick="closeBulkImportModal()">&times;</button>
             </div>
-            <div style="margin-bottom:12px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Name</label>
-                <input type="text" id="createTicketName"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+
+            <!-- Hint + CSV upload button -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:12px;">
+                <div style="font-size:12px;color:#888;line-height:1.5;">
+                    Type or paste names and emails. <strong>Tab</strong> between fields, <strong>Tab from Qty</strong>
+                    adds a row, <strong>Enter</strong> to import.
+                </div>
+                <label
+                    style="flex-shrink:0;display:flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid #c4b5fd;border-radius:6px;color:#6366f1;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                    📄 CSV
+                    <input type="file" id="importCsvFile" accept=".csv,text/csv" style="display:none;"
+                        onchange="handleCsvFile(this)">
+                </label>
             </div>
-            <div style="margin-bottom:12px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Email</label>
-                <input type="email" id="createTicketEmail"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+
+            <!-- Column headers -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 52px 28px;gap:4px;margin-bottom:4px;padding:0 2px;">
+                <div
+                    style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
+                    Name</div>
+                <div
+                    style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
+                    Email</div>
+                <div
+                    style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;text-align:center;">
+                    Qty</div>
+                <div></div>
             </div>
-            <div style="margin-bottom:20px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Quantity</label>
-                <input type="number" id="createTicketCount" value="1" min="1"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;" />
+
+            <!-- Grid rows -->
+            <div id="importRowsContainer"
+                style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
+
+            <!-- Invalid row warning -->
+            <div id="importValidationMsg" style="margin-top:8px;font-size:12px;color:#ef4444;min-height:16px;"></div>
+
+            <!-- Options -->
+            <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" id="importNoEmail" style="accent-color:#6366f1;width:15px;height:15px;">
+                <label for="importNoEmail" style="font-size:13px;color:#555;cursor:pointer;">Don't send emails (add
+                    silently)</label>
             </div>
-            <div id="createTicketCustomFields" style="margin-bottom:20px;"></div>
-            <button class="btn btn-primary" style="width:100%;" onclick="submitCreateTicket()">Create Ticket</button>
+
+            <div style="display:flex;gap:8px;margin-top:14px;">
+                <button id="importSubmitBtn" class="btn btn-primary" style="flex:1;" onclick="submitBulkImport(this)"
+                    disabled>Import</button>
+                <button class="btn btn-secondary" onclick="closeBulkImportModal()">Cancel</button>
+            </div>
+            <div id="importResultMsg" style="margin-top:10px;font-size:13px;text-align:center;"></div>
         </div>
     </div>
 
@@ -1939,7 +2072,8 @@
             <div class="modal-header">
                 <h2>Edit Registration</h2>
                 <div style="display:flex;align-items:center;gap:8px;">
-                    <button class="btn btn-secondary" style="padding:5px 12px;font-size:13px;" onclick="printTicketEmail()">Print</button>
+                    <button class="btn btn-secondary" style="padding:5px 12px;font-size:13px;"
+                        onclick="printTicketEmail()">Print</button>
                     <button class="modal-close" onclick="closeEditTicketModal()">&times;</button>
                 </div>
             </div>
@@ -1961,12 +2095,15 @@
             <input type="hidden" id="editTicketId" />
             <input type="hidden" id="editRegId" />
             <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket(false)">Save &amp; Resend</button>
+                <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket(false)">Save &amp;
+                    Resend</button>
                 <button class="btn btn-secondary" style="flex:1;" onclick="submitEditTicket(true)">Save Only</button>
                 <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Only</button>
             </div>
-            <button class="btn btn-secondary" style="width:100%;margin-top:4px;" onclick="openDirectEmailModal()">Send Email</button>
-            <button class="btn btn-danger" style="width:100%;margin-top:4px;" onclick="deleteRegistrationFromModal()">Delete Registration</button>
+            <button class="btn btn-secondary" style="width:100%;margin-top:4px;" onclick="openDirectEmailModal()">Send
+                Email</button>
+            <button class="btn btn-danger" style="width:100%;margin-top:4px;"
+                onclick="deleteRegistrationFromModal()">Delete Registration</button>
             <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:#666;"></div>
         </div>
     </div>
@@ -2090,37 +2227,197 @@
             }
         }
 
-        function openCreateTicketModal() {
-            document.getElementById('createTicketName').value = '';
-            document.getElementById('createTicketEmail').value = '';
-            document.getElementById('createTicketCount').value = '1';
-            renderCustomFieldsInputs('createTicketCustomFields');
-            document.getElementById('createTicketModal').style.display = 'flex';
-        }
-        function closeCreateTicketModal() {
-            document.getElementById('createTicketModal').style.display = 'none';
-        }
-        async function submitCreateTicket() {
-            const name = document.getElementById('createTicketName').value;
-            const email = document.getElementById('createTicketEmail').value;
-            const ticketCount = document.getElementById('createTicketCount').value;
-            const customFields = getCustomFieldsValues('createTicketCustomFields');
+        // ── Bulk Import / Grid Entry Logic ──
 
-            if (!name || !email) return alert('Name and email required');
-            const r = await fetch('/api/event/' + selectedId + '/ticket', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email, ticketCount, customFields })
+        function openBulkImportModal() {
+            const container = document.getElementById('importRowsContainer');
+            container.innerHTML = '';
+            document.getElementById('importValidationMsg').textContent = '';
+            document.getElementById('importResultMsg').textContent = '';
+            document.getElementById('importNoEmail').checked = false;
+            document.getElementById('importSubmitBtn').disabled = false;
+            document.getElementById('importSubmitBtn').textContent = 'Import';
+
+            // Start with one blank row
+            makeImportRow();
+            document.getElementById('bulkImportModal').style.display = 'flex';
+
+            // Focus first name field
+            setTimeout(() => {
+                const first = container.querySelector('input');
+                if (first) first.focus();
+            }, 100);
+        }
+
+        function closeBulkImportModal() {
+            document.getElementById('bulkImportModal').style.display = 'none';
+        }
+
+        function makeImportRow(data = {}) {
+            const container = document.getElementById('importRowsContainer');
+            const row = document.createElement('div');
+            row.className = 'igr-row';
+            row.innerHTML = `
+                <input type="text" class="igr-inp igr-name" placeholder="Full Name" value="${esc(data.name || '')}">
+                <input type="text" class="igr-inp igr-email" placeholder="email@example.com" value="${esc(data.email || '')}">
+                <input type="number" class="igr-inp igr-qty" value="${data.qty || 1}" min="1">
+                <button class="igr-del" onclick="this.closest('.igr-row').remove(); syncImportBtn()">&times;</button>
+            `;
+
+            // Tab logic
+            const q = row.querySelector('.igr-qty');
+            q.onkeydown = (e) => {
+                if (e.key === 'Tab' && !e.shiftKey) {
+                    // If this is the last row, make a new one
+                    if (!row.nextElementSibling) {
+                        e.preventDefault();
+                        makeImportRow();
+                    }
+                }
+            };
+
+            // Enter logic
+            row.querySelectorAll('input').forEach(inp => {
+                inp.onkeydown = (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        submitBulkImport(document.getElementById('importSubmitBtn'));
+                    }
+                };
             });
-            const data = await r.json();
-            if (r.ok) {
-                closeCreateTicketModal();
-                const event = events.find(e => e.id === selectedId);
-                fetchAndRender(event, true);
-                alert('Ticket(s) created! Bundle has been sent by email.');
-            } else {
-                alert(data.error || 'Failed to create ticket');
+
+            // Paste logic on name/email
+            const handlePaste = (e) => {
+                const text = (e.clipboardData || window.clipboardData).getData('text');
+                if (text.includes('\t') || text.includes('\n')) {
+                    e.preventDefault();
+                    parseImportText(text, row);
+                }
+            };
+            row.querySelector('.igr-name').onpaste = handlePaste;
+            row.querySelector('.igr-email').onpaste = handlePaste;
+
+            container.appendChild(row);
+            row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            syncImportBtn();
+            return row;
+        }
+
+        function syncImportBtn() {
+            const btn = document.getElementById('importSubmitBtn');
+            const rows = document.querySelectorAll('#importRowsContainer .igr-row');
+            btn.disabled = rows.length === 0;
+        }
+
+        function parseImportText(text, targetRow) {
+            const lines = text.split(/\r?\n/).filter(l => l.trim());
+            if (!lines.length) return;
+
+            const rowsData = lines.map(line => {
+                const parts = line.split('\t');
+                if (parts.length >= 2) return { name: parts[0].trim(), email: parts[1].trim(), qty: parseInt(parts[2]) || 1 };
+                // fallback to comma if no tabs
+                const cParts = splitLine(line);
+                if (cParts.length >= 2) return { name: cParts[0], email: cParts[1], qty: parseInt(cParts[2]) || 1 };
+                return { name: line.trim(), email: '', qty: 1 };
+            });
+
+            // First row fills targetRow
+            const first = rowsData.shift();
+            targetRow.querySelector('.igr-name').value = first.name;
+            targetRow.querySelector('.igr-email').value = first.email;
+            targetRow.querySelector('.igr-qty').value = first.qty;
+
+            // Subsequent rows append
+            rowsData.forEach(d => makeImportRow(d));
+        }
+
+        function splitLine(line) {
+            // Simple CSV split
+            const parts = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') inQuotes = !inQuotes;
+                else if (char === ',' && !inQuotes) { parts.push(current.trim()); current = ''; }
+                else current += char;
             }
+            parts.push(current.trim());
+            return parts;
+        }
+
+        function handleCsvFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                parseImportText(e.target.result, document.querySelectorAll('#importRowsContainer .igr-row')[0] || makeImportRow());
+                input.value = ''; // Reset
+            };
+            reader.readAsText(file);
+        }
+
+        async function submitBulkImport(btn) {
+            const container = document.getElementById('importRowsContainer');
+            const rows = [...container.querySelectorAll('.igr-row')];
+            const msg = document.getElementById('importValidationMsg');
+            msg.textContent = '';
+
+            // Validation
+            let hasError = false;
+            const validData = [];
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+            rows.forEach(row => {
+                const nameInp = row.querySelector('.igr-name');
+                const emailInp = row.querySelector('.igr-email');
+                const qtyInp = row.querySelector('.igr-qty');
+
+                nameInp.classList.remove('err');
+                emailInp.classList.remove('err');
+
+                const name = nameInp.value.trim();
+                const email = emailInp.value.trim();
+                const qty = parseInt(qtyInp.value) || 0;
+
+                let rowErr = false;
+                if (!name) { nameInp.classList.add('err'); rowErr = true; }
+                if (!email || !emailRegex.test(email)) { emailInp.classList.add('err'); rowErr = true; }
+                if (qty <= 0) { qtyInp.classList.add('err'); rowErr = true; }
+
+                if (rowErr) hasError = true;
+                else validData.push({ name, email, ticketCount: qty });
+            });
+
+            if (hasError) {
+                msg.textContent = 'Please fix the fields in red.';
+                return;
+            }
+            if (!validData.length) return;
+
+            btn.disabled = true;
+            const noEmail = document.getElementById('importNoEmail').checked;
+            const resMsg = document.getElementById('importResultMsg');
+
+            let successCount = 0;
+            for (let i = 0; i < validData.length; i++) {
+                resMsg.textContent = `Importing ${i + 1} of ${validData.length}…`;
+                try {
+                    const r = await fetch(`/api/event/${selectedId}/ticket`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...validData[i], noEmail })
+                    });
+                    if (r.ok) successCount++;
+                } catch (e) { }
+            }
+
+            resMsg.innerHTML = `<span style="color:#059669;font-weight:600;">✓ Successfully added ${successCount} registrations.</span>`;
+            setTimeout(() => {
+                closeBulkImportModal();
+                loadEvents(); // Refresh data
+            }, 1000);
         }
 
         function openEditTicketModal(regId, tickets) {
@@ -2137,7 +2434,7 @@
 
             // Build ticket QR preview
             const preview = document.getElementById('editTicketPreview');
-            const createdStr = t.created_at ? new Date(t.created_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : null;
+            const createdStr = t.created_at ? new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
 
             const renderTicketCard = (tk, i, showLarge) => {
                 const checkedIn = !!tk.used_at;
@@ -2162,7 +2459,7 @@
                     ? `<button onclick="toggleTicketInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Undo Check-in</button>`
                     : `<button onclick="toggleTicketInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#d1fae5;color:#065f46;border:none;border-radius:6px;cursor:pointer;">Mark Checked In</button>`;
                 const size = showLarge ? 120 : 80;
-                const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:4px;">Ticket ${i+1}</div>` : '';
+                const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:4px;">Ticket ${i + 1}</div>` : '';
                 return `<div style="text-align:center;">
                     ${label}
                     <img src="/qr/${tk.token}" style="width:${size}px;height:${size}px;display:block;margin:0 auto 6px;" />
@@ -2183,7 +2480,7 @@
                 <span>${createdStr ? `Registered ${createdStr}` : ''}</span>
                 <div style="display:flex;gap:6px;align-items:center;">
                     ${emailBadge}
-                    <button class="copy-email-btn" onclick="copyToClipboard('${esc(t.email||'')}', this)" title="Copy email">📋 Copy</button>
+                    <button class="copy-email-btn" onclick="copyToClipboard('${esc(t.email || '')}', this)" title="Copy email">📋 Copy</button>
                 </div>
             </div>`;
 
@@ -2286,10 +2583,10 @@
             if (!el) return;
             el.innerHTML = logs.map(l => {
                 const isErr = l.msg.includes('❌') || l.tag.includes('error');
-                const isOk  = l.msg.includes('✅') || l.msg.includes('📧') || l.msg.includes('✓');
+                const isOk = l.msg.includes('✅') || l.msg.includes('📧') || l.msg.includes('✓');
                 const color = isErr ? '#f87171' : isOk ? '#34d399' : '#cbd5e1';
                 return `<div style="color:${color};font-size:11px;padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(l.msg)}">`
-                    + `<span style="color:#64748b;">${l.time.replace('T',' ').replace('Z','')}</span> `
+                    + `<span style="color:#64748b;">${l.time.replace('T', ' ').replace('Z', '')}</span> `
                     + `<span style="color:#818cf8;">[${esc(l.tag)}]</span> ${esc(l.msg)}`
                     + `</div>`;
             }).join('') || '<div style="color:#64748b;font-size:11px;">No logs yet.</div>';
@@ -2297,7 +2594,7 @@
 
         function toggleLogsPanel() {
             const body = document.getElementById('adminLogsBody');
-            const btn  = document.getElementById('adminLogsToggle');
+            const btn = document.getElementById('adminLogsToggle');
             const collapsed = body.style.display === 'none';
             body.style.display = collapsed ? 'block' : 'none';
             btn.textContent = collapsed ? '▼' : '▲';
