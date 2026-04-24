@@ -1,130 +1,141 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register | TicketCheckin</title>
+    <title>Register | WTS Tickets</title>
+    <meta name="theme-color" content="#1a1f3c">
     <link rel="stylesheet" href="style.css">
-</head>
+    <style>
+        body { background: #f4f5f8; }
+        .container { max-width: 480px; padding: 24px 16px 40px; }
 
+        .event-header {
+            text-align: center; margin-bottom: 6px;
+        }
+        .event-name { font-size: 22px; font-weight: 800; color: #1a1f3c; margin-bottom: 4px; }
+        .event-meta { font-size: 14px; color: #64748b; }
+
+        .success-box {
+            background: #fff; border: 1px solid #dde3ed;
+            border-radius: 14px; padding: 28px 20px;
+            text-align: center;
+        }
+        .success-icon { font-size: 44px; margin-bottom: 12px; }
+        .success-title { font-size: 20px; font-weight: 800; color: #1a1f3c; margin-bottom: 6px; }
+        .success-sub   { font-size: 14px; color: #64748b; margin-bottom: 22px; }
+
+        .qr-img {
+            width: min(180px, 70vw); height: min(180px, 70vw);
+            border-radius: 12px; border: 4px solid #fff;
+            box-shadow: 0 4px 16px rgba(0,0,0,.1);
+            margin: 0 auto 14px; display: block;
+        }
+        .ticket-token {
+            font-size: 12px; font-family: monospace;
+            color: #94a3b8; margin-bottom: 20px;
+        }
+        .wallet-link { display: inline-block; margin-bottom: 16px; }
+        .wallet-link img { height: 44px; display: block; }
+
+        .btn-outline {
+            background: #f4f5f8; color: #1a1f3c;
+            border: 1.5px solid #dde3ed;
+            font-size: 15px;
+        }
+        .btn-outline:hover { background: #e8ecf4; }
+
+        @media (max-width: 480px) {
+            .container { padding: 16px 12px 32px; }
+        }
+    </style>
+</head>
 <body>
     <div class="container">
         <div class="card">
-            <div class="header">
-                <h1 id="eventTitle">TicketCheckin</h1>
-                <p id="eventDesc">Register for the event and get your unique ticket.</p>
+            <div id="formView">
+                <div class="event-header">
+                    <div class="event-name" id="eventTitle">Loading…</div>
+                    <div class="event-meta" id="eventDesc"></div>
+                </div>
+                <form id="registerForm" style="margin-top:24px;">
+                    <div class="form-group">
+                        <label for="name">Full Name</label>
+                        <input type="text" id="name" placeholder="Jane Smith" required autocomplete="name">
+                    </div>
+                    <div class="form-group">
+                        <label for="email">Email Address</label>
+                        <input type="email" id="email" placeholder="jane@example.com" required autocomplete="email">
+                    </div>
+                    <button type="submit" id="submitBtn">Get My Ticket</button>
+                </form>
             </div>
 
-            <form id="registerForm">
-                <div class="form-group">
-                    <label for="name">Full Name</label>
-                    <input type="text" id="name" placeholder="John Doe" required>
-                </div>
-                <div class="form-group">
-                    <label for="email">Email Address</label>
-                    <input type="email" id="email" placeholder="john@example.com" required>
-                </div>
-                <button type="submit" id="submitBtn">Generate Ticket</button>
-            </form>
-
-            <div id="result" class="qr-result" style="display: none;">
-                <h3 style="margin-bottom: 12px;">You're In! 🎉</h3>
-                <p style="margin-bottom: 20px; font-size: 14px; color: var(--text-muted);">
-                    An email has been sent to you. You can also save this QR code:
-                </p>
-                <img id="qrImage" src="" alt="QR Code">
-                <p style="margin-top: 12px; font-weight: 700;" id="ticketName"></p>
-
-                <div style="text-align: center; margin-top: 20px;">
-                    <a id="appleWalletLink" href="#" style="display: inline-block;">
-                        <img src="/apple-wallet-badge.png" alt="Add to Apple Wallet"
-                            style="height: 40px; border: none; box-shadow: none;">
+            <div id="successView" style="display:none;">
+                <div class="success-box">
+                    <div class="success-icon">🎉</div>
+                    <div class="success-title">You're registered!</div>
+                    <div class="success-sub">A confirmation email has been sent to you with your QR code.</div>
+                    <img id="qrImage" class="qr-img" src="" alt="QR Code">
+                    <div class="ticket-token" id="ticketToken"></div>
+                    <a id="appleWalletLink" href="#" class="wallet-link">
+                        <img src="/apple-wallet-badge.png" alt="Add to Apple Wallet">
                     </a>
+                    <button class="btn-outline" onclick="window.location.reload()">Register Another Person</button>
                 </div>
-
-                <button onclick="window.location.reload()"
-                    style="margin-top: 24px; background: #eee; color: #333;">Register Another</button>
             </div>
         </div>
 
         <div class="nav">
-            <a href="scanner.html">Go to Scanner →</a>
+            <a href="/">Home</a>
+            <a href="scanner.html">Scanner →</a>
         </div>
     </div>
 
     <script>
-        const form = document.getElementById('registerForm');
-        const submitBtn = document.getElementById('submitBtn');
-        const result = document.getElementById('result');
-        const qrImage = document.getElementById('qrImage');
-        const ticketName = document.getElementById('ticketName');
-        const eventTitle = document.getElementById('eventTitle');
-        const eventDesc = document.getElementById('eventDesc');
+        const params  = new URLSearchParams(window.location.search);
+        const eventId = params.get('id');
+        if (!eventId) { alert('No Event ID provided.'); window.location.href = '/'; }
 
-        // Detect event ID from URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const eventId = urlParams.get('id');
-
-        if (!eventId) {
-            alert('No Event ID provided. Redirecting to home.');
-            window.location.href = '/';
-        }
-
-        // Load Event Info
         async function loadEvent() {
             try {
-                const res = await fetch(`/api/event/${eventId}`);
-                if (!res.ok) throw new Error('Event not found');
+                const res   = await fetch(`/api/event/${eventId}`);
+                if (!res.ok) throw new Error();
                 const event = await res.json();
-                eventTitle.textContent = event.name;
-                eventDesc.textContent = `Register for ${event.location.name} on ${new Date(event.time).toLocaleString()}`;
-                document.title = `${event.name} - Registration`;
-            } catch (err) {
-                console.error('Error loading event:', err);
+                document.getElementById('eventTitle').textContent = event.name;
+                document.getElementById('eventDesc').textContent  =
+                    `${event.location?.name || ''} · ${new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+                document.title = `Register — ${event.name}`;
+            } catch {
                 alert('Event not found or has been removed.');
                 window.location.href = '/';
             }
         }
         loadEvent();
 
-        form.onsubmit = async (e) => {
+        document.getElementById('registerForm').onsubmit = async e => {
             e.preventDefault();
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Processing...';
-
-            const payload = {
-                name: document.getElementById('name').value,
-                email: document.getElementById('email').value,
-                eventId: eventId
-            };
-
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true; btn.textContent = 'Processing…';
             try {
-                const res = await fetch('/api/register', {
+                const res  = await fetch('/api/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify({ name: document.getElementById('name').value, email: document.getElementById('email').value, eventId })
                 });
-
                 const data = await res.json();
-
                 if (data.success) {
-                    form.style.display = 'none';
-                    result.style.display = 'block';
-                    qrImage.src = data.qr;
-                    ticketName.textContent = data.ticket.name;
-                    document.getElementById('appleWalletLink').href = `/api/pass/${data.ticket.token}.pkpass`;
+                    document.getElementById('formView').style.display    = 'none';
+                    document.getElementById('successView').style.display = 'block';
+                    document.getElementById('qrImage').src               = data.qr;
+                    document.getElementById('ticketToken').textContent   = data.ticket.token;
+                    document.getElementById('appleWalletLink').href      = `/api/pass/${data.ticket.token}.pkpass`;
                 } else {
                     alert('Error: ' + data.error);
                 }
-            } catch (err) {
-                alert('Connection error. Please try again.');
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Generate Ticket';
-            }
+            } catch { alert('Connection error. Please try again.'); }
+            finally  { btn.disabled = false; btn.textContent = 'Get My Ticket'; }
         };
     </script>
 </body>
-
 </html>
