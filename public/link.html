@@ -111,7 +111,7 @@
         }
 
         .center-state { text-align: center; padding: 12px 0; }
-        .state-icon   { font-size: 44px; margin-bottom: 14px; }
+        .state-icon   { width: 52px; height: 52px; margin: 0 auto 14px; display: block; }
         .state-title  { font-size: 20px; font-weight: 700; color: #1a1f3c; margin-bottom: 8px; }
         .state-sub    { color: #64748b; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
 
@@ -123,7 +123,7 @@
 </head>
 <body>
     <nav>
-        <a href="/"><img src="/logo.png" alt="Will's Tech Support"></a>
+        <a href="/"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
         <a href="/">← Home</a>
     </nav>
     <div class="page-body">
@@ -133,17 +133,17 @@
 
             <!-- Error -->
             <div id="errorState" class="hidden center-state">
-                <div class="state-icon">❌</div>
+                <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                 <div class="state-title">Link Not Found</div>
                 <p class="state-sub" id="errorMessage">This link may have expired or is invalid.</p>
             </div>
 
             <!-- Main form -->
             <div id="linkForm" class="hidden">
-                <div class="card-icon">🔗</div>
+                <div class="card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
                 <h1 id="pageTitle">Link Sheet to Account</h1>
                 <p class="subtitle" id="pageSubtitle">Connect this event sheet to your account to manage it from your dashboard.</p>
-                <div class="event-badge"><span>🎟️</span><span id="eventName">Loading…</span></div>
+                <div class="event-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg><span id="eventName">Loading…</span></div>
 
                 <div id="loginSection">
                     <div class="form-group">
@@ -161,14 +161,14 @@
 
                 <div id="claimSection" class="hidden">
                     <p class="logged-in-note">You're logged in as <strong id="currentEmail"></strong></p>
-                    <button class="btn btn-success" onclick="claimLink()">🔗 Link to My Account</button>
+                    <button class="btn btn-success" onclick="claimLink()">Link to My Account</button>
                     <button class="btn btn-outline" onclick="logoutAndSwitch()">Use a different account</button>
                 </div>
             </div>
 
             <!-- Already linked -->
             <div id="alreadyLinked" class="hidden center-state">
-                <div class="state-icon">✅</div>
+                <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
                 <div class="state-title">Already Linked!</div>
                 <p class="state-sub">This sheet is already connected to your account.</p>
                 <a href="/dashboard.html" class="btn btn-primary" style="display:block;text-align:center;text-decoration:none;">Go to Dashboard</a>
@@ -176,7 +176,7 @@
 
             <!-- Success -->
             <div id="successState" class="hidden center-state">
-                <div class="state-icon">🎉</div>
+                <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="#1a1f3c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                 <div class="state-title">Successfully Linked!</div>
                 <p class="state-sub">This event sheet is now connected to your account.</p>
                 <a href="/dashboard.html" class="btn btn-primary" style="display:block;text-align:center;text-decoration:none;">View in Dashboard</a>

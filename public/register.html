@@ -21,7 +21,7 @@
             border-radius: 14px; padding: 28px 20px;
             text-align: center;
         }
-        .success-icon { font-size: 44px; margin-bottom: 12px; }
+        .success-icon { width: 52px; height: 52px; margin: 0 auto 12px; display: block; }
         .success-title { font-size: 20px; font-weight: 800; color: #1a1f3c; margin-bottom: 6px; }
         .success-sub   { font-size: 14px; color: #64748b; margin-bottom: 22px; }
 
@@ -73,7 +73,7 @@
 
             <div id="successView" style="display:none;">
                 <div class="success-box">
-                    <div class="success-icon">🎉</div>
+                    <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
                     <div class="success-title">You're registered!</div>
                     <div class="success-sub">A confirmation email has been sent to you with your QR code.</div>
                     <img id="qrImage" class="qr-img" src="" alt="QR Code">

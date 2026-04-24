@@ -462,6 +462,52 @@
             padding: 40px 20px;
             font-size: 14px;
         }
+
+        /* ── iOS-style tab bar ── */
+        .tab-bar {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            z-index: 25;
+            display: none;
+            flex-direction: column;
+            background: rgba(10,10,10,0.88);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .tab-bar-inner {
+            display: flex;
+            height: 49px;
+        }
+        .tab-bar-safe {
+            height: env(safe-area-inset-bottom, 0px);
+        }
+        .tab-btn {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.4);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: color 0.15s;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .tab-btn.active { color: #fff; }
+        .tab-btn svg { width: 22px; height: 22px; }
+
+        body.has-tab-bar #recentScans {
+            bottom: calc(49px + env(safe-area-inset-bottom, 0px) + 16px);
+        }
+        body.has-tab-bar #iosBanner {
+            bottom: calc(49px + env(safe-area-inset-bottom, 0px) + 12px);
+        }
     </style>
 </head>
 <body>
@@ -511,16 +557,30 @@
 <div id="iosBanner" style="display:none; position:fixed; bottom:calc(env(safe-area-inset-bottom,0px) + 84px); left:14px; right:14px; z-index:30; background:rgba(28,28,30,0.96); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-radius:16px; padding:14px 16px; border:1px solid rgba(255,255,255,0.12); box-shadow:0 8px 32px rgba(0,0,0,0.5);">
     <button onclick="dismissIOSBanner()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:rgba(255,255,255,0.45);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px;">×</button>
     <div style="display:flex;align-items:center;gap:12px;">
-        <div style="font-size:30px;flex-shrink:0;">🎟️</div>
+        <div style="flex-shrink:0;width:36px;height:36px;background:#c4294a;border-radius:9px;display:flex;align-items:center;justify-content:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg></div>
         <div>
             <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:3px;">Add to Home Screen</div>
             <div style="font-size:12px;color:rgba(255,255,255,0.55);line-height:1.5;">Tap <svg style="display:inline;vertical-align:middle;margin:0 2px;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> then <strong style="color:#fff;">"Add to Home Screen"</strong></div>
         </div>
     </div>
-    <!-- Downward arrow pointing toward iOS share bar -->
     <div style="position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);width:14px;height:8px;overflow:hidden;">
         <div style="width:14px;height:14px;background:rgba(28,28,30,0.96);border:1px solid rgba(255,255,255,0.12);transform:rotate(45deg);transform-origin:top left;margin-left:1px;"></div>
     </div>
+</div>
+
+<!-- iOS-style tab bar (shown when logged in) -->
+<div class="tab-bar" id="tabBar">
+    <div class="tab-bar-inner">
+        <button class="tab-btn active" id="tabScanner" onclick="switchTab('scanner')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+            Scanner
+        </button>
+        <button class="tab-btn" id="tabList" onclick="switchTab('list')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            Check-In
+        </button>
+    </div>
+    <div class="tab-bar-safe"></div>
 </div>
 
 <!-- Backdrop for list sheet only -->
@@ -593,7 +653,8 @@ let pendingCheckoutToken = null;
 
     if (isLoggedIn) {
         document.getElementById('roomWrap').style.display = 'block';
-        document.getElementById('listBtn').style.display  = 'block';
+        document.getElementById('tabBar').style.display   = 'flex';
+        document.body.classList.add('has-tab-bar');
         await loadEvents();
     } else {
         document.getElementById('signInBtn').style.display = 'block';
@@ -637,6 +698,7 @@ async function openList() {
 
     document.getElementById('listBackdrop').classList.add('show');
     document.getElementById('listSheet').classList.add('show');
+    setActiveTab('list');
 
     if (ev) await loadAttendees(ev.id);
 }
@@ -644,6 +706,23 @@ async function openList() {
 function closeList() {
     document.getElementById('listBackdrop').classList.remove('show');
     document.getElementById('listSheet').classList.remove('show');
+    setActiveTab('scanner');
+}
+
+function switchTab(tab) {
+    if (tab === 'list') {
+        openList();
+    } else {
+        closeList();
+    }
+}
+
+function setActiveTab(tab) {
+    const ts = document.getElementById('tabScanner');
+    const tl = document.getElementById('tabList');
+    if (!ts) return;
+    ts.classList.toggle('active', tab === 'scanner');
+    tl.classList.toggle('active', tab === 'list');
 }
 
 async function openListFromResult() {
@@ -932,6 +1011,7 @@ function onScanSuccess(decodedText) {
 }
 
 // ── Camera ────────────────────────────────────────────────
+function startCamera() { /* camera is started inline below */ }
 const scanner = new Html5Qrcode('reader');
 scanner.start(
     { facingMode: 'environment' },
