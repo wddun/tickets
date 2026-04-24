@@ -968,8 +968,13 @@
                     style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
             </div>
             <div style="margin-bottom:12px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date &amp; Time</label>
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Start Date &amp; Time</label>
                 <input type="datetime-local" id="editEventTime"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Date &amp; Time <span style="font-weight:400;color:#aaa;">(optional — for multi-day events)</span></label>
+                <input type="datetime-local" id="editEventEndTime"
                     style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
             </div>
             <div style="margin-bottom:12px;">
@@ -1088,7 +1093,7 @@
                 onclick="event.stopPropagation(); toggleEventCheck('${e.id}', this.checked)">
             <div class="event-card-body">
                 <div class="event-card-name">${esc(e.name)}</div>
-                <div class="event-card-meta">${fmtDate(e.time)}</div>
+                <div class="event-card-meta">${fmtDateRange(e.time, e.endTime)}</div>
                 <div class="event-card-meta">${esc(e.location?.name || '')}</div>
                 ${total > 0 ? `<span class="event-card-badge${allDone ? ' all-clear' : ''}">${scanned}/${total} checked in</span>` : ''}
             </div>
@@ -1195,7 +1200,7 @@
             <div style="flex:1;">
                 <div class="detail-title">${esc(event.name)}</div>
                 <div class="detail-meta">
-                    📅 ${fmtDate(event.time)}<br>
+                    📅 ${fmtDateRange(event.time, event.endTime)}<br>
                     📍 ${esc(event.location?.name || '')}${event.location?.address ? ' — ' + esc(event.location.address) : ''}
                 </div>
                 <div class="detail-actions">
@@ -1523,14 +1528,14 @@
             document.getElementById('editEventId').value = id;
             document.getElementById('editEventName').value = ev.name || '';
             // Convert stored time to local datetime-local format (not UTC)
-            if (ev.time) {
-                const d = new Date(ev.time);
+            const toLocalDT = (iso) => {
+                if (!iso) return '';
+                const d = new Date(iso);
                 const pad = n => String(n).padStart(2, '0');
-                const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-                document.getElementById('editEventTime').value = local;
-            } else {
-                document.getElementById('editEventTime').value = '';
-            }
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            };
+            document.getElementById('editEventTime').value = toLocalDT(ev.time);
+            document.getElementById('editEventEndTime').value = toLocalDT(ev.endTime);
             // Color: convert "rgb(r, g, b)" or hex to #rrggbb for color input
             const colorRaw = ev.color || '#6366f1';
             const hexColor = colorRaw.startsWith('rgb')
@@ -1558,6 +1563,7 @@
             const id = document.getElementById('editEventId').value;
             const name = document.getElementById('editEventName').value.trim();
             const time = document.getElementById('editEventTime').value;
+            const endTime = document.getElementById('editEventEndTime').value;
             const colorHex = document.getElementById('editEventColor').value;
             const locationName = document.getElementById('editEventLocName').value.trim();
             const locationAddress = document.getElementById('editEventLocAddress').value.trim();
@@ -1575,12 +1581,14 @@
 
             // Convert datetime-local (local time, no tz) back to full ISO string
             const timeISO = time ? new Date(time).toISOString() : '';
+            const endTimeISO = endTime ? new Date(endTime).toISOString() : '';
 
             const allowReentry = document.getElementById('editEventAllowReentry').checked;
 
             const fd = new FormData();
             fd.append('name', name);
             fd.append('time', timeISO);
+            fd.append('endTime', endTimeISO);
             fd.append('color', color);
             fd.append('locationName', locationName);
             fd.append('locationAddress', locationAddress);
@@ -1710,7 +1718,8 @@
                 if (!r.ok) return '';
                 const d = await r.json();
                 const eventObj = events.find(e => e.id === eventId);
-                const isPast = eventObj && new Date(eventObj.time) < new Date();
+                const eventEnd = eventObj && (eventObj.endTime || eventObj.time);
+                const isPast = eventObj && new Date(eventEnd) < new Date();
                 let statusText = '';
                 if (d.sentAt) {
                     statusText = `<span style="color:#10b981;font-size:12px;">✓ Sent ${fmtDate(d.sentAt)}</span>`;
@@ -1983,6 +1992,13 @@
         }
         function fmtDate(t) {
             return new Date(t).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+        }
+        function fmtDateRange(startISO, endISO) {
+            const start = new Date(startISO);
+            const end = endISO ? new Date(endISO) : null;
+            if (!end || isNaN(end.getTime())) return fmtDate(startISO);
+            const opts = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' };
+            return `${start.toLocaleString(undefined, opts)} – ${end.toLocaleString(undefined, opts)}`;
         }
 
         init();
