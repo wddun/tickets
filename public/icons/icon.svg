@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#a855f7"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- Ticket shape -->
+  <path d="M112 176 a16 16 0 0 1 16-16 h256 a16 16 0 0 1 16 16 v48 a32 32 0 0 0 0 64 v48 a16 16 0 0 1-16 16 H128 a16 16 0 0 1-16-16 v-48 a32 32 0 0 0 0-64 Z"
+        fill="rgba(255,255,255,0.2)" stroke="rgba(255,255,255,0.6)" stroke-width="4"/>
+  <!-- Perforated line -->
+  <line x1="112" y1="288" x2="400" y2="288" stroke="rgba(255,255,255,0.4)" stroke-width="3" stroke-dasharray="10,8"/>
+  <!-- Star/checkmark -->
+  <text x="256" y="258" font-family="-apple-system,sans-serif" font-size="80" font-weight="700"
+        fill="white" text-anchor="middle" dominant-baseline="middle">🎟</text>
+</svg>

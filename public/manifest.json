@@ -1,0 +1,25 @@
+{
+  "name": "WTS Tickets",
+  "short_name": "WTS Tickets",
+  "description": "Event ticketing and QR check-in by Will's Tech Support",
+  "start_url": "/scanner.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

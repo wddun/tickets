@@ -92,10 +92,18 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo 
 function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '' }) {
     const dateStr = (() => {
         try {
-            return new Date(event.time).toLocaleString('en-US', {
+            const start = new Date(event.time).toLocaleString('en-US', {
                 weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
                 hour: 'numeric', minute: '2-digit', hour12: true
             });
+            if (event.endTime) {
+                const end = new Date(event.endTime).toLocaleString('en-US', {
+                    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+                    hour: 'numeric', minute: '2-digit', hour12: true
+                });
+                return `${start} – ${end}`;
+            }
+            return start;
         } catch (_) { return String(event.time); }
     })();
     const locName = event.location?.name || '';
@@ -326,7 +334,22 @@ app.set('trust proxy', 1);
 app.use(compression());
 app.use(express.json({ limit: '20mb' }));
 app.use(express.static('public', { extensions: ['html'] }));
+app.get('/html5-qrcode.min.js', (req, res) => {
+    res.sendFile(path.resolve(__dirname, 'node_modules/html5-qrcode/html5-qrcode.min.js'));
+});
 app.get('/support', (req, res) => res.redirect('/support.html'));
+
+// Android TWA domain verification — fill in sha256_cert_fingerprints after generating your APK with PWA Builder
+app.get('/.well-known/assetlinks.json', (req, res) => {
+    res.json([{
+        relation: ['delegate_permission/common.handle_all_urls'],
+        target: {
+            namespace: 'android_app',
+            package_name: process.env.ANDROID_PACKAGE_NAME || 'com.willstechsupport.tickets',
+            sha256_cert_fingerprints: (process.env.ANDROID_SHA256_FINGERPRINT || '').split(',').filter(Boolean)
+        }
+    }]);
+});
 app.use(session({
     store: new FileStore({
         path: './sessions',
@@ -1031,7 +1054,7 @@ async function fetchAndSaveImage(driveFileId) {
 
 // API: Update Event from Google Sheet
 app.post('/api/sheet/update-event', async (req, res) => {
-    const { eventId, name, time, color, locationName, address, lat, lng, driveFileId } = req.body;
+    const { eventId, name, time, endTime, color, locationName, address, lat, lng, driveFileId } = req.body;
 
     if (!eventId) return res.status(400).json({ error: 'eventId is required' });
 
@@ -1041,6 +1064,7 @@ app.post('/api/sheet/update-event', async (req, res) => {
     try {
         if (name) event.name = name;
         if (time) event.time = time;
+        if (endTime !== undefined) event.endTime = endTime || null;
         if (color) event.color = color;
         if (locationName) event.location.name = locationName;
         if (address) event.location.address = address;
@@ -1062,7 +1086,7 @@ app.post('/api/sheet/update-event', async (req, res) => {
 
 // API: Create Event from Google Sheet (no auth required — keep your server URL private)
 app.post('/api/sheet/create-event', async (req, res) => {
-    const { name, time, color, locationName, address, lat, lng, driveFileId } = req.body;
+    const { name, time, endTime, color, locationName, address, lat, lng, driveFileId } = req.body;
 
     if (!name || !time) {
         return res.status(400).json({ error: 'name and time are required' });
@@ -1084,6 +1108,7 @@ app.post('/api/sheet/create-event', async (req, res) => {
         userId,
         name,
         time,
+        endTime: endTime || null,
         color: color || 'rgb(99, 102, 241)',
         imageUrl,
         scannerPin: Math.floor(100000 + Math.random() * 900000).toString(), // 6-digit PIN
@@ -1178,7 +1203,7 @@ app.get('/api/event/:id', (req, res) => {
 });
 
 app.post('/api/events', requireAuth, upload.single('image'), async (req, res) => {
-    const { name, time, color, locationName, lat, lng } = req.body;
+    const { name, time, endTime, color, locationName, lat, lng } = req.body;
     let imageUrl = null;
 
     if (req.file) {
@@ -1198,6 +1223,7 @@ app.post('/api/events', requireAuth, upload.single('image'), async (req, res) =>
         userId: req.session.userId,
         name,
         time,
+        endTime: endTime || null,
         color,
         imageUrl,
         scannerPin: Math.floor(100000 + Math.random() * 900000).toString(), // 6-digit PIN
@@ -1222,7 +1248,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
         return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const { name, time, color, locationName, locationAddress, lat, lng } = req.body;
+    const { name, time, endTime, color, locationName, locationAddress, lat, lng } = req.body;
 
     let imageUrl = event.imageUrl;
     if (req.file) {
@@ -1244,6 +1270,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
         if (!ev) return;
         if (name) ev.name = name;
         if (time) ev.time = time;
+        ev.endTime = endTime || null;
         if (color) ev.color = color;
         ev.imageUrl = imageUrl;
         ev.allowReentry = allowReentry;
@@ -1704,7 +1731,7 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
 <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
 <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
 <p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
-<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</p>
+<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>
 ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
 ${qrBlocks}
 </body>
@@ -1993,36 +2020,64 @@ async function generatePassBuffer(ticket, event) {
     const cfEntries = Object.entries(customFields);
 
     const eventDate = new Date(event.time);
+    const eventEndDate = event.endTime ? new Date(event.endTime) : null;
+    const isMultiDay = eventEndDate && !Number.isNaN(eventEndDate.getTime());
     const hasNote = !!cfEntries[0];
+
+    const buildDateLabel = () => {
+        if (!isMultiDay) return 'DATE';
+        return 'DATES';
+    };
+
+    const buildDateValue = (date) => {
+        if (!isMultiDay) return date;
+        // For multi-day events show a compact range string
+        const fmtOpts = { month: 'short', day: 'numeric' };
+        const startStr = eventDate.toLocaleString('en-US', { ...fmtOpts, hour: 'numeric', minute: '2-digit', hour12: true });
+        const endStr = eventEndDate.toLocaleString('en-US', { ...fmtOpts, hour: 'numeric', minute: '2-digit', hour12: true });
+        return `${startStr} – ${endStr}`;
+    };
+
+    const setRelevantDatesAndExpiry = () => {
+        const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
+        const windowEnd = isMultiDay
+            ? new Date(eventEndDate.getTime() + 2 * 60 * 60 * 1000)
+            : new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
+        const expiresAt = isMultiDay
+            ? new Date(eventEndDate.getTime() + 24 * 60 * 60 * 1000)
+            : new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
+        pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
+        pass.expirationDate = expiresAt;
+    };
 
     // If notes exist, keep date in the header and notes in secondary.
     // If no notes, place date in secondary (so the row isn't empty).
     if (hasNote) {
         if (!Number.isNaN(eventDate.getTime())) {
-            pass.headerFields.push({
-                key: "date", label: "DATE", value: eventDate,
-                dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
-            });
-            const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
-            const windowEnd = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
-            const expiresAt = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
-            pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
-            pass.expirationDate = expiresAt;
+            if (isMultiDay) {
+                pass.headerFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
+            } else {
+                pass.headerFields.push({
+                    key: "date", label: buildDateLabel(), value: eventDate,
+                    dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
+                });
+            }
+            setRelevantDatesAndExpiry();
         } else {
             pass.headerFields.push({ key: "date", label: "DATE", value: String(event.time) });
         }
         pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
     } else {
         if (!Number.isNaN(eventDate.getTime())) {
-            pass.secondaryFields.push({
-                key: "date", label: "DATE", value: eventDate,
-                dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
-            });
-            const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
-            const windowEnd = new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
-            const expiresAt = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
-            pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
-            pass.expirationDate = expiresAt;
+            if (isMultiDay) {
+                pass.secondaryFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
+            } else {
+                pass.secondaryFields.push({
+                    key: "date", label: buildDateLabel(), value: eventDate,
+                    dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
+                });
+            }
+            setRelevantDatesAndExpiry();
         } else {
             pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
         }
@@ -2549,7 +2604,7 @@ function buildReminderHtml(event, customMessage) {
             <p style="color:#555;">Your event is coming up ${timeLabel}.</p>
             <div style="background:#f4f5f7; border-radius:10px; padding:16px 20px; margin:20px 0;">
                 <p style="font-weight:700; font-size:16px; color:#1a1a2e; margin:0 0 6px;">${event.name}</p>
-                <p style="color:#555; margin:0 0 4px;">📅 ${new Date(event.time).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</p>
+                <p style="color:#555; margin:0 0 4px;">📅 ${new Date(event.time).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>
                 <p style="color:#555; margin:0;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
             </div>
             <p style="color:#555; white-space:pre-wrap;">${msg}</p>
