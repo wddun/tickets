@@ -388,6 +388,21 @@ const db = await JSONFilePreset(path.resolve(__dirname, 'db.json'), defaultData)
 
 const uploadsDir = path.resolve(__dirname, 'public', 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
+
+// Auto-generate PWA icons from icon.svg if the PNGs don't exist yet
+const iconsDir = path.resolve(__dirname, 'public', 'icons');
+fs.mkdirSync(iconsDir, { recursive: true });
+const svgIconPath = path.join(iconsDir, 'icon.svg');
+const icon192Path = path.join(iconsDir, 'icon-192.png');
+const icon512Path = path.join(iconsDir, 'icon-512.png');
+if (fs.existsSync(svgIconPath) && (!fs.existsSync(icon192Path) || !fs.existsSync(icon512Path))) {
+    const svgBuf = fs.readFileSync(svgIconPath);
+    await Promise.all([
+        sharp(svgBuf).resize(192, 192).png().toFile(icon192Path),
+        sharp(svgBuf).resize(512, 512).png().toFile(icon512Path),
+    ]);
+    console.log('[OK] PWA icons generated (icon-192.png, icon-512.png)');
+}
 const upload = multer({
     storage: multer.diskStorage({
         destination: uploadsDir,

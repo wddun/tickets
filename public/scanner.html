@@ -507,6 +507,22 @@
     </div>
 </div>
 
+<!-- iOS Add to Home Screen nudge (Safari only, not shown if already installed) -->
+<div id="iosBanner" style="display:none; position:fixed; bottom:calc(env(safe-area-inset-bottom,0px) + 84px); left:14px; right:14px; z-index:30; background:rgba(28,28,30,0.96); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-radius:16px; padding:14px 16px; border:1px solid rgba(255,255,255,0.12); box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+    <button onclick="dismissIOSBanner()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:rgba(255,255,255,0.45);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px;">×</button>
+    <div style="display:flex;align-items:center;gap:12px;">
+        <div style="font-size:30px;flex-shrink:0;">🎟️</div>
+        <div>
+            <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:3px;">Add to Home Screen</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.55);line-height:1.5;">Tap <svg style="display:inline;vertical-align:middle;margin:0 2px;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> then <strong style="color:#fff;">"Add to Home Screen"</strong></div>
+        </div>
+    </div>
+    <!-- Downward arrow pointing toward iOS share bar -->
+    <div style="position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);width:14px;height:8px;overflow:hidden;">
+        <div style="width:14px;height:14px;background:rgba(28,28,30,0.96);border:1px solid rgba(255,255,255,0.12);transform:rotate(45deg);transform-origin:top left;margin-left:1px;"></div>
+    </div>
+</div>
+
 <!-- Backdrop for list sheet only -->
 <div class="backdrop" id="listBackdrop" onclick="closeList()"></div>
 
@@ -936,6 +952,18 @@ scanner.start(
 // ── Utilities ─────────────────────────────────────────────
 function escHtml(s)  { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function escAttr(s)  { return String(s ?? '').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+// iOS "Add to Home Screen" nudge
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+const _isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+if (_isIOS && !_isStandalone && !localStorage.getItem('ios-banner-dismissed')) {
+    // Slight delay so the camera UI settles first
+    setTimeout(() => { document.getElementById('iosBanner').style.display = 'block'; }, 2500);
+}
+function dismissIOSBanner() {
+    document.getElementById('iosBanner').style.display = 'none';
+    localStorage.setItem('ios-banner-dismissed', '1');
+}
 
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js');
