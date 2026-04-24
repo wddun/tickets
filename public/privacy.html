@@ -4,31 +4,63 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Privacy Policy | WTS Tickets</title>
+    <meta name="theme-color" content="#1a1f3c">
     <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #f8fafc;
-            color: #1a1a2e;
-            margin: 0;
-            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f4f5f8; color: #1e293b;
+            -webkit-font-smoothing: antialiased;
         }
-        .container {
-            max-width: 760px;
-            margin: 0 auto;
-            padding: 48px 24px;
+        nav {
+            background: #1a1f3c; height: 52px;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px;
         }
-        h1 { font-size: 32px; font-weight: 700; margin-bottom: 4px; }
-        h2 { font-size: 18px; font-weight: 600; margin-top: 36px; margin-bottom: 8px; }
-        p, li { font-size: 15px; line-height: 1.7; color: #374151; }
+        nav img { height: 24px; width: auto; }
+        nav a   { font-size: 13px; color: rgba(255,255,255,.6); font-weight: 500; text-decoration: none; }
+        nav a:hover { color: #fff; }
+
+        .content {
+            max-width: 700px; margin: 0 auto;
+            padding: 40px 20px 60px;
+        }
+        h1 {
+            font-size: clamp(24px, 5vw, 32px);
+            font-weight: 800; color: #1a1f3c;
+            margin-bottom: 4px;
+        }
+        .meta { font-size: 13px; color: #94a3b8; margin-bottom: 32px; }
+        h2 {
+            font-size: 16px; font-weight: 700;
+            color: #1a1f3c; margin-top: 32px; margin-bottom: 8px;
+        }
+        p, li {
+            font-size: 15px; line-height: 1.75; color: #374151;
+        }
         ul { padding-left: 20px; }
-        .meta { font-size: 13px; color: #6b7280; margin-bottom: 40px; }
-        a { color: #6366f1; text-decoration: none; }
+        li { margin-bottom: 4px; }
+        a  { color: #c4294a; text-decoration: none; }
         a:hover { text-decoration: underline; }
-        .footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid #e5e7eb; font-size: 13px; color: #6b7280; }
+        .footer-bar {
+            margin-top: 48px; padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            font-size: 13px; color: #94a3b8;
+        }
+        .footer-bar a { color: #94a3b8; }
+        .footer-bar a:hover { color: #64748b; }
+
+        @media (max-width: 480px) {
+            .content { padding: 28px 16px 48px; }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
+    <nav>
+        <a href="/"><img src="/logo.png" alt="Will's Tech Support"></a>
+        <a href="/">← Home</a>
+    </nav>
+    <div class="content">
         <h1>Privacy Policy</h1>
         <p class="meta">WTS Tickets &nbsp;·&nbsp; Last updated: March 28, 2026</p>
 
@@ -57,7 +89,7 @@
         <p>We use Amazon Web Services (AWS SES) to send transactional emails (ticket delivery). AWS may process recipient email addresses in order to deliver those emails. No other third-party analytics or advertising services are used.</p>
 
         <h2>5. Data Retention</h2>
-        <p>Your account data is retained until you delete your account. You can delete your account at any time from the iOS app (Events tab → person icon → Delete Account) or from the web dashboard (Delete Account button in the top bar). Deleting your account permanently removes all associated events, tickets, and personal data.</p>
+        <p>Your account data is retained until you delete your account. You can delete your account at any time from the dashboard (Settings → Delete Account). Deleting your account permanently removes all associated events, tickets, and personal data.</p>
 
         <h2>6. Children's Privacy</h2>
         <p>WTS Tickets is intended for use by event organizers and is not directed at children under 13. We do not knowingly collect personal information from children.</p>
@@ -69,11 +101,10 @@
         <p>We may update this policy from time to time. Continued use of the service after changes constitutes acceptance of the updated policy.</p>
 
         <h2>9. Contact</h2>
-        <p>For privacy-related questions or requests, contact us at:<br>
-        <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a></p>
+        <p>For privacy-related questions: <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a></p>
 
-        <div class="footer">
-            &copy; Will's Tech Support &nbsp;·&nbsp; <a href="/">WTS Tickets</a>
+        <div class="footer-bar">
+            © 2026 Will's Tech Support &nbsp;·&nbsp; <a href="/">WTS Tickets</a>
         </div>
     </div>
 </body>

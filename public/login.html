@@ -1,106 +1,131 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login | WTS Tickets</title>
+    <meta name="theme-color" content="#1a1f3c">
     <link rel="stylesheet" href="style.css">
     <style>
+        body { justify-content: flex-start; background: #f4f5f8; }
+        .page-nav {
+            background: #1a1f3c;
+            padding: 0 20px; height: 52px;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .page-nav img { height: 24px; width: auto; }
+        .page-nav a { font-size: 13px; color: rgba(255,255,255,.6); font-weight: 500; }
+        .page-nav a:hover { color: #fff; }
+
+        .auth-wrap {
+            flex: 1; display: flex;
+            align-items: flex-start; justify-content: center;
+            padding: 32px 16px 40px;
+        }
         .auth-card {
-            max-width: 400px;
-            margin: 50px auto;
-            padding: 30px;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            background: #fff;
+            border: 1px solid #dde3ed;
+            border-radius: 14px;
+            box-shadow: 0 2px 12px rgba(0,0,0,.07);
+            padding: 32px 28px;
+            width: 100%; max-width: 400px;
+        }
+        @media (max-width: 480px) {
+            .auth-card { padding: 24px 18px; }
+            .auth-wrap  { padding: 20px 12px 32px; }
         }
 
-        .toggle-auth {
-            text-align: center;
+        .auth-logo { text-align: center; margin-bottom: 24px; }
+        .auth-logo img { height: 32px; margin: 0 auto; }
+        .auth-title { font-size: 20px; font-weight: 800; color: #1a1f3c; text-align: center; margin-bottom: 4px; }
+        .auth-desc  { font-size: 14px; color: #64748b; text-align: center; margin-bottom: 24px; }
+
+        .toggle-row {
+            text-align: center; margin-top: 18px;
+            font-size: 14px; color: #64748b;
+        }
+        .toggle-row a { color: #c4294a; font-weight: 600; text-decoration: none; }
+        .toggle-row a:hover { text-decoration: underline; }
+
+        .footer-note {
             margin-top: 20px;
-            font-size: 14px;
-            color: var(--text-muted);
+            font-size: 11px; color: #94a3b8; text-align: center;
         }
-
-        .toggle-auth a {
-            color: var(--primary);
-            text-decoration: none;
-            font-weight: 600;
-        }
+        .footer-note a { color: #94a3b8; }
+        .footer-note a:hover { color: #64748b; }
     </style>
 </head>
-
-<body class="home">
-    <div class="container">
+<body>
+    <nav class="page-nav">
+        <a href="/"><img src="/logo.png" alt="Will's Tech Support"></a>
+        <a href="/">← Back</a>
+    </nav>
+    <div class="auth-wrap">
         <div class="auth-card">
-            <div class="header" style="text-align: center;">
-                <h1 id="authTitle">Organizer Login</h1>
-                <p id="authDesc">Manage your events and tickets.</p>
-            </div>
+            <div class="auth-logo"><img src="/logo.png" alt="Will's Tech Support"></div>
+            <div class="auth-title" id="authTitle">Organizer Login</div>
+            <div class="auth-desc"  id="authDesc">Manage your events and tickets.</div>
 
-            <form id="authForm" style="margin-top: 20px;">
+            <form id="authForm">
                 <div class="form-group">
-                    <label>Email Address</label>
-                    <input type="email" id="email" placeholder="organizer@example.com" required>
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" placeholder="organizer@example.com" required autocomplete="email">
                 </div>
                 <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="password" placeholder="••••••••" required>
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password">
                 </div>
                 <button type="submit" id="submitBtn">Login</button>
             </form>
 
-            <div class="toggle-auth">
+            <div class="toggle-row">
                 <span id="toggleText">Don't have an account?</span>
                 <a href="#" id="toggleBtn">Sign Up</a>
             </div>
-            <p style="margin-top:20px;font-size:11px;color:#94a3b8;text-align:center;">© Will's Tech Support &nbsp;·&nbsp; <a href="mailto:support@willstechsupport.com" style="color:#94a3b8;">support@willstechsupport.com</a></p>
+            <div class="footer-note">
+                © Will's Tech Support &nbsp;·&nbsp;
+                <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a>
+            </div>
         </div>
     </div>
 
     <script>
         let isLogin = true;
-        const authForm = document.getElementById('authForm');
-        const authTitle = document.getElementById('authTitle');
-        const authDesc = document.getElementById('authDesc');
-        const toggleBtn = document.getElementById('toggleBtn');
+        const toggleBtn  = document.getElementById('toggleBtn');
         const toggleText = document.getElementById('toggleText');
-        const submitBtn = document.getElementById('submitBtn');
+        const submitBtn  = document.getElementById('submitBtn');
+        const authTitle  = document.getElementById('authTitle');
+        const authDesc   = document.getElementById('authDesc');
 
-        toggleBtn.onclick = (e) => {
+        toggleBtn.onclick = e => {
             e.preventDefault();
             isLogin = !isLogin;
-            authTitle.textContent = isLogin ? 'Organizer Login' : 'Create Account';
-            authDesc.textContent = isLogin ? 'Manage your events and tickets.' : 'Start hosting your own events today.';
-            toggleText.textContent = isLogin ? "Don't have an account?" : "Already have an account?";
-            toggleBtn.textContent = isLogin ? 'Sign Up' : 'Login';
-            submitBtn.textContent = isLogin ? 'Login' : 'Create Account';
+            authTitle.textContent  = isLogin ? 'Organizer Login' : 'Create Account';
+            authDesc.textContent   = isLogin ? 'Manage your events and tickets.' : 'Start hosting your own events today.';
+            toggleText.textContent = isLogin ? "Don't have an account?" : 'Already have an account?';
+            toggleBtn.textContent  = isLogin ? 'Sign Up' : 'Login';
+            submitBtn.textContent  = isLogin ? 'Login' : 'Create Account';
+            document.querySelector('input[autocomplete="current-password"]').autocomplete = isLogin ? 'current-password' : 'new-password';
         };
 
-        authForm.onsubmit = async (e) => {
+        document.getElementById('authForm').onsubmit = async e => {
             e.preventDefault();
-            const email = document.getElementById('email').value;
+            const email    = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
-
+            submitBtn.disabled = true;
+            submitBtn.textContent = isLogin ? 'Logging in…' : 'Creating account…';
             try {
-                const res = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
-                });
+                const res  = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
                 const data = await res.json();
-                if (data.success) {
-                    window.location.href = '/dashboard.html';
-                } else {
-                    alert('Error: ' + data.error);
-                }
-            } catch (err) {
-                alert('Connection error');
+                if (data.success) { window.location.href = '/dashboard.html'; }
+                else { alert('Error: ' + data.error); }
+            } catch { alert('Connection error'); }
+            finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = isLogin ? 'Login' : 'Create Account';
             }
         };
     </script>
 </body>
-
 </html>
