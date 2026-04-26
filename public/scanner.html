@@ -308,41 +308,41 @@
         #listSheet { max-height: 95dvh; }
 
         .list-header {
-            padding: 12px 20px 10px;
+            padding: 10px 16px 10px;
             flex-shrink: 0;
         }
         .list-title {
             font-size: 18px; font-weight: 700;
             margin-bottom: 10px;
+            padding-left: 4px;
         }
         .search-wrap {
             position: relative;
         }
-        .search-wrap::before {
-            content: '⌕';
+        .search-icon {
             position: absolute;
             left: 11px; top: 50%;
             transform: translateY(-50%);
-            font-size: 16px;
-            color: rgba(255,255,255,0.4);
             pointer-events: none;
+            color: rgba(255,255,255,0.38);
+            display: flex;
         }
         #searchInput {
             width: 100%;
             background: rgba(255,255,255,0.1);
             border: none;
-            border-radius: 10px;
-            padding: 9px 12px 9px 32px;
+            border-radius: 12px;
+            padding: 10px 12px 10px 36px;
             color: #fff;
             font-size: 15px;
         }
-        #searchInput::placeholder { color: rgba(255,255,255,0.35); }
+        #searchInput::placeholder { color: rgba(255,255,255,0.32); }
         #searchInput:focus { outline: none; background: rgba(255,255,255,0.14); }
 
         .list-stats {
-            font-size: 12px;
-            color: rgba(255,255,255,0.4);
-            padding: 6px 20px 4px;
+            font-size: 13px; font-weight: 600;
+            color: rgba(255,255,255,0.45);
+            padding: 4px 20px 8px;
             flex-shrink: 0;
         }
 
@@ -350,107 +350,122 @@
         #attendeeList {
             flex: 1;
             overflow-y: auto;
-            padding: 4px 16px 0;
             -webkit-overflow-scrolling: touch;
         }
 
-        .person-row {
-            background: rgba(255,255,255,0.07);
-            border-radius: 14px;
-            margin-bottom: 6px;
-            overflow: hidden;
+        /* Section headers */
+        .list-section {
+            padding: 14px 16px 6px;
+            font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.7px;
+            color: rgba(255,255,255,0.3);
+            display: flex; align-items: center; gap: 8px;
+            flex-shrink: 0;
         }
+        .list-section-count {
+            font-size: 11px; font-weight: 600;
+            background: rgba(255,255,255,0.1);
+            padding: 1px 7px; border-radius: 10px;
+            letter-spacing: 0;
+        }
+
+        /* Person rows — iOS table style */
+        .person-row {
+            margin: 0 12px 2px;
+            border-radius: 13px;
+            overflow: hidden;
+            background: rgba(255,255,255,0.07);
+        }
+        .person-row + .person-row { margin-top: 2px; }
+
         .person-main {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 12px 14px;
+            gap: 13px;
+            padding: 11px 14px 11px 12px;
             cursor: pointer;
             user-select: none;
             -webkit-user-select: none;
+            min-height: 64px;
         }
-        .person-dot {
-            width: 10px; height: 10px;
+
+        /* Initials avatar */
+        .avatar {
+            width: 42px; height: 42px;
             border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 15px; font-weight: 700;
             flex-shrink: 0;
+            letter-spacing: -0.5px;
         }
-        .dot-all     { background: #4ade80; }
-        .dot-partial { background: #fbbf24; }
-        .dot-none    { background: rgba(255,255,255,0.25); }
+        .av-pending { background: rgba(255,255,255,0.1);  color: rgba(255,255,255,0.6); }
+        .av-partial { background: rgba(251,191,36,0.18);  color: #fbbf24; }
+        .av-done    { background: rgba(74,222,128,0.18);  color: #4ade80; }
 
         .person-info { flex: 1; min-width: 0; }
         .person-name {
-            font-size: 15px; font-weight: 600;
+            font-size: 16px; font-weight: 600;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            margin-bottom: 2px;
         }
-        .person-count { font-size: 12px; color: rgba(255,255,255,0.4); margin-top: 1px; }
+        .person-status {
+            font-size: 12px; color: rgba(255,255,255,0.4);
+            display: flex; align-items: center; gap: 5px;
+        }
+        .status-dot {
+            width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+        }
+        .sd-pending { background: rgba(255,255,255,0.3); }
+        .sd-partial { background: #fbbf24; }
+        .sd-done    { background: #4ade80; }
 
-        .person-actions {
-            display: flex;
-            gap: 6px;
-            align-items: center;
-        }
-        .checkin-all-btn {
-            background: rgba(255,255,255,0.12);
-            border: none;
-            color: #fff;
-            font-size: 12px; font-weight: 700;
-            padding: 5px 10px;
-            border-radius: 8px;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-        .checkin-all-btn:active { opacity: 0.7; }
-        .expand-arrow {
-            font-size: 12px;
-            color: rgba(255,255,255,0.3);
-            transition: transform 0.2s;
+        .row-checkin-btn {
+            background: #fff;
+            border: none; color: #1a1f3c;
+            font-size: 13px; font-weight: 700;
+            padding: 8px 16px; border-radius: 20px;
+            cursor: pointer; white-space: nowrap;
+            -webkit-tap-highlight-color: transparent;
             flex-shrink: 0;
+        }
+        .row-checkin-btn:active { opacity: 0.65; }
+        .row-done-label {
+            font-size: 13px; font-weight: 600;
+            color: #4ade80; flex-shrink: 0;
+        }
+
+        .expand-arrow {
+            font-size: 14px; font-weight: 300;
+            color: rgba(255,255,255,0.25);
+            transition: transform 0.22s;
+            flex-shrink: 0; margin-left: 2px;
         }
         .person-row.open .expand-arrow { transform: rotate(90deg); }
 
-        .ticket-rows { display: none; padding: 0 14px 10px; }
+        .ticket-rows { display: none; border-top: 1px solid rgba(255,255,255,0.07); }
         .person-row.open .ticket-rows { display: block; }
 
         .ticket-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 0;
-            border-top: 1px solid rgba(255,255,255,0.06);
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
         }
+        .ticket-item:last-child { border-bottom: none; }
         .ticket-dot {
-            width: 7px; height: 7px;
-            border-radius: 50%;
-            flex-shrink: 0;
+            width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
         }
         .tdot-used    { background: #4ade80; }
         .tdot-pending { background: rgba(255,255,255,0.2); }
-
-        .ticket-label {
-            flex: 1;
-            font-size: 14px;
-            color: rgba(255,255,255,0.75);
-        }
-        .ticket-time {
-            font-size: 11px;
-            color: rgba(255,255,255,0.35);
-        }
+        .ticket-label { flex: 1; font-size: 14px; color: rgba(255,255,255,0.7); }
+        .ticket-time  { font-size: 12px; color: rgba(255,255,255,0.3); }
         .ticket-btn {
-            background: rgba(255,255,255,0.1);
-            border: none;
-            color: #fff;
-            font-size: 12px; font-weight: 700;
-            padding: 4px 10px;
-            border-radius: 8px;
-            cursor: pointer;
+            background: rgba(255,255,255,0.12); border: none;
+            color: #fff; font-size: 12px; font-weight: 700;
+            padding: 5px 12px; border-radius: 8px; cursor: pointer;
             white-space: nowrap;
         }
         .ticket-btn:active { opacity: 0.7; }
-        .ticket-scanned {
-            font-size: 11px; font-weight: 700;
-            color: #4ade80;
-        }
+        .ticket-scanned { font-size: 12px; font-weight: 700; color: #4ade80; }
 
         .list-close {
             padding: 6px 16px 4px;
@@ -592,6 +607,9 @@
     <div class="list-header">
         <div class="list-title" id="listTitle">Check-In List</div>
         <div class="search-wrap">
+            <span class="search-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </span>
             <input type="search" id="searchInput" placeholder="Search attendees…" oninput="filterList()" autocomplete="off">
         </div>
     </div>
@@ -778,60 +796,88 @@ function renderList() {
         return;
     }
 
-    // Stats across all (not just filtered)
-    const totalTickets  = allAttendees.reduce((n, a) => n + a.tickets.length, 0);
+    const totalTickets   = allAttendees.reduce((n, a) => n + a.tickets.length, 0);
     const scannedTickets = allAttendees.reduce((n, a) => n + a.tickets.filter(t => t.used_at).length, 0);
-    statsEl.textContent = `${scannedTickets} / ${totalTickets} tickets checked in`;
+    const pct = totalTickets ? Math.round(scannedTickets / totalTickets * 100) : 0;
+    statsEl.textContent = `${scannedTickets} / ${totalTickets} checked in · ${pct}%`;
 
     if (!filteredAttendees.length) {
         container.innerHTML = '<div class="list-empty">No results</div>';
         return;
     }
 
-    container.innerHTML = filteredAttendees.map(a => buildPersonRow(a)).join('');
+    // Partition: pending (none checked), partial, done (all checked)
+    const pending = filteredAttendees.filter(a => a.tickets.every(t => !t.used_at));
+    const partial = filteredAttendees.filter(a => a.tickets.some(t => t.used_at) && a.tickets.some(t => !t.used_at));
+    const done    = filteredAttendees.filter(a => a.tickets.every(t => t.used_at));
+
+    let html = '';
+    const needingAction = [...pending, ...partial];
+
+    if (needingAction.length) {
+        html += `<div class="list-section">Pending<span class="list-section-count">${needingAction.length}</span></div>`;
+        html += needingAction.map(a => buildPersonRow(a)).join('');
+    }
+    if (done.length) {
+        html += `<div class="list-section" style="margin-top:6px;">Checked In<span class="list-section-count">${done.length}</span></div>`;
+        html += done.map(a => buildPersonRow(a)).join('');
+    }
+    html += '<div style="height:12px;"></div>';
+
+    container.innerHTML = html;
 }
 
 function buildPersonRow(a) {
-    const total    = a.tickets.length;
-    const scanned  = a.tickets.filter(t => t.used_at).length;
-    const dotClass = scanned === total ? 'dot-all' : scanned > 0 ? 'dot-partial' : 'dot-none';
-    const countTxt = total === 1 ? (scanned ? '1 ticket · Checked in' : '1 ticket · Pending')
-                                 : `${scanned}/${total} tickets checked in`;
+    const total   = a.tickets.length;
+    const scanned = a.tickets.filter(t => t.used_at).length;
+    const allDone = scanned === total;
+    const noDone  = scanned === 0;
 
-    const allDone   = scanned === total;
-    const checkBtnHtml = allDone
-        ? ''
-        : `<button class="checkin-all-btn" onclick="checkInPerson(event,'${a.registrationId}')">Check In All</button>`;
+    const initials = a.name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const avClass  = allDone ? 'av-done' : noDone ? 'av-pending' : 'av-partial';
+    const sdClass  = allDone ? 'sd-done'    : noDone ? 'sd-pending' : 'sd-partial';
 
-    const ticketRows = a.tickets.map((t, i) => {
+    const statusTxt = allDone
+        ? (total === 1 ? 'Checked in' : `All ${total} tickets checked in`)
+        : noDone
+        ? (total === 1 ? '1 ticket · Pending' : `${total} tickets · None checked in`)
+        : `${scanned} of ${total} checked in`;
+
+    const actionHtml = allDone
+        ? `<div class="row-done-label">Done</div>`
+        : `<button class="row-checkin-btn" onclick="checkInPerson(event,'${escAttr(a.registrationId)}')">Check In</button>`;
+
+    const expandArrow = total > 1 ? `<div class="expand-arrow">›</div>` : '';
+
+    const ticketRows = total > 1 ? a.tickets.map((t, i) => {
         const time = t.used_at ? new Date(t.used_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
-        const label = total > 1 ? `Ticket ${i + 1}` : 'Ticket';
         return `
-            <div class="ticket-item" id="ticket-${t.id}">
+            <div class="ticket-item" id="ticket-${escAttr(t.id)}">
                 <div class="ticket-dot ${t.used_at ? 'tdot-used' : 'tdot-pending'}"></div>
-                <div class="ticket-label">${escHtml(label)}</div>
-                ${time ? `<div class="ticket-time">${time}</div>` : ''}
+                <div class="ticket-label">Ticket ${i + 1}</div>
+                ${time ? `<div class="ticket-time">${escHtml(time)}</div>` : ''}
                 ${t.used_at
                     ? `<div class="ticket-scanned">✓</div>`
-                    : `<button class="ticket-btn" onclick="checkInTicket(event,'${t.id}','${a.registrationId}')">Check In</button>`
+                    : `<button class="ticket-btn" onclick="checkInTicket(event,'${escAttr(t.id)}','${escAttr(a.registrationId)}')">Check In</button>`
                 }
             </div>`;
-    }).join('');
+    }).join('') : '';
 
     return `
-        <div class="person-row" id="reg-${a.registrationId}">
-            <div class="person-main" onclick="togglePerson('${a.registrationId}')">
-                <div class="person-dot ${dotClass}"></div>
+        <div class="person-row" id="reg-${escAttr(a.registrationId)}">
+            <div class="person-main" onclick="togglePerson('${escAttr(a.registrationId)}')">
+                <div class="avatar ${avClass}">${escHtml(initials)}</div>
                 <div class="person-info">
                     <div class="person-name">${escHtml(a.name)}</div>
-                    <div class="person-count">${escHtml(countTxt)}</div>
+                    <div class="person-status">
+                        <span class="status-dot ${sdClass}"></span>
+                        ${escHtml(statusTxt)}
+                    </div>
                 </div>
-                <div class="person-actions" onclick="event.stopPropagation()">
-                    ${checkBtnHtml}
-                </div>
-                <div class="expand-arrow">›</div>
+                <div onclick="event.stopPropagation()">${actionHtml}</div>
+                ${expandArrow}
             </div>
-            <div class="ticket-rows">${ticketRows}</div>
+            ${total > 1 ? `<div class="ticket-rows">${ticketRows}</div>` : ''}
         </div>`;
 }
 
