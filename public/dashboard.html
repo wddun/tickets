@@ -4,7 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Events</title>
+    <title>Dashboard | WTS Tickets</title>
+    <meta name="theme-color" content="#1a1f3c">
     <style>
         * {
             box-sizing: border-box;
@@ -24,42 +25,53 @@
 
         /* ── Top bar ── */
         .topbar {
-            background: #fff;
-            border-bottom: 1px solid #e8e8e8;
-            padding: 0 28px;
-            height: 58px;
+            background: #1a1f3c;
+            padding: 0 20px;
+            height: 56px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             position: sticky;
             top: 0;
             z-index: 50;
+            flex-shrink: 0;
+            gap: 12px;
         }
 
-        .topbar-title {
-            font-size: 18px;
-            font-weight: 700;
-            color: #1a1a2e;
-            letter-spacing: -0.3px;
-        }
+        .topbar-logo img { height: 26px; width: auto; display: block; }
 
-        .topbar-title span {
-            color: #6366f1;
-        }
+        .topbar-actions { display: flex; align-items: center; gap: 6px; }
 
+        .topbar-btn {
+            background: rgba(255,255,255,0.08);
+            border: none;
+            color: rgba(255,255,255,0.75);
+            padding: 7px 13px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex; align-items: center; gap: 5px;
+            transition: background 0.15s, color 0.15s;
+            white-space: nowrap;
+            font-family: inherit;
+        }
+        .topbar-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+        .topbar-btn-danger { color: #fca5a5; }
+        .topbar-btn-danger:hover { background: rgba(220,38,38,0.2); color: #fca5a5; }
+
+        /* keep for any remaining references */
         .logout-btn {
-            background: none;
-            border: 1px solid #e0e0e0;
-            color: #666;
-            padding: 6px 14px;
+            background: rgba(255,255,255,0.08);
+            border: none;
+            color: rgba(255,255,255,0.75);
+            padding: 7px 13px;
             border-radius: 8px;
             font-size: 13px;
             cursor: pointer;
         }
-
-        .logout-btn:hover {
-            background: #f4f5f7;
-        }
+        .logout-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
 
         /* ── Layout ── */
         .layout {
@@ -136,12 +148,12 @@
         }
 
         .event-card:hover {
-            background: #f8f8ff;
+            background: #f4f5f8;
         }
 
         .event-card.active {
-            background: #f0f0ff;
-            border-color: #6366f1;
+            background: #fff5f7;
+            border-color: #c4294a;
         }
 
         .event-card.checked {
@@ -168,7 +180,7 @@
 
         .event-card-badge {
             display: inline-block;
-            background: #6366f1;
+            background: #1a1f3c;
             color: #fff;
             font-size: 11px;
             font-weight: 600;
@@ -207,9 +219,7 @@
             gap: 12px;
         }
 
-        .empty-state-icon {
-            font-size: 48px;
-        }
+        .empty-state-icon { line-height: 1; }
 
         .empty-state p {
             font-size: 15px;
@@ -236,12 +246,12 @@
             width: 90px;
             height: 90px;
             border-radius: 14px;
-            background: linear-gradient(135deg, #6366f1, #818cf8);
+            background: linear-gradient(135deg, #1a1f3c, #252b52);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 32px;
             flex-shrink: 0;
+            color: rgba(255,255,255,0.5);
         }
 
         .detail-title {
@@ -283,7 +293,7 @@
         }
 
         .btn-primary {
-            background: #6366f1;
+            background: #1a1f3c;
             color: #fff;
         }
 
@@ -321,17 +331,17 @@
         }
 
         .stat-box:hover {
-            border-color: #a5b4fc;
-            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
+            border-color: #b0bcd0;
+            box-shadow: 0 2px 8px rgba(26,31,60,0.08);
         }
 
         .stat-box.stat-active {
-            border-color: #6366f1;
-            background: #f5f3ff;
+            border-color: #1a1f3c;
+            background: #f0f1f7;
         }
 
         .stat-box.stat-active .stat-label {
-            color: #6366f1;
+            color: #1a1f3c;
         }
 
         .stat-num {
@@ -394,7 +404,7 @@
         }
 
         .search-box:focus {
-            border-color: #6366f1;
+            border-color: #1a1f3c;
         }
 
         .attendee-table {
@@ -419,7 +429,7 @@
         }
 
         .attendee-row.header-row {
-            background: #f8f8ff;
+            background: #f4f5f8;
             font-size: 11px;
             font-weight: 700;
             color: #888;
@@ -447,7 +457,7 @@
         }
 
         .sort-btn.sort-active {
-            color: #6366f1;
+            color: #1a1f3c;
         }
 
         .copy-email-btn {
@@ -462,8 +472,8 @@
         }
 
         .copy-email-btn:hover {
-            color: #6366f1;
-            background: #f0f0ff;
+            color: #c4294a;
+            background: #fef2f2;
         }
 
         .attendee-row.row-selected {
@@ -483,7 +493,7 @@
 
         .ticket-count {
             font-size: 12px;
-            color: #6366f1;
+            color: #1a1f3c;
             font-weight: 600;
         }
 
@@ -688,7 +698,7 @@
             width: 34px;
             height: 34px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #6366f1, #818cf8);
+            background: linear-gradient(135deg, #1a1f3c, #252b52);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -730,8 +740,8 @@
         }
 
         .link-box {
-            background: #f8f8ff;
-            border: 1px solid #e0e0ff;
+            background: #f4f5f8;
+            border: 1px solid #dde3ed;
             border-radius: 10px;
             padding: 12px;
             margin-bottom: 18px;
@@ -756,7 +766,7 @@
         }
 
         .link-box input:focus {
-            border-color: #6366f1;
+            border-color: #1a1f3c;
         }
 
         .btn-settings {
@@ -805,7 +815,7 @@
         }
 
         .igr-inp:focus {
-            border-color: #6366f1;
+            border-color: #1a1f3c;
             z-index: 2;
         }
 
@@ -840,10 +850,19 @@
 <body>
 
     <div class="topbar">
-        <div class="topbar-title">🎟️ <span>WTS</span> Tickets</div>
-        <button class="logout-btn" onclick="logout()">Sign out</button>
-        <button class="logout-btn" onclick="confirmDeleteAccount()"
-            style="margin-left:8px;color:#dc2626;border-color:#dc2626;">Delete Account</button>
+        <a href="/" class="topbar-logo"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
+        <div class="topbar-actions">
+            <a href="/" class="topbar-btn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                Home
+            </a>
+            <a href="/scanner.html" class="topbar-btn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/></svg>
+                Scanner
+            </a>
+            <button class="topbar-btn" onclick="logout()">Sign Out</button>
+            <button class="topbar-btn topbar-btn-danger" onclick="confirmDeleteAccount()">Delete Account</button>
+        </div>
     </div>
 
     <div class="layout" style="flex:1;">
@@ -869,7 +888,9 @@
         <!-- Main -->
         <div class="main" id="main">
             <div class="empty-state" id="emptyState">
-                <div class="empty-state-icon">🎟️</div>
+                <div class="empty-state-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#dde3ed" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>
+                </div>
                 <p>Select an event to view details</p>
                 <p style="font-size:13px; color:#bbb;">Events are created from your Google Sheet</p>
             </div>
@@ -890,9 +911,10 @@
         </div>
     </div>
 
-    <footer
-        style="text-align:center;padding:10px;font-size:12px;color:#aaa;border-top:1px solid #e8e8e8;background:#fff;">
-        &copy; 2026 Will's Tech Support
+    <footer style="background:#10132a;border-top:1px solid rgba(255,255,255,0.06);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;">
+        <img src="/logo-nav.svg" alt="Will's Tech Support" style="height:20px;width:auto;opacity:0.7;">
+        <span style="font-size:12px;color:rgba(255,255,255,0.28);">&copy; 2026 Will's Tech Support</span>
+        <a href="/support.html" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;">Support</a>
     </footer>
 
 
@@ -947,7 +969,7 @@
         onclick="if(event.target===this)closeSettings()">
         <div class="modal">
             <div class="modal-header">
-                <h2>⚙️ Room Settings</h2>
+                <h2>Room Settings</h2>
                 <button class="modal-close" onclick="closeSettings()">&times;</button>
             </div>
             <div id="settingsContent">Loading…</div>
@@ -1196,17 +1218,17 @@
         <div class="detail-header">
             ${event.imageUrl
                     ? `<img class="detail-image" src="${event.imageUrl}" alt="">`
-                    : `<div class="detail-image-placeholder">🎟️</div>`}
+                    : `<div class="detail-image-placeholder"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg></div>`}
             <div style="flex:1;">
                 <div class="detail-title">${esc(event.name)}</div>
                 <div class="detail-meta">
-                    📅 ${fmtDateRange(event.time, event.endTime)}<br>
-                    📍 ${esc(event.location?.name || '')}${event.location?.address ? ' — ' + esc(event.location.address) : ''}
+                    <svg style="display:inline;vertical-align:text-top;margin-right:4px;opacity:.6" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>${fmtDateRange(event.time, event.endTime)}<br>
+                    <svg style="display:inline;vertical-align:text-top;margin-right:4px;opacity:.6" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>${esc(event.location?.name || '')}${event.location?.address ? ' — ' + esc(event.location.address) : ''}
                 </div>
                 <div class="detail-actions">
-                    <a href="/scanner.html" target="_blank" class="btn btn-scanner">📷 Open Scanner</a>
-                    <button class="btn-settings" onclick="openEditEventModal('${event.id}')">✏️ Edit Event</button>
-                    <button class="btn-settings" onclick="openSettings('${event.id}')">⚙️ Settings</button>
+                    <a href="/scanner.html" target="_blank" class="btn btn-scanner">Open Scanner</a>
+                    <button class="btn-settings" onclick="openEditEventModal('${event.id}')">Edit Event</button>
+                    <button class="btn-settings" onclick="openSettings('${event.id}')">Settings</button>
                     <button class="btn-settings" onclick="openBulkEmailModal('${event.id}', ${grouped.length})">✉️ Email All</button>
                     <button class="btn btn-danger" onclick="deleteEvent('${event.id}')">Delete Event</button>
                 </div>
@@ -2496,7 +2518,7 @@
                 <span>${createdStr ? `Registered ${createdStr}` : ''}</span>
                 <div style="display:flex;gap:6px;align-items:center;">
                     ${emailBadge}
-                    <button class="copy-email-btn" onclick="copyToClipboard('${esc(t.email || '')}', this)" title="Copy email">📋 Copy</button>
+                    <button class="copy-email-btn" onclick="copyToClipboard('${esc(t.email || '')}', this)" title="Copy email">Copy</button>
                 </div>
             </div>`;
 
