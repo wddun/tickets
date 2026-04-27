@@ -330,7 +330,7 @@ struct ScanBanner: View {
                 Text(result.title.uppercased())
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.white.opacity(0.7))
-                    .tracking(1.0)
+                    .kerning(1.0)
                 Text(result.firstName ?? result.name)
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(.white)
