@@ -2,27 +2,33 @@
 //  DisplayConnectionView.swift
 //  Ticket Check In
 //
-//  Sheet shown from the scanner phone to pair a display device
-//  via Bluetooth (BLE) or Internet (SSE QR code).
+//  Settings sheet: choose this device's role (Display or Scanner)
+//  and connection method (Bluetooth or WiFi), then start.
 //
 
 import SwiftUI
 import CoreImage.CIFilterBuiltins
 
-struct DisplayConnectionView: View {
+struct DisplaySetupView: View {
     @ObservedObject var bluetooth: BluetoothManager
     @Environment(\.dismiss) private var dismiss
 
-    enum Mode: String, CaseIterable {
-        case bluetooth = "Bluetooth"
-        case internet  = "Internet"
-    }
-
-    @State private var mode: Mode = .bluetooth
-    @State private var displayURL: String? = nil
-    @State private var isLoadingToken = false
-    @State private var tokenError: String? = nil
+    @AppStorage("displayModeActive")   private var displayModeActive   = false
+    @AppStorage("displayInitialMode")  private var displayInitialMode  = "bluetooth"
     @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
+
+    enum Role       { case display, scanner }
+    enum Connection { case bluetooth, wifi }
+    enum Phase      { case picking, scannerBLE, scannerWiFi }
+
+    @State private var role:       Role       = .display
+    @State private var connection: Connection = .bluetooth
+    @State private var phase:      Phase      = .picking
+
+    // Scanner WiFi state
+    @State private var displayURL:     String? = nil
+    @State private var isLoadingToken          = false
+    @State private var tokenError:     String? = nil
 
     private var lastEvent: Event? {
         guard !lastSelectedEventData.isEmpty else { return nil }
@@ -31,76 +37,201 @@ struct DisplayConnectionView: View {
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                Picker("Mode", selection: $mode) {
-                    ForEach(Mode.allCases, id: \.self) { m in
-                        Text(m.rawValue).tag(m)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-
-                Divider()
-
-                if mode == .bluetooth {
-                    bluetoothContent
-                } else {
-                    internetContent
+            Group {
+                switch phase {
+                case .picking:    pickingView
+                case .scannerBLE: scannerBLEView
+                case .scannerWiFi: scannerWiFiView
                 }
             }
-            .navigationTitle("Connect Display")
+            .navigationTitle("Display Setup")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if phase == .picking {
+                        Button("Cancel") { dismiss() }
+                    } else {
+                        Button("Back") {
+                            if bluetooth.bleState == .scanning || bluetooth.bleState == .connecting {
+                                bluetooth.disconnect()
+                            }
+                            phase = .picking
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    if phase == .scannerBLE && bluetooth.bleState == .connected {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
-        }
-        .onChange(of: mode) { _ in
-            if mode == .bluetooth {
-                displayURL = nil
-                tokenError = nil
-            } else {
-                if bluetooth.bleState == .scanning { bluetooth.disconnect() }
-                if let event = lastEvent, displayURL == nil { fetchToken(eventId: event.id) }
-            }
-        }
-        .onDisappear {
-            if bluetooth.bleState == .scanning { bluetooth.disconnect() }
         }
     }
 
-    // MARK: - Bluetooth
+    // MARK: - Phase 1: Picker
 
     @ViewBuilder
-    private var bluetoothContent: some View {
+    private var pickingView: some View {
+        Form {
+            Section {
+                rolePicker
+            } header: {
+                Text("This phone is the…")
+            }
+
+            Section {
+                connectionPicker
+            } header: {
+                Text("Connect via")
+            }
+
+            Section {
+                Button {
+                    startSetup()
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text("Start")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                        Spacer()
+                    }
+                }
+            }
+
+            Section {
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var rolePicker: some View {
+        HStack(spacing: 0) {
+            roleButton("Display", selected: role == .display) { role = .display }
+            Divider()
+            roleButton("Scanner", selected: role == .scanner) { role = .scanner }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .listRowInsets(EdgeInsets())
+    }
+
+    @ViewBuilder
+    private var connectionPicker: some View {
+        HStack(spacing: 0) {
+            roleButton("Bluetooth", selected: connection == .bluetooth) { connection = .bluetooth }
+            Divider()
+            roleButton("WiFi", selected: connection == .wifi) { connection = .wifi }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .listRowInsets(EdgeInsets())
+    }
+
+    @ViewBuilder
+    private func roleButton(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 15, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Color.accentColor : .secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(selected ? Color.accentColor.opacity(0.08) : Color.clear)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var description: String {
+        switch (role, connection) {
+        case (.display, .bluetooth):
+            return "This phone shows scan results. The scanner phone finds and connects to it via Bluetooth — no internet needed."
+        case (.display, .wifi):
+            return "This phone shows scan results via the server. Point its camera at the QR code shown on the scanner phone."
+        case (.scanner, .bluetooth):
+            return "This phone scans tickets and sends results to the display phone over Bluetooth."
+        case (.scanner, .wifi):
+            return "This phone scans tickets. Results appear on the display phone via the server — show this QR code on the display phone."
+        }
+    }
+
+    private func startSetup() {
+        switch (role, connection) {
+        case (.display, let conn):
+            displayInitialMode = conn == .bluetooth ? "bluetooth" : "wifi"
+            dismiss()
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                displayModeActive = true
+            }
+        case (.scanner, .bluetooth):
+            bluetooth.startScanningForDisplays()
+            phase = .scannerBLE
+        case (.scanner, .wifi):
+            phase = .scannerWiFi
+            if let event = lastEvent { fetchToken(eventId: event.id) }
+        }
+    }
+
+    // MARK: - Phase 2: Scanner BLE
+
+    @ViewBuilder
+    private var scannerBLEView: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 24) {
                 switch bluetooth.bleState {
-                case .idle:
-                    idleBLE
                 case .scanning:
-                    scanningBLE
+                    VStack(spacing: 12) {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Scanning for displays…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 24)
+                        if bluetooth.discoveredDisplays.isEmpty {
+                            Text("On the display phone, open Display Setup → Display → Bluetooth → Start.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
+                        } else {
+                            bleDeviceList
+                        }
+                    }
+
                 case .connecting:
                     ProgressView("Connecting…").padding(.top, 40)
+
                 case .connected:
-                    connectedBLE
-                case .disconnected:
-                    VStack(spacing: 16) {
-                        Image(systemName: "wifi.slash")
-                            .font(.system(size: 44))
-                            .foregroundStyle(.secondary)
-                        Text("Disconnected — scanning for display…")
+                    VStack(spacing: 14) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 52))
+                            .foregroundStyle(.green)
+                            .padding(.top, 24)
+                        Text("Connected to \(bluetooth.connectedDisplayName ?? "Display")")
+                            .font(.headline)
+                        Text("Scan results will appear on the display automatically.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        discoveredList
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                        Button(role: .destructive) {
+                            bluetooth.disconnect()
+                        } label: {
+                            Text("Disconnect")
+                                .font(.subheadline)
+                                .foregroundStyle(.red)
+                        }
+                        .padding(.top, 4)
                     }
+
                 case .unauthorized:
                     VStack(spacing: 12) {
                         Image(systemName: "antenna.radiowaves.left.and.right.slash")
                             .font(.system(size: 44))
                             .foregroundStyle(.orange)
+                            .padding(.top, 24)
                         Text("Bluetooth permission denied")
                             .font(.headline)
                         Text("Go to Settings → Ticket Check In → enable Bluetooth.")
@@ -108,147 +239,60 @@ struct DisplayConnectionView: View {
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 32)
-                    }.padding(.top, 20)
-                case .unsupported:
-                    VStack(spacing: 12) {
-                        Image(systemName: "xmark.circle")
-                            .font(.system(size: 44))
-                            .foregroundStyle(.red)
-                        Text("Bluetooth not supported on this device.")
-                            .font(.headline)
-                    }.padding(.top, 20)
-                case .advertising:
+                    }
+
+                default:
                     EmptyView()
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
         }
     }
 
     @ViewBuilder
-    private var idleBLE: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 44))
+    private var bleDeviceList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("NEARBY DISPLAYS")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .padding(.top, 20)
-            Text("Search for a nearby device running the Display tab.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Button {
-                bluetooth.startScanningForDisplays()
-            } label: {
-                Label("Scan for Displays", systemImage: "magnifyingglass")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.accentColor)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .padding(.horizontal, 32)
-        }
-    }
-
-    @ViewBuilder
-    private var scanningBLE: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 10) {
-                ProgressView()
-                Text("Scanning for displays…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.top, 12)
-            if bluetooth.discoveredDisplays.isEmpty {
-                Text("On the display device, open the Display tab and tap \"Start Bluetooth Display\".")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            } else {
-                discoveredList
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var connectedBLE: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 52))
-                .foregroundStyle(.green)
-                .padding(.top, 20)
-            Text("Connected to \(bluetooth.connectedDisplayName ?? "Display")")
-                .font(.headline)
-            Text("Scan results will appear on the display automatically.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Button(role: .destructive) {
-                bluetooth.disconnect()
-            } label: {
-                Text("Disconnect")
-                    .font(.subheadline)
-                    .foregroundStyle(.red)
-            }
-            .padding(.top, 4)
-        }
-    }
-
-    @ViewBuilder
-    private var discoveredList: some View {
-        if !bluetooth.discoveredDisplays.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("NEARBY DISPLAYS")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 6)
-                ForEach(bluetooth.discoveredDisplays) { display in
-                    Button {
-                        bluetooth.connect(to: display)
-                    } label: {
-                        HStack {
-                            Image(systemName: "tv")
-                                .font(.system(size: 18))
-                                .foregroundStyle(Color.accentColor)
-                                .frame(width: 32)
-                            Text(display.name)
-                                .font(.system(size: 16, weight: .medium))
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 14)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 6)
+            ForEach(bluetooth.discoveredDisplays) { display in
+                Button { bluetooth.connect(to: display) } label: {
+                    HStack {
+                        Image(systemName: "tv")
+                            .font(.system(size: 18))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 32)
+                        Text(display.name)
+                            .font(.system(size: 16, weight: .medium))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.primary)
-                    Divider().padding(.leading, 52)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+                Divider().padding(.leading, 52)
             }
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 20)
         }
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 20)
     }
 
-    // MARK: - Internet
+    // MARK: - Phase 2: Scanner WiFi
 
     @ViewBuilder
-    private var internetContent: some View {
+    private var scannerWiFiView: some View {
         ScrollView {
             VStack(spacing: 20) {
                 if let event = lastEvent {
                     Text(event.name)
                         .font(.headline)
-                        .padding(.top, 8)
-
+                        .padding(.top, 16)
                     if isLoadingToken {
                         ProgressView("Loading…").padding(.top, 20)
                     } else if let error = tokenError {
@@ -262,9 +306,11 @@ struct DisplayConnectionView: View {
                             .padding(.horizontal, 32)
                         Button("Retry") { fetchToken(eventId: event.id) }
                     } else if let url = displayURL {
-                        Text("Scan this code on the display device")
+                        Text("Point the display phone's camera at this code")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
                         if let qrImage = makeQRImage(url) {
                             Image(uiImage: qrImage)
                                 .interpolation(.none)
@@ -274,23 +320,18 @@ struct DisplayConnectionView: View {
                                 .padding(12)
                                 .background(.white, in: RoundedRectangle(cornerRadius: 12))
                         }
-                        Text(url)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                        Button("Refresh") { fetchToken(eventId: event.id) }
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        Button("Done") { dismiss() }
+                            .font(.system(size: 16, weight: .semibold))
+                            .padding(.top, 4)
                     }
                 } else {
                     Image(systemName: "calendar.badge.questionmark")
                         .font(.system(size: 44))
                         .foregroundStyle(.secondary)
-                        .padding(.top, 20)
+                        .padding(.top, 24)
                     Text("No event selected")
                         .font(.headline)
-                    Text("Open the Events tab, select an event, then come back here to get the display QR code.")
+                    Text("Open the Events tab and select an event first.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -298,7 +339,6 @@ struct DisplayConnectionView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
         }
         .task(id: lastEvent?.id) {
             guard let event = lastEvent, displayURL == nil, !isLoadingToken else { return }
@@ -317,7 +357,7 @@ struct DisplayConnectionView: View {
                 await MainActor.run { displayURL = url; isLoadingToken = false }
             } catch {
                 await MainActor.run {
-                    tokenError = "Could not load display link. Make sure you're logged in."
+                    tokenError = "Could not load display link. Make sure you're signed in."
                     isLoadingToken = false
                 }
             }
