@@ -164,7 +164,7 @@ struct DisplayConnectionView: View {
             }
             .padding(.top, 12)
             if bluetooth.discoveredDisplays.isEmpty {
-                Text("On the display device, open the Display tab and tap "Start Bluetooth Display".")
+                Text("On the display device, open the Display tab and tap \"Start Bluetooth Display\".")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
