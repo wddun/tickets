@@ -1964,6 +1964,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
                 ticketStatusCache.clear();
                 log('validate', `[OK] REENTRY ENTER — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
                 res.json({ status: 'reentry_enter', message: `Welcome back to ${event ? event.name : 'the event'}!`, ...ticketFields });
+                if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastDisplay(event.id, { type: 'scan', status: 'reentry_enter', name: ticket.name, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
                 pushWalletIfChanged([ticket], event).catch(() => { });
                 return;
             }
@@ -1981,6 +1982,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
 
     log('validate', `[OK] VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
+    if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastDisplay(event.id, { type: 'scan', status: 'valid', name: ticket.name, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
     pushWalletIfChanged([ticket], event).catch(() => { });
 });
 
@@ -2841,6 +2843,94 @@ setInterval(async () => {
     }
 }, 5 * 60 * 1000);
 
+
+// ── Door Display / SSE ──────────────────────────────────────────────────────
+const displayClients = new Map(); // eventId → Set<res>
+
+function broadcastDisplay(eventId, payload) {
+    const clients = displayClients.get(eventId);
+    if (!clients || clients.size === 0) return;
+    const chunk = `data: ${JSON.stringify(payload)}\n\n`;
+    for (const client of clients) {
+        try { client.write(chunk); } catch { /* disconnected */ }
+    }
+}
+
+// Generate or retrieve display token (auth required — only event owner/access)
+app.get('/api/display/token/:eventId', requireAuth, async (req, res) => {
+    const { eventId } = req.params;
+    if (!userHasEventAccess(req.session.userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
+    const event = db.data.events.find(e => e.id === eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!event.displayToken) {
+        await db.update(data => {
+            const ev = data.events.find(e => e.id === eventId);
+            if (ev && !ev.displayToken) ev.displayToken = crypto.randomBytes(24).toString('hex');
+        });
+    }
+    const tok = db.data.events.find(e => e.id === eventId).displayToken;
+    res.json({ token: tok, url: `${BASE_URL}/display.html?token=${tok}` });
+});
+
+// Regenerate display token (invalidates old links)
+app.post('/api/display/token/:eventId/rotate', requireAuth, async (req, res) => {
+    const { eventId } = req.params;
+    if (!userHasEventAccess(req.session.userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
+    await db.update(data => {
+        const ev = data.events.find(e => e.id === eventId);
+        if (ev) ev.displayToken = crypto.randomBytes(24).toString('hex');
+    });
+    const tok = db.data.events.find(e => e.id === eventId).displayToken;
+    res.json({ token: tok, url: `${BASE_URL}/display.html?token=${tok}` });
+});
+
+// Event info for display page (public — display token is the auth)
+app.get('/api/display/info/:token', (req, res) => {
+    const event = db.data.events.find(e => e.displayToken === req.params.token);
+    if (!event) return res.status(404).json({ error: 'Not found' });
+    const tickets = db.data.tickets.filter(t => t.eventId === event.id);
+    res.json({
+        event: { id: event.id, name: event.name, time: event.time, location: event.location, capacity: event.capacity || null },
+        total: tickets.length,
+        scanned: tickets.filter(t => t.used_at).length
+    });
+});
+
+// SSE stream — display token is the auth
+app.get('/api/display/stream/:token', (req, res) => {
+    const { token } = req.params;
+    if (!token || token.length < 32) return res.status(400).send('Invalid token');
+    const event = db.data.events.find(e => e.displayToken === token);
+    if (!event) return res.status(404).send('Not found');
+
+    res.set({
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+    });
+    res.flushHeaders();
+
+    const tickets = db.data.tickets.filter(t => t.eventId === event.id);
+    res.write(`data: ${JSON.stringify({
+        type: 'init',
+        event: { id: event.id, name: event.name, time: event.time, capacity: event.capacity || null },
+        total: tickets.length,
+        scanned: tickets.filter(t => t.used_at).length
+    })}\n\n`);
+
+    if (!displayClients.has(event.id)) displayClients.set(event.id, new Set());
+    displayClients.get(event.id).add(res);
+
+    const keepAlive = setInterval(() => {
+        try { res.write(': ping\n\n'); } catch { clearInterval(keepAlive); }
+    }, 25000);
+
+    req.on('close', () => {
+        clearInterval(keepAlive);
+        displayClients.get(event.id)?.delete(res);
+    });
+});
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\nTicket Check-in System running at:\n - Local: http://localhost:${PORT}\n   - Network:  http://0.0.0.0:${PORT}\n`);
 });

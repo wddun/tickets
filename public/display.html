@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Display | WTS Tickets</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            width: 100%; height: 100%;
+            background: #080810;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #app {
+            position: fixed; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0)
+                     env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+            transition: background 0.35s ease;
+        }
+
+        /* ── Idle / no scan ── */
+        #idleView {
+            text-align: center;
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
+        }
+        #statusDot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: #555; display: inline-block;
+            transition: background 0.4s;
+        }
+        #statusDot.connected { background: #22c55e; box-shadow: 0 0 8px #22c55e66; }
+        #statusDot.connecting { background: #f59e0b; animation: pulse 1.2s infinite; }
+        #statusLabel {
+            font-size: 14px; font-weight: 500;
+            color: rgba(255,255,255,0.35); letter-spacing: 0.3px;
+        }
+        #idleEventName {
+            font-size: clamp(18px, 3vw, 28px);
+            font-weight: 700; color: rgba(255,255,255,0.25);
+            margin-top: 6px; letter-spacing: -0.5px;
+        }
+        #idleCount {
+            font-size: 13px; color: rgba(255,255,255,0.18);
+            margin-top: 2px;
+        }
+
+        /* ── Scan result ── */
+        #resultView {
+            display: none; flex-direction: column; align-items: center;
+            gap: clamp(12px, 2vw, 28px);
+            text-align: center;
+            padding: 20px;
+        }
+        #resultView.visible { display: flex; }
+        #resultIcon {
+            font-size: clamp(56px, 10vw, 96px);
+            line-height: 1;
+        }
+        #resultName {
+            font-size: clamp(40px, 8vw, 88px);
+            font-weight: 800;
+            line-height: 1.05;
+            letter-spacing: -1px;
+            max-width: 90vw;
+        }
+        #resultStatus {
+            font-size: clamp(18px, 3vw, 30px);
+            font-weight: 600;
+            opacity: 0.82;
+        }
+        #resultEvent {
+            font-size: clamp(13px, 1.8vw, 18px);
+            opacity: 0.45;
+            font-weight: 500;
+        }
+
+        /* ── Landscape overrides ── */
+        @media (orientation: landscape) {
+            #resultView { flex-direction: row; gap: clamp(24px, 4vw, 60px); }
+            #resultIcon { font-size: clamp(52px, 8vw, 80px); flex-shrink: 0; }
+            #resultTexts { text-align: left; }
+            #resultName  { font-size: clamp(36px, 6vw, 72px); }
+        }
+
+        /* ── Reconnect overlay ── */
+        #reconnectBadge {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px; padding: 8px 18px;
+            font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.5);
+            display: none;
+        }
+        #reconnectBadge.visible { display: block; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* SVG icons inlined as CSS masks */
+        .icon-check::before  { content: "✓"; }
+        .icon-warn::before   { content: "!"; }
+        .icon-x::before      { content: "✕"; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Idle state -->
+        <div id="idleView">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span id="statusDot" class="connecting"></span>
+                <span id="statusLabel">Connecting…</span>
+            </div>
+            <div id="idleEventName"></div>
+            <div id="idleCount"></div>
+        </div>
+
+        <!-- Scan result -->
+        <div id="resultView">
+            <div id="resultIcon"></div>
+            <div id="resultTexts">
+                <div id="resultName"></div>
+                <div id="resultStatus"></div>
+                <div id="resultEvent"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="reconnectBadge">Reconnecting…</div>
+
+    <script>
+        const token = new URLSearchParams(window.location.search).get('token');
+        if (!token) {
+            document.getElementById('statusLabel').textContent = 'No display token — use the dashboard to generate a link.';
+            throw new Error('No token');
+        }
+
+        const app   = document.getElementById('app');
+        const idle  = document.getElementById('idleView');
+        const res   = document.getElementById('resultView');
+        const dot   = document.getElementById('statusDot');
+        const label = document.getElementById('statusLabel');
+        const badge = document.getElementById('reconnectBadge');
+
+        let eventName = '';
+        let total = 0;
+        let scanned = 0;
+        let dismissTimer = null;
+        let retryDelay = 2000;
+        let es = null;
+
+        const STATUS = {
+            valid:         { bg: 'rgb(16,127,60)',   icon: '✓', text: 'Checked In' },
+            reentry_enter: { bg: 'rgb(16,127,60)',   icon: '✓', text: 'Welcome Back' },
+            used:          { bg: 'rgb(185,85,15)',   icon: '!', text: 'Already Checked In' },
+            invalid:       { bg: 'rgb(185,30,30)',   icon: '✕', text: 'Invalid Ticket' },
+        };
+
+        function setIdle() {
+            app.style.background = '#080810';
+            res.classList.remove('visible');
+            res.style.display = 'none';
+            idle.style.display = 'flex';
+        }
+
+        function showResult(data) {
+            const cfg = STATUS[data.status] || STATUS.invalid;
+            app.style.background = cfg.bg;
+            document.getElementById('resultIcon').textContent   = cfg.icon;
+            document.getElementById('resultName').textContent   = data.name || '';
+            document.getElementById('resultStatus').textContent = cfg.text;
+            document.getElementById('resultEvent').textContent  = data.eventName || eventName;
+            idle.style.display = 'none';
+            res.style.display  = 'flex';
+            res.classList.add('visible');
+
+            clearTimeout(dismissTimer);
+            dismissTimer = setTimeout(setIdle, 4000);
+        }
+
+        function updateIdle() {
+            document.getElementById('idleEventName').textContent = eventName;
+            document.getElementById('idleCount').textContent     = scanned > 0
+                ? `${scanned} / ${total} checked in` : '';
+        }
+
+        function connect() {
+            if (es) { es.close(); es = null; }
+            dot.className = 'connecting';
+            label.textContent = 'Connecting…';
+            badge.classList.remove('visible');
+
+            const source = new EventSource(`/api/display/stream/${token}`);
+            es = source;
+
+            source.onopen = () => {
+                dot.className = 'connected';
+                label.textContent = 'Connected';
+                badge.classList.remove('visible');
+                retryDelay = 2000;
+            };
+
+            source.onmessage = e => {
+                try {
+                    const msg = JSON.parse(e.data);
+                    if (msg.type === 'init') {
+                        eventName = msg.event?.name || '';
+                        total     = msg.total || 0;
+                        scanned   = msg.scanned || 0;
+                        document.title = eventName ? `${eventName} · Display` : 'Display · WTS Tickets';
+                        updateIdle();
+                    } else if (msg.type === 'scan') {
+                        total   = msg.total   ?? total;
+                        scanned = msg.scanned ?? scanned;
+                        updateIdle();
+                        showResult(msg);
+                    }
+                } catch { /* malformed */ }
+            };
+
+            source.onerror = () => {
+                source.close();
+                es = null;
+                dot.className = '';
+                label.textContent = 'Disconnected';
+                badge.classList.add('visible');
+                // Exponential backoff: 2s → 4s → 8s → 8s max
+                setTimeout(connect, retryDelay);
+                retryDelay = Math.min(retryDelay * 2, 8000);
+            };
+        }
+
+        // Keep screen awake (experimental — not universally supported)
+        async function keepAwake() {
+            try {
+                if ('wakeLock' in navigator) {
+                    await navigator.wakeLock.request('screen');
+                }
+            } catch { /* not supported */ }
+        }
+        keepAwake();
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') keepAwake();
+        });
+
+        connect();
+    </script>
+</body>
+</html>
