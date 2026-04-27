@@ -1964,7 +1964,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
                 ticketStatusCache.clear();
                 log('validate', `[OK] REENTRY ENTER — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
                 res.json({ status: 'reentry_enter', message: `Welcome back to ${event ? event.name : 'the event'}!`, ...ticketFields });
-                if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastDisplay(event.id, { type: 'scan', status: 'reentry_enter', name: ticket.name, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
+                if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastDisplay(event.id, { type: 'scan', status: 'reentry_enter', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
                 pushWalletIfChanged([ticket], event).catch(() => { });
                 return;
             }
@@ -1982,7 +1982,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
 
     log('validate', `[OK] VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
-    if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastDisplay(event.id, { type: 'scan', status: 'valid', name: ticket.name, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
+    if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastDisplay(event.id, { type: 'scan', status: 'valid', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
     pushWalletIfChanged([ticket], event).catch(() => { });
 });
 

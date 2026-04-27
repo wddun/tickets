@@ -167,6 +167,7 @@ struct EventsListViewModern: View {
     @State private var navigationPath = NavigationPath()
     @State private var hasAutoNavigated = false
     @State private var showDeleteConfirm = false
+    @State private var showDisplaySetup = false
     @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
 
     private var lastSelectedEvent: Event? {
@@ -218,6 +219,12 @@ struct EventsListViewModern: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
+                        Button {
+                            showDisplaySetup = true
+                        } label: {
+                            Label("Display Setup", systemImage: "tv")
+                        }
+                        Divider()
                         Button("Sign Out", role: .destructive) {
                             Task { try? await api.logout() }
                         }
@@ -240,6 +247,9 @@ struct EventsListViewModern: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This will permanently delete your account and all associated events and tickets. This cannot be undone.")
+            }
+            .sheet(isPresented: $showDisplaySetup) {
+                DisplaySetupView(bluetooth: BluetoothManager.shared)
             }
         }
         .task {
@@ -277,6 +287,7 @@ struct EventsListViewLegacy: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showDeleteConfirm = false
+    @State private var showDisplaySetup = false
     @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
 
     var body: some View {
@@ -310,6 +321,12 @@ struct EventsListViewLegacy: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
+                        Button {
+                            showDisplaySetup = true
+                        } label: {
+                            Label("Display Setup", systemImage: "tv")
+                        }
+                        Divider()
                         Button("Sign Out", role: .destructive) {
                             Task { try? await api.logout() }
                         }
@@ -332,6 +349,9 @@ struct EventsListViewLegacy: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This will permanently delete your account and all associated events and tickets. This cannot be undone.")
+            }
+            .sheet(isPresented: $showDisplaySetup) {
+                DisplaySetupView(bluetooth: BluetoothManager.shared)
             }
         }
         .task { await loadEvents() }

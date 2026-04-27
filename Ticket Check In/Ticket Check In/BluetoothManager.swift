@@ -13,6 +13,16 @@ struct BLEScanResult: Codable, Equatable {
     let name: String
     let firstName: String?
     let eventName: String?
+    let registrationId: String?
+
+    init(status: String, name: String, firstName: String? = nil,
+         eventName: String? = nil, registrationId: String? = nil) {
+        self.status = status
+        self.name = name
+        self.firstName = firstName
+        self.eventName = eventName
+        self.registrationId = registrationId
+    }
 }
 
 class BluetoothManager: NSObject, ObservableObject {

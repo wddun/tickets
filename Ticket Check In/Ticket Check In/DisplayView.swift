@@ -18,6 +18,7 @@ struct DisplayView: View {
     let onDismiss: () -> Void
 
     @State private var currentResult: BLEScanResult? = nil
+    @State private var displayRegistrationId: String? = nil
     @State private var resultBg: Color = .black
     @State private var showResult = false
     @State private var dismissTask: Task<Void, Never>? = nil
@@ -87,8 +88,9 @@ struct DisplayView: View {
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             displayMode = initialMode == "wifi" ? .internet : .bluetooth
-            // Auto-start immediately — no button tap required
-            if initialMode != "wifi" {
+            if initialMode == "wifi" {
+                showQRScanner = true
+            } else {
                 bluetooth.startDisplayMode()
             }
         }
@@ -183,7 +185,7 @@ struct DisplayView: View {
         switch displayMode {
         case .bluetooth:
             switch bluetooth.bleState {
-            case .connected:    return "Connected via Bluetooth"
+            case .connected:    return "Connected — Ready to scan"
             case .advertising:  return "Waiting for scanner…"
             case .scanning:     return "Scanning…"
             case .connecting:   return "Connecting…"
@@ -194,10 +196,10 @@ struct DisplayView: View {
             }
         case .internet:
             switch sseState {
-            case .connected:    return "Connected · Live"
+            case .connected:    return "Connected — Ready to scan"
             case .connecting:   return "Connecting…"
             case .disconnected: return "Reconnecting…"
-            case .idle:         return "Tap to scan QR code"
+            case .idle:         return "Scan QR code to connect"
             }
         }
     }
@@ -219,9 +221,10 @@ struct DisplayView: View {
                     Text(resultLabel(result))
                         .font(.system(size: 24, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.8))
-                    // Checkout button for reentry_exit
                     if result.status == "reentry_exit" {
                         checkoutButton
+                    } else if result.status == "used" {
+                        checkBackInButton
                     }
                 }
                 Spacer(minLength: 0)
@@ -239,9 +242,10 @@ struct DisplayView: View {
                 Text(resultLabel(result))
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.8))
-                // Checkout button for reentry_exit
                 if result.status == "reentry_exit" {
                     checkoutButton.padding(.top, 8)
+                } else if result.status == "used" {
+                    checkBackInButton.padding(.top, 8)
                 }
                 Spacer()
                 if let event = result.eventName {
@@ -265,6 +269,29 @@ struct DisplayView: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 12)
                 .background(.white.opacity(0.9), in: Capsule())
+        }
+    }
+
+    @ViewBuilder
+    private var checkBackInButton: some View {
+        Button {
+            Task { await performCheckBackIn() }
+        } label: {
+            Text("Check Back In")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(resultBg)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .background(.white.opacity(0.9), in: Capsule())
+        }
+    }
+
+    private func performCheckBackIn() async {
+        guard let rid = displayRegistrationId else { return }
+        try? await APIService.shared.checkIn(registrationId: rid)
+        await MainActor.run {
+            withAnimation { showResult = false }
+            resultBg = .black
         }
     }
 
@@ -348,6 +375,7 @@ struct DisplayView: View {
         dismissTask?.cancel()
         showCheckoutConfirm = false
         currentResult = result
+        displayRegistrationId = result.registrationId
         resultBg = resultBackground(result)
         withAnimation { showResult = true }
         // For reentry_exit, don't auto-dismiss — needs manual checkout action
@@ -405,10 +433,11 @@ struct DisplayView: View {
             sseTotal   = msg["total"]   as? Int ?? sseTotal
             sseScanned = msg["scanned"] as? Int ?? sseScanned
             let result = BLEScanResult(
-                status:    msg["status"]    as? String ?? "invalid",
-                name:      msg["name"]      as? String ?? "Guest",
-                firstName: nil,
-                eventName: sseEventName.isEmpty ? nil : sseEventName
+                status:         msg["status"]         as? String ?? "invalid",
+                name:           msg["name"]           as? String ?? "Guest",
+                firstName:      nil,
+                eventName:      sseEventName.isEmpty ? nil : sseEventName,
+                registrationId: msg["registrationId"] as? String
             )
             displayResult(result)
         }
