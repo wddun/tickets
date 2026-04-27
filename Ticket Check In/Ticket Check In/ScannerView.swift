@@ -367,25 +367,27 @@ struct ScannerView: View {
             let request = URLRequest(url: url, timeoutInterval: .infinity)
             guard let (bytes, _) = try? await URLSession.shared.bytes(for: request) else { return }
             var buffer = ""
-            for try await byte in bytes {
-                if Task.isCancelled { break }
-                buffer += String(bytes: [byte], encoding: .utf8) ?? ""
-                while let range = buffer.range(of: "\n\n") {
-                    let chunk = String(buffer[buffer.startIndex..<range.lowerBound])
-                    buffer = String(buffer[range.upperBound...])
-                    if chunk.hasPrefix("data: "),
-                       let data = chunk.dropFirst(6).data(using: .utf8),
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let type = json["type"] as? String, type == "notification",
-                       let message = json["message"] as? String {
-                        await MainActor.run {
-                            adminNotifTitle = json["title"] as? String ?? "Admin Message"
-                            adminNotifMsg   = message
-                            showAdminNotif  = true
+            do {
+                for try await byte in bytes {
+                    if Task.isCancelled { break }
+                    buffer += String(bytes: [byte], encoding: .utf8) ?? ""
+                    while let range = buffer.range(of: "\n\n") {
+                        let chunk = String(buffer[buffer.startIndex..<range.lowerBound])
+                        buffer = String(buffer[range.upperBound...])
+                        if chunk.hasPrefix("data: "),
+                           let data = chunk.dropFirst(6).data(using: .utf8),
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           let type = json["type"] as? String, type == "notification",
+                           let message = json["message"] as? String {
+                            await MainActor.run {
+                                adminNotifTitle = json["title"] as? String ?? "Admin Message"
+                                adminNotifMsg   = message
+                                showAdminNotif  = true
+                            }
                         }
                     }
                 }
-            }
+            } catch { /* stream ended or cancelled — ignore */ }
         }
     }
 }
