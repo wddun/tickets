@@ -1,24 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#252b52"/>
-      <stop offset="100%" style="stop-color:#1a1f3c"/>
-    </linearGradient>
-  </defs>
   <!-- Background -->
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <!-- Red accent stripe top -->
-  <rect x="0" y="0" width="512" height="18" rx="112" fill="#c4294a"/>
-  <rect x="0" y="0" width="512" height="18" fill="#c4294a"/>
+  <rect width="512" height="512" fill="#1a1f3c"/>
+
   <!-- Ticket body -->
-  <rect x="80" y="140" width="352" height="232" rx="24" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.18)" stroke-width="3"/>
-  <!-- Perforation line -->
-  <line x1="80" y1="290" x2="432" y2="290" stroke="rgba(255,255,255,0.2)" stroke-width="3" stroke-dasharray="12,9"/>
-  <!-- Ticket icon -->
-  <text x="256" y="230" font-family="-apple-system,sans-serif" font-size="96"
-        text-anchor="middle" dominant-baseline="middle">🎟</text>
-  <!-- WTS text below -->
-  <text x="256" y="340" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
-        font-size="36" font-weight="800" fill="rgba(255,255,255,0.7)"
-        text-anchor="middle" dominant-baseline="middle" letter-spacing="4">TICKETS</text>
+  <rect x="68" y="166" width="376" height="180" rx="30" fill="white"/>
+
+  <!-- Red header band (top of ticket) -->
+  <rect x="68" y="166" width="376" height="56" rx="30" fill="#bd2949"/>
+  <rect x="68" y="194" width="376" height="28" fill="#bd2949"/>
+
+  <!-- Side notches (cut-out semicircles) -->
+  <circle cx="68"  cy="256" r="24" fill="#1a1f3c"/>
+  <circle cx="444" cy="256" r="24" fill="#1a1f3c"/>
+
+  <!-- Perforation dashes -->
+  <line x1="256" y1="186" x2="256" y2="334"
+        stroke="#1a1f3c" stroke-width="5"
+        stroke-dasharray="14,11" stroke-linecap="round" opacity="0.18"/>
 </svg>

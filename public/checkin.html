@@ -183,6 +183,7 @@
         .sd-partial { background: #fbbf24; }
         .sd-done    { background: #4ade80; }
 
+        .row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
         .row-checkin-btn {
             background: #fff;
             border: none; color: #1a1f3c;
@@ -193,6 +194,17 @@
             flex-shrink: 0;
         }
         .row-checkin-btn:active { opacity: 0.65; }
+        .row-checkin1-btn {
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+            font-size: 13px; font-weight: 700;
+            padding: 8px 14px; border-radius: 20px;
+            cursor: pointer; white-space: nowrap;
+            -webkit-tap-highlight-color: transparent;
+            flex-shrink: 0;
+        }
+        .row-checkin1-btn:active { opacity: 0.65; }
         .row-done-label {
             font-size: 13px; font-weight: 600;
             color: #4ade80; flex-shrink: 0;
@@ -444,9 +456,18 @@ function buildPersonRow(a) {
         ? (total === 1 ? '1 ticket · Pending' : `${total} tickets · None checked in`)
         : `${scanned} of ${total} checked in`;
 
-    const actionHtml = allDone
-        ? `<div class="row-done-label">Done</div>`
-        : `<button class="row-checkin-btn" onclick="checkInPerson(event,'${escAttr(a.registrationId)}')">Check In</button>`;
+    const unchecked = total - scanned;
+    let actionHtml;
+    if (allDone) {
+        actionHtml = `<div class="row-done-label">Done</div>`;
+    } else if (total > 1 && unchecked > 1) {
+        actionHtml = `<div class="row-actions">
+            <button class="row-checkin1-btn" onclick="checkIn1(event,'${escAttr(a.registrationId)}')">+1</button>
+            <button class="row-checkin-btn"  onclick="checkInPerson(event,'${escAttr(a.registrationId)}')">All</button>
+        </div>`;
+    } else {
+        actionHtml = `<button class="row-checkin-btn" onclick="checkInPerson(event,'${escAttr(a.registrationId)}')">Check In</button>`;
+    }
 
     const expandArrow = total > 1 ? `<div class="expand-arrow">›</div>` : '';
 
@@ -526,6 +547,22 @@ async function checkInPerson(e, registrationId) {
             btn.textContent = 'Check In'; btn.disabled = false;
         }
     } catch (_) { btn.textContent = 'Check In'; btn.disabled = false; }
+}
+
+async function checkIn1(e, registrationId) {
+    e.stopPropagation();
+    const btn = e.target;
+    const attendee = allAttendees.find(a => a.registrationId === registrationId);
+    const first = attendee && attendee.tickets.find(t => !t.used_at);
+    if (!first) return;
+    btn.textContent = '…'; btn.disabled = true;
+    try {
+        const r = await fetch(`/api/checkin/${first.id}`, { method: 'POST' });
+        if (r.ok) {
+            first.used_at = new Date().toISOString();
+            filterList();
+        } else { btn.textContent = '+1'; btn.disabled = false; }
+    } catch (_) { btn.textContent = '+1'; btn.disabled = false; }
 }
 
 // ── Utilities ─────────────────────────────────────────────
