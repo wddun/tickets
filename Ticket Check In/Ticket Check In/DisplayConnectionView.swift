@@ -2,9 +2,6 @@
 //  DisplayConnectionView.swift
 //  Ticket Check In
 //
-//  Settings sheet: choose this device's role (Display or Scanner)
-//  and connection method (Bluetooth or WiFi), then start.
-//
 
 import SwiftUI
 import CoreImage.CIFilterBuiltins
@@ -13,22 +10,22 @@ struct DisplaySetupView: View {
     @ObservedObject var bluetooth: BluetoothManager
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("displayModeActive")   private var displayModeActive   = false
-    @AppStorage("displayInitialMode")  private var displayInitialMode  = "bluetooth"
-    @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
+    @AppStorage("displayModeActive")      private var displayModeActive   = false
+    @AppStorage("displayInitialMode")     private var displayInitialMode  = "bluetooth"
+    @AppStorage("displayAutoStart")       private var displayAutoStart    = false
+    @AppStorage("lastSelectedEventData")  private var lastSelectedEventData: Data = Data()
 
-    enum Role       { case display, scanner }
-    enum Connection { case bluetooth, wifi }
-    enum Phase      { case picking, scannerBLE, scannerWiFi }
+    enum Role:       String, CaseIterable { case display = "Display", scanner = "Scanner" }
+    enum Connection: String, CaseIterable { case bluetooth = "Bluetooth", wifi = "WiFi" }
 
     @State private var role:       Role       = .display
     @State private var connection: Connection = .bluetooth
-    @State private var phase:      Phase      = .picking
+    @State private var started                = false
 
     // Scanner WiFi state
-    @State private var displayURL:     String? = nil
-    @State private var isLoadingToken          = false
-    @State private var tokenError:     String? = nil
+    @State private var displayURL:    String? = nil
+    @State private var isLoadingToken         = false
+    @State private var tokenError:    String? = nil
 
     private var lastEvent: Event? {
         guard !lastSelectedEventData.isEmpty else { return nil }
@@ -37,128 +34,216 @@ struct DisplaySetupView: View {
 
     var body: some View {
         NavigationView {
-            Group {
-                switch phase {
-                case .picking:    pickingView
-                case .scannerBLE: scannerBLEView
-                case .scannerWiFi: scannerWiFiView
+            Form {
+                // ── Role ──────────────────────────────────────────────────────
+                Section("This device") {
+                    Picker("Role", selection: $role) {
+                        ForEach(Role.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                    .onChange(of: role) { _ in resetStarted() }
+                }
+
+                // ── Connection ────────────────────────────────────────────────
+                Section("Connect via") {
+                    Picker("Connection", selection: $connection) {
+                        ForEach(Connection.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                    .onChange(of: connection) { _ in resetStarted() }
+                }
+
+                // ── Start button ──────────────────────────────────────────────
+                if !started {
+                    Section {
+                        Button {
+                            handleStart()
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Start")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+
+                // ── Inline connection status (scanner roles only) ──────────────
+                if started && role == .scanner {
+                    if connection == .bluetooth {
+                        bleSection
+                    } else {
+                        wifiSection
+                    }
+                }
+
+                // ── Description ───────────────────────────────────────────────
+                Section {
+                    Text(descriptionText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Display Setup")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if phase == .picking {
-                        Button("Cancel") { dismiss() }
-                    } else {
-                        Button("Back") {
-                            if bluetooth.bleState == .scanning || bluetooth.bleState == .connecting {
-                                bluetooth.disconnect()
-                            }
-                            phase = .picking
+                    Button("Cancel") {
+                        if bluetooth.bleState == .scanning || bluetooth.bleState == .connecting {
+                            bluetooth.disconnect()
                         }
+                        dismiss()
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    if phase == .scannerBLE && bluetooth.bleState == .connected {
+                if started && role == .scanner && bluetooth.bleState == .connected {
+                    ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { dismiss() }
                     }
                 }
             }
         }
+        .onDisappear {
+            if bluetooth.bleState == .scanning { bluetooth.disconnect() }
+        }
     }
 
-    // MARK: - Phase 1: Picker
+    // MARK: - BLE Section (inline, scanner role)
 
     @ViewBuilder
-    private var pickingView: some View {
-        Form {
-            Section {
-                rolePicker
-            } header: {
-                Text("This phone is the…")
-            }
+    private var bleSection: some View {
+        Section {
+            switch bluetooth.bleState {
+            case .scanning:
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Scanning for displays…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+                if bluetooth.discoveredDisplays.isEmpty {
+                    Text("On the display phone, open Display Setup → Display → Bluetooth → Start.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-            Section {
-                connectionPicker
-            } header: {
-                Text("Connect via")
-            }
+            case .connecting:
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Connecting…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
 
-            Section {
-                Button {
-                    startSetup()
+            case .connected:
+                Label("Connected to \(bluetooth.connectedDisplayName ?? "Display")", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.system(size: 15, weight: .medium))
+                    .padding(.vertical, 4)
+                Button(role: .destructive) {
+                    bluetooth.disconnect()
+                    started = false
                 } label: {
-                    HStack {
-                        Spacer()
-                        Text("Start")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                        Spacer()
+                    Text("Disconnect")
+                        .font(.subheadline)
+                }
+
+            case .unauthorized:
+                Label("Bluetooth permission denied — check Settings.", systemImage: "antenna.radiowaves.left.and.right.slash")
+                    .foregroundStyle(.orange)
+                    .font(.subheadline)
+
+            default:
+                EmptyView()
+            }
+        } header: {
+            Text("Bluetooth")
+        }
+
+        // Discovered devices list
+        if !bluetooth.discoveredDisplays.isEmpty &&
+           (bluetooth.bleState == .scanning || bluetooth.bleState == .disconnected) {
+            Section("Nearby Displays") {
+                ForEach(bluetooth.discoveredDisplays) { display in
+                    Button {
+                        bluetooth.connect(to: display)
+                    } label: {
+                        HStack {
+                            Image(systemName: "tv")
+                                .foregroundStyle(Color.accentColor)
+                            Text(display.name)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
+                    .foregroundStyle(.primary)
                 }
             }
+        }
+    }
 
-            Section {
-                Text(description)
+    // MARK: - WiFi Section (inline, scanner role)
+
+    @ViewBuilder
+    private var wifiSection: some View {
+        Section {
+            if let event = lastEvent {
+                if isLoadingToken {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Loading…").foregroundStyle(.secondary)
+                    }
+                } else if let error = tokenError {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(error).foregroundStyle(.secondary).font(.subheadline)
+                        Button("Retry") { fetchToken(eventId: event.id) }
+                    }
+                } else if let url = displayURL {
+                    VStack(spacing: 12) {
+                        Text("Point the display device at this code")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        if let qrImage = makeQRImage(url) {
+                            Image(uiImage: qrImage)
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: 200)
+                                .padding(10)
+                                .background(.white, in: RoundedRectangle(cornerRadius: 10))
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+            } else {
+                Text("Open the Events tab and select an event first.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+        } header: {
+            Text(lastEvent.map { $0.name } ?? "WiFi")
+        }
+        .task(id: lastEvent?.id) {
+            if let event = lastEvent, displayURL == nil, !isLoadingToken { fetchToken(eventId: event.id) }
         }
     }
 
-    @ViewBuilder
-    private var rolePicker: some View {
-        HStack(spacing: 0) {
-            roleButton("Display", selected: role == .display) { role = .display }
-            Divider()
-            roleButton("Scanner", selected: role == .scanner) { role = .scanner }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .listRowInsets(EdgeInsets())
-    }
+    // MARK: - Actions
 
-    @ViewBuilder
-    private var connectionPicker: some View {
-        HStack(spacing: 0) {
-            roleButton("Bluetooth", selected: connection == .bluetooth) { connection = .bluetooth }
-            Divider()
-            roleButton("WiFi", selected: connection == .wifi) { connection = .wifi }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .listRowInsets(EdgeInsets())
-    }
-
-    @ViewBuilder
-    private func roleButton(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 15, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Color.accentColor : .secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(selected ? Color.accentColor.opacity(0.08) : Color.clear)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var description: String {
-        switch (role, connection) {
-        case (.display, .bluetooth):
-            return "This phone shows scan results. The scanner phone finds and connects to it via Bluetooth — no internet needed."
-        case (.display, .wifi):
-            return "This phone shows scan results via the server. Point its camera at the QR code shown on the scanner phone."
-        case (.scanner, .bluetooth):
-            return "This phone scans tickets and sends results to the display phone over Bluetooth."
-        case (.scanner, .wifi):
-            return "This phone scans tickets. Results appear on the display phone via the server — show this QR code on the display phone."
-        }
-    }
-
-    private func startSetup() {
+    private func handleStart() {
         switch (role, connection) {
         case (.display, let conn):
             displayInitialMode = conn == .bluetooth ? "bluetooth" : "wifi"
+            displayAutoStart   = true
             dismiss()
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 350_000_000)
@@ -166,183 +251,35 @@ struct DisplaySetupView: View {
             }
         case (.scanner, .bluetooth):
             bluetooth.startScanningForDisplays()
-            phase = .scannerBLE
+            started = true
         case (.scanner, .wifi):
-            phase = .scannerWiFi
+            started = true
             if let event = lastEvent { fetchToken(eventId: event.id) }
         }
     }
 
-    // MARK: - Phase 2: Scanner BLE
-
-    @ViewBuilder
-    private var scannerBLEView: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                switch bluetooth.bleState {
-                case .scanning:
-                    VStack(spacing: 12) {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("Scanning for displays…")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.top, 24)
-                        if bluetooth.discoveredDisplays.isEmpty {
-                            Text("On the display phone, open Display Setup → Display → Bluetooth → Start.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 32)
-                        } else {
-                            bleDeviceList
-                        }
-                    }
-
-                case .connecting:
-                    ProgressView("Connecting…").padding(.top, 40)
-
-                case .connected:
-                    VStack(spacing: 14) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 52))
-                            .foregroundStyle(.green)
-                            .padding(.top, 24)
-                        Text("Connected to \(bluetooth.connectedDisplayName ?? "Display")")
-                            .font(.headline)
-                        Text("Scan results will appear on the display automatically.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                        Button(role: .destructive) {
-                            bluetooth.disconnect()
-                        } label: {
-                            Text("Disconnect")
-                                .font(.subheadline)
-                                .foregroundStyle(.red)
-                        }
-                        .padding(.top, 4)
-                    }
-
-                case .unauthorized:
-                    VStack(spacing: 12) {
-                        Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                            .font(.system(size: 44))
-                            .foregroundStyle(.orange)
-                            .padding(.top, 24)
-                        Text("Bluetooth permission denied")
-                            .font(.headline)
-                        Text("Go to Settings → Ticket Check In → enable Bluetooth.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                    }
-
-                default:
-                    EmptyView()
-                }
-            }
-            .frame(maxWidth: .infinity)
+    private func resetStarted() {
+        guard started else { return }
+        if bluetooth.bleState == .scanning || bluetooth.bleState == .connecting {
+            bluetooth.disconnect()
         }
+        started = false
+        displayURL = nil
+        tokenError = nil
     }
 
-    @ViewBuilder
-    private var bleDeviceList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("NEARBY DISPLAYS")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 6)
-            ForEach(bluetooth.discoveredDisplays) { display in
-                Button { bluetooth.connect(to: display) } label: {
-                    HStack {
-                        Image(systemName: "tv")
-                            .font(.system(size: 18))
-                            .foregroundStyle(Color.accentColor)
-                            .frame(width: 32)
-                        Text(display.name)
-                            .font(.system(size: 16, weight: .medium))
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 14)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.primary)
-                Divider().padding(.leading, 52)
-            }
-        }
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 20)
-    }
+    // MARK: - Description
 
-    // MARK: - Phase 2: Scanner WiFi
-
-    @ViewBuilder
-    private var scannerWiFiView: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                if let event = lastEvent {
-                    Text(event.name)
-                        .font(.headline)
-                        .padding(.top, 16)
-                    if isLoadingToken {
-                        ProgressView("Loading…").padding(.top, 20)
-                    } else if let error = tokenError {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.orange)
-                        Text(error)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                        Button("Retry") { fetchToken(eventId: event.id) }
-                    } else if let url = displayURL {
-                        Text("Point the display phone's camera at this code")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                        if let qrImage = makeQRImage(url) {
-                            Image(uiImage: qrImage)
-                                .interpolation(.none)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 220, height: 220)
-                                .padding(12)
-                                .background(.white, in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        Button("Done") { dismiss() }
-                            .font(.system(size: 16, weight: .semibold))
-                            .padding(.top, 4)
-                    }
-                } else {
-                    Image(systemName: "calendar.badge.questionmark")
-                        .font(.system(size: 44))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 24)
-                    Text("No event selected")
-                        .font(.headline)
-                    Text("Open the Events tab and select an event first.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .task(id: lastEvent?.id) {
-            guard let event = lastEvent, displayURL == nil, !isLoadingToken else { return }
-            fetchToken(eventId: event.id)
+    private var descriptionText: String {
+        switch (role, connection) {
+        case (.display, .bluetooth):
+            return "This device shows scan results. The scanner phone connects to it via Bluetooth — no internet required on either device."
+        case (.display, .wifi):
+            return "This device shows scan results via the server. On the scanner phone, go to Display Setup → Scanner → WiFi and point its QR code at this device's camera."
+        case (.scanner, .bluetooth):
+            return "This device scans tickets and sends results to the display device over Bluetooth."
+        case (.scanner, .wifi):
+            return "This device scans tickets. Results appear on the display device via the server. Show the QR code below to the display device."
         }
     }
 
@@ -350,14 +287,14 @@ struct DisplaySetupView: View {
 
     private func fetchToken(eventId: String) {
         isLoadingToken = true
-        tokenError = nil
+        tokenError     = nil
         Task {
             do {
                 let (_, url) = try await APIService.shared.getDisplayToken(eventId: eventId)
                 await MainActor.run { displayURL = url; isLoadingToken = false }
             } catch {
                 await MainActor.run {
-                    tokenError = "Could not load display link. Make sure you're signed in."
+                    tokenError     = "Could not load display link. Make sure you're signed in."
                     isLoadingToken = false
                 }
             }
@@ -366,8 +303,8 @@ struct DisplaySetupView: View {
 
     private func makeQRImage(_ string: String) -> UIImage? {
         let context = CIContext()
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(string.utf8)
+        let filter  = CIFilter.qrCodeGenerator()
+        filter.message         = Data(string.utf8)
         filter.correctionLevel = "M"
         guard let output = filter.outputImage else { return nil }
         let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))

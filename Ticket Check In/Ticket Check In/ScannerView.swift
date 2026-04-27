@@ -321,7 +321,8 @@ struct ScannerView: View {
             status: status,
             name: response.name ?? "Guest",
             firstName: response.firstName,
-            eventName: response.eventName
+            eventName: response.eventName,
+            registrationId: response.registrationId
         )
         BluetoothManager.shared.sendScanResult(ble)
     }
