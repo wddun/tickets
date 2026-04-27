@@ -13,6 +13,7 @@ struct ScannerView: View {
     let switchToManual: () -> Void
 
     @ObservedObject private var api = APIService.shared
+    @ObservedObject private var bluetooth = BluetoothManager.shared
 
     // Full-screen overlay state (reentry exit confirm only)
     @State private var scanResult: ScanResult?
@@ -25,6 +26,7 @@ struct ScannerView: View {
     @State private var lastRegistrationId: String?
     @State private var bannerDismissTask: Task<Void, Never>?
     @State private var showingDetail = false
+    @State private var showDisplayConnection = false
     @State private var lastScannedToken: String?
     @State private var lastScanTime: Date?
     @State private var pendingCheckoutToken: String?
@@ -35,6 +37,7 @@ struct ScannerView: View {
             CameraPreviewView(isScanning: $isScanning, onCode: handleCode)
                 .ignoresSafeArea()
             viewfinderFrame
+            displayButton
             bottomBar
             // Slide-down banner — non-blocking, camera stays live
             VStack {
@@ -57,6 +60,35 @@ struct ScannerView: View {
             if let result = recentScans.first {
                 TicketDetailSheet(result: result)
             }
+        }
+        .sheet(isPresented: $showDisplayConnection) {
+            DisplayConnectionView(bluetooth: bluetooth)
+        }
+    }
+
+    @ViewBuilder private var displayButton: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button { showDisplayConnection = true } label: {
+                    Image(systemName: bluetooth.bleState == .connected ? "tv.fill" : "tv")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(displayButtonColor)
+                        .padding(10)
+                        .background(.black.opacity(0.45), in: Circle())
+                }
+                .padding(.top, 56)
+                .padding(.trailing, 16)
+            }
+            Spacer()
+        }
+    }
+
+    private var displayButtonColor: Color {
+        switch bluetooth.bleState {
+        case .connected:   return .green
+        case .scanning, .connecting: return .yellow
+        default:           return .white.opacity(0.7)
         }
     }
 
@@ -161,11 +193,13 @@ struct ScannerView: View {
             result = ScanResult(from: response, status: .success, title: "Checked In!")
             CheckInFeedback.shared.success()
             showBanner(result)
+            sendToDisplay(response: response, status: "valid")
         case "reentry_enter":
             lastRegistrationId = response.registrationId ?? response.ticketId
             result = ScanResult(from: response, status: .reentryEnter, title: "Checked Back In!")
             CheckInFeedback.shared.success()
             showBanner(result)
+            sendToDisplay(response: response, status: "reentry_enter")
         case "reentry_exit":
             pendingCheckoutToken = token
             result = ScanResult(from: response, status: .reentryExitPrompt, title: "Confirm Check-Out")
@@ -176,10 +210,12 @@ struct ScannerView: View {
             result = ScanResult(from: response, status: .alreadyUsed, title: "Already Checked In")
             CheckInFeedback.shared.alreadyUsed()
             showBanner(result)
+            sendToDisplay(response: response, status: "used")
         default:
             result = ScanResult(status: .error, title: "Invalid Ticket", name: response.name ?? "")
             CheckInFeedback.shared.error()
             showBanner(result)
+            sendToDisplay(response: response, status: "invalid")
         }
     }
 
@@ -212,6 +248,16 @@ struct ScannerView: View {
     private func dismissExitOverlay() {
         withAnimation { scanResult = nil }
         pendingCheckoutToken = nil
+    }
+
+    private func sendToDisplay(response: ValidateResponse, status: String) {
+        let ble = BLEScanResult(
+            status: status,
+            name: response.name ?? "Guest",
+            firstName: response.firstName,
+            eventName: response.eventName
+        )
+        BluetoothManager.shared.sendScanResult(ble)
     }
 }
 

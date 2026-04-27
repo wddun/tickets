@@ -287,4 +287,19 @@ class APIService: ObservableObject {
         if http.statusCode == 401 { throw APIError.unauthorized }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
+
+    func getDisplayToken(eventId: String) async throws -> (token: String, url: String) {
+        guard let url = URL(string: "\(baseURL)/api/display/token/\(eventId)") else { throw APIError.invalidURL }
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        if http.statusCode == 401 { throw APIError.unauthorized }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+        guard let obj = try? JSONDecoder().decode(DisplayTokenResponse.self, from: data) else { throw APIError.decodingError }
+        return (obj.token, obj.url)
+    }
+}
+
+private struct DisplayTokenResponse: Codable {
+    let token: String
+    let url: String
 }
