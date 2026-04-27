@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Check-In | WTS Tickets</title>
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #fff;
+            height: 100dvh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Nav bar ── */
+        .nav-bar {
+            flex-shrink: 0;
+            background: rgba(0,0,0,0.88);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .nav-top {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .nav-title {
+            flex: 1;
+            font-size: 17px;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .nav-stats {
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.45);
+            white-space: nowrap;
+        }
+
+        /* Event picker in nav */
+        .event-picker-wrap {
+            position: relative;
+        }
+        .event-picker-wrap::after {
+            content: '▾';
+            position: absolute;
+            right: 11px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
+            pointer-events: none;
+        }
+        select#eventSelect {
+            width: 100%;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: #fff;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 8px 28px 8px 12px;
+            border-radius: 10px;
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+        }
+        select#eventSelect option { background: #1c1c1e; }
+
+        /* ── Search bar ── */
+        .search-bar {
+            flex-shrink: 0;
+            padding: 10px 14px;
+            background: rgba(0,0,0,0.6);
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+        }
+        .search-wrap {
+            position: relative;
+        }
+        .search-icon {
+            position: absolute;
+            left: 11px; top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            color: rgba(255,255,255,0.38);
+            display: flex;
+        }
+        #searchInput {
+            width: 100%;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            border-radius: 12px;
+            padding: 10px 12px 10px 36px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 15px;
+        }
+        #searchInput::placeholder { color: rgba(255,255,255,0.32); }
+        #searchInput:focus { outline: none; background: rgba(255,255,255,0.14); }
+
+        /* ── Attendee list ── */
+        #attendeeList {
+            flex: 1;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 8px;
+        }
+
+        .list-section {
+            padding: 14px 16px 6px;
+            font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.7px;
+            color: rgba(255,255,255,0.3);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .list-section-count {
+            font-size: 11px; font-weight: 600;
+            background: rgba(255,255,255,0.1);
+            padding: 1px 7px; border-radius: 10px;
+            letter-spacing: 0;
+        }
+
+        .person-row {
+            margin: 0 12px 2px;
+            border-radius: 13px;
+            overflow: hidden;
+            background: rgba(255,255,255,0.07);
+        }
+        .person-row + .person-row { margin-top: 2px; }
+
+        .person-main {
+            display: flex;
+            align-items: center;
+            gap: 13px;
+            padding: 11px 14px 11px 12px;
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+            min-height: 64px;
+        }
+
+        .avatar {
+            width: 42px; height: 42px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 15px; font-weight: 700;
+            flex-shrink: 0;
+            letter-spacing: -0.5px;
+        }
+        .av-pending { background: rgba(255,255,255,0.1);  color: rgba(255,255,255,0.6); }
+        .av-partial { background: rgba(251,191,36,0.18);  color: #fbbf24; }
+        .av-done    { background: rgba(74,222,128,0.18);  color: #4ade80; }
+
+        .person-info { flex: 1; min-width: 0; }
+        .person-name {
+            font-size: 16px; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            margin-bottom: 2px;
+        }
+        .person-status {
+            font-size: 12px; color: rgba(255,255,255,0.4);
+            display: flex; align-items: center; gap: 5px;
+        }
+        .status-dot {
+            width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+        }
+        .sd-pending { background: rgba(255,255,255,0.3); }
+        .sd-partial { background: #fbbf24; }
+        .sd-done    { background: #4ade80; }
+
+        .row-checkin-btn {
+            background: #fff;
+            border: none; color: #1a1f3c;
+            font-size: 13px; font-weight: 700;
+            padding: 8px 16px; border-radius: 20px;
+            cursor: pointer; white-space: nowrap;
+            -webkit-tap-highlight-color: transparent;
+            flex-shrink: 0;
+        }
+        .row-checkin-btn:active { opacity: 0.65; }
+        .row-done-label {
+            font-size: 13px; font-weight: 600;
+            color: #4ade80; flex-shrink: 0;
+        }
+
+        .expand-arrow {
+            font-size: 14px; font-weight: 300;
+            color: rgba(255,255,255,0.25);
+            transition: transform 0.22s;
+            flex-shrink: 0; margin-left: 2px;
+        }
+        .person-row.open .expand-arrow { transform: rotate(90deg); }
+
+        .ticket-rows { display: none; border-top: 1px solid rgba(255,255,255,0.07); }
+        .person-row.open .ticket-rows { display: block; }
+
+        .ticket-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .ticket-item:last-child { border-bottom: none; }
+        .ticket-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .tdot-used    { background: #4ade80; }
+        .tdot-pending { background: rgba(255,255,255,0.2); }
+        .ticket-label { flex: 1; font-size: 14px; color: rgba(255,255,255,0.7); }
+        .ticket-time  { font-size: 12px; color: rgba(255,255,255,0.3); }
+        .ticket-btn {
+            background: rgba(255,255,255,0.12); border: none;
+            color: #fff; font-size: 12px; font-weight: 700;
+            padding: 5px 12px; border-radius: 8px; cursor: pointer;
+            white-space: nowrap;
+        }
+        .ticket-btn:active { opacity: 0.7; }
+        .ticket-scanned { font-size: 12px; font-weight: 700; color: #4ade80; }
+
+        .list-empty {
+            text-align: center;
+            color: rgba(255,255,255,0.3);
+            padding: 60px 20px;
+            font-size: 14px;
+        }
+
+        /* ── Tab bar ── */
+        .tab-bar {
+            flex-shrink: 0;
+            background: rgba(10,10,10,0.88);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .tab-bar-inner {
+            display: flex;
+            height: 49px;
+        }
+        .tab-bar-safe {
+            height: env(safe-area-inset-bottom, 0px);
+        }
+        .tab-btn {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.4);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: color 0.15s;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .tab-btn.active { color: #fff; }
+        .tab-btn svg { width: 22px; height: 22px; }
+    </style>
+</head>
+<body>
+
+<div class="nav-bar">
+    <div class="nav-top">
+        <div class="nav-title" id="navTitle">Check-In</div>
+        <div class="nav-stats" id="navStats"></div>
+    </div>
+    <div class="event-picker-wrap">
+        <select id="eventSelect" onchange="onEventChange()">
+            <option value="">Loading…</option>
+        </select>
+    </div>
+</div>
+
+<div class="search-bar">
+    <div class="search-wrap">
+        <span class="search-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </span>
+        <input type="search" id="searchInput" placeholder="Search attendees…" oninput="filterList()" autocomplete="off">
+    </div>
+</div>
+
+<div id="attendeeList"><div class="list-empty">Loading…</div></div>
+
+<div class="tab-bar">
+    <div class="tab-bar-inner">
+        <button class="tab-btn" onclick="window.location.href='/scanner.html'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+            Scanner
+        </button>
+        <button class="tab-btn active" onclick="">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            Check-In
+        </button>
+        <button class="tab-btn" onclick="window.location.href='/settings.html'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Account
+        </button>
+    </div>
+    <div class="tab-bar-safe"></div>
+</div>
+
+<script>
+let events = [];
+let allAttendees = [];
+let filteredAttendees = [];
+
+// ── Init ──────────────────────────────────────────────────
+(async () => {
+    try {
+        const r = await fetch('/api/auth/me');
+        if (!r.ok) { window.location.href = '/'; return; }
+    } catch (_) { window.location.href = '/'; return; }
+
+    try {
+        const r = await fetch('/api/events');
+        if (r.ok) {
+            events = await r.json();
+            const sel = document.getElementById('eventSelect');
+            if (!events.length) {
+                sel.innerHTML = '<option value="">No events</option>';
+                document.getElementById('attendeeList').innerHTML = '<div class="list-empty">No events found</div>';
+                return;
+            }
+            sel.innerHTML = events.map(e =>
+                `<option value="${escAttr(e.id)}">${escHtml(e.name)}</option>`
+            ).join('');
+            // Restore from scanner selection
+            const saved = localStorage.getItem('selectedEventId');
+            if (saved && events.find(e => e.id === saved)) sel.value = saved;
+            await loadAttendees(sel.value);
+        }
+    } catch (_) {
+        document.getElementById('attendeeList').innerHTML = '<div class="list-empty">Failed to load events</div>';
+    }
+})();
+
+async function onEventChange() {
+    const sel = document.getElementById('eventSelect');
+    localStorage.setItem('selectedEventId', sel.value);
+    document.getElementById('searchInput').value = '';
+    allAttendees = [];
+    filteredAttendees = [];
+    if (sel.value) await loadAttendees(sel.value);
+}
+
+// ── Data ──────────────────────────────────────────────────
+async function loadAttendees(eventId) {
+    document.getElementById('attendeeList').innerHTML = '<div class="list-empty">Loading…</div>';
+    const ev = events.find(e => e.id === eventId);
+    document.getElementById('navTitle').textContent = ev ? ev.name : 'Check-In';
+    try {
+        const r = await fetch(`/api/event/${eventId}/tickets`);
+        if (!r.ok) throw new Error();
+        const tickets = await r.json();
+        const groups = {};
+        for (const t of tickets) {
+            const rid = t.registrationId || t.id;
+            if (!groups[rid]) groups[rid] = { registrationId: rid, name: t.name, email: t.email, tickets: [] };
+            groups[rid].tickets.push(t);
+        }
+        allAttendees = Object.values(groups).sort((a, b) => a.name.localeCompare(b.name));
+    } catch (_) {
+        allAttendees = [];
+    }
+    filterList();
+}
+
+// ── Rendering ─────────────────────────────────────────────
+function filterList() {
+    const q = document.getElementById('searchInput').value.trim().toLowerCase();
+    filteredAttendees = q
+        ? allAttendees.filter(a => a.name.toLowerCase().includes(q) || (a.email || '').toLowerCase().includes(q))
+        : allAttendees;
+    renderList();
+}
+
+function renderList() {
+    const container = document.getElementById('attendeeList');
+
+    if (!allAttendees.length) {
+        container.innerHTML = '<div class="list-empty">No attendees found</div>';
+        document.getElementById('navStats').textContent = '';
+        return;
+    }
+
+    const totalTickets   = allAttendees.reduce((n, a) => n + a.tickets.length, 0);
+    const scannedTickets = allAttendees.reduce((n, a) => n + a.tickets.filter(t => t.used_at).length, 0);
+    const pct = totalTickets ? Math.round(scannedTickets / totalTickets * 100) : 0;
+    document.getElementById('navStats').textContent = `${scannedTickets} / ${totalTickets} · ${pct}%`;
+
+    if (!filteredAttendees.length) {
+        container.innerHTML = '<div class="list-empty">No results</div>';
+        return;
+    }
+
+    const pending = filteredAttendees.filter(a => a.tickets.every(t => !t.used_at));
+    const partial = filteredAttendees.filter(a => a.tickets.some(t => t.used_at) && a.tickets.some(t => !t.used_at));
+    const done    = filteredAttendees.filter(a => a.tickets.every(t => t.used_at));
+
+    let html = '';
+    const needingAction = [...pending, ...partial];
+
+    if (needingAction.length) {
+        html += `<div class="list-section">Pending<span class="list-section-count">${needingAction.length}</span></div>`;
+        html += needingAction.map(buildPersonRow).join('');
+    }
+    if (done.length) {
+        html += `<div class="list-section" style="margin-top:6px;">Checked In<span class="list-section-count">${done.length}</span></div>`;
+        html += done.map(buildPersonRow).join('');
+    }
+    html += '<div style="height:12px;"></div>';
+    container.innerHTML = html;
+}
+
+function buildPersonRow(a) {
+    const total   = a.tickets.length;
+    const scanned = a.tickets.filter(t => t.used_at).length;
+    const allDone = scanned === total;
+    const noDone  = scanned === 0;
+
+    const initials = a.name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const avClass  = allDone ? 'av-done' : noDone ? 'av-pending' : 'av-partial';
+    const sdClass  = allDone ? 'sd-done' : noDone ? 'sd-pending' : 'sd-partial';
+
+    const statusTxt = allDone
+        ? (total === 1 ? 'Checked in' : `All ${total} tickets checked in`)
+        : noDone
+        ? (total === 1 ? '1 ticket · Pending' : `${total} tickets · None checked in`)
+        : `${scanned} of ${total} checked in`;
+
+    const actionHtml = allDone
+        ? `<div class="row-done-label">Done</div>`
+        : `<button class="row-checkin-btn" onclick="checkInPerson(event,'${escAttr(a.registrationId)}')">Check In</button>`;
+
+    const expandArrow = total > 1 ? `<div class="expand-arrow">›</div>` : '';
+
+    const ticketRows = total > 1 ? a.tickets.map((t, i) => {
+        const time = t.used_at ? new Date(t.used_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+        return `
+            <div class="ticket-item">
+                <div class="ticket-dot ${t.used_at ? 'tdot-used' : 'tdot-pending'}"></div>
+                <div class="ticket-label">Ticket ${i + 1}</div>
+                ${time ? `<div class="ticket-time">${escHtml(time)}</div>` : ''}
+                ${t.used_at
+                    ? `<div class="ticket-scanned">✓</div>`
+                    : `<button class="ticket-btn" onclick="checkInTicket(event,'${escAttr(t.id)}','${escAttr(a.registrationId)}')">Check In</button>`
+                }
+            </div>`;
+    }).join('') : '';
+
+    return `
+        <div class="person-row" id="reg-${escAttr(a.registrationId)}">
+            <div class="person-main" onclick="togglePerson('${escAttr(a.registrationId)}')">
+                <div class="avatar ${avClass}">${escHtml(initials)}</div>
+                <div class="person-info">
+                    <div class="person-name">${escHtml(a.name)}</div>
+                    <div class="person-status">
+                        <span class="status-dot ${sdClass}"></span>
+                        ${escHtml(statusTxt)}
+                    </div>
+                </div>
+                <div onclick="event.stopPropagation()">${actionHtml}</div>
+                ${expandArrow}
+            </div>
+            ${total > 1 ? `<div class="ticket-rows">${ticketRows}</div>` : ''}
+        </div>`;
+}
+
+function togglePerson(rid) {
+    const el = document.getElementById(`reg-${rid}`);
+    if (el) el.classList.toggle('open');
+}
+
+// ── Check-in actions ──────────────────────────────────────
+async function checkInTicket(e, ticketId, registrationId) {
+    e.stopPropagation();
+    const btn = e.target;
+    btn.textContent = '…'; btn.disabled = true;
+    try {
+        const r = await fetch(`/api/checkin/${ticketId}`, { method: 'POST' });
+        if (r.ok) {
+            const attendee = allAttendees.find(a => a.registrationId === registrationId);
+            if (attendee) {
+                const t = attendee.tickets.find(t => t.id === ticketId);
+                if (t) t.used_at = new Date().toISOString();
+            }
+            filterList();
+            setTimeout(() => {
+                const row = document.getElementById(`reg-${registrationId}`);
+                if (row && !row.classList.contains('open')) row.classList.add('open');
+            }, 50);
+        } else {
+            btn.textContent = 'Check In'; btn.disabled = false;
+        }
+    } catch (_) { btn.textContent = 'Check In'; btn.disabled = false; }
+}
+
+async function checkInPerson(e, registrationId) {
+    e.stopPropagation();
+    const btn = e.target;
+    btn.textContent = '…'; btn.disabled = true;
+    try {
+        const r = await fetch(`/api/checkin/${registrationId}`, { method: 'POST' });
+        if (r.ok) {
+            const now = new Date().toISOString();
+            const attendee = allAttendees.find(a => a.registrationId === registrationId);
+            if (attendee) attendee.tickets.forEach(t => { if (!t.used_at) t.used_at = now; });
+            filterList();
+        } else {
+            btn.textContent = 'Check In'; btn.disabled = false;
+        }
+    } catch (_) { btn.textContent = 'Check In'; btn.disabled = false; }
+}
+
+// ── Utilities ─────────────────────────────────────────────
+function escHtml(s)  { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escAttr(s)  { return String(s ?? '').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+</script>
+</body>
+</html>

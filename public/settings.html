@@ -246,7 +246,7 @@
 
     document.getElementById('emailVal').textContent = user.email || '—';
 
-    // Load events
+    // Load events and restore selection from scanner page
     try {
         const r = await fetch('/api/events');
         if (r.ok) {
@@ -258,10 +258,14 @@
                 opt.textContent = e.name;
                 sel.appendChild(opt);
             });
-            if (events.length === 1) {
+            // Auto-select: current scanner event → only event → nothing
+            const saved = localStorage.getItem('selectedEventId');
+            if (saved && events.find(e => e.id === saved)) {
+                sel.value = saved;
+            } else if (events.length === 1) {
                 sel.value = events[0].id;
-                loadQR();
             }
+            if (sel.value) loadQR();
         }
     } catch (_) {}
 })();
