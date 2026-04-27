@@ -100,8 +100,8 @@ struct DisplaySetupView: View {
                         dismiss()
                     }
                 }
-                if started && role == .scanner && bluetooth.bleState == .connected {
-                    ToolbarItem(placement: .confirmationAction) {
+                ToolbarItem(placement: .confirmationAction) {
+                    if started && role == .scanner && bluetooth.bleState == .connected {
                         Button("Done") { dismiss() }
                     }
                 }
