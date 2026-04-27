@@ -3,14 +3,14 @@
   <rect width="512" height="512" fill="#1a1f3c"/>
 
   <!-- Ticket body -->
-  <rect x="68" y="166" width="376" height="180" rx="30" fill="rgba(255,255,255,0.92)"/>
+  <rect x="88" y="152" width="336" height="208" rx="30" fill="rgba(255,255,255,0.92)"/>
 
   <!-- Side notches (cut-out semicircles) -->
-  <circle cx="68"  cy="256" r="24" fill="#1a1f3c"/>
-  <circle cx="444" cy="256" r="24" fill="#1a1f3c"/>
+  <circle cx="88"  cy="256" r="24" fill="#1a1f3c"/>
+  <circle cx="424" cy="256" r="24" fill="#1a1f3c"/>
 
   <!-- Perforation dashes -->
-  <line x1="256" y1="186" x2="256" y2="334"
+  <line x1="256" y1="172" x2="256" y2="340"
         stroke="#1a1f3c" stroke-width="5"
         stroke-dasharray="14,11" stroke-linecap="round" opacity="0.25"/>
 </svg>
