@@ -1276,6 +1276,27 @@ app.get('/api/events', requireAuth, (req, res) => {
     res.json(userEvents);
 });
 
+app.post('/api/events', requireAuth, async (req, res) => {
+    const { name, time, endTime, locationName, color } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Event name is required' });
+    if (!time) return res.status(400).json({ error: 'Event date/time is required' });
+
+    const newEvent = {
+        id: nanoid(10),
+        userId: req.session.userId,
+        name: name.trim(),
+        time,
+        endTime: endTime || null,
+        color: color || 'rgb(99, 102, 241)',
+        imageUrl: null,
+        scannerPin: Math.floor(100000 + Math.random() * 900000).toString(),
+        location: { name: locationName ? locationName.trim() : '', address: '', lat: 0, lng: 0 },
+    };
+
+    await db.update(data => data.events.push(newEvent));
+    res.json({ success: true, eventId: newEvent.id, event: newEvent });
+});
+
 app.get('/api/events/counts', requireAuth, (req, res) => {
     const user = db.data.users.find(u => u.id === req.session.userId);
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
