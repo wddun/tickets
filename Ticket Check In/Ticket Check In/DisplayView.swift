@@ -87,6 +87,10 @@ struct DisplayView: View {
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             displayMode = initialMode == "wifi" ? .internet : .bluetooth
+            // Auto-start immediately — no button tap required
+            if initialMode != "wifi" {
+                bluetooth.startDisplayMode()
+            }
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -111,8 +115,7 @@ struct DisplayView: View {
     private func idleContent(landscape: Bool) -> some View {
         VStack(spacing: 0) {
             Spacer()
-            // Status
-            VStack(spacing: 10) {
+            VStack(spacing: 16) {
                 statusIndicator
                 if !sseEventName.isEmpty {
                     Text(sseEventName)
@@ -126,22 +129,12 @@ struct DisplayView: View {
                 }
             }
             Spacer()
-            // Action button
+            // Only show action button for internet mode needing QR
             if displayMode == .internet && sseState == .idle {
                 Button {
                     showQRScanner = true
                 } label: {
                     Label("Scan QR Code to Connect", systemImage: "qrcode.viewfinder")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
-                        .background(.white.opacity(0.08), in: Capsule())
-                }
-                .padding(.bottom, 60)
-            } else if displayMode == .bluetooth && bluetooth.bleState == .idle {
-                Button { bluetooth.startDisplayMode() } label: {
-                    Label("Start Bluetooth Display", systemImage: "antenna.radiowaves.left.and.right")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
                         .padding(.horizontal, 24)
@@ -158,13 +151,14 @@ struct DisplayView: View {
 
     @ViewBuilder
     private var statusIndicator: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 10) {
             Circle()
                 .fill(dotColor)
-                .frame(width: 9, height: 9)
+                .frame(width: 11, height: 11)
+                .shadow(color: dotColor.opacity(0.6), radius: dotColor == .green ? 6 : 0)
             Text(statusText)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.35))
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.5))
         }
     }
 
@@ -196,7 +190,7 @@ struct DisplayView: View {
             case .disconnected: return "Disconnected — retrying…"
             case .unauthorized: return "Bluetooth permission denied"
             case .unsupported:  return "Bluetooth not supported"
-            case .idle:         return "Tap to start"
+            case .idle:         return "Starting…"
             }
         case .internet:
             switch sseState {

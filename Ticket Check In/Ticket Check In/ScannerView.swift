@@ -45,7 +45,7 @@ struct ScannerView: View {
             bottomBar
             // Slide-down banner — non-blocking, camera stays live
             VStack {
-                if bannerVisible, let result = bannerResult {
+                if bannerVisible && !flashVisible, let result = bannerResult {
                     ScanBanner(result: result)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
