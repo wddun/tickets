@@ -524,41 +524,25 @@
             bottom: calc(49px + env(safe-area-inset-bottom, 0px) + 12px);
         }
 
-        /* ── Settings sheet ── */
-        #settingsSheet { max-height: 92dvh; overflow: hidden; display: flex; flex-direction: column; }
-        .settings-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0 20px; }
-        .settings-title { font-size: 22px; font-weight: 700; padding: 12px 20px 20px; }
-        .settings-section { padding: 0 16px 16px; }
-        .settings-section-header {
-            font-size: 12px; font-weight: 600; text-transform: uppercase;
-            letter-spacing: 0.5px; color: rgba(255,255,255,0.3);
-            margin-bottom: 8px; padding: 0 4px;
+        /* ── Scan detail sheet ── */
+        .scan-history-item { cursor: pointer; pointer-events: auto; }
+        #detailSheet { max-height: 82dvh; }
+        .det-header {
+            padding: 28px 20px 22px; text-align: center;
+            border-radius: 0;
         }
-        .settings-card { background: rgba(255,255,255,0.07); border-radius: 14px; overflow: hidden; }
-        .settings-row {
-            display: flex; align-items: center; justify-content: space-between;
-            gap: 12px; padding: 14px 16px;
+        .det-icon  { font-size: 52px; line-height: 1; margin-bottom: 8px; }
+        .det-status{ font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.78); margin-bottom: 4px; }
+        .det-name  { font-size: 32px; font-weight: 800; color: #fff; line-height: 1.1; word-break: break-word; }
+        .det-body  { padding: 0 20px 24px; }
+        .det-row {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            gap: 16px; padding: 13px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
         }
-        .settings-row + .settings-row { border-top: 1px solid rgba(255,255,255,0.06); }
-        .settings-row-label { font-size: 15px; color: rgba(255,255,255,0.65); flex-shrink: 0; }
-        .settings-row-value {
-            font-size: 14px; color: rgba(255,255,255,0.38);
-            text-align: right; word-break: break-all;
-        }
-        .settings-danger-btn {
-            width: 100%; margin-top: 8px; padding: 14px; border: none;
-            border-radius: 14px; font-size: 16px; font-weight: 600; cursor: pointer;
-            background: rgba(255,69,58,0.12); color: #ff453a; transition: opacity 0.15s;
-        }
-        .settings-danger-btn:active { opacity: 0.7; }
-        .qr-section { padding: 16px; text-align: center; }
-        .qr-event-label { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.55); margin-bottom: 14px; }
-        .qr-img { width: 176px; height: 176px; border-radius: 10px; display: block; margin: 0 auto; }
-        .qr-hint { font-size: 12px; color: rgba(255,255,255,0.28); margin-top: 10px; line-height: 1.4; }
-        .qr-placeholder {
-            font-size: 14px; color: rgba(255,255,255,0.3);
-            padding: 20px 16px; text-align: center; line-height: 1.5;
-        }
+        .det-row:last-child { border-bottom: none; }
+        .det-label { font-size: 14px; color: rgba(255,255,255,0.42); flex-shrink: 0; }
+        .det-val   { font-size: 14px; font-weight: 500; color: #fff; text-align: right; word-break: break-word; }
     </style>
 </head>
 <body>
@@ -630,9 +614,9 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             Check-In
         </button>
-        <button class="tab-btn" id="tabSettings" onclick="switchTab('settings')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            Settings
+        <button class="tab-btn" id="tabSettings" onclick="window.location.href='/settings.html'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Account
         </button>
     </div>
     <div class="tab-bar-safe"></div>
@@ -660,31 +644,11 @@
     </div>
 </div>
 
-<!-- Settings sheet -->
-<div class="backdrop" id="settingsBackdrop" onclick="closeSettings()"></div>
-<div class="sheet" id="settingsSheet">
+<!-- Scan detail sheet (tap recent scan card to open) -->
+<div class="backdrop" id="detailBackdrop" onclick="closeDetail()"></div>
+<div class="sheet" id="detailSheet">
     <div class="sheet-handle"></div>
-    <div class="settings-scroll">
-        <div class="settings-title">Settings</div>
-
-        <div class="settings-section">
-            <div class="settings-section-header">Account</div>
-            <div class="settings-card">
-                <div class="settings-row">
-                    <span class="settings-row-label">Signed in as</span>
-                    <span class="settings-row-value" id="settingsEmailText">—</span>
-                </div>
-            </div>
-            <button class="settings-danger-btn" onclick="signOut()">Sign Out</button>
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-section-header">Display Connect</div>
-            <div class="settings-card" id="displayConnectCard">
-                <div class="qr-placeholder">Select an event from the scanner screen first.</div>
-            </div>
-        </div>
-    </div>
+    <div id="detailContent" style="overflow-y:auto;-webkit-overflow-scrolling:touch;max-height:75dvh;"></div>
 </div>
 
 <script>
@@ -798,82 +762,62 @@ function closeList() {
     setActiveTab('scanner');
 }
 
-function openSettings() {
-    closeResult();
-    const emailEl = document.getElementById('settingsEmailText');
-    if (emailEl) emailEl.textContent = currentUser?.email || '—';
-    document.getElementById('settingsBackdrop').classList.add('show');
-    document.getElementById('settingsSheet').classList.add('show');
-    setActiveTab('settings');
-    renderDisplayConnect();
-}
-
-function closeSettings() {
-    closeSettingsSheet();
-    setActiveTab('scanner');
-}
-
-function renderDisplayConnect() {
-    const ev = selectedEvent();
-    const card = document.getElementById('displayConnectCard');
-    if (!ev) {
-        card.innerHTML = '<div class="qr-placeholder">Select an event from the scanner screen to show the display QR code.</div>';
-        return;
-    }
-    card.innerHTML = '<div class="qr-placeholder">Loading…</div>';
-    fetch(`/api/display/qr/${encodeURIComponent(ev.id)}`)
-        .then(r => { if (!r.ok) throw new Error(); return r.blob(); })
-        .then(blob => {
-            const url = URL.createObjectURL(blob);
-            card.innerHTML = `
-                <div class="qr-section">
-                    <div class="qr-event-label">${escHtml(ev.name)}</div>
-                    <img class="qr-img" src="${url}" alt="Display QR Code">
-                    <div class="qr-hint">Point the display device's camera at this code to connect</div>
-                </div>`;
-        })
-        .catch(() => {
-            card.innerHTML = '<div class="qr-placeholder">Could not load QR code.</div>';
-        });
-}
-
-async function signOut() {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
-    window.location.href = '/login.html';
-}
-
 function switchTab(tab) {
-    if (tab === 'list') {
-        closeSettingsSheet();
-        openList();
-    } else if (tab === 'settings') {
-        closeListSheet();
-        openSettings();
-    } else {
-        closeListSheet();
-        closeSettingsSheet();
-        setActiveTab('scanner');
-    }
-}
-
-// Raw sheet closers — hide the panel without touching the active tab indicator
-function closeListSheet() {
-    document.getElementById('listBackdrop').classList.remove('show');
-    document.getElementById('listSheet').classList.remove('show');
-}
-function closeSettingsSheet() {
-    document.getElementById('settingsBackdrop').classList.remove('show');
-    document.getElementById('settingsSheet').classList.remove('show');
+    if (tab === 'list') openList();
+    else closeList();
 }
 
 function setActiveTab(tab) {
-    const ts  = document.getElementById('tabScanner');
-    const tl  = document.getElementById('tabList');
-    const tst = document.getElementById('tabSettings');
+    const ts = document.getElementById('tabScanner');
+    const tl = document.getElementById('tabList');
     if (!ts) return;
-    ts.classList.toggle('active',  tab === 'scanner');
-    tl.classList.toggle('active',  tab === 'list');
-    if (tst) tst.classList.toggle('active', tab === 'settings');
+    ts.classList.toggle('active', tab === 'scanner');
+    tl.classList.toggle('active', tab === 'list');
+}
+
+// ── Scan detail sheet ─────────────────────────────────────
+let lastScanData = null;
+
+function openDetail() {
+    if (!lastScanData) return;
+    const d      = lastScanData;
+    const status = d.status || 'error';
+    const bg     = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
+    const icon   = STATUS_ICONS[status]   || '!';
+    const title  = STATUS_TITLES[status]  || 'Error';
+
+    let rows = '';
+    if (d.email)     rows += detRow('Email',  d.email);
+    if (d.eventName) rows += detRow('Event',  d.eventName);
+    if (d.used_at && status === 'used') {
+        const t = new Date(d.used_at);
+        rows += detRow('Checked in',
+            t.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }) + ', ' +
+            t.toLocaleDateString([], { month:'short', day:'numeric' }));
+    }
+    if (d.customFields) {
+        Object.entries(d.customFields).forEach(([k, v]) => { rows += detRow(k, v); });
+    }
+
+    document.getElementById('detailContent').innerHTML = `
+        <div class="det-header" style="background:${bg}">
+            <div class="det-icon">${icon}</div>
+            <div class="det-status">${escHtml(title)}</div>
+            <div class="det-name">${escHtml(d.firstName || d.name || '')}</div>
+        </div>
+        ${rows ? `<div class="det-body">${rows}</div>` : ''}`;
+
+    document.getElementById('detailBackdrop').classList.add('show');
+    document.getElementById('detailSheet').classList.add('show');
+}
+
+function detRow(label, value) {
+    return `<div class="det-row"><span class="det-label">${escHtml(label)}</span><span class="det-val">${escHtml(value)}</span></div>`;
+}
+
+function closeDetail() {
+    document.getElementById('detailBackdrop').classList.remove('show');
+    document.getElementById('detailSheet').classList.remove('show');
 }
 
 async function openListFromResult() {
@@ -1095,6 +1039,7 @@ function showBanner(data) {
 function hideBanner() { document.getElementById('scanBanner').classList.remove('show'); }
 
 function addToHistory(data, status) {
+    lastScanData = { ...data, status };
     recentScansList = [{
         dotCls: STATUS_DOT_CLS[status] || 'shi-dot-red',
         name:   data.firstName || data.name || 'Unknown',
@@ -1102,7 +1047,7 @@ function addToHistory(data, status) {
     }];
     const s = recentScansList[0];
     document.getElementById('recentScans').innerHTML = `
-        <div class="scan-history-item">
+        <div class="scan-history-item" onclick="openDetail()">
             <div class="shi-dot ${s.dotCls}"></div>
             <div class="shi-name">${escHtml(s.name)}</div>
             <div class="shi-meta">${escHtml(s.meta)}</div>
