@@ -30,6 +30,9 @@ struct ScannerView: View {
     @State private var lastScannedToken: String?
     @State private var lastScanTime: Date?
     @State private var pendingCheckoutToken: String?
+    @State private var flashResult: ScanResult?
+    @State private var flashVisible = false
+    @State private var flashTask: Task<Void, Never>?
     private let scanDebounceInterval: TimeInterval = 5.0
 
     var body: some View {
@@ -53,6 +56,12 @@ struct ScannerView: View {
             .animation(.spring(response: 0.32, dampingFraction: 0.78), value: bannerVisible)
             // Full-screen overlay only for reentry exit confirmation
             exitConfirmOverlay
+            // 1-second fullscreen scan flash
+            if flashVisible, let result = flashResult {
+                ScanFlashOverlay(result: result)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
         }
         .task { await api.checkAuth() }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
@@ -89,12 +98,13 @@ struct ScannerView: View {
 
     @ViewBuilder private var statusPills: some View {
         VStack {
-            Spacer()
+            // Sits just below the top bar (gear button is ~56pt top + 10pt padding + icon)
             HStack(spacing: 8) {
                 blePill
                 wifiPill
             }
-            .padding(.bottom, 136)   // sits above the bottom bar
+            .padding(.top, 110)   // below the gear button
+            Spacer()
         }
     }
 
@@ -279,6 +289,15 @@ struct ScannerView: View {
             guard !Task.isCancelled else { return }
             withAnimation(.easeIn(duration: 0.22)) { bannerVisible = false }
         }
+        // Fullscreen 1-second flash
+        flashTask?.cancel()
+        flashResult = result
+        withAnimation(.easeInOut(duration: 0.15)) { flashVisible = true }
+        flashTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { flashVisible = false }
+        }
     }
 
     private func handleConfirmCheckout() {
@@ -341,6 +360,45 @@ struct ScanResult: Equatable {
 }
 
 // MARK: - Slide-Down Scan Banner
+
+struct ScanFlashOverlay: View {
+    let result: ScanResult
+
+    private var color: Color {
+        switch result.status {
+        case .success, .reentryEnter: return Color(red: 0.07, green: 0.53, blue: 0.25)
+        case .alreadyUsed, .reentryExitPrompt: return Color(red: 0.75, green: 0.37, blue: 0.06)
+        case .error: return Color(red: 0.72, green: 0.12, blue: 0.12)
+        }
+    }
+
+    private var icon: String {
+        switch result.status {
+        case .success, .reentryEnter: return "checkmark.circle.fill"
+        case .alreadyUsed:            return "exclamationmark.circle.fill"
+        default:                      return "xmark.circle.fill"
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            color.ignoresSafeArea()
+            VStack(spacing: 20) {
+                Image(systemName: icon)
+                    .font(.system(size: 80, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(result.firstName ?? result.name)
+                    .font(.system(size: 42, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Text(result.title)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+        }
+    }
+}
 
 struct ScanBanner: View {
     let result: ScanResult
