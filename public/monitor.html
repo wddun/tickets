@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner Monitor | WTS Tickets</title>
+    <meta name="theme-color" content="#0a0a0f">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #0a0a0f;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        /* ── Nav ── */
+        .nav {
+            background: rgba(10,10,15,0.9);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            padding: 0 20px;
+            display: flex; align-items: center; gap: 16px;
+            height: 52px;
+            position: sticky; top: 0; z-index: 50;
+        }
+        .nav-back {
+            color: rgba(255,255,255,0.5); text-decoration: none;
+            font-size: 14px; font-weight: 500;
+            display: flex; align-items: center; gap: 4px;
+        }
+        .nav-back:hover { color: #fff; }
+        .nav-title { font-size: 16px; font-weight: 700; flex: 1; }
+        .conn-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #374151; transition: background 0.3s;
+        }
+        .conn-dot.live { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+
+        /* ── Event tabs ── */
+        .event-tabs {
+            display: flex; gap: 8px; align-items: center;
+            padding: 14px 20px 0;
+            overflow-x: auto; -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        .event-tabs::-webkit-scrollbar { display: none; }
+        .tab-pill {
+            flex-shrink: 0;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.5);
+            font-size: 13px; font-weight: 600;
+            padding: 6px 14px; border-radius: 20px;
+            cursor: pointer; transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .tab-pill:hover { color: #fff; background: rgba(255,255,255,0.12); }
+        .tab-pill.active { background: #fff; color: #0a0a0f; border-color: #fff; }
+
+        /* ── Scanner grid ── */
+        .grid-header {
+            padding: 16px 20px 10px;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .grid-header-title { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 0.6px; }
+        .scanner-count { font-size: 11px; background: rgba(255,255,255,0.1); padding: 2px 8px; border-radius: 10px; color: rgba(255,255,255,0.4); }
+
+        .scanner-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 14px;
+            padding: 4px 20px 30px;
+        }
+
+        /* ── Scanner card ── */
+        .scanner-card {
+            background: #13131a;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 18px;
+            overflow: hidden;
+            display: flex; flex-direction: column;
+            transition: border-color 0.3s;
+            position: relative;
+        }
+        .scanner-card.flash-valid   { border-color: rgba(74,222,128,0.4); }
+        .scanner-card.flash-used    { border-color: rgba(251,191,36,0.4); }
+        .scanner-card.flash-invalid { border-color: rgba(239,68,68,0.4); }
+        .scanner-card.flash-reentry_enter { border-color: rgba(96,165,250,0.4); }
+
+        .card-header {
+            display: flex; align-items: center; gap: 10px;
+            padding: 13px 15px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .card-scanner-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: #374151; flex-shrink: 0;
+            transition: background 0.3s;
+        }
+        .card-scanner-dot.recent { background: #4ade80; }
+        .card-scanner-dot.active { background: #fbbf24; }
+
+        .card-scanner-id {
+            flex: 1; font-size: 13px; font-weight: 700;
+            color: rgba(255,255,255,0.8);
+        }
+        .card-event-tag {
+            font-size: 11px; color: rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.06);
+            padding: 2px 8px; border-radius: 8px;
+            white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; max-width: 110px;
+        }
+        .card-age { font-size: 11px; color: rgba(255,255,255,0.25); white-space: nowrap; }
+
+        .card-result {
+            flex: 1;
+            padding: 16px 15px 14px;
+            min-height: 100px;
+            display: flex; flex-direction: column; justify-content: center;
+            border-radius: 0;
+            transition: background 0.5s;
+        }
+        .result-icon { font-size: 22px; margin-bottom: 6px; }
+        .result-name {
+            font-size: 22px; font-weight: 800;
+            line-height: 1.15;
+            margin-bottom: 4px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .result-status { font-size: 14px; font-weight: 600; opacity: 0.75; margin-bottom: 8px; }
+        .result-stats  { font-size: 12px; color: rgba(255,255,255,0.35); }
+
+        /* Idle state */
+        .card-idle .result-icon  { opacity: 0.2; }
+        .card-idle .result-name  { font-size: 16px; font-weight: 500; color: rgba(255,255,255,0.25); }
+        .card-idle .result-status { display: none; }
+        .card-idle .result-stats  { color: rgba(255,255,255,0.2); }
+
+        .card-footer {
+            display: flex; gap: 8px; align-items: center;
+            padding: 10px 15px 13px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }
+        .footer-btn {
+            flex: 1;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.65);
+            font-size: 12px; font-weight: 600;
+            padding: 7px 10px; border-radius: 10px;
+            cursor: pointer; text-align: center;
+            transition: all 0.15s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .footer-btn:hover { background: rgba(255,255,255,0.13); color: #fff; }
+        .footer-btn.copied { color: #4ade80; border-color: rgba(74,222,128,0.3); }
+
+        /* ── Empty / loading state ── */
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 80px 20px;
+            color: rgba(255,255,255,0.2);
+            font-size: 15px;
+        }
+        .empty-icon { font-size: 48px; margin-bottom: 14px; opacity: 0.3; }
+
+        /* ── QR modal ── */
+        .modal-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 200;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.2s;
+        }
+        .modal-overlay.open { opacity: 1; pointer-events: auto; }
+        .modal {
+            background: #1c1c1e;
+            border-radius: 20px;
+            padding: 28px 24px;
+            width: 90%; max-width: 340px;
+            text-align: center;
+            transform: scale(0.95);
+            transition: transform 0.2s;
+        }
+        .modal-overlay.open .modal { transform: scale(1); }
+        .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+        .modal-sub   { font-size: 13px; color: rgba(255,255,255,0.4); margin-bottom: 20px; }
+        .modal-qr    { background: #fff; border-radius: 12px; padding: 12px; display: inline-block; margin-bottom: 20px; }
+        .modal-qr img { display: block; width: 200px; height: 200px; }
+        .modal-url   { font-size: 11px; color: rgba(255,255,255,0.3); word-break: break-all; margin-bottom: 16px; }
+        .modal-close {
+            width: 100%; padding: 12px;
+            background: rgba(255,255,255,0.1); border: none;
+            color: #fff; font-size: 15px; font-weight: 600;
+            border-radius: 12px; cursor: pointer;
+        }
+        .modal-close:hover { background: rgba(255,255,255,0.16); }
+    </style>
+</head>
+<body>
+
+<nav class="nav">
+    <a class="nav-back" href="/dashboard.html">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        Dashboard
+    </a>
+    <div class="nav-title">Scanner Monitor</div>
+    <div class="conn-dot" id="connDot" title="SSE connection"></div>
+</nav>
+
+<div class="event-tabs" id="eventTabs"></div>
+
+<div class="grid-header">
+    <div class="grid-header-title">Active Scanners</div>
+    <div class="scanner-count" id="scannerCount">0</div>
+</div>
+
+<div class="scanner-grid" id="scannerGrid">
+    <div class="empty-state"><div class="empty-icon">📡</div>Loading…</div>
+</div>
+
+<!-- QR modal -->
+<div class="modal-overlay" id="qrModal" onclick="closeQR()">
+    <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal-title" id="qrTitle">Display Link</div>
+        <div class="modal-sub" id="qrSub"></div>
+        <div class="modal-qr"><img id="qrImg" src="" alt="QR Code"></div>
+        <div class="modal-url" id="qrUrl"></div>
+        <button class="modal-close" onclick="closeQR()">Done</button>
+    </div>
+</div>
+
+<script>
+let allEvents  = [];   // [{ id, name, displayToken }]
+let scanners   = {};   // pairToken → scannerData
+let activeFilter = null; // null = all, string = eventId
+let es;
+
+// ── Init ──────────────────────────────────────────────────
+(async () => {
+    try {
+        const r = await fetch('/api/auth/me');
+        if (!r.ok) { window.location.href = '/login.html?next=/monitor.html'; return; }
+    } catch (_) { window.location.href = '/login.html?next=/monitor.html'; return; }
+
+    await loadData();
+    connectSSE();
+})();
+
+async function loadData() {
+    try {
+        const r = await fetch('/api/monitor/scanners');
+        if (!r.ok) return;
+        const data = await r.json();
+        allEvents = data.events;
+        scanners = {};
+        for (const s of data.scanners) scanners[s.pairToken] = s;
+        renderTabs();
+        renderGrid();
+    } catch (_) {}
+}
+
+// ── SSE ───────────────────────────────────────────────────
+function connectSSE() {
+    if (es) es.close();
+    es = new EventSource('/api/monitor/stream');
+
+    es.onopen = () => {
+        document.getElementById('connDot').classList.add('live');
+    };
+
+    es.addEventListener('message', e => {
+        try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'scanner_update') {
+                const scanner = msg.scanner;
+                const isNew = !scanners[scanner.pairToken];
+                scanners[scanner.pairToken] = scanner;
+
+                if (isNew) {
+                    // New scanner appeared — ensure we have its event in allEvents
+                    if (!allEvents.find(ev => ev.id === scanner.eventId)) {
+                        loadData(); // refresh events list
+                        return;
+                    }
+                    renderTabs();
+                    renderGrid();
+                } else {
+                    updateCard(scanner);
+                }
+                renderCount();
+            }
+        } catch (_) {}
+    });
+
+    es.onerror = () => {
+        document.getElementById('connDot').classList.remove('live');
+        es.close();
+        setTimeout(connectSSE, 3000);
+    };
+}
+
+// ── Tabs ──────────────────────────────────────────────────
+function renderTabs() {
+    const tabs = document.getElementById('eventTabs');
+    const eventsWithScanners = new Set(Object.values(scanners).map(s => s.eventId));
+    const visibleEvents = allEvents.filter(e => eventsWithScanners.has(e.id));
+
+    if (visibleEvents.length <= 1) { tabs.innerHTML = ''; return; }
+
+    tabs.innerHTML = `<button class="tab-pill${activeFilter === null ? ' active' : ''}" onclick="setFilter(null)">All Events</button>`
+        + visibleEvents.map(e =>
+            `<button class="tab-pill${activeFilter === e.id ? ' active' : ''}" onclick="setFilter('${esc(e.id)}')">${esc(e.name)}</button>`
+        ).join('');
+}
+
+function setFilter(eventId) {
+    activeFilter = eventId;
+    renderTabs();
+    renderGrid();
+}
+
+// ── Grid ──────────────────────────────────────────────────
+function renderGrid() {
+    const grid = document.getElementById('scannerGrid');
+    const visible = Object.values(scanners)
+        .filter(s => !activeFilter || s.eventId === activeFilter)
+        .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+
+    renderCount();
+
+    if (!visible.length) {
+        grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📡</div>No active scanners yet.<br>Scanners appear here as they check in tickets.</div>`;
+        return;
+    }
+
+    grid.innerHTML = visible.map(s => buildCard(s)).join('');
+}
+
+function renderCount() {
+    const count = Object.values(scanners).filter(s => !activeFilter || s.eventId === activeFilter).length;
+    document.getElementById('scannerCount').textContent = count;
+}
+
+function buildCard(s) {
+    const ev = allEvents.find(e => e.id === s.eventId);
+    const shortId = 'Scanner #' + s.pairToken.replace(/-/g, '').slice(-6);
+    const ago     = timeSince(s.lastSeen);
+    const dotCls  = dotClass(s.lastSeen);
+    const r       = s.lastResult;
+    const isIdle  = !r;
+
+    const resultHtml = isIdle
+        ? `<div class="result-icon">●</div><div class="result-name">Waiting…</div>`
+        : `<div class="result-icon">${statusIcon(r.status)}</div>
+           <div class="result-name">${esc(r.name || '—')}</div>
+           <div class="result-status">${statusLabel(r.status)}</div>
+           <div class="result-stats">${r.scanned} / ${r.total} checked in</div>`;
+
+    const showEvent = !activeFilter || activeFilter === null;
+    const eventTag  = (showEvent && ev) ? `<span class="card-event-tag">${esc(ev.name)}</span>` : '';
+
+    return `
+    <div class="scanner-card${isIdle ? ' card-idle' : ''}" id="card-${esc(s.pairToken)}">
+        <div class="card-header">
+            <div class="card-scanner-dot ${dotCls}"></div>
+            <div class="card-scanner-id">${esc(shortId)}</div>
+            ${eventTag}
+            <div class="card-age">${ago}</div>
+        </div>
+        <div class="card-result" id="result-${esc(s.pairToken)}" style="${isIdle ? '' : resultBg(r.status)}">
+            ${resultHtml}
+        </div>
+        <div class="card-footer">
+            <button class="footer-btn" onclick="copyLink('${esc(s.pairToken)}', this)">⎘ Copy Link</button>
+            <button class="footer-btn" onclick="showQR('${esc(s.pairToken)}')">QR Code</button>
+        </div>
+    </div>`;
+}
+
+function updateCard(s) {
+    const card = document.getElementById(`card-${s.pairToken}`);
+    if (!card) { renderGrid(); return; }
+
+    const r     = s.lastResult;
+    const dotEl = card.querySelector('.card-scanner-dot');
+    const ageEl = card.querySelector('.card-age');
+    const resEl = document.getElementById(`result-${s.pairToken}`);
+
+    dotEl.className = 'card-scanner-dot ' + dotClass(s.lastSeen);
+    ageEl.textContent = timeSince(s.lastSeen);
+    card.classList.remove('card-idle');
+
+    resEl.style.cssText = resultBg(r.status);
+    resEl.innerHTML = `
+        <div class="result-icon">${statusIcon(r.status)}</div>
+        <div class="result-name">${esc(r.name || '—')}</div>
+        <div class="result-status">${statusLabel(r.status)}</div>
+        <div class="result-stats">${r.scanned} / ${r.total} checked in</div>`;
+
+    const flashCls = 'flash-' + r.status;
+    card.classList.add(flashCls);
+    setTimeout(() => card.classList.remove(flashCls), 4000);
+
+    // Fade result background back after 4s
+    setTimeout(() => { resEl.style.cssText = ''; }, 4000);
+}
+
+// ── Actions ───────────────────────────────────────────────
+function displayUrl(pairToken) {
+    const s  = scanners[pairToken];
+    const ev = allEvents.find(e => e.id === s?.eventId);
+    if (!ev?.displayToken) return null;
+    return `${location.origin}/display.html?token=${ev.displayToken}&pair=${encodeURIComponent(pairToken)}`;
+}
+
+function copyLink(pairToken, btn) {
+    const url = displayUrl(pairToken);
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+        btn.textContent = '✓ Copied';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = '⎘ Copy Link'; btn.classList.remove('copied'); }, 2000);
+    }).catch(() => {
+        prompt('Copy this display URL:', url);
+    });
+}
+
+function showQR(pairToken) {
+    const s   = scanners[pairToken];
+    const ev  = allEvents.find(e => e.id === s?.eventId);
+    const url = displayUrl(pairToken);
+    if (!url) return;
+
+    const shortId = 'Scanner #' + pairToken.replace(/-/g, '').slice(-6);
+    document.getElementById('qrTitle').textContent = shortId;
+    document.getElementById('qrSub').textContent   = ev ? ev.name : '';
+    document.getElementById('qrUrl').textContent   = url;
+    document.getElementById('qrImg').src = `/api/display/qr/${s.eventId}?pair=${encodeURIComponent(pairToken)}`;
+    document.getElementById('qrModal').classList.add('open');
+}
+
+function closeQR() {
+    document.getElementById('qrModal').classList.remove('open');
+}
+
+// ── Helpers ───────────────────────────────────────────────
+function statusIcon(st)  { return { valid:'✓', used:'⚠', invalid:'✕', reentry_enter:'↩' }[st] ?? '●'; }
+function statusLabel(st) { return { valid:'Valid', used:'Already Used', invalid:'Invalid', reentry_enter:'Re-Entry' }[st] ?? st; }
+
+function resultBg(st) {
+    const map = {
+        valid:         'background:rgba(74,222,128,0.12);',
+        used:          'background:rgba(251,191,36,0.10);',
+        invalid:       'background:rgba(239,68,68,0.12);',
+        reentry_enter: 'background:rgba(96,165,250,0.10);',
+    };
+    return map[st] ?? '';
+}
+
+function dotClass(lastSeen) {
+    const secs = (Date.now() - new Date(lastSeen)) / 1000;
+    if (secs < 30)   return 'recent';
+    if (secs < 300)  return 'active';
+    return '';
+}
+
+function timeSince(iso) {
+    const secs = Math.floor((Date.now() - new Date(iso)) / 1000);
+    if (secs <  60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.floor(secs/60)}m ago`;
+    return `${Math.floor(secs/3600)}h ago`;
+}
+
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// Refresh ages every 30s
+setInterval(() => {
+    document.querySelectorAll('.scanner-card').forEach(card => {
+        const pt = card.id.replace('card-', '');
+        const s  = scanners[pt];
+        if (!s) return;
+        const ageEl = card.querySelector('.card-age');
+        const dotEl = card.querySelector('.card-scanner-dot');
+        if (ageEl) ageEl.textContent = timeSince(s.lastSeen);
+        if (dotEl) dotEl.className = 'card-scanner-dot ' + dotClass(s.lastSeen);
+    });
+}, 30000);
+</script>
+</body>
+</html>
