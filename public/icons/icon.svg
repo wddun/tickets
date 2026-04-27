@@ -3,11 +3,7 @@
   <rect width="512" height="512" fill="#1a1f3c"/>
 
   <!-- Ticket body -->
-  <rect x="68" y="166" width="376" height="180" rx="30" fill="white"/>
-
-  <!-- Red header band (top of ticket) -->
-  <rect x="68" y="166" width="376" height="56" rx="30" fill="#bd2949"/>
-  <rect x="68" y="194" width="376" height="28" fill="#bd2949"/>
+  <rect x="68" y="166" width="376" height="180" rx="30" fill="rgba(255,255,255,0.92)"/>
 
   <!-- Side notches (cut-out semicircles) -->
   <circle cx="68"  cy="256" r="24" fill="#1a1f3c"/>
@@ -16,5 +12,5 @@
   <!-- Perforation dashes -->
   <line x1="256" y1="186" x2="256" y2="334"
         stroke="#1a1f3c" stroke-width="5"
-        stroke-dasharray="14,11" stroke-linecap="round" opacity="0.18"/>
+        stroke-dasharray="14,11" stroke-linecap="round" opacity="0.25"/>
 </svg>
