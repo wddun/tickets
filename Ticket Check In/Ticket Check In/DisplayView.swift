@@ -54,7 +54,7 @@ struct DisplayView: View {
         }
         .ignoresSafeArea()
         .statusBar(hidden: true)
-        .persistentSystemOverlays(.hidden)
+        .modifier(HideSystemOverlaysModifier())
         .onAppear   { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -411,12 +411,22 @@ class SSEDisplayClient: NSObject, URLSessionDataDelegate {
 
 // MARK: - QR Scanner Sheet (for Internet mode pairing)
 
+private struct HideSystemOverlaysModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 16.0, *) {
+            content.persistentSystemOverlays(.hidden)
+        } else {
+            content
+        }
+    }
+}
+
 struct DisplayQRScannerSheet: View {
     let onDetected: (String) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             ZStack {
                 Color.black.ignoresSafeArea()
                 DisplayQRCameraView(onDetected: onDetected)
@@ -438,8 +448,20 @@ struct DisplayQRScannerSheet: View {
                         .foregroundStyle(.white)
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .modifier(DarkNavBarModifier())
+        }
+        .navigationViewStyle(.stack)
+    }
+}
+
+private struct DarkNavBarModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 16.0, *) {
+            content
+                .toolbarBackground(.black, for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+        } else {
+            content
         }
     }
 }
