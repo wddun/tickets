@@ -523,6 +523,42 @@
         body.has-tab-bar #iosBanner {
             bottom: calc(49px + env(safe-area-inset-bottom, 0px) + 12px);
         }
+
+        /* ── Settings sheet ── */
+        #settingsSheet { max-height: 92dvh; overflow: hidden; display: flex; flex-direction: column; }
+        .settings-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0 20px; }
+        .settings-title { font-size: 22px; font-weight: 700; padding: 12px 20px 20px; }
+        .settings-section { padding: 0 16px 16px; }
+        .settings-section-header {
+            font-size: 12px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.5px; color: rgba(255,255,255,0.3);
+            margin-bottom: 8px; padding: 0 4px;
+        }
+        .settings-card { background: rgba(255,255,255,0.07); border-radius: 14px; overflow: hidden; }
+        .settings-row {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; padding: 14px 16px;
+        }
+        .settings-row + .settings-row { border-top: 1px solid rgba(255,255,255,0.06); }
+        .settings-row-label { font-size: 15px; color: rgba(255,255,255,0.65); flex-shrink: 0; }
+        .settings-row-value {
+            font-size: 14px; color: rgba(255,255,255,0.38);
+            text-align: right; word-break: break-all;
+        }
+        .settings-danger-btn {
+            width: 100%; margin-top: 8px; padding: 14px; border: none;
+            border-radius: 14px; font-size: 16px; font-weight: 600; cursor: pointer;
+            background: rgba(255,69,58,0.12); color: #ff453a; transition: opacity 0.15s;
+        }
+        .settings-danger-btn:active { opacity: 0.7; }
+        .qr-section { padding: 16px; text-align: center; }
+        .qr-event-label { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.55); margin-bottom: 14px; }
+        .qr-img { width: 176px; height: 176px; border-radius: 10px; display: block; margin: 0 auto; }
+        .qr-hint { font-size: 12px; color: rgba(255,255,255,0.28); margin-top: 10px; line-height: 1.4; }
+        .qr-placeholder {
+            font-size: 14px; color: rgba(255,255,255,0.3);
+            padding: 20px 16px; text-align: center; line-height: 1.5;
+        }
     </style>
 </head>
 <body>
@@ -594,6 +630,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             Check-In
         </button>
+        <button class="tab-btn" id="tabSettings" onclick="switchTab('settings')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Settings
+        </button>
     </div>
     <div class="tab-bar-safe"></div>
 </div>
@@ -617,6 +657,33 @@
     <div id="attendeeList"></div>
     <div class="list-close">
         <button class="action-btn btn-secondary" onclick="closeList()">Done</button>
+    </div>
+</div>
+
+<!-- Settings sheet -->
+<div class="backdrop" id="settingsBackdrop" onclick="closeSettings()"></div>
+<div class="sheet" id="settingsSheet">
+    <div class="sheet-handle"></div>
+    <div class="settings-scroll">
+        <div class="settings-title">Settings</div>
+
+        <div class="settings-section">
+            <div class="settings-section-header">Account</div>
+            <div class="settings-card">
+                <div class="settings-row">
+                    <span class="settings-row-label">Signed in as</span>
+                    <span class="settings-row-value" id="settingsEmailText">—</span>
+                </div>
+            </div>
+            <button class="settings-danger-btn" onclick="signOut()">Sign Out</button>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-section-header">Display Connect</div>
+            <div class="settings-card" id="displayConnectCard">
+                <div class="qr-placeholder">Select an event from the scanner screen first.</div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -653,6 +720,7 @@ function playSound(type) {
 
 // ── State ─────────────────────────────────────────────────
 let isLoggedIn      = false;
+let currentUser     = null;
 let events          = [];
 let allAttendees    = [];   // grouped registrations for selected event
 let filteredAttendees = [];
@@ -666,7 +734,11 @@ let pendingCheckoutToken = null;
 (async () => {
     try {
         const r = await fetch('/api/auth/me');
-        isLoggedIn = r.ok;
+        if (r.ok) {
+            isLoggedIn = true;
+            const data = await r.json();
+            currentUser = data.user;
+        }
     } catch (_) {}
 
     if (isLoggedIn) {
@@ -722,25 +794,86 @@ async function openList() {
 }
 
 function closeList() {
-    document.getElementById('listBackdrop').classList.remove('show');
-    document.getElementById('listSheet').classList.remove('show');
+    closeListSheet();
     setActiveTab('scanner');
+}
+
+function openSettings() {
+    closeResult();
+    const emailEl = document.getElementById('settingsEmailText');
+    if (emailEl) emailEl.textContent = currentUser?.email || '—';
+    document.getElementById('settingsBackdrop').classList.add('show');
+    document.getElementById('settingsSheet').classList.add('show');
+    setActiveTab('settings');
+    renderDisplayConnect();
+}
+
+function closeSettings() {
+    closeSettingsSheet();
+    setActiveTab('scanner');
+}
+
+function renderDisplayConnect() {
+    const ev = selectedEvent();
+    const card = document.getElementById('displayConnectCard');
+    if (!ev) {
+        card.innerHTML = '<div class="qr-placeholder">Select an event from the scanner screen to show the display QR code.</div>';
+        return;
+    }
+    card.innerHTML = '<div class="qr-placeholder">Loading…</div>';
+    fetch(`/api/display/qr/${encodeURIComponent(ev.id)}`)
+        .then(r => { if (!r.ok) throw new Error(); return r.blob(); })
+        .then(blob => {
+            const url = URL.createObjectURL(blob);
+            card.innerHTML = `
+                <div class="qr-section">
+                    <div class="qr-event-label">${escHtml(ev.name)}</div>
+                    <img class="qr-img" src="${url}" alt="Display QR Code">
+                    <div class="qr-hint">Point the display device's camera at this code to connect</div>
+                </div>`;
+        })
+        .catch(() => {
+            card.innerHTML = '<div class="qr-placeholder">Could not load QR code.</div>';
+        });
+}
+
+async function signOut() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
+    window.location.href = '/login.html';
 }
 
 function switchTab(tab) {
     if (tab === 'list') {
+        closeSettingsSheet();
         openList();
+    } else if (tab === 'settings') {
+        closeListSheet();
+        openSettings();
     } else {
-        closeList();
+        closeListSheet();
+        closeSettingsSheet();
+        setActiveTab('scanner');
     }
 }
 
+// Raw sheet closers — hide the panel without touching the active tab indicator
+function closeListSheet() {
+    document.getElementById('listBackdrop').classList.remove('show');
+    document.getElementById('listSheet').classList.remove('show');
+}
+function closeSettingsSheet() {
+    document.getElementById('settingsBackdrop').classList.remove('show');
+    document.getElementById('settingsSheet').classList.remove('show');
+}
+
 function setActiveTab(tab) {
-    const ts = document.getElementById('tabScanner');
-    const tl = document.getElementById('tabList');
+    const ts  = document.getElementById('tabScanner');
+    const tl  = document.getElementById('tabList');
+    const tst = document.getElementById('tabSettings');
     if (!ts) return;
-    ts.classList.toggle('active', tab === 'scanner');
-    tl.classList.toggle('active', tab === 'list');
+    ts.classList.toggle('active',  tab === 'scanner');
+    tl.classList.toggle('active',  tab === 'list');
+    if (tst) tst.classList.toggle('active', tab === 'settings');
 }
 
 async function openListFromResult() {

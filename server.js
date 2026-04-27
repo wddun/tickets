@@ -2872,6 +2872,29 @@ app.get('/api/display/token/:eventId', requireAuth, async (req, res) => {
     res.json({ token: tok, url: `${BASE_URL}/display.html?token=${tok}` });
 });
 
+// QR code PNG for the display URL (used by web scanner settings page)
+app.get('/api/display/qr/:eventId', requireAuth, async (req, res) => {
+    const { eventId } = req.params;
+    await db.read();
+    if (!userHasEventAccess(req.session.userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
+    const event = db.data.events.find(e => e.id === eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!event.displayToken) {
+        await db.update(data => {
+            const ev = data.events.find(e => e.id === eventId);
+            if (ev && !ev.displayToken) ev.displayToken = crypto.randomBytes(24).toString('hex');
+        });
+    }
+    const tok = db.data.events.find(e => e.id === eventId).displayToken;
+    const url = `${BASE_URL}/display.html?token=${tok}`;
+    try {
+        const png = await QRCode.toBuffer(url, { width: 400, margin: 2 });
+        res.set('Content-Type', 'image/png').set('Cache-Control', 'no-cache').send(png);
+    } catch (err) {
+        res.status(500).json({ error: 'QR generation failed' });
+    }
+});
+
 // Regenerate display token (invalidates old links)
 app.post('/api/display/token/:eventId/rotate', requireAuth, async (req, res) => {
     const { eventId } = req.params;
