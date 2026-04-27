@@ -569,10 +569,7 @@
 
         /* ── Responsive ── */
         @media (max-width: 700px) {
-            .sidebar {
-                width: 100%;
-                min-width: unset;
-            }
+            body { overflow: auto; }
 
             .layout {
                 flex-direction: column;
@@ -580,8 +577,37 @@
                 overflow: visible;
             }
 
+            /* On mobile, sidebar and main occupy full width but only one shows at a time */
+            .sidebar {
+                width: 100%;
+                min-width: unset;
+                border-right: none;
+                border-bottom: 1px solid #e8e8e8;
+            }
+
             .main {
+                display: none;
                 padding: 16px;
+            }
+
+            /* When an event is selected, hide sidebar, show main */
+            body.event-selected .sidebar { display: none; }
+            body.event-selected .main    { display: block; }
+
+            /* Back button shown on mobile only */
+            .mobile-back-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                background: none;
+                border: none;
+                color: #c4294a;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                padding: 0;
+                margin-bottom: 16px;
+                font-family: inherit;
             }
 
             .stats-row {
@@ -597,6 +623,15 @@
             .attendee-row .attendee-email {
                 display: none;
             }
+
+            /* Hide less important topbar items on mobile */
+            .topbar-hide-mobile { display: none !important; }
+            .topbar-logo img    { height: 20px; }
+        }
+
+        @media (min-width: 701px) {
+            .mobile-back-btn { display: none; }
+            .main { display: block; }
         }
 
         /* ── Settings modal ── */
@@ -850,9 +885,9 @@
 <body>
 
     <div class="topbar">
-        <a href="/" class="topbar-logo"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
+        <a href="/" class="topbar-logo"><img src="/logo-nav.svg" alt="WTS Tickets"></a>
         <div class="topbar-actions">
-            <a href="/" class="topbar-btn">
+            <a href="/" class="topbar-btn topbar-hide-mobile">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                 Home
             </a>
@@ -861,7 +896,7 @@
                 Scanner
             </a>
             <button class="topbar-btn" onclick="logout()">Sign Out</button>
-            <button class="topbar-btn topbar-btn-danger" onclick="confirmDeleteAccount()">Delete Account</button>
+            <button class="topbar-btn topbar-btn-danger topbar-hide-mobile" onclick="confirmDeleteAccount()">Delete Account</button>
         </div>
     </div>
 
@@ -912,7 +947,7 @@
     </div>
 
     <footer style="background:#10132a;border-top:1px solid rgba(255,255,255,0.06);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;">
-        <img src="/logo-nav.svg" alt="Will's Tech Support" style="height:20px;width:auto;opacity:0.7;">
+        <img src="/logo-nav.svg" alt="WTS Tickets" style="height:20px;width:auto;opacity:0.7;">
         <span style="font-size:12px;color:rgba(255,255,255,0.28);">&copy; 2026 Will's Tech Support</span>
         <a href="/support.html" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;">Support</a>
     </footer>
@@ -1188,6 +1223,7 @@
             checkedRegIds.clear();
             clearInterval(refreshTimer);
             renderSidebar();
+            document.body.classList.add('event-selected');
 
             const event = events.find(e => e.id === id);
             document.getElementById('emptyState').style.display = 'none';
@@ -1196,6 +1232,10 @@
 
             await fetchAndRender(event);
             refreshTimer = setInterval(() => fetchAndRender(event, true), 15000);
+        }
+
+        function backToEventList() {
+            document.body.classList.remove('event-selected');
         }
 
         async function fetchAndRender(event, silent = false) {
@@ -1220,6 +1260,10 @@
 
             const el = document.getElementById('eventDetail');
             el.innerHTML = `
+        <button class="mobile-back-btn" onclick="backToEventList()">
+            <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,1 1,7 7,13"/></svg>
+            All Events
+        </button>
         <div class="detail-header">
             ${event.imageUrl
                     ? `<img class="detail-image" src="${event.imageUrl}" alt="">`
