@@ -183,7 +183,6 @@
         .sd-partial { background: #fbbf24; }
         .sd-done    { background: #4ade80; }
 
-        .row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
         .row-checkin-btn {
             background: #fff;
             border: none; color: #1a1f3c;
@@ -194,52 +193,90 @@
             flex-shrink: 0;
         }
         .row-checkin-btn:active { opacity: 0.65; }
-        .row-checkin1-btn {
-            background: rgba(255,255,255,0.15);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: #fff;
-            font-size: 13px; font-weight: 700;
-            padding: 8px 14px; border-radius: 20px;
-            cursor: pointer; white-space: nowrap;
-            -webkit-tap-highlight-color: transparent;
-            flex-shrink: 0;
-        }
-        .row-checkin1-btn:active { opacity: 0.65; }
         .row-done-label {
             font-size: 13px; font-weight: 600;
             color: #4ade80; flex-shrink: 0;
         }
-
-        .expand-arrow {
-            font-size: 14px; font-weight: 300;
-            color: rgba(255,255,255,0.25);
-            transition: transform 0.22s;
+        .row-multi-hint {
+            font-size: 11px; color: rgba(255,255,255,0.25);
             flex-shrink: 0; margin-left: 2px;
         }
-        .person-row.open .expand-arrow { transform: rotate(90deg); }
 
-        .ticket-rows { display: none; border-top: 1px solid rgba(255,255,255,0.07); }
-        .person-row.open .ticket-rows { display: block; }
-
-        .ticket-item {
-            display: flex; align-items: center; gap: 10px;
-            padding: 10px 14px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+        /* ── Ticket picker sheet ── */
+        .sheet-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55);
+            z-index: 200;
+            display: flex; align-items: flex-end;
+            opacity: 0; transition: opacity 0.22s;
+            pointer-events: none;
         }
-        .ticket-item:last-child { border-bottom: none; }
-        .ticket-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-        .tdot-used    { background: #4ade80; }
-        .tdot-pending { background: rgba(255,255,255,0.2); }
-        .ticket-label { flex: 1; font-size: 14px; color: rgba(255,255,255,0.7); }
-        .ticket-time  { font-size: 12px; color: rgba(255,255,255,0.3); }
-        .ticket-btn {
+        .sheet-overlay.open { opacity: 1; pointer-events: auto; }
+        .sheet {
+            background: #1c1c1e;
+            border-radius: 22px 22px 0 0;
+            width: 100%;
+            max-height: 75vh;
+            display: flex; flex-direction: column;
+            transform: translateY(100%);
+            transition: transform 0.28s cubic-bezier(0.32,0.72,0,1);
+        }
+        .sheet-overlay.open .sheet { transform: translateY(0); }
+        .sheet-handle {
+            width: 36px; height: 4px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 2px;
+            margin: 12px auto 0;
+            flex-shrink: 0;
+        }
+        .sheet-header {
+            padding: 14px 20px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            flex-shrink: 0;
+        }
+        .sheet-name {
+            font-size: 17px; font-weight: 700; margin-bottom: 2px;
+        }
+        .sheet-subtitle {
+            font-size: 13px; color: rgba(255,255,255,0.4);
+        }
+        .sheet-tickets { flex: 1; overflow-y: auto; }
+        .sheet-ticket-row {
+            display: flex; align-items: center; gap: 14px;
+            padding: 14px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .sheet-ticket-row:last-child { border-bottom: none; }
+        .sheet-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+        .sheet-dot-used    { background: #4ade80; }
+        .sheet-dot-pending { background: rgba(255,255,255,0.2); }
+        .sheet-ticket-info { flex: 1; min-width: 0; }
+        .sheet-ticket-num { font-size: 15px; font-weight: 600; }
+        .sheet-ticket-status { font-size: 12px; color: rgba(255,255,255,0.38); margin-top: 1px; }
+        .sheet-ticket-btn {
             background: rgba(255,255,255,0.12); border: none;
-            color: #fff; font-size: 12px; font-weight: 700;
-            padding: 5px 12px; border-radius: 8px; cursor: pointer;
-            white-space: nowrap;
+            color: #fff; font-size: 13px; font-weight: 700;
+            padding: 8px 16px; border-radius: 20px;
+            cursor: pointer; white-space: nowrap;
+            -webkit-tap-highlight-color: transparent;
         }
-        .ticket-btn:active { opacity: 0.7; }
-        .ticket-scanned { font-size: 12px; font-weight: 700; color: #4ade80; }
+        .sheet-ticket-btn:active { opacity: 0.7; }
+        .sheet-ticket-done { font-size: 13px; font-weight: 700; color: #4ade80; }
+        .sheet-footer {
+            padding: 12px 16px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            flex-shrink: 0;
+            padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+        }
+        .sheet-all-btn {
+            width: 100%; padding: 14px;
+            background: #fff; color: #1a1f3c;
+            border: none; border-radius: 14px;
+            font-size: 16px; font-weight: 700;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .sheet-all-btn:active { opacity: 0.8; }
 
         .list-empty {
             text-align: center;
@@ -327,10 +364,25 @@
     <div class="tab-bar-safe"></div>
 </div>
 
+<div class="sheet-overlay" id="ticketSheet" onclick="closeTicketSheet()">
+    <div class="sheet" onclick="event.stopPropagation()">
+        <div class="sheet-handle"></div>
+        <div class="sheet-header">
+            <div class="sheet-name" id="sheetName"></div>
+            <div class="sheet-subtitle" id="sheetSubtitle"></div>
+        </div>
+        <div class="sheet-tickets" id="sheetTickets"></div>
+        <div class="sheet-footer">
+            <button class="sheet-all-btn" id="sheetAllBtn" onclick="checkInAllFromSheet()">Check In All</button>
+        </div>
+    </div>
+</div>
+
 <script>
 let events = [];
 let allAttendees = [];
 let filteredAttendees = [];
+let sheetRegId = null;
 
 // ── Init ──────────────────────────────────────────────────
 (async () => {
@@ -456,38 +508,20 @@ function buildPersonRow(a) {
         ? (total === 1 ? '1 ticket · Pending' : `${total} tickets · None checked in`)
         : `${scanned} of ${total} checked in`;
 
-    const unchecked = total - scanned;
     let actionHtml;
     if (allDone) {
         actionHtml = `<div class="row-done-label">Done</div>`;
-    } else if (total > 1 && unchecked > 1) {
-        actionHtml = `<div class="row-actions">
-            <button class="row-checkin1-btn" onclick="checkIn1(event,'${escAttr(a.registrationId)}')">+1</button>
-            <button class="row-checkin-btn"  onclick="checkInPerson(event,'${escAttr(a.registrationId)}')">All</button>
-        </div>`;
+    } else if (total > 1) {
+        actionHtml = `<button class="row-checkin-btn" onclick="openTicketSheet(event,'${escAttr(a.registrationId)}')">Check In</button>`;
     } else {
         actionHtml = `<button class="row-checkin-btn" onclick="checkInPerson(event,'${escAttr(a.registrationId)}')">Check In</button>`;
     }
 
-    const expandArrow = total > 1 ? `<div class="expand-arrow">›</div>` : '';
-
-    const ticketRows = total > 1 ? a.tickets.map((t, i) => {
-        const time = t.used_at ? new Date(t.used_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
-        return `
-            <div class="ticket-item">
-                <div class="ticket-dot ${t.used_at ? 'tdot-used' : 'tdot-pending'}"></div>
-                <div class="ticket-label">Ticket ${i + 1}</div>
-                ${time ? `<div class="ticket-time">${escHtml(time)}</div>` : ''}
-                ${t.used_at
-                    ? `<div class="ticket-scanned">✓</div>`
-                    : `<button class="ticket-btn" onclick="checkInTicket(event,'${escAttr(t.id)}','${escAttr(a.registrationId)}')">Check In</button>`
-                }
-            </div>`;
-    }).join('') : '';
+    const multiHint = total > 1 ? `<div class="row-multi-hint">${total} tickets</div>` : '';
 
     return `
         <div class="person-row" id="reg-${escAttr(a.registrationId)}">
-            <div class="person-main" onclick="togglePerson('${escAttr(a.registrationId)}')">
+            <div class="person-main">
                 <div class="avatar ${avClass}">${escHtml(initials)}</div>
                 <div class="person-info">
                     <div class="person-name">${escHtml(a.name)}</div>
@@ -496,42 +530,14 @@ function buildPersonRow(a) {
                         ${escHtml(statusTxt)}
                     </div>
                 </div>
-                <div onclick="event.stopPropagation()">${actionHtml}</div>
-                ${expandArrow}
+                <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+                    ${multiHint}${actionHtml}
+                </div>
             </div>
-            ${total > 1 ? `<div class="ticket-rows">${ticketRows}</div>` : ''}
         </div>`;
 }
 
-function togglePerson(rid) {
-    const el = document.getElementById(`reg-${rid}`);
-    if (el) el.classList.toggle('open');
-}
-
 // ── Check-in actions ──────────────────────────────────────
-async function checkInTicket(e, ticketId, registrationId) {
-    e.stopPropagation();
-    const btn = e.target;
-    btn.textContent = '…'; btn.disabled = true;
-    try {
-        const r = await fetch(`/api/checkin/${ticketId}`, { method: 'POST' });
-        if (r.ok) {
-            const attendee = allAttendees.find(a => a.registrationId === registrationId);
-            if (attendee) {
-                const t = attendee.tickets.find(t => t.id === ticketId);
-                if (t) t.used_at = new Date().toISOString();
-            }
-            filterList();
-            setTimeout(() => {
-                const row = document.getElementById(`reg-${registrationId}`);
-                if (row && !row.classList.contains('open')) row.classList.add('open');
-            }, 50);
-        } else {
-            btn.textContent = 'Check In'; btn.disabled = false;
-        }
-    } catch (_) { btn.textContent = 'Check In'; btn.disabled = false; }
-}
-
 async function checkInPerson(e, registrationId) {
     e.stopPropagation();
     const btn = e.target;
@@ -549,20 +555,75 @@ async function checkInPerson(e, registrationId) {
     } catch (_) { btn.textContent = 'Check In'; btn.disabled = false; }
 }
 
-async function checkIn1(e, registrationId) {
+// ── Ticket picker sheet ───────────────────────────────────
+function openTicketSheet(e, registrationId) {
     e.stopPropagation();
-    const btn = e.target;
-    const attendee = allAttendees.find(a => a.registrationId === registrationId);
-    const first = attendee && attendee.tickets.find(t => !t.used_at);
-    if (!first) return;
+    sheetRegId = registrationId;
+    renderSheet();
+    document.getElementById('ticketSheet').classList.add('open');
+}
+
+function closeTicketSheet() {
+    document.getElementById('ticketSheet').classList.remove('open');
+    sheetRegId = null;
+}
+
+function renderSheet() {
+    const a = allAttendees.find(x => x.registrationId === sheetRegId);
+    if (!a) return;
+    const scanned = a.tickets.filter(t => t.used_at).length;
+    document.getElementById('sheetName').textContent = a.name;
+    document.getElementById('sheetSubtitle').textContent = `${scanned} of ${a.tickets.length} checked in`;
+    document.getElementById('sheetAllBtn').style.display = scanned === a.tickets.length ? 'none' : 'block';
+
+    document.getElementById('sheetTickets').innerHTML = a.tickets.map((t, i) => {
+        const time = t.used_at
+            ? new Date(t.used_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+            : null;
+        return `
+            <div class="sheet-ticket-row">
+                <div class="sheet-dot ${t.used_at ? 'sheet-dot-used' : 'sheet-dot-pending'}"></div>
+                <div class="sheet-ticket-info">
+                    <div class="sheet-ticket-num">Ticket ${i + 1}</div>
+                    <div class="sheet-ticket-status">${time ? `Checked in ${escHtml(time)}` : 'Pending'}</div>
+                </div>
+                ${t.used_at
+                    ? `<div class="sheet-ticket-done">✓</div>`
+                    : `<button class="sheet-ticket-btn" onclick="checkInFromSheet('${escAttr(t.id)}', this)">Check In</button>`
+                }
+            </div>`;
+    }).join('');
+}
+
+async function checkInFromSheet(ticketId, btn) {
+    const a = allAttendees.find(x => x.registrationId === sheetRegId);
+    const ticket = a && a.tickets.find(t => t.id === ticketId);
+    if (!ticket) return;
     btn.textContent = '…'; btn.disabled = true;
     try {
-        const r = await fetch(`/api/checkin/${first.id}`, { method: 'POST' });
+        const r = await fetch(`/api/checkin/${ticketId}`, { method: 'POST' });
         if (r.ok) {
-            first.used_at = new Date().toISOString();
+            ticket.used_at = new Date().toISOString();
+            renderSheet();
             filterList();
-        } else { btn.textContent = '+1'; btn.disabled = false; }
-    } catch (_) { btn.textContent = '+1'; btn.disabled = false; }
+        } else { btn.textContent = 'Check In'; btn.disabled = false; }
+    } catch (_) { btn.textContent = 'Check In'; btn.disabled = false; }
+}
+
+async function checkInAllFromSheet() {
+    const a = allAttendees.find(x => x.registrationId === sheetRegId);
+    if (!a) return;
+    const btn = document.getElementById('sheetAllBtn');
+    btn.textContent = '…'; btn.disabled = true;
+    try {
+        const r = await fetch(`/api/checkin/${sheetRegId}`, { method: 'POST' });
+        if (r.ok) {
+            const now = new Date().toISOString();
+            a.tickets.forEach(t => { if (!t.used_at) t.used_at = now; });
+            renderSheet();
+            filterList();
+        } else { btn.textContent = 'Check In All'; btn.disabled = false; }
+    } catch (_) { btn.textContent = 'Check In All'; btn.disabled = false; }
 }
 
 // ── Utilities ─────────────────────────────────────────────
