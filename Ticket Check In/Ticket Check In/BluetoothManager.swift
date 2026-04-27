@@ -9,7 +9,7 @@ import UIKit
 
 // JSON payload sent over BLE from scanner phone → display phone
 struct BLEScanResult: Codable, Equatable {
-    let status: String      // "valid" | "used" | "invalid" | "reentry_enter"
+    let status: String      // "valid" | "used" | "invalid" | "reentry_enter" | "reentry_exit" | "ping"
     let name: String
     let firstName: String?
     let eventName: String?
@@ -93,6 +93,24 @@ class BluetoothManager: NSObject, ObservableObject {
               let peripheral = connectedPeripheral,
               let characteristic = writeCharacteristic,
               let data = try? JSONEncoder().encode(result) else { return }
+        write(data: data, to: peripheral, characteristic: characteristic)
+    }
+
+    /// Send a connection ping so the display immediately shows "connected".
+    func sendPing() {
+        let ping = BLEScanResult(
+            status: "ping",
+            name: UIDevice.current.name,
+            firstName: nil,
+            eventName: nil
+        )
+        guard let data = try? JSONEncoder().encode(ping) else { return }
+        guard let peripheral = connectedPeripheral,
+              let characteristic = writeCharacteristic else { return }
+        write(data: data, to: peripheral, characteristic: characteristic)
+    }
+
+    private func write(data: Data, to peripheral: CBPeripheral, characteristic: CBCharacteristic) {
         let type: CBCharacteristicWriteType = characteristic.properties.contains(.writeWithoutResponse)
             ? .withoutResponse
             : .withResponse
@@ -172,6 +190,12 @@ extension BluetoothManager: CBPeripheralManagerDelegate {
                 continue
             }
             peripheral.respond(to: request, withResult: .success)
+            // Ping = connection handshake, just mark connected
+            if result.status == "ping" {
+                bleState = .connected
+                connectedDisplayName = result.name
+                continue
+            }
             receivedResult = result
             if bleState != .connected { bleState = .connected }
         }
@@ -264,6 +288,8 @@ extension BluetoothManager: CBPeripheralDelegate {
         guard let char = service.characteristics?.first(where: { $0.uuid == Self.characteristicUUID })
         else { return }
         writeCharacteristic = char
+        // Send ping immediately so display shows connected without waiting for a scan
+        sendPing()
     }
 
     func peripheral(_ peripheral: CBPeripheral,
