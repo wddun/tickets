@@ -3156,9 +3156,14 @@ app.post('/api/scan/heartbeat', async (req, res) => {
 
     scannerRegistry.set(pairToken, entry);
 
-    // Notify any open monitor clients for this event
+    // Notify monitor clients — if no eventId, broadcast to ALL monitors
     if (entry.eventId) {
         broadcastToMonitors(entry.eventId, { type: 'scanner_update', scanner: entry });
+    } else {
+        const chunk = `data: ${JSON.stringify({ type: 'scanner_update', scanner: entry })}\n\n`;
+        for (const client of monitorClients) {
+            try { client.res.write(chunk); } catch (_) { }
+        }
     }
 
     res.json({ ok: true });
