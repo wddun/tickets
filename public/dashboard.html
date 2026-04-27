@@ -708,6 +708,15 @@
             color: #333;
         }
 
+        .color-swatch {
+            width: 28px; height: 28px; border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .color-swatch:hover { transform: scale(1.15); }
+        .color-swatch.selected { border-color: #1a1f3c; transform: scale(1.15); }
+
         .modal-section-title {
             font-size: 12px;
             font-weight: 600;
@@ -909,11 +918,14 @@
         <div class="sidebar">
             <div class="sidebar-header">
                 <h2>Your Events</h2>
-                <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;">
-                    <input type="checkbox" id="selectAllEvents" onchange="toggleAllEvents(this.checked)"
-                        style="accent-color:#dc2626;">
-                    All
-                </label>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button class="btn btn-primary btn-sm" onclick="openNewEventModal()" style="padding:5px 11px;font-size:12px;">+ New</button>
+                    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;">
+                        <input type="checkbox" id="selectAllEvents" onchange="toggleAllEvents(this.checked)"
+                            style="accent-color:#dc2626;">
+                        All
+                    </label>
+                </div>
             </div>
             <div class="sidebar-bulk-bar" id="eventBulkBar">
                 <span class="sidebar-bulk-count" id="eventBulkCount"></span>
@@ -931,7 +943,7 @@
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#dde3ed" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>
                 </div>
                 <p>Select an event to view details</p>
-                <p style="font-size:13px; color:#bbb;">Events are created from your Google Sheet</p>
+                <p style="font-size:13px; color:#bbb;">Create an event with <strong>+ New</strong> or import from your Google Sheet</p>
             </div>
             <div id="eventDetail" style="display:none;"></div>
         </div>
@@ -956,6 +968,55 @@
         <a href="/support.html" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;">Support</a>
     </footer>
 
+
+    <!-- New Event Modal -->
+    <div class="modal-overlay" id="newEventModal" style="display:none;z-index:200;"
+        onclick="if(event.target===this)closeNewEventModal()">
+        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;">
+            <div class="modal-header">
+                <h2>Create New Event</h2>
+                <button class="modal-close" onclick="closeNewEventModal()">&times;</button>
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name <span style="color:#c4294a">*</span></label>
+                <input type="text" id="newEventName" placeholder="e.g. Summer Gala 2026"
+                    style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;"
+                    onkeydown="if(event.key==='Enter')document.getElementById('newEventTime').focus()">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+                <div class="form-group">
+                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date & Time <span style="color:#c4294a">*</span></label>
+                    <input type="datetime-local" id="newEventTime"
+                        style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
+                </div>
+                <div class="form-group">
+                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Time <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                    <input type="datetime-local" id="newEventEndTime"
+                        style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue / Location <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                <input type="text" id="newEventLocation" placeholder="e.g. The Grand Ballroom"
+                    style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
+            </div>
+            <div class="form-group" style="margin-bottom:20px;">
+                <label style="display:block;margin-bottom:8px;font-size:13px;font-weight:600;">Color</label>
+                <div id="colorSwatches" style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <div class="color-swatch selected" data-color="rgb(99,102,241)"  style="background:rgb(99,102,241)"></div>
+                    <div class="color-swatch" data-color="rgb(196,41,74)"   style="background:rgb(196,41,74)"></div>
+                    <div class="color-swatch" data-color="rgb(16,185,129)"  style="background:rgb(16,185,129)"></div>
+                    <div class="color-swatch" data-color="rgb(245,158,11)"  style="background:rgb(245,158,11)"></div>
+                    <div class="color-swatch" data-color="rgb(59,130,246)"  style="background:rgb(59,130,246)"></div>
+                    <div class="color-swatch" data-color="rgb(239,68,68)"   style="background:rgb(239,68,68)"></div>
+                    <div class="color-swatch" data-color="rgb(168,85,247)"  style="background:rgb(168,85,247)"></div>
+                    <div class="color-swatch" data-color="rgb(20,184,166)"  style="background:rgb(20,184,166)"></div>
+                </div>
+            </div>
+            <div id="newEventError" style="color:#c4294a;font-size:13px;margin-bottom:10px;display:none;"></div>
+            <button class="btn btn-primary" style="width:100%;" id="newEventSubmitBtn" onclick="submitNewEvent()">Create Event</button>
+        </div>
+    </div>
 
     <!-- Bulk Email Modal -->
     <div class="modal-overlay" id="bulkEmailModal" style="display:none;z-index:200;"
@@ -2040,6 +2101,75 @@
             } catch (err) {
                 alert('Network error while revoking access.');
             }
+        }
+
+        // ── New Event ─────────────────────────────────────────
+        let selectedColor = 'rgb(99,102,241)';
+
+        function openNewEventModal() {
+            document.getElementById('newEventName').value = '';
+            document.getElementById('newEventTime').value = '';
+            document.getElementById('newEventEndTime').value = '';
+            document.getElementById('newEventLocation').value = '';
+            document.getElementById('newEventError').style.display = 'none';
+            selectedColor = 'rgb(99,102,241)';
+            document.querySelectorAll('.color-swatch').forEach(s => {
+                s.classList.toggle('selected', s.dataset.color === selectedColor);
+            });
+            document.querySelectorAll('.color-swatch').forEach(s => {
+                s.onclick = () => {
+                    selectedColor = s.dataset.color;
+                    document.querySelectorAll('.color-swatch').forEach(x => x.classList.remove('selected'));
+                    s.classList.add('selected');
+                };
+            });
+            document.getElementById('newEventModal').style.display = 'flex';
+            setTimeout(() => document.getElementById('newEventName').focus(), 80);
+        }
+
+        function closeNewEventModal() {
+            document.getElementById('newEventModal').style.display = 'none';
+        }
+
+        async function submitNewEvent() {
+            const name     = document.getElementById('newEventName').value.trim();
+            const timeVal  = document.getElementById('newEventTime').value;
+            const endVal   = document.getElementById('newEventEndTime').value;
+            const location = document.getElementById('newEventLocation').value.trim();
+            const errEl    = document.getElementById('newEventError');
+            const btn      = document.getElementById('newEventSubmitBtn');
+
+            if (!name) { errEl.textContent = 'Event name is required.'; errEl.style.display = 'block'; return; }
+            if (!timeVal) { errEl.textContent = 'Date & time is required.'; errEl.style.display = 'block'; return; }
+            errEl.style.display = 'none';
+
+            btn.disabled = true; btn.textContent = 'Creating…';
+            try {
+                const r = await fetch('/api/events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name,
+                        time: new Date(timeVal).toISOString(),
+                        endTime: endVal ? new Date(endVal).toISOString() : null,
+                        locationName: location,
+                        color: selectedColor,
+                    }),
+                });
+                const data = await r.json();
+                if (data.success) {
+                    closeNewEventModal();
+                    await loadEvents();
+                    selectEvent(data.eventId);
+                } else {
+                    errEl.textContent = data.error || 'Failed to create event.';
+                    errEl.style.display = 'block';
+                }
+            } catch (_) {
+                errEl.textContent = 'Connection error.';
+                errEl.style.display = 'block';
+            }
+            btn.disabled = false; btn.textContent = 'Create Event';
         }
 
         async function logout() {
