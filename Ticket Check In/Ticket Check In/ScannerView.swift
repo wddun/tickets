@@ -26,7 +26,7 @@ struct ScannerView: View {
     @State private var lastRegistrationId: String?
     @State private var bannerDismissTask: Task<Void, Never>?
     @State private var showingDetail = false
-    @State private var showDisplayConnection = false
+    @State private var showSettings = false
     @State private var lastScannedToken: String?
     @State private var lastScanTime: Date?
     @State private var pendingCheckoutToken: String?
@@ -37,7 +37,8 @@ struct ScannerView: View {
             CameraPreviewView(isScanning: $isScanning, onCode: handleCode)
                 .ignoresSafeArea()
             viewfinderFrame
-            displayButton
+            topBar
+            statusPills
             bottomBar
             // Slide-down banner — non-blocking, camera stays live
             VStack {
@@ -61,19 +62,19 @@ struct ScannerView: View {
                 TicketDetailSheet(result: result)
             }
         }
-        .sheet(isPresented: $showDisplayConnection) {
+        .sheet(isPresented: $showSettings) {
             DisplaySetupView(bluetooth: bluetooth)
         }
     }
 
-    @ViewBuilder private var displayButton: some View {
+    @ViewBuilder private var topBar: some View {
         VStack {
             HStack {
                 Spacer()
-                Button { showDisplayConnection = true } label: {
-                    Image(systemName: bluetooth.bleState == .connected ? "tv.fill" : "tv")
+                Button { showSettings = true } label: {
+                    Image(systemName: "gearshape.fill")
                         .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(displayButtonColor)
+                        .foregroundStyle(.white.opacity(0.85))
                         .padding(10)
                         .background(.black.opacity(0.45), in: Circle())
                 }
@@ -84,12 +85,58 @@ struct ScannerView: View {
         }
     }
 
-    private var displayButtonColor: Color {
-        switch bluetooth.bleState {
-        case .connected:   return .green
-        case .scanning, .connecting: return .yellow
-        default:           return .white.opacity(0.7)
+    // MARK: - Status Pills
+
+    @ViewBuilder private var statusPills: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 8) {
+                blePill
+                wifiPill
+            }
+            .padding(.bottom, 136)   // sits above the bottom bar
         }
+    }
+
+    @ViewBuilder private var blePill: some View {
+        let (dot, label): (Color, String) = {
+            switch bluetooth.bleState {
+            case .connected:              return (.green,  "BLE · Connected")
+            case .scanning:               return (.yellow, "BLE · Scanning")
+            case .connecting:             return (.yellow, "BLE · Connecting")
+            case .disconnected:           return (.orange, "BLE · Lost")
+            case .unauthorized:           return (.red,    "BLE · No Permission")
+            default:                      return (.gray,   "BLE · Off")
+            }
+        }()
+        Label {
+            Text(label).font(.system(size: 12, weight: .semibold))
+        } icon: {
+            Circle().fill(dot).frame(width: 7, height: 7)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.black.opacity(0.55), in: Capsule())
+    }
+
+    @ViewBuilder private var wifiPill: some View {
+        let (dot, label): (Color, String) = {
+            if api.isAuthenticated {
+                return (.green, "Server · Online")
+            } else {
+                return (.gray, "Server · Offline")
+            }
+        }()
+        Label {
+            Text(label).font(.system(size: 12, weight: .semibold))
+        } icon: {
+            Circle().fill(dot).frame(width: 7, height: 7)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.black.opacity(0.55), in: Capsule())
     }
 
     @ViewBuilder private var viewfinderFrame: some View {
@@ -205,7 +252,7 @@ struct ScannerView: View {
             result = ScanResult(from: response, status: .reentryExitPrompt, title: "Confirm Check-Out")
             CheckInFeedback.shared.alreadyUsed()
             withAnimation { scanResult = result }
-            // No banner — full-screen prompt requires explicit action
+            sendToDisplay(response: response, status: "reentry_exit")
         case "used":
             result = ScanResult(from: response, status: .alreadyUsed, title: "Already Checked In")
             CheckInFeedback.shared.alreadyUsed()
