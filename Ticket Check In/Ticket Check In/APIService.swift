@@ -299,6 +299,27 @@ class APIService: ObservableObject {
         guard let obj = try? JSONDecoder().decode(DisplayTokenResponse.self, from: data) else { throw APIError.decodingError }
         return (obj.token, obj.url)
     }
+    /// Register this scanner with the server monitor (called on launch + every 30 s).
+    /// Fire-and-forget — errors are silently ignored.
+    func sendHeartbeat(pairToken: String, eventId: String? = nil) async {
+        guard let url = URL(string: "\(baseURL)/api/scan/heartbeat") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let device = UIDevice.current
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        var body: [String: String] = [
+            "pairToken":   pairToken,
+            "platform":    "ios-app",
+            "deviceName":  device.name,
+            "osVersion":   "\(device.systemName) \(device.systemVersion)",
+            "appVersion":  appVersion,
+        ]
+        if let eid = eventId { body["eventId"] = eid }
+        request.httpBody = try? JSONEncoder().encode(body)
+        _ = try? await session.data(for: request)
+    }
 }
 
 private struct DisplayTokenResponse: Codable {

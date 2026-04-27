@@ -2868,15 +2868,15 @@ setInterval(async () => {
 
 
 // ── Door Display / SSE ──────────────────────────────────────────────────────
-const displayClients  = new Map(); // pairToken → Set<res>
+const displayClients = new Map(); // pairToken → Set<res>
 const scannerRegistry = new Map(); // pairToken → { pairToken, eventId, eventName, lastSeen, lastResult }
-const monitorClients  = new Set(); // { res, eventIds: Set<string> }
+const monitorClients = new Set(); // { res, eventIds: Set<string> }
 
 function broadcastToMonitors(eventId, payload) {
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;
     for (const client of monitorClients) {
         if (client.eventIds.has(eventId)) {
-            try { client.res.write(chunk); } catch (_) {}
+            try { client.res.write(chunk); } catch (_) { }
         }
     }
 }
@@ -3066,6 +3066,146 @@ app.get('/api/monitor/stream', requireAuth, async (req, res) => {
         clearInterval(keepAlive);
         monitorClients.delete(client);
     });
+});
+
+
+// ── Scanner-side notification SSE stream ──────────────────────────────────────
+// The iOS scanner app subscribes to this so it receives admin notifications in
+// real-time (no display device pairing required).
+app.get('/api/scan/stream/:pairToken', (req, res) => {
+    const { pairToken } = req.params;
+    if (!pairToken) return res.status(400).send('pairToken required');
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    // Register as a displayClient so broadcastToPair() reaches this scanner
+    if (!displayClients.has(pairToken)) displayClients.set(pairToken, new Set());
+    displayClients.get(pairToken).add(res);
+
+    const keepAlive = setInterval(() => {
+        try { res.write(': ping\n\n'); } catch (_) { clearInterval(keepAlive); }
+    }, 25000);
+
+    req.on('close', () => {
+        clearInterval(keepAlive);
+        const clients = displayClients.get(pairToken);
+        if (clients) { clients.delete(res); if (clients.size === 0) displayClients.delete(pairToken); }
+    });
+});
+
+// ── Monitor bootstrap: list all known scanners ─────────────────────────────────
+app.get('/api/monitor/scanners', requireAuth, async (req, res) => {
+    await db.read();
+    const userId = req.session.userId;
+    const user = db.data.users.find(u => u.id === userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+
+    const userEvents = isAdmin
+        ? db.data.events
+        : db.data.events.filter(e => {
+            if (e.userId === userId) return true;
+            const link = db.data.sheetLinks.find(l => l.eventId === e.id);
+            const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === userId) : null;
+            return !!access;
+        });
+
+    const userEventIds = new Set(userEvents.map(e => e.id));
+
+    // Hydrate scannerRegistry; filter to events this user can see
+    const scannerList = [...scannerRegistry.values()].filter(s =>
+        !s.eventId || userEventIds.has(s.eventId)
+    );
+
+    res.json({ scanners: scannerList, events: userEvents });
+});
+
+// ── Scanner Heartbeat ────────────────────────────────────────────────────────
+// Called by iOS app/web scanner on launch and every 30 s to stay visible in
+// the monitor even before any scan has happened.
+app.post('/api/scan/heartbeat', async (req, res) => {
+    const { pairToken, eventId, platform, deviceName, appVersion, osVersion } = req.body;
+    if (!pairToken) return res.status(400).json({ error: 'pairToken required' });
+
+    const ip = getIP(req);
+    const now = new Date().toISOString();
+
+    const existing = scannerRegistry.get(pairToken) || {};
+    const entry = {
+        ...existing,
+        pairToken,
+        ip,
+        platform: platform || existing.platform || 'unknown',  // 'ios-app' | 'web'
+        deviceName: deviceName || existing.deviceName || 'Unknown device',
+        appVersion: appVersion || existing.appVersion || null,
+        osVersion: osVersion || existing.osVersion || null,
+        userAgent: req.headers['user-agent'] || existing.userAgent || null,
+        lastSeen: now,
+        eventId: eventId || existing.eventId || null,
+        eventName: existing.eventName || null,
+        lastResult: existing.lastResult || null,
+    };
+
+    // Resolve eventName if eventId provided
+    if (entry.eventId && !entry.eventName) {
+        const ev = db.data.events.find(e => e.id === entry.eventId);
+        if (ev) entry.eventName = ev.name;
+    }
+
+    scannerRegistry.set(pairToken, entry);
+
+    // Notify any open monitor clients for this event
+    if (entry.eventId) {
+        broadcastToMonitors(entry.eventId, { type: 'scanner_update', scanner: entry });
+    }
+
+    res.json({ ok: true });
+});
+
+// ── Monitor Notifications ────────────────────────────────────────────────────
+// Send a message to one or all scanners (SSE → app shows alert/notification)
+app.post('/api/monitor/notify', requireAuth, async (req, res) => {
+    await db.read();
+    const { pairToken, title = 'Admin Message', message } = req.body;
+    if (!message) return res.status(400).json({ error: 'message is required' });
+
+    const userId = req.session.userId;
+    const user = db.data.users.find(u => u.id === userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+
+    // Gather pairTokens that belong to events the user owns
+    const userEventIds = new Set(
+        isAdmin
+            ? db.data.events.map(e => e.id)
+            : db.data.events.filter(e => e.userId === userId).map(e => e.id)
+    );
+
+    const payload = { type: 'notification', title, message, sentAt: new Date().toISOString() };
+    let notified = 0;
+
+    if (pairToken === '*') {
+        // Broadcast to all scanners for owned events
+        for (const [token, data] of scannerRegistry) {
+            if (!data.eventId || userEventIds.has(data.eventId)) {
+                broadcastToPair(token, payload);
+                notified++;
+            }
+        }
+    } else {
+        // Notify a specific scanner — verify it belongs to an owned event
+        const scannerData = scannerRegistry.get(pairToken);
+        if (!scannerData) return res.status(404).json({ error: 'Scanner not found' });
+        if (scannerData.eventId && !userEventIds.has(scannerData.eventId)) {
+            return res.status(403).json({ error: 'Not authorized' });
+        }
+        broadcastToPair(pairToken, payload);
+        notified = 1;
+    }
+
+    log('monitor-notify', `[notify] Sent to ${notified} scanner(s) — by: ${userId}  msg: ${message.slice(0, 60)}`);
+    res.json({ ok: true, notified });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
