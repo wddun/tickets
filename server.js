@@ -1964,7 +1964,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
                 ticketStatusCache.clear();
                 log('validate', `[OK] REENTRY ENTER — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
                 res.json({ status: 'reentry_enter', message: `Welcome back to ${event ? event.name : 'the event'}!`, ...ticketFields });
-                if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastDisplay(event.id, { type: 'scan', status: 'reentry_enter', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
+                if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastToPair(req.body.pairToken, { type: 'scan', status: 'reentry_enter', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
                 pushWalletIfChanged([ticket], event).catch(() => { });
                 return;
             }
@@ -1982,7 +1982,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
 
     log('validate', `[OK] VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
-    if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastDisplay(event.id, { type: 'scan', status: 'valid', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
+    if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastToPair(req.body.pairToken, { type: 'scan', status: 'valid', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
     pushWalletIfChanged([ticket], event).catch(() => { });
 });
 
@@ -2845,10 +2845,11 @@ setInterval(async () => {
 
 
 // ── Door Display / SSE ──────────────────────────────────────────────────────
-const displayClients = new Map(); // eventId → Set<res>
+const displayClients = new Map(); // pairToken → Set<res>
 
-function broadcastDisplay(eventId, payload) {
-    const clients = displayClients.get(eventId);
+function broadcastToPair(pairToken, payload) {
+    if (!pairToken) return;
+    const clients = displayClients.get(pairToken);
     if (!clients || clients.size === 0) return;
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;
     for (const client of clients) {
@@ -2886,7 +2887,8 @@ app.get('/api/display/qr/:eventId', requireAuth, async (req, res) => {
         });
     }
     const tok = db.data.events.find(e => e.id === eventId).displayToken;
-    const url = `${BASE_URL}/display.html?token=${tok}`;
+    const pair = req.query.pair || '';
+    const url = `${BASE_URL}/display.html?token=${tok}${pair ? `&pair=${encodeURIComponent(pair)}` : ''}`;
     try {
         const png = await QRCode.toBuffer(url, { width: 400, margin: 2 });
         res.set('Content-Type', 'image/png').set('Cache-Control', 'no-cache').send(png);
@@ -2919,10 +2921,12 @@ app.get('/api/display/info/:token', (req, res) => {
     });
 });
 
-// SSE stream — display token is the auth
+// SSE stream — display token is the auth, pairToken routes to specific scanner
 app.get('/api/display/stream/:token', (req, res) => {
     const { token } = req.params;
+    const pairToken = req.query.pair;
     if (!token || token.length < 32) return res.status(400).send('Invalid token');
+    if (!pairToken) return res.status(400).send('Missing pair token');
     const event = db.data.events.find(e => e.displayToken === token);
     if (!event) return res.status(404).send('Not found');
 
@@ -2942,8 +2946,8 @@ app.get('/api/display/stream/:token', (req, res) => {
         scanned: tickets.filter(t => t.used_at).length
     })}\n\n`);
 
-    if (!displayClients.has(event.id)) displayClients.set(event.id, new Set());
-    displayClients.get(event.id).add(res);
+    if (!displayClients.has(pairToken)) displayClients.set(pairToken, new Set());
+    displayClients.get(pairToken).add(res);
 
     const keepAlive = setInterval(() => {
         try { res.write(': ping\n\n'); } catch { clearInterval(keepAlive); }
@@ -2951,7 +2955,7 @@ app.get('/api/display/stream/:token', (req, res) => {
 
     req.on('close', () => {
         clearInterval(keepAlive);
-        displayClients.get(event.id)?.delete(res);
+        displayClients.get(pairToken)?.delete(res);
     });
 });
 app.listen(PORT, '0.0.0.0', () => {

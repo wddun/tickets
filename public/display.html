@@ -139,10 +139,12 @@
     <div id="reconnectBadge">Reconnecting…</div>
 
     <script>
-        const token = new URLSearchParams(window.location.search).get('token');
-        if (!token) {
-            document.getElementById('statusLabel').textContent = 'No display token — use the dashboard to generate a link.';
-            throw new Error('No token');
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+        const pair  = params.get('pair');
+        if (!token || !pair) {
+            document.getElementById('statusLabel').textContent = 'Invalid display link — regenerate it from the scanner app.';
+            throw new Error('No token or pair');
         }
 
         const app   = document.getElementById('app');
@@ -200,7 +202,7 @@
             label.textContent = 'Connecting…';
             badge.classList.remove('visible');
 
-            const source = new EventSource(`/api/display/stream/${token}`);
+            const source = new EventSource(`/api/display/stream/${token}?pair=${encodeURIComponent(pair)}`);
             es = source;
 
             source.onopen = () => {
