@@ -361,7 +361,7 @@ struct ScannerView: View {
     /// Subscribe to the server SSE scanner stream so admin notifications arrive instantly.
     private func startNotifListener() {
         notifTask?.cancel()
-        notifTask = Task.detached(priority: .background) { [pairToken = scannerPairToken] in
+        notifTask = Task.detached(priority: .background) { [pairToken = scannerPairToken, baseURL] in
             let urlStr = "\(baseURL)/api/scan/stream/\(pairToken)"
             guard let url = URL(string: urlStr) else { return }
             let request = URLRequest(url: url, timeoutInterval: .infinity)
