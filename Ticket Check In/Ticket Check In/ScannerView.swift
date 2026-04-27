@@ -62,7 +62,7 @@ struct ScannerView: View {
             }
         }
         .sheet(isPresented: $showDisplayConnection) {
-            DisplayConnectionView(bluetooth: bluetooth)
+            DisplaySetupView(bluetooth: bluetooth)
         }
     }
 

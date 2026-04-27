@@ -8,7 +8,8 @@ import SwiftUI
 struct ContentView: View {
     @State private var selectedTab = 0
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
-    @AppStorage("showDisplayTab") private var showDisplayTab = false
+    @AppStorage("showDisplayTab")    private var showDisplayTab    = false
+    @AppStorage("displayModeActive") private var displayModeActive = false
     @StateObject private var bluetooth = BluetoothManager.shared
 
     var body: some View {
@@ -29,6 +30,12 @@ struct ContentView: View {
                         .tabItem { Label("Display", systemImage: "tv") }
                         .tag(2)
                 }
+            }
+            .onChange(of: displayModeActive) { active in
+                guard active else { return }
+                showDisplayTab   = true
+                selectedTab      = 2
+                displayModeActive = false   // reset so next open doesn't re-jump
             }
         }
     }

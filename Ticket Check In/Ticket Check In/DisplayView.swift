@@ -20,6 +20,8 @@ struct DisplayView: View {
     @State private var showResult = false
     @State private var dismissTask: Task<Void, Never>? = nil
 
+    @AppStorage("displayInitialMode") private var displayInitialMode = "bluetooth"
+
     // Internet (SSE) mode
     @State private var displayMode: DisplayMode = .bluetooth
     @State private var sseState: SSEState = .idle
@@ -55,7 +57,10 @@ struct DisplayView: View {
         .ignoresSafeArea()
         .statusBar(hidden: true)
         .modifier(HideSystemOverlaysModifier())
-        .onAppear   { UIApplication.shared.isIdleTimerDisabled = true }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+            displayMode = displayInitialMode == "wifi" ? .internet : .bluetooth
+        }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             stopAllConnections()
@@ -78,11 +83,6 @@ struct DisplayView: View {
     @ViewBuilder
     private func idleContent(landscape: Bool) -> some View {
         VStack(spacing: 0) {
-            // Mode picker at top
-            if !showResult {
-                modePicker
-                    .padding(.top, 56)
-            }
             Spacer()
             // Status
             VStack(spacing: 10) {
@@ -99,7 +99,7 @@ struct DisplayView: View {
                 }
             }
             Spacer()
-            // Internet mode: show scan button or connecting state
+            // Action button
             if displayMode == .internet && sseState == .idle {
                 Button {
                     showQRScanner = true
@@ -128,19 +128,6 @@ struct DisplayView: View {
         }
     }
 
-    @ViewBuilder
-    private var modePicker: some View {
-        Picker("Mode", selection: $displayMode) {
-            ForEach(DisplayMode.allCases, id: \.self) { mode in
-                Text(mode.rawValue).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 260)
-        .onChange(of: displayMode) { _ in
-            stopAllConnections()
-        }
-    }
 
     @ViewBuilder
     private var statusIndicator: some View {
