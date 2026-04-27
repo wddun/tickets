@@ -78,6 +78,9 @@
                 <button type="submit" id="submitBtn">Login</button>
             </form>
 
+            <div class="toggle-row" id="forgotRow">
+                <a href="/forgot-password.html" style="color:#94a3b8;font-weight:500;">Forgot password?</a>
+            </div>
             <div class="toggle-row">
                 <span id="toggleText">Don't have an account?</span>
                 <a href="#" id="toggleBtn">Sign Up</a>
@@ -106,6 +109,7 @@
             toggleBtn.textContent  = isLogin ? 'Sign Up' : 'Login';
             submitBtn.textContent  = isLogin ? 'Login' : 'Create Account';
             document.querySelector('input[autocomplete="current-password"]').autocomplete = isLogin ? 'current-password' : 'new-password';
+            document.getElementById('forgotRow').style.display = isLogin ? '' : 'none';
         };
 
         document.getElementById('authForm').onsubmit = async e => {

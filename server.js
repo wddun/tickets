@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import { JSONFilePreset } from 'lowdb/node';
 import { nanoid } from 'nanoid';
 import QRCode from 'qrcode';
@@ -332,6 +332,13 @@ async function pushAppNotificationToTokens(tokens, { title, body, data } = {}) {
 
 app.set('trust proxy', 1);
 app.use(compression());
+app.use((req, res, next) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('X-Frame-Options', 'SAMEORIGIN');
+    res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.set('X-XSS-Protection', '0');
+    next();
+});
 app.use(express.json({ limit: '20mb' }));
 app.use(express.static('public', { extensions: ['html'] }));
 app.get('/html5-qrcode.min.js', (req, res) => {
@@ -374,6 +381,22 @@ const loginLimiter = rateLimit({
     message: { error: 'Too many login attempts. Please try again later.' }
 });
 
+const forgotPasswordLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many password reset requests. Please try again later.' }
+});
+
+const validateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 240,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many scan requests.' }
+});
+
 // Initialize Database
 const defaultData = {
     users: [],
@@ -382,7 +405,8 @@ const defaultData = {
     sheetLinks: [],
     sheetAccess: [],
     pushDevices: [],
-    pushSubscriptions: []
+    pushSubscriptions: [],
+    passwordResetTokens: []
 };
 const db = await JSONFilePreset(path.resolve(__dirname, 'db.json'), defaultData);
 
@@ -427,6 +451,7 @@ if (!db.data.sheetAccess) db.data.sheetAccess = [];
 if (!db.data.walletDevices) db.data.walletDevices = [];
 if (!db.data.pushDevices) db.data.pushDevices = [];
 if (!db.data.pushSubscriptions) db.data.pushSubscriptions = [];
+if (!db.data.passwordResetTokens) db.data.passwordResetTokens = [];
 
 // Migration: backfill scannerPin on any events that don't have one
 const eventsMissingPin = db.data.events.filter(e => !e.scannerPin);
@@ -553,6 +578,62 @@ app.post('/api/auth/logout', (req, res) => {
     const user = userId ? db.data.users.find(u => u.id === userId) : null;
     log('logout', `[logout] User logged out — email: ${user?.email || 'unknown'}  id: ${userId || 'none'}  ip: ${getIP(req)}`);
     req.session.destroy();
+    res.json({ success: true });
+});
+
+app.post('/api/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
+    const normalizedEmail = ((req.body.email || '') + '').toLowerCase().trim();
+    const user = db.data.users.find(u => u.email === normalizedEmail);
+    // Always respond 200 — don't reveal whether an account exists
+    if (!user) {
+        log('forgot-password', `[note] No account for email — ip: ${getIP(req)}`);
+        return res.json({ success: true });
+    }
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    await db.update(data => {
+        data.passwordResetTokens = (data.passwordResetTokens || []).filter(t => t.userId !== user.id);
+        data.passwordResetTokens.push({ userId: user.id, tokenHash, expiresAt, createdAt: new Date().toISOString() });
+    });
+    const resetUrl = `${BASE_URL}/reset-password.html?token=${rawToken}`;
+    await sendEmail({
+        to: normalizedEmail,
+        subject: 'Reset your password — Will\'s Tech Support Tickets',
+        html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;">
+            <div style="margin-bottom:24px;"><img src="${BASE_URL}/logo.png" alt="Will's Tech Support" style="height:28px;"></div>
+            <h2 style="color:#1a1f3c;margin:0 0 8px;">Reset your password</h2>
+            <p style="color:#64748b;margin:0 0 28px;">We received a request to reset the password for <strong>${normalizedEmail}</strong>. Click the button below to choose a new password.</p>
+            <div style="text-align:center;margin:0 0 28px;">
+                <a href="${resetUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Reset Password</a>
+            </div>
+            <p style="color:#94a3b8;font-size:13px;margin:0 0 8px;">This link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>
+            <p style="color:#cbd5e1;font-size:11px;word-break:break-all;">Direct link: ${resetUrl}</p>
+        </div>`
+    }).catch(err => log('forgot-password', `[ERR] Email failed — email: ${normalizedEmail}  err: ${err.message}`));
+    log('forgot-password', `[OK] Reset email sent — email: ${normalizedEmail}  ip: ${getIP(req)}`);
+    res.json({ success: true });
+});
+
+app.post('/api/auth/reset-password', forgotPasswordLimiter, async (req, res) => {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and password are required.' });
+    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
+    const entry = (db.data.passwordResetTokens || []).find(t => t.tokenHash === tokenHash);
+    if (!entry || new Date(entry.expiresAt) < new Date()) {
+        log('reset-password', `[ERR] Invalid or expired token  ip: ${getIP(req)}`);
+        return res.status(400).json({ error: 'This reset link is invalid or has expired.' });
+    }
+    const user = db.data.users.find(u => u.id === entry.userId);
+    if (!user) return res.status(400).json({ error: 'Account not found.' });
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await db.update(data => {
+        const u = data.users.find(u => u.id === entry.userId);
+        if (u) u.password = hashedPassword;
+        data.passwordResetTokens = (data.passwordResetTokens || []).filter(t => t.tokenHash !== tokenHash);
+    });
+    log('reset-password', `[OK] Password reset — email: ${user.email}  ip: ${getIP(req)}`);
     res.json({ success: true });
 });
 
@@ -852,6 +933,14 @@ app.post('/api/register-bulk', async (req, res) => {
     const count = parseInt(ticketCount, 10);
     if (isNaN(count) || count < 1 || count > 500) {
         return res.status(400).json({ error: 'ticketCount must be a number between 1 and 500' });
+    }
+
+    // Capacity check — only enforced for new registrations, not resends
+    if (!isResend && event.capacity) {
+        const registered = db.data.tickets.filter(t => t.eventId === event.id).length;
+        if (registered + count > event.capacity) {
+            return res.status(409).json({ error: `Event is at capacity (${event.capacity} tickets max, ${registered} registered)` });
+        }
     }
 
     const fullName = `${firstName} ${lastName}`;
@@ -1241,6 +1330,7 @@ app.post('/api/events', requireAuth, upload.single('image'), async (req, res) =>
         endTime: endTime || null,
         color,
         imageUrl,
+        capacity: parseInt(req.body.capacity) || null,
         scannerPin: Math.floor(100000 + Math.random() * 900000).toString(), // 6-digit PIN
         location: {
             name: locationName || 'Venue',
@@ -1279,6 +1369,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     }
 
     const allowReentry = req.body.allowReentry === 'true';
+    const capacityRaw = req.body.capacity !== undefined ? req.body.capacity : undefined;
 
     await db.update(data => {
         const ev = data.events.find(e => e.id === req.params.id);
@@ -1289,6 +1380,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
         if (color) ev.color = color;
         ev.imageUrl = imageUrl;
         ev.allowReentry = allowReentry;
+        if (capacityRaw !== undefined) ev.capacity = parseInt(capacityRaw) || null;
         ev.location = {
             name: locationName || ev.location?.name || 'Venue',
             address: locationAddress || ev.location?.address || '',
@@ -1424,6 +1516,13 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     }
 
     const count = Math.max(1, parseInt(ticketCount) || 1);
+
+    if (event.capacity) {
+        const registered = db.data.tickets.filter(t => t.eventId === event.id).length;
+        if (registered + count > event.capacity) {
+            return res.status(409).json({ error: `Event is at capacity (${event.capacity} tickets max, ${registered} registered)` });
+        }
+    }
     const registrationId = nanoid(10);
     const newTickets = [];
 
@@ -1831,7 +1930,7 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     pushWalletIfChanged(tickets, event).catch(() => { });
 });
 
-app.post('/api/validate', async (req, res) => {
+app.post('/api/validate', validateLimiter, async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'Token is required' });
 
