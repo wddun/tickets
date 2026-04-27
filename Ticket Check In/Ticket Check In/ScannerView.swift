@@ -34,6 +34,11 @@ struct ScannerView: View {
     @State private var flashResult: ScanResult?
     @State private var flashVisible = false
     @State private var flashTask: Task<Void, Never>?
+    @State private var heartbeatTask: Task<Void, Never>?
+    @State private var notifTask: Task<Void, Never>?
+    @State private var adminNotifTitle  = ""
+    @State private var adminNotifMsg    = ""
+    @State private var showAdminNotif   = false
     private let scanDebounceInterval: TimeInterval = 5.0
 
     var body: some View {
@@ -65,8 +70,22 @@ struct ScannerView: View {
             }
         }
         .task { await api.checkAuth() }
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+            startHeartbeat()
+            startNotifListener()
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+            heartbeatTask?.cancel()
+            notifTask?.cancel()
+        }
+        .alert(adminNotifTitle.isEmpty ? "Admin Message" : adminNotifTitle,
+               isPresented: $showAdminNotif) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(adminNotifMsg)
+        }
         .sheet(isPresented: $showingDetail) {
             if let result = recentScans.first {
                 TicketDetailSheet(result: result)
@@ -327,6 +346,47 @@ struct ScannerView: View {
             registrationId: response.registrationId
         )
         BluetoothManager.shared.sendScanResult(ble)
+    }
+
+    private func startHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { @MainActor in
+            while !Task.isCancelled {
+                await api.sendHeartbeat(pairToken: scannerPairToken)
+                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 s
+            }
+        }
+    }
+
+    /// Subscribe to the server SSE scanner stream so admin notifications arrive instantly.
+    private func startNotifListener() {
+        notifTask?.cancel()
+        notifTask = Task.detached(priority: .background) { [pairToken = scannerPairToken] in
+            let urlStr = "\(baseURL)/api/scan/stream/\(pairToken)"
+            guard let url = URL(string: urlStr) else { return }
+            let request = URLRequest(url: url, timeoutInterval: .infinity)
+            guard let (bytes, _) = try? await URLSession.shared.bytes(for: request) else { return }
+            var buffer = ""
+            for try await byte in bytes {
+                if Task.isCancelled { break }
+                buffer += String(bytes: [byte], encoding: .utf8) ?? ""
+                while let range = buffer.range(of: "\n\n") {
+                    let chunk = String(buffer[buffer.startIndex..<range.lowerBound])
+                    buffer = String(buffer[range.upperBound...])
+                    if chunk.hasPrefix("data: "),
+                       let data = chunk.dropFirst(6).data(using: .utf8),
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let type = json["type"] as? String, type == "notification",
+                       let message = json["message"] as? String {
+                        await MainActor.run {
+                            adminNotifTitle = json["title"] as? String ?? "Admin Message"
+                            adminNotifMsg   = message
+                            showAdminNotif  = true
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
