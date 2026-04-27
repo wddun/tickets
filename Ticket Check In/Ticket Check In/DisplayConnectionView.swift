@@ -216,7 +216,7 @@ struct DisplayConnectionView: View {
                         HStack {
                             Image(systemName: "tv")
                                 .font(.system(size: 18))
-                                .foregroundStyle(.accentColor)
+                                .foregroundStyle(Color.accentColor)
                                 .frame(width: 32)
                             Text(display.name)
                                 .font(.system(size: 16, weight: .medium))

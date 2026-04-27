@@ -3,6 +3,7 @@
 //  Ticket Check In
 //
 
+import Combine
 import CoreBluetooth
 import UIKit
 
