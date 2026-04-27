@@ -168,7 +168,6 @@ struct EventsListViewModern: View {
     @State private var hasAutoNavigated = false
     @State private var showDeleteConfirm = false
     @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
-    @AppStorage("showDisplayTab") private var showDisplayTab = false
 
     private var lastSelectedEvent: Event? {
         guard !lastSelectedEventData.isEmpty else { return nil }
@@ -219,8 +218,6 @@ struct EventsListViewModern: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Toggle("Display Tab", isOn: $showDisplayTab)
-                        Divider()
                         Button("Sign Out", role: .destructive) {
                             Task { try? await api.logout() }
                         }
@@ -281,7 +278,6 @@ struct EventsListViewLegacy: View {
     @State private var errorMessage: String?
     @State private var showDeleteConfirm = false
     @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
-    @AppStorage("showDisplayTab") private var showDisplayTab = false
 
     var body: some View {
         NavigationView {
@@ -314,8 +310,6 @@ struct EventsListViewLegacy: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Toggle("Display Tab", isOn: $showDisplayTab)
-                        Divider()
                         Button("Sign Out", role: .destructive) {
                             Task { try? await api.logout() }
                         }

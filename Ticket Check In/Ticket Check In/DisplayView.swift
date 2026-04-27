@@ -14,15 +14,17 @@ import AVFoundation
 
 struct DisplayView: View {
     @ObservedObject var bluetooth: BluetoothManager
+    let initialMode: String
+    let onDismiss: () -> Void
 
     @State private var currentResult: BLEScanResult? = nil
     @State private var resultBg: Color = .black
     @State private var showResult = false
     @State private var dismissTask: Task<Void, Never>? = nil
-
-    @AppStorage("displayInitialMode") private var displayInitialMode = "bluetooth"
+    @State private var showCheckoutConfirm = false
 
     // Internet (SSE) mode
+    @AppStorage("displayInitialMode") private var displayInitialMode = "bluetooth"
     @State private var displayMode: DisplayMode = .bluetooth
     @State private var sseState: SSEState = .idle
     @State private var sseEventName: String = ""
@@ -51,15 +53,40 @@ struct DisplayView: View {
                     idleContent(landscape: landscape)
                         .transition(.opacity)
                 }
+
+                // Exit button (top-left)
+                VStack {
+                    HStack {
+                        Button {
+                            stopAllConnections()
+                            onDismiss()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundStyle(.white.opacity(0.5))
+                                .padding(20)
+                        }
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .ignoresSafeArea()
+
+                // Checkout confirm overlay
+                if showCheckoutConfirm, let result = currentResult, result.status == "reentry_exit" {
+                    checkoutConfirmOverlay
+                        .transition(.opacity)
+                }
             }
             .animation(.easeInOut(duration: 0.4), value: showResult)
+            .animation(.easeInOut(duration: 0.2), value: showCheckoutConfirm)
         }
         .ignoresSafeArea()
         .statusBar(hidden: true)
         .modifier(HideSystemOverlaysModifier())
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
-            displayMode = displayInitialMode == "wifi" ? .internet : .bluetooth
+            displayMode = initialMode == "wifi" ? .internet : .bluetooth
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -198,6 +225,10 @@ struct DisplayView: View {
                     Text(resultLabel(result))
                         .font(.system(size: 24, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.8))
+                    // Checkout button for reentry_exit
+                    if result.status == "reentry_exit" {
+                        checkoutButton
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -214,6 +245,10 @@ struct DisplayView: View {
                 Text(resultLabel(result))
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.8))
+                // Checkout button for reentry_exit
+                if result.status == "reentry_exit" {
+                    checkoutButton.padding(.top, 8)
+                }
                 Spacer()
                 if let event = result.eventName {
                     Text(event)
@@ -226,11 +261,66 @@ struct DisplayView: View {
     }
 
     @ViewBuilder
+    private var checkoutButton: some View {
+        Button {
+            withAnimation { showCheckoutConfirm = true }
+        } label: {
+            Text("Confirm Check-Out")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(resultBg)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .background(.white.opacity(0.9), in: Capsule())
+        }
+    }
+
+    @ViewBuilder
+    private var checkoutConfirmOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea()
+            VStack(spacing: 20) {
+                Image(systemName: "door.left.hand.open")
+                    .font(.system(size: 52))
+                    .foregroundStyle(.white)
+                Text("Confirm Check-Out?")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(currentResult.map { $0.firstName ?? $0.name } ?? "")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                HStack(spacing: 16) {
+                    Button("Cancel") {
+                        withAnimation { showCheckoutConfirm = false }
+                    }
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.horizontal, 28).padding(.vertical, 12)
+                    .background(.white.opacity(0.15), in: Capsule())
+
+                    Button("Check Out") {
+                        withAnimation {
+                            showCheckoutConfirm = false
+                            showResult = false
+                            resultBg = .black
+                        }
+                    }
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 28).padding(.vertical, 12)
+                    .background(.white, in: Capsule())
+                }
+            }
+            .padding(40)
+        }
+    }
+
+    @ViewBuilder
     private func resultIcon(_ result: BLEScanResult) -> some View {
         let name: String = {
             switch result.status {
             case "valid", "reentry_enter": return "checkmark.circle.fill"
             case "used":                   return "exclamationmark.circle.fill"
+            case "reentry_exit":            return "door.left.hand.open"
             default:                       return "xmark.circle.fill"
             }
         }()
@@ -241,10 +331,11 @@ struct DisplayView: View {
 
     private func resultLabel(_ result: BLEScanResult) -> String {
         switch result.status {
-        case "valid":         return "Checked In"
-        case "reentry_enter": return "Welcome Back"
-        case "used":          return "Already Checked In"
-        default:              return "Invalid Ticket"
+        case "valid":          return "Checked In"
+        case "reentry_enter":  return "Welcome Back"
+        case "used":           return "Already Checked In"
+        case "reentry_exit":   return "Ready to Check Out"
+        default:               return "Invalid Ticket"
         }
     }
 
@@ -252,6 +343,7 @@ struct DisplayView: View {
         switch result.status {
         case "valid", "reentry_enter": return Color(red: 0.07, green: 0.53, blue: 0.25)
         case "used":                   return Color(red: 0.75, green: 0.37, blue: 0.06)
+        case "reentry_exit":           return Color(red: 0.18, green: 0.38, blue: 0.75)
         default:                       return Color(red: 0.72, green: 0.12, blue: 0.12)
         }
     }
@@ -260,9 +352,12 @@ struct DisplayView: View {
 
     private func displayResult(_ result: BLEScanResult) {
         dismissTask?.cancel()
+        showCheckoutConfirm = false
         currentResult = result
         resultBg = resultBackground(result)
         withAnimation { showResult = true }
+        // For reentry_exit, don't auto-dismiss — needs manual checkout action
+        guard result.status != "reentry_exit" else { return }
         dismissTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }

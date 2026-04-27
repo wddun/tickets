@@ -7,9 +7,9 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedTab = 0
-    @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
-    @AppStorage("showDisplayTab")    private var showDisplayTab    = false
-    @AppStorage("displayModeActive") private var displayModeActive = false
+    @AppStorage("hasSeenOnboarding")   private var hasSeenOnboarding   = false
+    @AppStorage("displayModeActive")   private var displayModeActive   = false
+    @AppStorage("displayInitialMode")  private var displayInitialMode  = "bluetooth"
     @StateObject private var bluetooth = BluetoothManager.shared
 
     var body: some View {
@@ -25,17 +25,12 @@ struct ContentView: View {
                 EventsView(switchToScanner: { selectedTab = 0 })
                     .tabItem { Label("Events", systemImage: "calendar") }
                     .tag(1)
-                if showDisplayTab {
-                    DisplayView(bluetooth: bluetooth)
-                        .tabItem { Label("Display", systemImage: "tv") }
-                        .tag(2)
-                }
             }
-            .onChange(of: displayModeActive) { active in
-                guard active else { return }
-                showDisplayTab   = true
-                selectedTab      = 2
-                displayModeActive = false   // reset so next open doesn't re-jump
+            // Fullscreen display mode — covers entire app when active
+            .fullScreenCover(isPresented: $displayModeActive) {
+                DisplayView(bluetooth: bluetooth, initialMode: displayInitialMode) {
+                    displayModeActive = false
+                }
             }
         }
     }
