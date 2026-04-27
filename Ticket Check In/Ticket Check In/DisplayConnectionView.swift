@@ -14,6 +14,7 @@ struct DisplaySetupView: View {
     @AppStorage("displayInitialMode")     private var displayInitialMode  = "bluetooth"
     @AppStorage("displayAutoStart")       private var displayAutoStart    = false
     @AppStorage("lastSelectedEventData")  private var lastSelectedEventData: Data = Data()
+    @AppStorage("scannerPairToken")       private var scannerPairToken: String = ""
 
     enum Role:       String, CaseIterable { case display = "Display", scanner = "Scanner" }
     enum Connection: String, CaseIterable { case bluetooth = "Bluetooth", wifi = "WiFi" }
@@ -288,9 +289,11 @@ struct DisplaySetupView: View {
     private func fetchToken(eventId: String) {
         isLoadingToken = true
         tokenError     = nil
+        if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
         Task {
             do {
-                let (_, url) = try await APIService.shared.getDisplayToken(eventId: eventId)
+                let (_, baseURL) = try await APIService.shared.getDisplayToken(eventId: eventId)
+                let url = baseURL + "&pair=" + scannerPairToken
                 await MainActor.run { displayURL = url; isLoadingToken = false }
             } catch {
                 await MainActor.run {

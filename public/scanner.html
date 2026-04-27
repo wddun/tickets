@@ -474,6 +474,17 @@ function playSound(type) {
     }
 }
 
+// ── Scanner pair token (1:1 display pairing) ─────────────
+function getScannerPairToken() {
+    let pt = localStorage.getItem('scannerPairToken');
+    if (!pt) {
+        pt = (crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2,'0')).join(''));
+        localStorage.setItem('scannerPairToken', pt);
+    }
+    return pt;
+}
+const SCANNER_PAIR_TOKEN = getScannerPairToken();
+
 // ── State ─────────────────────────────────────────────────
 let isLoggedIn      = false;
 let currentUser     = null;
@@ -689,7 +700,7 @@ function onScanSuccess(decodedText) {
     fetch('/api/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token })
+        body: JSON.stringify({ token, pairToken: SCANNER_PAIR_TOKEN })
     })
     .then(r => r.json())
     .then(data => {

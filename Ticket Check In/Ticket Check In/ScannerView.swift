@@ -14,6 +14,7 @@ struct ScannerView: View {
 
     @ObservedObject private var api = APIService.shared
     @ObservedObject private var bluetooth = BluetoothManager.shared
+    @AppStorage("scannerPairToken") private var scannerPairToken: String = ""
 
     // Full-screen overlay state (reentry exit confirm only)
     @State private var scanResult: ScanResult?
@@ -231,7 +232,8 @@ struct ScannerView: View {
 
         Task {
             do {
-                let response = try await APIService.shared.validateTicket(token: token)
+                if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
+                let response = try await APIService.shared.validateTicket(token: token, pairToken: scannerPairToken)
                 await MainActor.run { showResult(for: response, token: token) }
             } catch {
                 await MainActor.run {

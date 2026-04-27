@@ -396,11 +396,12 @@ struct DisplayView: View {
     }
 
     private func connectSSE(urlString: String) {
-        // Parse the display token from the display.html?token=xxx URL
+        // Parse token and pair from the display.html?token=xxx&pair=yyy URL
         guard let url = URL(string: urlString),
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let token = components.queryItems?.first(where: { $0.name == "token" })?.value,
               !token.isEmpty else { return }
+        let pair = components.queryItems?.first(where: { $0.name == "pair" })?.value ?? ""
 
         sseState = .connecting
         let client = SSEDisplayClient()
@@ -415,7 +416,7 @@ struct DisplayView: View {
                 sseState = connected ? .connected : .disconnected
             }
         }
-        client.connect(token: token)
+        client.connect(token: token, pair: pair)
     }
 
     private func handleSSEMessage(_ json: String) {
@@ -458,15 +459,18 @@ class SSEDisplayClient: NSObject, URLSessionDataDelegate {
     private var retryDelay: TimeInterval = 2
     private var isStopped = false
     private var token = ""
+    private var pair  = ""
 
-    func connect(token: String) {
+    func connect(token: String, pair: String) {
         self.token = token
+        self.pair  = pair
         startStream()
     }
 
     private func startStream() {
         guard !isStopped else { return }
-        guard let url = URL(string: "\(baseURL)/api/display/stream/\(token)") else { return }
+        let pairQuery = pair.isEmpty ? "" : "?pair=\(pair.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? pair)"
+        guard let url = URL(string: "\(baseURL)/api/display/stream/\(token)\(pairQuery)") else { return }
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = .infinity
         config.timeoutIntervalForResource = .infinity

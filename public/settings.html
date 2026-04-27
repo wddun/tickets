@@ -311,7 +311,8 @@ async function loadQR() {
     }
     container.innerHTML = '<span class="qr-loading">Loading…</span>';
     try {
-        const r = await fetch(`/api/display/qr/${encodeURIComponent(eventId)}`);
+        const pairToken = localStorage.getItem('scannerPairToken') || '';
+        const r = await fetch(`/api/display/qr/${encodeURIComponent(eventId)}?pair=${encodeURIComponent(pairToken)}`);
         if (!r.ok) throw new Error('Failed');
         const blob = await r.blob();
         const url = URL.createObjectURL(blob);
