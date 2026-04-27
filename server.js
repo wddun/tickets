@@ -1964,13 +1964,15 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
                 ticketStatusCache.clear();
                 log('validate', `[OK] REENTRY ENTER — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
                 res.json({ status: 'reentry_enter', message: `Welcome back to ${event ? event.name : 'the event'}!`, ...ticketFields });
-                if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastToPair(req.body.pairToken, { type: 'scan', status: 'reentry_enter', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
+                if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); recordScan(req.body.pairToken, event, 'reentry_enter', ticket, _t); }
                 pushWalletIfChanged([ticket], event).catch(() => { });
                 return;
             }
         }
         log('validate', `[warn] ALREADY USED — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  used_at: ${ticket.used_at}  ip: ${getIP(req)}`);
-        return res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, ...ticketFields });
+        res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, ...ticketFields });
+        if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); recordScan(req.body.pairToken, event, 'used', ticket, _t); }
+        return;
     }
 
     const validatedAt = new Date().toISOString();
@@ -1982,7 +1984,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
 
     log('validate', `[OK] VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
-    if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); broadcastToPair(req.body.pairToken, { type: 'scan', status: 'valid', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length }); }
+    if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); recordScan(req.body.pairToken, event, 'valid', ticket, _t); }
     pushWalletIfChanged([ticket], event).catch(() => { });
 });
 
@@ -2845,7 +2847,26 @@ setInterval(async () => {
 
 
 // ── Door Display / SSE ──────────────────────────────────────────────────────
-const displayClients = new Map(); // pairToken → Set<res>
+const displayClients  = new Map(); // pairToken → Set<res>
+const scannerRegistry = new Map(); // pairToken → { pairToken, eventId, eventName, lastSeen, lastResult }
+const monitorClients  = new Set(); // { res, eventIds: Set<string> }
+
+function broadcastToMonitors(eventId, payload) {
+    const chunk = `data: ${JSON.stringify(payload)}\n\n`;
+    for (const client of monitorClients) {
+        if (client.eventIds.has(eventId)) {
+            try { client.res.write(chunk); } catch (_) {}
+        }
+    }
+}
+
+function recordScan(pairToken, event, status, ticket, allTickets) {
+    broadcastToPair(pairToken, { type: 'scan', status, name: ticket.name, registrationId: ticket.registrationId, total: allTickets.length, scanned: allTickets.filter(t => t.used_at).length });
+    if (!pairToken || !event) return;
+    const scannerData = { pairToken, eventId: event.id, eventName: event.name, lastSeen: new Date().toISOString(), lastResult: { type: 'scan', status, name: ticket.name || '', total: allTickets.length, scanned: allTickets.filter(t => t.used_at).length } };
+    scannerRegistry.set(pairToken, scannerData);
+    broadcastToMonitors(event.id, { type: 'scanner_update', scanner: scannerData });
+}
 
 function broadcastToPair(pairToken, payload) {
     if (!pairToken) return;
@@ -2958,6 +2979,74 @@ app.get('/api/display/stream/:token', (req, res) => {
         displayClients.get(pairToken)?.delete(res);
     });
 });
+// ── Scanner Monitor ──────────────────────────────────────────────────────────
+app.get('/api/monitor/scanners', requireAuth, async (req, res) => {
+    await db.read();
+    const userId = req.session.userId;
+    const user = db.data.users.find(u => u.id === userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const { eventId } = req.query;
+
+    let events;
+    if (eventId) {
+        if (!userHasEventAccess(userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
+        events = db.data.events.filter(e => e.id === eventId);
+    } else {
+        events = isAdmin ? db.data.events : db.data.events.filter(e => e.userId === userId);
+    }
+
+    let dirty = false;
+    for (const ev of events) {
+        if (!ev.displayToken) { ev.displayToken = crypto.randomBytes(24).toString('hex'); dirty = true; }
+    }
+    if (dirty) await db.write();
+
+    const eventIds = new Set(events.map(e => e.id));
+    const scanners = [];
+    for (const [, data] of scannerRegistry) {
+        if (eventIds.has(data.eventId)) scanners.push(data);
+    }
+
+    res.json({
+        events: events.map(e => ({ id: e.id, name: e.name, displayToken: e.displayToken })),
+        scanners,
+    });
+});
+
+app.get('/api/monitor/stream', requireAuth, async (req, res) => {
+    await db.read();
+    const userId = req.session.userId;
+    const user = db.data.users.find(u => u.id === userId);
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const { eventId } = req.query;
+
+    let eventIds;
+    if (eventId) {
+        if (!userHasEventAccess(userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
+        eventIds = new Set([eventId]);
+    } else {
+        const userEvents = isAdmin ? db.data.events : db.data.events.filter(e => e.userId === userId);
+        eventIds = new Set(userEvents.map(e => e.id));
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const client = { res, eventIds };
+    monitorClients.add(client);
+
+    const keepAlive = setInterval(() => {
+        try { res.write(': ping\n\n'); } catch (_) { clearInterval(keepAlive); }
+    }, 25000);
+
+    req.on('close', () => {
+        clearInterval(keepAlive);
+        monitorClients.delete(client);
+    });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\nTicket Check-in System running at:\n - Local: http://localhost:${PORT}\n   - Network:  http://0.0.0.0:${PORT}\n`);
 });
