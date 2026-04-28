@@ -143,28 +143,6 @@
         }
         #roomSelect option { background: #1c1c1e; color: #fff; }
 
-        /* ── Slide-down scan banner (non-blocking) ── */
-        #scanBanner {
-            position: fixed;
-            top: 0; left: 0; right: 0;
-            z-index: 60;
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: calc(env(safe-area-inset-top, 0px) + 10px) 18px 14px;
-            transform: translateY(-110%);
-            transition: transform 0.32s cubic-bezier(0.34, 1.4, 0.64, 1);
-            pointer-events: none;
-        }
-        #scanBanner.show {
-            transform: translateY(0);
-            pointer-events: auto;
-        }
-        .sb-icon { font-size: 26px; line-height: 1; flex-shrink: 0; }
-        .sb-text { flex: 1; min-width: 0; }
-        .sb-name { font-size: 19px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .sb-status { font-size: 13px; color: rgba(255,255,255,0.75); font-weight: 500; margin-top: 1px; }
-
         /* ── Recent scans history strip ── */
         #recentScans {
             position: fixed;
@@ -363,15 +341,6 @@
 <div id="reader"></div>
 
 <div class="scan-guide"><div class="scan-box"><span></span></div></div>
-
-<!-- Slide-down scan result banner -->
-<div id="scanBanner">
-    <div class="sb-icon" id="sbIcon"></div>
-    <div class="sb-text">
-        <div class="sb-name"   id="sbName"></div>
-        <div class="sb-status" id="sbStatus"></div>
-    </div>
-</div>
 
 <!-- Recent scan history strip (bottom) -->
 <div id="recentScans"></div>
@@ -687,22 +656,33 @@ const STATUS_TITLES  = { valid:'Checked In!', reentry_enter:'Checked Back In!', 
 const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', invalid:'shi-dot-red', error:'shi-dot-red', info:'shi-dot-green' };
 
 let recentScansList = [];
-let bannerTimer = null;
+let flashTimer = null;
 
-// Non-blocking slide-down banner (used for everything except reentry_exit)
-function showBanner(data) {
+// Full-screen colored flash — auto-dismisses after 2s, tap also dismisses
+function showFlash(data) {
     const status = data.status || 'error';
-    const banner = document.getElementById('scanBanner');
-    banner.style.background = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
-    document.getElementById('sbIcon').textContent   = STATUS_ICONS[status]  || '!';
-    document.getElementById('sbName').textContent   = data.firstName || data.name || '';
-    document.getElementById('sbStatus').textContent = STATUS_TITLES[status] || 'Error';
-    banner.classList.add('show');
-    clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(hideBanner, 1400);
+    const overlay = document.getElementById('resultOverlay');
+    overlay.style.background = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
+    document.getElementById('roIcon').textContent   = STATUS_ICONS[status]  || '!';
+    document.getElementById('roTitle').textContent  = STATUS_TITLES[status] || 'Error';
+    document.getElementById('roName').textContent   = data.firstName || data.name || '';
+    const email = data.email || '';
+    const emailEl = document.getElementById('roEmail');
+    emailEl.textContent = email;
+    emailEl.style.display = email ? '' : 'none';
+    const eventEl = document.getElementById('roEvent');
+    eventEl.textContent = data.eventName || '';
+    eventEl.style.display = data.eventName ? '' : 'none';
+    document.getElementById('roFields').innerHTML = '';
+    document.getElementById('roBottom').innerHTML = '';
+    overlay.classList.add('show');
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(closeResult, 2000);
     addToHistory(data, status);
 }
-function hideBanner() { document.getElementById('scanBanner').classList.remove('show'); }
+
+// Alias kept for notification fallback
+function showBanner(data) { showFlash(data); }
 
 function addToHistory(data, status) {
     lastScanData = { ...data, status };
@@ -739,6 +719,7 @@ function openExitConfirm(data) {
 }
 
 function closeResult() {
+    clearTimeout(flashTimer);
     document.getElementById('resultOverlay').classList.remove('show');
     pendingCheckoutToken = null;
 }
@@ -791,12 +772,12 @@ function onScanSuccess(decodedText) {
         if (data.status === 'reentry_exit') {
             openExitConfirm(data);
         } else {
-            showBanner(data);
+            showFlash(data);
         }
     })
     .catch(() => {
         playSound('error');
-        showBanner({ status: 'error', name: 'Server Error' });
+        showFlash({ status: 'error', name: 'Server Error' });
     });
 }
 
