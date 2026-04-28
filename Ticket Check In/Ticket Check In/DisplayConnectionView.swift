@@ -222,6 +222,10 @@ struct DisplaySetupView: View {
                                 .background(.white, in: RoundedRectangle(cornerRadius: 10))
                                 .frame(maxWidth: .infinity)
                         }
+                        Text("Scan with any phone's camera app to open the display in a browser — or scan with the iOS Tickets app (Display Setup → Display → WiFi → Start).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
                     .padding(.vertical, 8)
                 }

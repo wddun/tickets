@@ -315,6 +315,72 @@
             bottom: calc(49px + env(safe-area-inset-bottom, 0px) + 12px);
         }
 
+        /* ── Display tab panel ── */
+        #displayPanel {
+            position: fixed;
+            inset: 0;
+            z-index: 24;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            background: #080810;
+            padding: calc(env(safe-area-inset-top, 0px) + 28px) 24px
+                     calc(49px + env(safe-area-inset-bottom, 0px) + 28px);
+            gap: 24px;
+        }
+        #displayPanel.active { display: flex; }
+        .dp-title { font-size: 26px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+        .dp-event-name { font-size: 13px; color: rgba(255,255,255,0.35); margin-top: -16px; text-align: center; }
+        .dp-qr-wrap {
+            background: #fff; border-radius: 16px; padding: 14px;
+            width: min(240px, 68vw);
+        }
+        .dp-qr-wrap img { width: 100%; height: auto; display: block; }
+        .dp-qr-placeholder {
+            width: min(240px, 68vw); aspect-ratio: 1;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(255,255,255,0.06); border-radius: 16px;
+            color: rgba(255,255,255,0.4); font-size: 13px; text-align: center;
+            padding: 20px;
+        }
+        .dp-steps { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 10px; }
+        .dp-step {
+            display: flex; align-items: flex-start; gap: 12px;
+            background: rgba(255,255,255,0.05); border-radius: 12px; padding: 13px 14px;
+        }
+        .dp-step-num {
+            width: 22px; height: 22px; border-radius: 11px;
+            background: rgba(255,255,255,0.14);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; margin-top: 1px;
+        }
+        .dp-step-text { font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.65); }
+        .dp-step-text strong { color: #fff; font-weight: 600; }
+        .dp-rotate-btn {
+            background: none; border: 1px solid rgba(255,255,255,0.15);
+            color: rgba(255,255,255,0.4); font-size: 12px; font-weight: 500;
+            padding: 7px 18px; border-radius: 20px; cursor: pointer; margin-top: 4px;
+        }
+        .dp-rotate-btn:active { opacity: 0.6; }
+        .dp-copy-row {
+            display: flex; gap: 8px; align-items: center;
+            width: 100%; max-width: 360px;
+        }
+        .dp-url-box {
+            flex: 1; background: rgba(255,255,255,0.06); border-radius: 10px;
+            padding: 9px 12px; font-size: 11px; color: rgba(255,255,255,0.4);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            cursor: default; border: none; outline: none;
+        }
+        .dp-copy-btn {
+            background: rgba(255,255,255,0.1); border: none; border-radius: 10px;
+            color: #fff; font-size: 12px; font-weight: 600; padding: 9px 14px;
+            cursor: pointer; white-space: nowrap; flex-shrink: 0;
+        }
+        .dp-copy-btn:active { opacity: 0.6; }
+
         /* ── Scan detail sheet ── */
         .scan-history-item { cursor: pointer; pointer-events: auto; }
         #detailSheet { max-height: 82dvh; }
@@ -396,12 +462,55 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             Check-In
         </button>
+        <button class="tab-btn" id="tabDisplay" onclick="switchTab('display')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            Display
+        </button>
         <button class="tab-btn" id="tabSettings" onclick="window.location.href='/settings.html'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             Account
         </button>
     </div>
     <div class="tab-bar-safe"></div>
+</div>
+
+<!-- Display tab panel -->
+<div id="displayPanel">
+    <div class="dp-title">Door Display</div>
+    <div class="dp-event-name" id="dpEventName"></div>
+
+    <div id="dpQRWrap" class="dp-qr-wrap" style="display:none">
+        <img id="dpQRImg" alt="Display QR Code">
+    </div>
+    <div id="dpQRPlaceholder" class="dp-qr-placeholder">Select an event to generate a QR code</div>
+
+    <div class="dp-copy-row" id="dpCopyRow" style="display:none">
+        <input class="dp-url-box" id="dpUrlBox" readonly>
+        <button class="dp-copy-btn" onclick="copyDisplayURL()">Copy Link</button>
+    </div>
+
+    <div class="dp-steps">
+        <div class="dp-step">
+            <div class="dp-step-num">1</div>
+            <div class="dp-step-text">
+                <strong>Any phone or tablet camera</strong> — open the default camera app, point it at this code, and tap the notification. The display page opens instantly in the browser — no app needed.
+            </div>
+        </div>
+        <div class="dp-step">
+            <div class="dp-step-num">2</div>
+            <div class="dp-step-text">
+                <strong>iOS Tickets app</strong> — on the display device open the app, tap the <strong>gear icon → Display Setup</strong>, set the role to <strong>Display</strong>, connection to <strong>WiFi</strong>, tap <strong>Start</strong>, then scan this code with the in-app scanner that appears.
+            </div>
+        </div>
+        <div class="dp-step">
+            <div class="dp-step-num">3</div>
+            <div class="dp-step-text">
+                <strong>Tip:</strong> the display page works great in <strong>landscape mode</strong> on a tablet mounted sideways at the door. You can also paste the copied link directly into any browser.
+            </div>
+        </div>
+    </div>
+
+    <button class="dp-rotate-btn" id="dpRotateBtn" onclick="rotateDisplayToken()">Regenerate Link</button>
 </div>
 
 
@@ -588,6 +697,8 @@ async function loadEvents() {
 
     sel.addEventListener('change', () => {
         localStorage.setItem('selectedEventId', sel.value);
+        displayQREventId = null;
+        if (document.getElementById('displayPanel')?.classList.contains('active')) loadDisplayQR();
     });
 }
 
@@ -799,6 +910,103 @@ scanner.start(
         position: 'absolute', inset: '0', width: '100%', height: '100%'
     });
 }).catch(err => console.error('Camera error:', err));
+
+// ── Tab switching ─────────────────────────────────────────
+function switchTab(tab) {
+    const isDisplay = tab === 'display';
+    document.getElementById('tabScanner').classList.toggle('active', !isDisplay);
+    document.getElementById('tabDisplay').classList.toggle('active', isDisplay);
+    document.getElementById('displayPanel').classList.toggle('active', isDisplay);
+    if (isDisplay) loadDisplayQR();
+}
+
+// ── Display QR code ───────────────────────────────────────
+let displayQREventId = null;
+let displayCurrentURL = '';
+
+function loadDisplayQR() {
+    const sel  = document.getElementById('roomSelect');
+    const eventId = sel ? sel.value : '';
+    const event = events.find(e => e.id === eventId);
+    const placeholder = document.getElementById('dpQRPlaceholder');
+    const wrap   = document.getElementById('dpQRWrap');
+    const img    = document.getElementById('dpQRImg');
+    const subtitle = document.getElementById('dpEventName');
+    const copyRow  = document.getElementById('dpCopyRow');
+
+    subtitle.textContent = event ? event.name : '';
+
+    if (!eventId || !isLoggedIn) {
+        placeholder.textContent = isLoggedIn
+            ? 'Select an event above to generate a QR code'
+            : 'Sign in to use display mode';
+        placeholder.style.display = 'flex';
+        wrap.style.display = 'none';
+        copyRow.style.display = 'none';
+        displayQREventId = null;
+        return;
+    }
+
+    if (displayQREventId === eventId) return;
+
+    placeholder.textContent = 'Generating…';
+    placeholder.style.display = 'flex';
+    wrap.style.display = 'none';
+    copyRow.style.display = 'none';
+
+    const pair = encodeURIComponent(SCANNER_PAIR_TOKEN);
+    const imgSrc = `/api/display/qr/${encodeURIComponent(eventId)}?pair=${pair}`;
+
+    // Fetch the display URL (for copy button) and load QR image simultaneously
+    fetch(`/api/display/token/${encodeURIComponent(eventId)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (data) {
+                displayCurrentURL = data.url + '&pair=' + encodeURIComponent(SCANNER_PAIR_TOKEN);
+                document.getElementById('dpUrlBox').value = displayCurrentURL;
+            }
+        })
+        .catch(() => {});
+
+    img.onload = () => {
+        placeholder.style.display = 'none';
+        wrap.style.display = 'block';
+        copyRow.style.display = 'flex';
+        displayQREventId = eventId;
+    };
+    img.onerror = () => {
+        placeholder.textContent = 'Could not load — make sure you\'re signed in.';
+        wrap.style.display = 'none';
+        displayQREventId = null;
+    };
+    img.src = imgSrc;
+}
+
+function copyDisplayURL() {
+    if (!displayCurrentURL) return;
+    navigator.clipboard.writeText(displayCurrentURL).then(() => {
+        const btn = document.querySelector('.dp-copy-btn');
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1800);
+    }).catch(() => {});
+}
+
+async function rotateDisplayToken() {
+    const sel = document.getElementById('roomSelect');
+    const eventId = sel ? sel.value : '';
+    if (!eventId) return;
+    const btn = document.getElementById('dpRotateBtn');
+    btn.textContent = 'Regenerating…';
+    btn.disabled = true;
+    try {
+        await fetch(`/api/display/token/${encodeURIComponent(eventId)}/rotate`, { method: 'POST' });
+        displayQREventId = null;
+        loadDisplayQR();
+    } catch (_) {}
+    btn.textContent = 'Regenerate Link';
+    btn.disabled = false;
+}
 
 // ── Utilities ─────────────────────────────────────────────
 function escHtml(s)  { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
