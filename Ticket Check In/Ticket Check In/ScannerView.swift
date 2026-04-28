@@ -75,6 +75,17 @@ struct ScannerView: View {
         } message: {
             Text(adminNotifMsg)
         }
+        .onChange(of: bluetooth.receivedResult) { result in
+            if let result = result {
+                if result.status == "checkout_cmd" {
+                    handleConfirmCheckout()
+                    bluetooth.receivedResult = nil
+                } else if result.status == "checkin_cmd" {
+                    handleCheckInCommand()
+                    bluetooth.receivedResult = nil
+                }
+            }
+        }
         .sheet(isPresented: $showingDetail) {
             if let result = recentScans.first {
                 TicketDetailSheet(result: result)
@@ -321,6 +332,20 @@ struct ScannerView: View {
     private func dismissExitOverlay() {
         withAnimation { scanResult = nil }
         pendingCheckoutToken = nil
+    }
+
+    private func handleCheckInCommand() {
+        // Find the token or registrationId from recentScans or somehow?
+        // Wait, on scanner phone, checkin command from display means the last scanned ticket that was used should be checked back in.
+        guard let token = lastScannedToken else { return }
+        Task {
+            if let rid = lastRegistrationId {
+                try? await APIService.shared.checkIn(registrationId: rid)
+            }
+            await MainActor.run {
+                CheckInFeedback.shared.success()
+            }
+        }
     }
 
     private func sendToDisplay(response: ValidateResponse, status: String) {

@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import { JSONFilePreset } from 'lowdb/node';
 import { nanoid } from 'nanoid';
 import QRCode from 'qrcode';
@@ -2111,11 +2111,16 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
 
 // Confirm reentry check-out (no auth required — scanner uses PIN, not session)
 app.post('/api/checkout', async (req, res) => {
-    const { token } = req.body;
-    if (!token) return res.status(400).json({ error: 'Token is required' });
+    const { token, registrationId } = req.body;
+    if (!token && !registrationId) return res.status(400).json({ error: 'Token or registrationId is required' });
 
-    const cleanToken = (token.startsWith('ticket:') ? token.split(':')[1] : token).trim();
-    const ticket = db.data.tickets.find(t => t.token === cleanToken);
+    let ticket;
+    if (token) {
+        const cleanToken = (token.startsWith('ticket:') ? token.split(':')[1] : token).trim();
+        ticket = db.data.tickets.find(t => t.token === cleanToken);
+    } else {
+        ticket = db.data.tickets.find(t => t.registrationId === registrationId);
+    }
     if (!ticket) return res.json({ status: 'invalid', message: 'Invalid ticket' });
 
     const event = db.data.events.find(e => e.id === ticket.eventId);

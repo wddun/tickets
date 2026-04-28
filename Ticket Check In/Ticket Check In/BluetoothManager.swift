@@ -120,6 +120,22 @@ class BluetoothManager: NSObject, ObservableObject {
         write(data: data, to: peripheral, characteristic: characteristic)
     }
 
+    /// Send a check-in command from display to scanner phone.
+    func sendCheckInCommand() {
+        guard role == .display, let char = notifyCharacteristic else { return }
+        let cmd = BLEScanResult(status: "checkin_cmd", name: "", firstName: nil, eventName: nil, registrationId: nil)
+        guard let data = try? JSONEncoder().encode(cmd) else { return }
+        peripheralManager?.updateValue(data, for: char, onSubscribedCentrals: nil)
+    }
+
+    /// Send a check-out command from display to scanner phone.
+    func sendCheckoutCommand() {
+        guard role == .display, let char = notifyCharacteristic else { return }
+        let cmd = BLEScanResult(status: "checkout_cmd", name: "", firstName: nil, eventName: nil, registrationId: nil)
+        guard let data = try? JSONEncoder().encode(cmd) else { return }
+        peripheralManager?.updateValue(data, for: char, onSubscribedCentrals: nil)
+    }
+
     private func write(data: Data, to peripheral: CBPeripheral, characteristic: CBCharacteristic) {
         let type: CBCharacteristicWriteType = characteristic.properties.contains(.writeWithoutResponse)
             ? .withoutResponse
@@ -169,9 +185,9 @@ extension BluetoothManager: CBPeripheralManagerDelegate {
     private func setupPeripheralService(_ manager: CBPeripheralManager) {
         let characteristic = CBMutableCharacteristic(
             type: Self.characteristicUUID,
-            properties: [.write, .writeWithoutResponse],
+            properties: [.write, .writeWithoutResponse, .notify],
             value: nil,
-            permissions: [.writeable]
+            permissions: [.writeable, .readable]
         )
         notifyCharacteristic = characteristic
 
@@ -298,8 +314,19 @@ extension BluetoothManager: CBPeripheralDelegate {
         guard let char = service.characteristics?.first(where: { $0.uuid == Self.characteristicUUID })
         else { return }
         writeCharacteristic = char
+        peripheral.setNotifyValue(true, for: char)
         // Send ping immediately so display shows connected without waiting for a scan
         sendPing()
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard let data = characteristic.value,
+              let cmd = try? JSONDecoder().decode(BLEScanResult.self, from: data) else { return }
+        if cmd.status == "checkout_cmd" || cmd.status == "checkin_cmd" {
+            DispatchQueue.main.async {
+                self.receivedResult = cmd
+            }
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
