@@ -15,6 +15,7 @@ struct DisplaySetupView: View {
     @AppStorage("displayAutoStart")       private var displayAutoStart    = false
     @AppStorage("lastSelectedEventData")  private var lastSelectedEventData: Data = Data()
     @AppStorage("scannerPairToken")       private var scannerPairToken: String = ""
+    @AppStorage("scannerMode")            private var scannerMode: String = "none"
 
     enum Role:       String, CaseIterable { case display = "Display", scanner = "Scanner" }
     enum Connection: String, CaseIterable { case bluetooth = "Bluetooth", wifi = "WiFi" }
@@ -97,6 +98,7 @@ struct DisplaySetupView: View {
                         if bluetooth.bleState == .scanning || bluetooth.bleState == .connecting {
                             bluetooth.disconnect()
                         }
+                        scannerMode = "none"
                         dismiss()
                     }
                 }
@@ -149,6 +151,7 @@ struct DisplaySetupView: View {
                 Button(role: .destructive) {
                     bluetooth.disconnect()
                     started = false
+                    scannerMode = "none"
                 } label: {
                     Text("Disconnect")
                         .font(.subheadline)
@@ -257,8 +260,10 @@ struct DisplaySetupView: View {
         case (.scanner, .bluetooth):
             bluetooth.startScanningForDisplays()
             started = true
+            scannerMode = "ble"
         case (.scanner, .wifi):
             started = true
+            scannerMode = "internet"
             if let event = lastEvent { fetchToken(eventId: event.id) }
         }
     }
@@ -269,6 +274,7 @@ struct DisplaySetupView: View {
             bluetooth.disconnect()
         }
         started = false
+        scannerMode = "none"
         displayURL = nil
         tokenError = nil
     }

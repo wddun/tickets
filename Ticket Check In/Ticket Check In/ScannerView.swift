@@ -19,6 +19,7 @@ struct ScannerView: View {
     @AppStorage("displayInitialMode")      private var displayInitialMode  = "bluetooth"
     @AppStorage("displayPreconnectURL")    private var displayPreconnectURL = ""
     @AppStorage("lastSelectedEventData")   private var lastSelectedEventData: Data = Data()
+    @AppStorage("scannerMode")             private var scannerMode: String = "none"
 
     // Full-screen overlay state (reentry exit confirm only)
     @State private var scanResult: ScanResult?
@@ -122,6 +123,7 @@ struct ScannerView: View {
             HStack(spacing: 8) {
                 blePill
                 wifiPill
+                modePill
             }
             .padding(.top, 110)   // below the gear button
             Spacer()
@@ -129,18 +131,18 @@ struct ScannerView: View {
     }
 
     @ViewBuilder private var blePill: some View {
-        let (dot, label): (Color, String) = {
+        let dot: Color = {
             switch bluetooth.bleState {
-            case .connected:              return (.green,  "BLE · Connected")
-            case .scanning:               return (.yellow, "BLE · Scanning")
-            case .connecting:             return (.yellow, "BLE · Connecting")
-            case .disconnected:           return (.orange, "BLE · Lost")
-            case .unauthorized:           return (.red,    "BLE · No Permission")
-            default:                      return (.gray,   "BLE · Off")
+            case .connected:              return .green
+            case .scanning:               return .yellow
+            case .connecting:             return .yellow
+            case .disconnected:           return .orange
+            case .unauthorized:           return .red
+            default:                      return .gray
             }
         }()
         Label {
-            Text(label).font(.system(size: 12, weight: .semibold))
+            Text("BLE").font(.system(size: 12, weight: .semibold))
         } icon: {
             Circle().fill(dot).frame(width: 7, height: 7)
         }
@@ -151,15 +153,9 @@ struct ScannerView: View {
     }
 
     @ViewBuilder private var wifiPill: some View {
-        let (dot, label): (Color, String) = {
-            if api.isAuthenticated {
-                return (.green, "Server · Online")
-            } else {
-                return (.gray, "Server · Offline")
-            }
-        }()
+        let dot: Color = api.isAuthenticated ? .green : .gray
         Label {
-            Text(label).font(.system(size: 12, weight: .semibold))
+            Text("Server").font(.system(size: 12, weight: .semibold))
         } icon: {
             Circle().fill(dot).frame(width: 7, height: 7)
         }
@@ -167,6 +163,29 @@ struct ScannerView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.black.opacity(0.55), in: Capsule())
+    }
+
+    @ViewBuilder private var modePill: some View {
+        let text: String? = {
+            if scannerMode == "ble" {
+                return "Scanner - BLE"
+            } else if scannerMode == "internet" {
+                return "Scanner - Internet"
+            }
+            return nil
+        }()
+        
+        if let text = text {
+            Label {
+                Text(text).font(.system(size: 12, weight: .semibold))
+            } icon: {
+                Image(systemName: "tv")
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.black.opacity(0.55), in: Capsule())
+        }
     }
 
     @ViewBuilder private var viewfinderFrame: some View {
