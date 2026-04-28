@@ -294,7 +294,11 @@ struct DisplayView: View {
 
     private func performCheckBackIn() async {
         guard let rid = displayRegistrationId else { return }
-        try? await APIService.shared.checkIn(registrationId: rid)
+        if displayMode == .internet {
+            try? await APIService.shared.checkIn(registrationId: rid)
+        } else {
+            BluetoothManager.shared.sendCheckInCommand()
+        }
         await MainActor.run {
             withAnimation { showResult = false }
             resultBg = .black
@@ -325,10 +329,18 @@ struct DisplayView: View {
                     .background(.white.opacity(0.15), in: Capsule())
 
                     Button("Check Out") {
-                        withAnimation {
-                            showCheckoutConfirm = false
-                            showResult = false
-                            resultBg = .black
+                        if displayMode == .internet {
+                            Task {
+                                if let rid = displayRegistrationId {
+                                    try? await APIService.shared.confirmCheckoutByRegistrationId(rid)
+                                }
+                                await MainActor.run {
+                                    withAnimation { showCheckoutConfirm = false; showResult = false; resultBg = .black }
+                                }
+                            }
+                        } else {
+                            BluetoothManager.shared.sendCheckoutCommand()
+                            withAnimation { showCheckoutConfirm = false; showResult = false; resultBg = .black }
                         }
                     }
                     .font(.system(size: 16, weight: .bold))

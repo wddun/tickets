@@ -133,6 +133,10 @@
                 <div id="resultStatus"></div>
                 <div id="resultEvent"></div>
             </div>
+            <div id="resultActions" style="display:none; margin-top:32px; gap:16px;">
+                <button id="btnCheckout" style="padding:16px 32px; border-radius:12px; border:none; background:rgba(255,255,255,0.9); color:rgb(185,85,15); font-weight:bold; font-size:18px; cursor:pointer;">Confirm Check-Out</button>
+                <button id="btnCancel" style="padding:16px 32px; border-radius:12px; border:none; background:transparent; color:rgba(255,255,255,0.7); font-weight:bold; font-size:16px; cursor:pointer; border: 2px solid rgba(255,255,255,0.3);">Cancel</button>
+            </div>
         </div>
     </div>
 
@@ -164,6 +168,7 @@
         const STATUS = {
             valid:         { bg: 'rgb(16,127,60)',   icon: '✓', text: 'Checked In' },
             reentry_enter: { bg: 'rgb(16,127,60)',   icon: '✓', text: 'Welcome Back' },
+            reentry_exit:  { bg: 'rgb(185,85,15)',   icon: '🚪', text: 'Confirm Check-Out' },
             used:          { bg: 'rgb(185,85,15)',   icon: '!', text: 'Already Checked In' },
             invalid:       { bg: 'rgb(185,30,30)',   icon: '✕', text: 'Invalid Ticket' },
         };
@@ -182,12 +187,37 @@
             document.getElementById('resultName').textContent   = data.name || '';
             document.getElementById('resultStatus').textContent = cfg.text;
             document.getElementById('resultEvent').textContent  = data.eventName || eventName;
+            
+            const actions = document.getElementById('resultActions');
+            if (data.status === 'reentry_exit') {
+                actions.style.display = 'flex';
+                document.getElementById('btnCheckout').onclick = async () => {
+                    actions.style.opacity = '0.5';
+                    actions.style.pointerEvents = 'none';
+                    try {
+                        await fetch('/api/checkout', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ registrationId: data.registrationId })
+                        });
+                        setIdle();
+                    } catch (e) {
+                        console.error('Checkout failed', e);
+                    }
+                };
+                document.getElementById('btnCancel').onclick = setIdle;
+            } else {
+                actions.style.display = 'none';
+            }
+            
             idle.style.display = 'none';
             res.style.display  = 'flex';
             res.classList.add('visible');
 
             clearTimeout(dismissTimer);
-            dismissTimer = setTimeout(setIdle, 4000);
+            if (data.status !== 'reentry_exit') {
+                dismissTimer = setTimeout(setIdle, 4000);
+            }
         }
 
         function updateIdle() {
