@@ -14,7 +14,10 @@ struct ScannerView: View {
 
     @ObservedObject private var api = APIService.shared
     @ObservedObject private var bluetooth = BluetoothManager.shared
-    @AppStorage("scannerPairToken") private var scannerPairToken: String = ""
+    @AppStorage("scannerPairToken")       private var scannerPairToken: String = ""
+    @AppStorage("displayModeActive")      private var displayModeActive   = false
+    @AppStorage("displayInitialMode")     private var displayInitialMode  = "bluetooth"
+    @AppStorage("displayPreconnectURL")   private var displayPreconnectURL = ""
 
     // Full-screen overlay state (reentry exit confirm only)
     @State private var scanResult: ScanResult?
@@ -224,6 +227,14 @@ struct ScannerView: View {
     }
 
     private func handleCode(_ token: String) {
+        // Display QR code — launch display mode directly
+        if token.contains("/display.html"), token.contains("token="), URL(string: token) != nil {
+            displayPreconnectURL = token
+            displayInitialMode   = "wifi"
+            displayModeActive    = true
+            return
+        }
+
         // 5-second same-token debounce — prevents accidental double-scan
         let now = Date()
         if let lastToken = lastScannedToken, let lastTime = lastScanTime,

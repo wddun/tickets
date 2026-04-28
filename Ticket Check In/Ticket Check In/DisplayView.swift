@@ -15,6 +15,7 @@ import AVFoundation
 struct DisplayView: View {
     @ObservedObject var bluetooth: BluetoothManager
     let initialMode: String
+    var preconnectURL: String = ""
     let onDismiss: () -> Void
 
     @State private var currentResult: BLEScanResult? = nil
@@ -87,10 +88,15 @@ struct DisplayView: View {
         .modifier(HideSystemOverlaysModifier())
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
-            displayMode = initialMode == "wifi" ? .internet : .bluetooth
-            if initialMode == "wifi" {
+            if !preconnectURL.isEmpty {
+                // Scanned display QR from the scanner — connect directly, no re-scan needed
+                displayMode = .internet
+                connectSSE(urlString: preconnectURL)
+            } else if initialMode == "wifi" {
+                displayMode = .internet
                 showQRScanner = true
             } else {
+                displayMode = .bluetooth
                 bluetooth.startDisplayMode()
             }
         }
