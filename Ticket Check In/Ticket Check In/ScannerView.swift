@@ -131,25 +131,27 @@ struct ScannerView: View {
     }
 
     @ViewBuilder private var blePill: some View {
-        let dot: Color = {
-            switch bluetooth.bleState {
-            case .connected:              return .green
-            case .scanning:               return .yellow
-            case .connecting:             return .yellow
-            case .disconnected:           return .orange
-            case .unauthorized:           return .red
-            default:                      return .gray
+        if scannerMode == "ble" {
+            let dot: Color = {
+                switch bluetooth.bleState {
+                case .connected:              return .green
+                case .scanning:               return .yellow
+                case .connecting:             return .yellow
+                case .disconnected:           return .orange
+                case .unauthorized:           return .red
+                default:                      return .gray
+                }
+            }()
+            Label {
+                Text("BLE").font(.system(size: 12, weight: .semibold))
+            } icon: {
+                Circle().fill(dot).frame(width: 7, height: 7)
             }
-        }()
-        Label {
-            Text("BLE").font(.system(size: 12, weight: .semibold))
-        } icon: {
-            Circle().fill(dot).frame(width: 7, height: 7)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.black.opacity(0.55), in: Capsule())
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.55), in: Capsule())
     }
 
     @ViewBuilder private var wifiPill: some View {
@@ -356,7 +358,7 @@ struct ScannerView: View {
     private func handleCheckInCommand() {
         // Find the token or registrationId from recentScans or somehow?
         // Wait, on scanner phone, checkin command from display means the last scanned ticket that was used should be checked back in.
-        guard let token = lastScannedToken else { return }
+        guard lastScannedToken != nil else { return }
         Task {
             if let rid = lastRegistrationId {
                 try? await APIService.shared.checkIn(registrationId: rid)
