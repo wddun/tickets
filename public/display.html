@@ -255,6 +255,22 @@
             if (document.visibilityState === 'visible') keepAwake();
         });
 
+        async function prefetchInfo() {
+            try {
+                const r = await fetch(`/api/display/info/${token}`);
+                if (!r.ok) return;
+                const data = await r.json();
+                if (data.event?.name) {
+                    eventName = data.event.name;
+                    total     = data.total   || 0;
+                    scanned   = data.scanned || 0;
+                    document.title = `${eventName} · Display`;
+                    updateIdle();
+                }
+            } catch { /* silently ignore — SSE init will fill in */ }
+        }
+
+        prefetchInfo();
         connect();
     </script>
 </body>

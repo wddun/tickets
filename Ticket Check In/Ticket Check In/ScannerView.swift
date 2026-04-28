@@ -14,10 +14,11 @@ struct ScannerView: View {
 
     @ObservedObject private var api = APIService.shared
     @ObservedObject private var bluetooth = BluetoothManager.shared
-    @AppStorage("scannerPairToken")       private var scannerPairToken: String = ""
-    @AppStorage("displayModeActive")      private var displayModeActive   = false
-    @AppStorage("displayInitialMode")     private var displayInitialMode  = "bluetooth"
-    @AppStorage("displayPreconnectURL")   private var displayPreconnectURL = ""
+    @AppStorage("scannerPairToken")        private var scannerPairToken: String = ""
+    @AppStorage("displayModeActive")       private var displayModeActive   = false
+    @AppStorage("displayInitialMode")      private var displayInitialMode  = "bluetooth"
+    @AppStorage("displayPreconnectURL")    private var displayPreconnectURL = ""
+    @AppStorage("lastSelectedEventData")   private var lastSelectedEventData: Data = Data()
 
     // Full-screen overlay state (reentry exit confirm only)
     @State private var scanResult: ScanResult?
@@ -333,11 +334,18 @@ struct ScannerView: View {
         BluetoothManager.shared.sendScanResult(ble)
     }
 
+    private func selectedEventId() -> String? {
+        guard !lastSelectedEventData.isEmpty,
+              let event = try? JSONDecoder().decode(Event.self, from: lastSelectedEventData)
+        else { return nil }
+        return event.id
+    }
+
     private func startHeartbeat() {
         heartbeatTask?.cancel()
         heartbeatTask = Task { @MainActor in
             while !Task.isCancelled {
-                await api.sendHeartbeat(pairToken: scannerPairToken)
+                await api.sendHeartbeat(pairToken: scannerPairToken, eventId: selectedEventId())
                 try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 s
             }
         }
@@ -346,8 +354,10 @@ struct ScannerView: View {
     /// Subscribe to the server SSE scanner stream so admin notifications arrive instantly.
     private func startNotifListener() {
         notifTask?.cancel()
+        let eventId = selectedEventId()
         notifTask = Task.detached(priority: .background) { [pairToken = scannerPairToken, baseURL] in
-            let urlStr = "\(baseURL)/api/scan/stream/\(pairToken)"
+            var urlStr = "\(baseURL)/api/scan/stream/\(pairToken)?platform=ios-app"
+            if let eid = eventId { urlStr += "&eventId=\(eid)" }
             guard let url = URL(string: urlStr) else { return }
             let request = URLRequest(url: url, timeoutInterval: .infinity)
             guard let (bytes, _) = try? await URLSession.shared.bytes(for: request) else { return }

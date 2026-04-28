@@ -595,7 +595,62 @@ let pendingCheckoutToken = null;
     startCamera();
     initScannerChannel();
     requestNotificationPermission();
+    if (isLoggedIn) startSessionWatcher();
 })();
+
+// ── Session expiry watcher ────────────────────────────────
+let sessionExpiredShown = false;
+
+function startSessionWatcher() {
+    setInterval(async () => {
+        try {
+            const r = await fetch('/api/auth/me');
+            if (!r.ok && isLoggedIn) onSessionExpired();
+        } catch (_) {}
+    }, 5 * 60 * 1000); // check every 5 minutes
+}
+
+function onSessionExpired() {
+    if (sessionExpiredShown || !isLoggedIn) return;
+    sessionExpiredShown = true;
+    isLoggedIn = false;
+
+    // Collapse auth-gated UI
+    document.getElementById('roomWrap').style.display  = 'none';
+    document.getElementById('signInBtn').style.display = 'block';
+
+    const next = encodeURIComponent('/scanner.html');
+    const bar  = document.createElement('div');
+    bar.id = 'sessionExpiredBar';
+    bar.style.cssText = [
+        'position:fixed',
+        'bottom:calc(49px + env(safe-area-inset-bottom,0px) + 10px)',
+        'left:12px','right:12px',
+        'z-index:90',
+        'background:rgba(18,18,28,0.97)',
+        'backdrop-filter:blur(14px)',
+        '-webkit-backdrop-filter:blur(14px)',
+        'border:1px solid rgba(255,255,255,0.1)',
+        'border-radius:14px',
+        'padding:13px 14px',
+        'display:flex','align-items:center','gap:10px',
+    ].join(';');
+    bar.innerHTML = `
+        <span style="flex:1;font-size:14px;color:#fff;font-weight:500;line-height:1.4;">
+            Session expired — scanning still works, but manual check-in requires sign in.
+        </span>
+        <a href="/login.html?next=${next}"
+           style="background:#c4294a;color:#fff;font-size:13px;font-weight:700;
+                  padding:8px 13px;border-radius:9px;text-decoration:none;white-space:nowrap;flex-shrink:0;">
+            Sign In
+        </a>
+        <button onclick="document.getElementById('sessionExpiredBar').remove()"
+                style="background:rgba(255,255,255,0.1);border:none;color:rgba(255,255,255,0.55);
+                       font-size:19px;line-height:1;padding:4px 8px;border-radius:7px;cursor:pointer;flex-shrink:0;">
+            ×
+        </button>`;
+    document.body.appendChild(bar);
+}
 
 // ── Scanner channel (heartbeat + SSE) ─────────────────────
 function getScannerDeviceName() {
@@ -610,7 +665,7 @@ function getScannerDeviceName() {
 
 function sendHeartbeat() {
     const sel = document.getElementById('roomSelect');
-    const eventId = sel ? sel.value : null;
+    const eventId = (sel && sel.value) || localStorage.getItem('selectedEventId') || null;
     fetch('/api/scan/heartbeat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
