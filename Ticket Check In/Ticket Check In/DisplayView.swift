@@ -541,12 +541,18 @@ struct DisplayQRScannerSheet: View {
                 DisplayQRCameraView(onDetected: onDetected)
                 VStack {
                     Spacer()
-                    Text("Point camera at the QR code on the scanner device")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                        .padding(.bottom, 48)
+                    VStack(spacing: 6) {
+                        Text("Scan the QR code shown on the scanner device")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                        Text("Find it in the Scanner app's Display tab, or on the web scanner under the Display tab → Display Setup → Scanner → WiFi.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 48)
                 }
             }
             .navigationTitle("Scan Display QR")
