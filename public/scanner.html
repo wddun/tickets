@@ -515,7 +515,87 @@ let pendingCheckoutToken = null;
         document.getElementById('signInBtn').style.display = 'block';
     }
     startCamera();
+    initScannerChannel();
+    requestNotificationPermission();
 })();
+
+// ── Scanner channel (heartbeat + SSE) ─────────────────────
+function getScannerDeviceName() {
+    const ua = navigator.userAgent;
+    if (/iPhone/.test(ua)) return 'iPhone (Web)';
+    if (/iPad/.test(ua)) return 'iPad (Web)';
+    if (/Android/.test(ua)) return 'Android (Web)';
+    if (/Macintosh/.test(ua)) return 'Mac (Web)';
+    if (/Windows/.test(ua)) return 'Windows (Web)';
+    return 'Browser (Web)';
+}
+
+function sendHeartbeat() {
+    const sel = document.getElementById('roomSelect');
+    const eventId = sel ? sel.value : null;
+    fetch('/api/scan/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            pairToken:  SCANNER_PAIR_TOKEN,
+            eventId:    eventId || undefined,
+            platform:   'web',
+            deviceName: getScannerDeviceName(),
+            osVersion:  navigator.platform || 'Web',
+            appVersion: '1.0',
+        })
+    }).catch(() => {});
+}
+
+let scannerSSE = null;
+function initScannerChannel() {
+    sendHeartbeat();
+    setInterval(sendHeartbeat, 30000);
+
+    function openSSE() {
+        if (scannerSSE) { try { scannerSSE.close(); } catch (_) {} }
+        const sel = document.getElementById('roomSelect');
+        const eventId = sel ? sel.value : '';
+        const url = `/api/scan/stream/${encodeURIComponent(SCANNER_PAIR_TOKEN)}?platform=web&eventId=${encodeURIComponent(eventId)}`;
+        scannerSSE = new EventSource(url);
+        scannerSSE.addEventListener('notify', e => {
+            try {
+                const d = JSON.parse(e.data);
+                const msg = d.message || 'Notification from admin';
+                if (Notification.permission === 'granted') {
+                    new Notification('WTS Tickets', { body: msg, icon: '/icons/icon-192.png' });
+                } else {
+                    showBanner({ status: 'info', name: msg });
+                }
+            } catch (_) {}
+        });
+        scannerSSE.onerror = () => {
+            scannerSSE.close();
+            setTimeout(openSSE, 5000);
+        };
+    }
+    openSSE();
+
+    // Reopen SSE when event selection changes (so eventId is current)
+    document.getElementById('roomSelect')?.addEventListener('change', () => {
+        sendHeartbeat();
+        openSSE();
+    });
+}
+
+function requestNotificationPermission() {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted' || Notification.permission === 'denied') return;
+    // Show explanation banner before prompting
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#1a1f3c;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;z-index:9999;font-size:14px;';
+    banner.innerHTML = `
+        <span style="flex:1">Enable notifications to receive messages from the admin dashboard.</span>
+        <button onclick="Notification.requestPermission().then(()=>this.closest('div').remove())" style="background:#e63946;border:none;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;white-space:nowrap;">Allow</button>
+        <button onclick="this.closest('div').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;">Dismiss</button>
+    `;
+    document.body.appendChild(banner);
+}
 
 // ── Events / rooms ────────────────────────────────────────
 async function loadEvents() {
@@ -600,10 +680,11 @@ const OVERLAY_COLORS = {
     used:          'rgba(234,88,12,0.95)',
     invalid:       'rgba(220,38,38,0.95)',
     error:         'rgba(220,38,38,0.95)',
+    info:          'rgba(26,31,60,0.97)',
 };
-const STATUS_ICONS   = { valid:'✓', reentry_enter:'↩', reentry_exit:'↩', used:'!', invalid:'✕', error:'✕' };
-const STATUS_TITLES  = { valid:'Checked In!', reentry_enter:'Checked Back In!', reentry_exit:'Confirm Check-Out', used:'Already Checked In', invalid:'Invalid QR', error:'Error' };
-const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', invalid:'shi-dot-red', error:'shi-dot-red' };
+const STATUS_ICONS   = { valid:'✓', reentry_enter:'↩', reentry_exit:'↩', used:'!', invalid:'✕', error:'✕', info:'📢' };
+const STATUS_TITLES  = { valid:'Checked In!', reentry_enter:'Checked Back In!', reentry_exit:'Confirm Check-Out', used:'Already Checked In', invalid:'Invalid QR', error:'Error', info:'Admin Message' };
+const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', invalid:'shi-dot-red', error:'shi-dot-red', info:'shi-dot-green' };
 
 let recentScansList = [];
 let bannerTimer = null;
