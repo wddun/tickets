@@ -512,11 +512,48 @@ app.post('/api/auth/signup', loginLimiter, async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = { id: nanoid(), email: normalizedEmail, password: hashedPassword };
+    const verifyToken = crypto.randomBytes(32).toString('hex');
+    const newUser = {
+        id: nanoid(),
+        email: normalizedEmail,
+        password: hashedPassword,
+        emailVerified: false,
+        verifyToken,
+        createdAt: new Date().toISOString()
+    };
     await db.update(data => data.users.push(newUser));
-    req.session.userId = newUser.id;
-    log('signup', `[OK] Account created — email: ${normalizedEmail}  id: ${newUser.id}`);
-    res.json({ success: true, user: { id: newUser.id, email: newUser.email } });
+    log('signup', `[OK] Account created (unverified) — email: ${normalizedEmail}  id: ${newUser.id}`);
+
+    const verifyURL = `${BASE_URL}/verify-email.html?token=${verifyToken}`;
+    sendEmail({
+        to: normalizedEmail,
+        subject: 'Verify your WTS Tickets account',
+        html: `
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
+  <div style="text-align:center;margin-bottom:28px;">
+    <div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;">
+      <span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span>
+    </div>
+  </div>
+  <h2 style="font-size:22px;font-weight:700;color:#1a1f3c;margin:0 0 10px;">Verify your email</h2>
+  <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 28px;">
+    Thanks for signing up. Click the button below to verify your email address and activate your account.
+  </p>
+  <div style="text-align:center;margin-bottom:28px;">
+    <a href="${verifyURL}" style="background:#c4294a;color:#fff;text-decoration:none;font-size:16px;font-weight:700;padding:14px 32px;border-radius:10px;display:inline-block;">
+      Verify Email Address
+    </a>
+  </div>
+  <p style="color:#94a3b8;font-size:13px;line-height:1.6;margin:0;">
+    This link expires in 24 hours. If you didn't create an account, you can ignore this email.
+  </p>
+  <div style="margin-top:12px;padding:12px 14px;background:#f8fafc;border-radius:8px;word-break:break-all;">
+    <span style="color:#64748b;font-size:12px;">${verifyURL}</span>
+  </div>
+</div>`,
+    }).catch(err => log('signup', `[warn] Verification email failed — ${err.message}`));
+
+    res.json({ success: true, needsVerification: true, email: normalizedEmail });
 });
 
 // One-time admin setup — only works if no admin account exists yet
@@ -534,7 +571,7 @@ app.post('/api/auth/setup-admin', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = { id: nanoid(), email: adminEmail, password: hashedPassword };
+    const newUser = { id: nanoid(), email: adminEmail, password: hashedPassword, emailVerified: true, createdAt: new Date().toISOString() };
     await db.update(data => data.users.push(newUser));
     req.session.userId = newUser.id;
     log('setup-admin', `[OK] Admin created — email: ${adminEmail}  id: ${newUser.id}`);
@@ -558,10 +595,73 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
         return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Block login for unverified accounts (field absent = legacy user, treat as verified)
+    if (user.emailVerified === false) {
+        log('login', `[warn] Unverified email — email: ${normalizedEmail}`);
+        return res.status(403).json({ error: 'Please verify your email before logging in. Check your inbox for a verification link.', needsVerification: true, email: normalizedEmail });
+    }
+
     const isAdmin = user.email === process.env.ADMIN_EMAIL;
     req.session.userId = user.id;
     log('login', `[OK] Success — email: ${normalizedEmail}  id: ${user.id}  role: ${isAdmin ? 'admin' : 'staff'}  ip: ${getIP(req)}`);
     res.json({ success: true, user: { id: user.id, email: user.email } });
+});
+
+app.get('/api/auth/verify/:token', async (req, res) => {
+    const { token } = req.params;
+    if (!token || token.length < 32) return res.status(400).json({ error: 'Invalid token.' });
+    await db.read();
+    const user = db.data.users.find(u => u.verifyToken === token);
+    if (!user) return res.status(400).json({ error: 'This verification link is invalid or has already been used.' });
+    await db.update(data => {
+        const u = data.users.find(u => u.verifyToken === token);
+        if (u) { u.emailVerified = true; delete u.verifyToken; }
+    });
+    req.session.userId = user.id;
+    log('verify', `[OK] Email verified — email: ${user.email}  id: ${user.id}`);
+    res.json({ success: true, user: { id: user.id, email: user.email } });
+});
+
+app.post('/api/auth/resend-verify', loginLimiter, async (req, res) => {
+    const normalizedEmail = ((req.body.email || '') + '').toLowerCase().trim();
+    if (!normalizedEmail) return res.status(400).json({ error: 'Email required.' });
+    await db.read();
+    const user = db.data.users.find(u => u.email === normalizedEmail);
+    // Always 200 — don't reveal account existence
+    if (!user || user.emailVerified !== false) return res.json({ success: true });
+    const verifyToken = crypto.randomBytes(32).toString('hex');
+    await db.update(data => {
+        const u = data.users.find(u => u.email === normalizedEmail);
+        if (u) u.verifyToken = verifyToken;
+    });
+    const verifyURL = `${BASE_URL}/verify-email.html?token=${verifyToken}`;
+    sendEmail({
+        to: normalizedEmail,
+        subject: 'Verify your WTS Tickets account',
+        html: `
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
+  <div style="text-align:center;margin-bottom:28px;">
+    <div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;">
+      <span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span>
+    </div>
+  </div>
+  <h2 style="font-size:22px;font-weight:700;color:#1a1f3c;margin:0 0 10px;">Verify your email</h2>
+  <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 28px;">
+    Click the button below to verify your email address and activate your WTS Tickets account.
+  </p>
+  <div style="text-align:center;margin-bottom:28px;">
+    <a href="${verifyURL}" style="background:#c4294a;color:#fff;text-decoration:none;font-size:16px;font-weight:700;padding:14px 32px;border-radius:10px;display:inline-block;">
+      Verify Email Address
+    </a>
+  </div>
+  <p style="color:#94a3b8;font-size:13px;margin:0 0 8px;">If you didn't create an account, you can ignore this email.</p>
+  <div style="margin-top:12px;padding:12px 14px;background:#f8fafc;border-radius:8px;word-break:break-all;">
+    <span style="color:#64748b;font-size:12px;">${verifyURL}</span>
+  </div>
+</div>`,
+    }).catch(err => log('resend-verify', `[warn] Email failed — email: ${normalizedEmail}  err: ${err.message}`));
+    log('resend-verify', `[OK] Verification email resent — email: ${normalizedEmail}`);
+    res.json({ success: true });
 });
 
 app.get('/api/auth/me', (req, res) => {

@@ -66,6 +66,7 @@
             <div class="auth-title" id="authTitle">Organizer Login</div>
             <div class="auth-desc"  id="authDesc">Manage your events and tickets.</div>
 
+            <!-- Auth form -->
             <form id="authForm">
                 <div class="form-group">
                     <label for="email">Email Address</label>
@@ -78,10 +79,25 @@
                 <button type="submit" id="submitBtn">Login</button>
             </form>
 
+            <!-- Check-your-email state (after signup or blocked login) -->
+            <div id="verifyState" style="display:none; text-align:center; padding: 8px 0 4px;">
+                <div style="font-size:40px; margin-bottom:14px;">📬</div>
+                <div style="font-size:17px; font-weight:700; color:#1a1f3c; margin-bottom:8px;" id="verifyTitle">Check your email</div>
+                <div style="font-size:14px; color:#64748b; line-height:1.6; margin-bottom:22px;" id="verifyDesc">
+                    We sent a verification link to <strong id="verifyEmail"></strong>. Click it to activate your account.
+                </div>
+                <button id="resendBtn" onclick="resendVerification()" style="background:#f1f5f9;border:none;color:#1a1f3c;font-size:14px;font-weight:600;padding:10px 22px;border-radius:10px;cursor:pointer;width:100%;margin-bottom:10px;">
+                    Resend verification email
+                </button>
+                <button onclick="showAuthForm()" style="background:none;border:none;color:#94a3b8;font-size:13px;font-weight:500;cursor:pointer;padding:4px;">
+                    ← Back to login
+                </button>
+            </div>
+
             <div class="toggle-row" id="forgotRow">
                 <a href="/forgot-password.html" style="color:#94a3b8;font-weight:500;">Forgot password?</a>
             </div>
-            <div class="toggle-row">
+            <div class="toggle-row" id="toggleRow">
                 <span id="toggleText">Don't have an account?</span>
                 <a href="#" id="toggleBtn">Sign Up</a>
             </div>
@@ -94,6 +110,7 @@
 
     <script>
         let isLogin = true;
+        let pendingVerifyEmail = '';
         const toggleBtn  = document.getElementById('toggleBtn');
         const toggleText = document.getElementById('toggleText');
         const submitBtn  = document.getElementById('submitBtn');
@@ -120,16 +137,61 @@
             submitBtn.disabled = true;
             submitBtn.textContent = isLogin ? 'Logging in…' : 'Creating account…';
             try {
-                const res  = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-                const data = await res.json();
-                if (data.success) { const next = new URLSearchParams(window.location.search).get('next'); window.location.href = (next && next.startsWith('/')) ? next : '/dashboard.html'; }
-                else { alert('Error: ' + data.error); }
+                const r    = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+                const data = await r.json();
+                if (data.success && data.needsVerification) {
+                    // Signup — show check-your-email screen
+                    showVerifyState(data.email || email, 'Check your email', `We sent a verification link to`);
+                } else if (data.needsVerification) {
+                    // Login blocked — unverified account
+                    showVerifyState(data.email || email, 'Email not verified', `Your account isn't activated yet. We sent a link to`);
+                } else if (data.success) {
+                    const next = new URLSearchParams(window.location.search).get('next');
+                    window.location.href = (next && next.startsWith('/')) ? next : '/dashboard.html';
+                } else {
+                    alert('Error: ' + data.error);
+                }
             } catch { alert('Connection error'); }
             finally {
                 submitBtn.disabled = false;
                 submitBtn.textContent = isLogin ? 'Login' : 'Create Account';
             }
         };
+
+        function showVerifyState(email, title, desc) {
+            pendingVerifyEmail = email;
+            document.getElementById('authForm').style.display    = 'none';
+            document.getElementById('forgotRow').style.display   = 'none';
+            document.getElementById('toggleRow').style.display   = 'none';
+            document.getElementById('verifyState').style.display = 'block';
+            document.getElementById('verifyTitle').textContent   = title;
+            document.getElementById('verifyDesc').innerHTML      = desc + ' <strong>' + email + '</strong>. Click it to activate your account.';
+            authTitle.textContent = title;
+            authDesc.textContent  = '';
+        }
+
+        function showAuthForm() {
+            document.getElementById('authForm').style.display    = 'block';
+            document.getElementById('forgotRow').style.display   = '';
+            document.getElementById('toggleRow').style.display   = '';
+            document.getElementById('verifyState').style.display = 'none';
+            authTitle.textContent = isLogin ? 'Organizer Login' : 'Create Account';
+            authDesc.textContent  = isLogin ? 'Manage your events and tickets.' : 'Start hosting your own events today.';
+        }
+
+        async function resendVerification() {
+            const btn = document.getElementById('resendBtn');
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            try {
+                await fetch('/api/auth/resend-verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: pendingVerifyEmail }) });
+                btn.textContent = 'Email sent!';
+                setTimeout(() => { btn.textContent = 'Resend verification email'; btn.disabled = false; }, 3000);
+            } catch {
+                btn.textContent = 'Failed — try again';
+                btn.disabled = false;
+            }
+        }
     </script>
 </body>
 </html>
