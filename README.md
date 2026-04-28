@@ -1,82 +1,150 @@
-# TicketCheckin 🎟️
+# WTS Tickets
 
-A complete Node.js ticket registration and check-in system. Features include QR code generation, email delivery (via Resend), and a mobile-optimized camera scanner with real-time validation.
-
-## Security / Secrets
-
-Do **not** commit secrets, pass certificates, or local data to GitHub.
-This repo expects the following to stay local:
-
-- `.env` (API keys and secrets)
-- `certs/` (Apple Wallet certs and private key)
-- `Certificates.p12`, `pass.cer`, `wwdr.cer`, `CertificateSigningRequest.certSigningRequest`
-- `db.json` (user/ticket data)
-- `sessions/` (session store)
-- `public/uploads/` (user-uploaded images)
-- `*.pkpass` (generated passes)
-
-See `.env.example` for required environment variables.
-
-## Apple Wallet Certificates
-
-Place your Apple Wallet certs in `certs/` with the following filenames:
-
-- `certs/wwdr.pem`
-- `certs/signer.pem`
-- `certs/signer.key`
-
-These files should never be committed. See `certs/README.md` for a quick guide.
+A full-stack ticket registration and check-in system built for live events. Handles everything from registration and Apple Wallet passes to real-time scanning, door displays, and a live scanner monitor.
 
 ## Features
-- **Registration**: Capture name and email, generate signed tickets.
-- **Email Integration**: Automatically send QR codes to attendees using Resend.
-- **Mobile Scanner**: Camera-based scanner with instant feedback.
-- **Security**: Single-use tickets validated against a local database.
-- **Aesthetics**: Premium UI with smooth transitions and audio cues.
-- Restore 100ms SES interval; queue still prevents exceeding it
-- Fix SES rate limiting with serialized promise queue
-- Add email selected attendees functionality
-- feat: add bulk email to all attendees of an event
-- Set reply‑to organizer email on all outgoing ticket emails
 
+### Registration & Ticketing
+- Per-attendee QR ticket generation with unique signed tokens
+- Multi-ticket registrations (general admission, VIP, etc.)
+- Apple Wallet pass integration (`.pkpass`)
+- Bulk registration import and re-send
+- Custom fields per event
+- Capacity limits with automatic enforcement
+- Email delivery via AWS SES
+
+### Scanning & Check-In
+- **iOS native app** — camera-based QR scanner with instant audio/haptic feedback and fullscreen color flash
+- **Web scanner PWA** — installable on any device, works in Safari/Chrome with the same UX
+- Manual check-in list with per-ticket and bulk check-in
+- Re-entry tracking (check-out / check back in flow)
+- Offline-tolerant: scanner works without login for read-only validation
+
+### Door Display
+Connect a second screen at the door that shows every scan result in large text.
+
+| Mode | How it works |
+|------|-------------|
+| **Bluetooth (iOS)** | Scanner phone sends results to display phone over BLE — no internet required |
+| **Internet / SSE** | Scanner shows a QR code; display device opens it in a browser or iOS app and connects via Server-Sent Events |
+
+**Connecting a display:**
+1. Open the **Display tab** in the web scanner (or gear → Display Setup in the iOS app)
+2. The QR code shown can be scanned by:
+   - Any phone's camera app → opens `display.html` in the browser automatically
+   - The iOS Tickets app main scanner → launches fullscreen display mode directly
+3. Rotate the display link at any time to invalidate old connections
+
+### Live Scanner Monitor
+Admin dashboard at `/monitor.html` showing every active scanner in real time:
+- Online/offline status (SSE heartbeat — appears the moment a scanner opens)
+- Platform badge (iOS app vs. web), device name, OS version, IP address
+- Last scan result per scanner
+- Per-scanner and mass notification (browser Notification API on web; in-app alert on iOS)
+- Event-level access control: admins see all, event owners see their own
+
+### Auth & Accounts
+- Email/password accounts with **email verification** on signup
+- Password reset via email
+- Session-based auth with keychain persistence on iOS
+- Admin account (`ADMIN_EMAIL`) has elevated access; set up once via `/api/auth/setup-admin`
+
+### Push Notifications
+- iOS: APNs push (requires Apple Push certificate)
+- Web: `Notification` API (browser permission prompt on first open)
+- Admin can notify all scanners for an event from the monitor dashboard
 
 ## Tech Stack
-- **Backend**: Node.js, Express, LowDB (pure JS JSON database).
-- **Frontend**: Vanilla JS, HTML5-QRCode, modern CSS.
-- **Services**: Resend (Email).
 
-## Getting Started
+| Layer | Tech |
+|-------|------|
+| Backend | Node.js, Express |
+| Database | LowDB (JSON file) |
+| Email | AWS SES |
+| Sessions | express-session + session-file-store |
+| QR | `qrcode` |
+| Passes | `passkit-generator` |
+| Images | `sharp` |
+| iOS app | Swift, SwiftUI, CoreBluetooth, AVFoundation |
 
-### 1. Prerequisites
-- Node.js installed.
-- A Resend API Key (get one at [resend.com](https://resend.com)).
+## Setup
 
-### 2. Setup
-1. Clone the repository or extract the files.
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Create a `.env` file based on `.env.example`:
-   ```env
-   PORT=3002
-   RESEND_API_KEY=re_your_api_key
-   RESEND_FROM=onboarding@resend.dev
-   ```
+### Prerequisites
+- Node.js 18+
+- AWS account with SES access
+- (Optional) Apple Developer account for Wallet passes and APNs
 
-### 3. Run
-Start the server:
+### Environment Variables
+
+Create a `.env` file:
+
+```env
+PORT=3002
+BASE_URL=https://your-domain.com
+
+# AWS SES
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=us-east-1
+SES_FROM=noreply@your-domain.com
+
+# Auth
+SESSION_SECRET=a-long-random-string
+ADMIN_EMAIL=you@example.com
+
+# Optional
+SES_MIN_INTERVAL_MS=100   # throttle between emails (default: 100ms)
+```
+
+### Install & Run
+
 ```bash
+npm install
 npm start
 ```
-The app will be available at:
-- **Local**: `http://localhost:3002`
-- **Network**: `http://<your-ip>:3002` (Use this for mobile scanning)
 
-## Usage
-1. Open **/register.html** on your computer.
-2. Register a test attendee.
-3. Open **/scanner.html** on your phone (make sure it's on the same Wi-Fi).
-4. Scan the QR code.
-   - **Green + High Tone**: Success! Ticket marked as used.
-   - **Red + Low Tone**: Error! Ticket invalid or already used.
+App is available at `http://localhost:3002` (or `BASE_URL` in production).
+
+### First-Time Admin Setup
+
+Navigate to `/login.html` and create the admin account:
+
+```bash
+curl -X POST https://your-domain.com/api/auth/setup-admin \
+  -H "Content-Type: application/json" \
+  -d '{"password":"your-password"}'
+```
+
+Or use the setup form if one is available. The admin email is set by `ADMIN_EMAIL` in `.env`.
+
+### Apple Wallet Certificates
+
+Place certs in `certs/` (never commit these):
+
+```
+certs/wwdr.pem
+certs/signer.pem
+certs/signer.key
+```
+
+## Files Not Committed
+
+```
+.env
+db.json
+sessions/
+certs/
+public/uploads/
+*.pkpass
+```
+
+## iOS App
+
+The Xcode project is in `Ticket Check In/`. Requires:
+- iOS 15.6+
+- Xcode 15+
+- No external Swift packages (uses only system frameworks)
+
+Set `baseURL` in `APIService.swift` to your server's `BASE_URL`.
+
+Background modes required in Info.plist: `bluetooth-central`, `bluetooth-peripheral`.
