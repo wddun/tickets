@@ -858,6 +858,12 @@ async function confirmCheckout() {
 
 // ── Scan handler ──────────────────────────────────────────
 function onScanSuccess(decodedText) {
+    // Display QR code — navigate straight to the display page
+    if (decodedText.includes('/display.html') && decodedText.includes('token=')) {
+        window.location.href = decodedText;
+        return;
+    }
+
     if (!decodedText.startsWith('ticket:')) return;
 
     const token = decodedText.split(':')[1].trim();
