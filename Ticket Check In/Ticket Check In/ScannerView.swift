@@ -18,14 +18,10 @@ struct ScannerView: View {
 
     // Full-screen overlay state (reentry exit confirm only)
     @State private var scanResult: ScanResult?
-    // Slide-down banner state
-    @State private var bannerResult: ScanResult?
-    @State private var bannerVisible = false
     // History strip at bottom
     @State private var recentScans: [ScanResult] = []
     @State private var isScanning = true
     @State private var lastRegistrationId: String?
-    @State private var bannerDismissTask: Task<Void, Never>?
     @State private var showingDetail = false
     @State private var showSettings = false
     @State private var lastScannedToken: String?
@@ -49,17 +45,6 @@ struct ScannerView: View {
             topBar
             statusPills
             bottomBar
-            // Slide-down banner — non-blocking, camera stays live
-            VStack {
-                if bannerVisible && !flashVisible, let result = bannerResult {
-                    ScanBanner(result: result)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                Spacer()
-            }
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            .animation(.spring(response: 0.32, dampingFraction: 0.78), value: bannerVisible)
             // Full-screen overlay only for reentry exit confirmation
             exitConfirmOverlay
             // 1-second fullscreen scan flash
@@ -300,22 +285,11 @@ struct ScannerView: View {
     private func showBanner(_ result: ScanResult) {
         recentScans.insert(result, at: 0)
         if recentScans.count > 1 { recentScans.removeLast() }
-        bannerResult = result
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-            bannerVisible = true
-        }
-        bannerDismissTask?.cancel()
-        bannerDismissTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_300_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeIn(duration: 0.22)) { bannerVisible = false }
-        }
-        // Fullscreen 1-second flash
         flashTask?.cancel()
         flashResult = result
         withAnimation(.easeInOut(duration: 0.15)) { flashVisible = true }
         flashTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 900_000_000)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.25)) { flashVisible = false }
         }
@@ -424,8 +398,6 @@ struct ScanResult: Equatable {
     }
 }
 
-// MARK: - Slide-Down Scan Banner
-
 struct ScanFlashOverlay: View {
     let result: ScanResult
 
@@ -462,55 +434,6 @@ struct ScanFlashOverlay: View {
                     .foregroundStyle(.white.opacity(0.8))
             }
         }
-    }
-}
-
-struct ScanBanner: View {
-    let result: ScanResult
-    @State private var iconScale: CGFloat = 0.5
-
-    private var color: Color {
-        switch result.status {
-        case .success, .reentryEnter: return Color(red: 0.09, green: 0.64, blue: 0.29)
-        case .alreadyUsed, .reentryExitPrompt: return Color(red: 0.9, green: 0.5, blue: 0.1)
-        case .error: return Color(red: 0.86, green: 0.15, blue: 0.15)
-        }
-    }
-
-    private var icon: String {
-        switch result.status {
-        case .success, .reentryEnter: return "checkmark.circle.fill"
-        case .alreadyUsed:            return "exclamationmark.circle.fill"
-        default:                      return "xmark.circle.fill"
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 18) {
-            Image(systemName: icon)
-                .font(.system(size: 52, weight: .bold))
-                .foregroundStyle(.white)
-                .scaleEffect(iconScale)
-                .onAppear {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
-                        iconScale = 1.0
-                    }
-                }
-            VStack(alignment: .leading, spacing: 5) {
-                Text(result.title.uppercased())
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.7))
-                Text(result.firstName ?? result.name)
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 22)
-        .padding(.top, 18)
-        .padding(.bottom, 22)
-        .background(color)
     }
 }
 
