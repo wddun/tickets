@@ -112,6 +112,11 @@ struct DisplaySetupView: View {
         .onDisappear {
             if bluetooth.bleState == .scanning { bluetooth.disconnect() }
         }
+        .onChange(of: bluetooth.bleState) { state in
+            if started && role == .scanner && state == .connected {
+                dismiss()
+            }
+        }
     }
 
     // MARK: - BLE Section (inline, scanner role)

@@ -123,7 +123,6 @@ struct ScannerView: View {
             HStack(spacing: 8) {
                 blePill
                 wifiPill
-                modePill
             }
             .padding(.top, 110)   // below the gear button
             Spacer()
@@ -135,15 +134,14 @@ struct ScannerView: View {
             let dot: Color = {
                 switch bluetooth.bleState {
                 case .connected:              return .green
-                case .scanning:               return .yellow
-                case .connecting:             return .yellow
+                case .scanning, .connecting:  return .yellow
                 case .disconnected:           return .orange
                 case .unauthorized:           return .red
                 default:                      return .gray
                 }
             }()
             Label {
-                Text("BLE").font(.system(size: 12, weight: .semibold))
+                Text("Scanner - BLE").font(.system(size: 12, weight: .semibold))
             } icon: {
                 Circle().fill(dot).frame(width: 7, height: 7)
             }
@@ -156,8 +154,9 @@ struct ScannerView: View {
 
     @ViewBuilder private var wifiPill: some View {
         let dot: Color = api.isAuthenticated ? .green : .gray
+        let labelText = scannerMode == "internet" ? "Scanner - Internet" : "Server"
         Label {
-            Text("Server").font(.system(size: 12, weight: .semibold))
+            Text(labelText).font(.system(size: 12, weight: .semibold))
         } icon: {
             Circle().fill(dot).frame(width: 7, height: 7)
         }
@@ -165,29 +164,6 @@ struct ScannerView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.black.opacity(0.55), in: Capsule())
-    }
-
-    @ViewBuilder private var modePill: some View {
-        let text: String? = {
-            if scannerMode == "ble" {
-                return "Scanner - BLE"
-            } else if scannerMode == "internet" {
-                return "Scanner - Internet"
-            }
-            return nil
-        }()
-        
-        if let text = text {
-            Label {
-                Text(text).font(.system(size: 12, weight: .semibold))
-            } icon: {
-                Image(systemName: "tv")
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.black.opacity(0.55), in: Capsule())
-        }
     }
 
     @ViewBuilder private var viewfinderFrame: some View {
