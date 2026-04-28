@@ -738,9 +738,9 @@
         }
 
         function onlineStatus(s) {
+            if (s.online) return 'online';
             if (!s.lastSeen) return 'offline';
             const age = (Date.now() - new Date(s.lastSeen)) / 1000;
-            if (age < 45) return 'online';
             if (age < 300) return 'idle';
             return 'offline';
         }
