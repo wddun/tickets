@@ -447,12 +447,13 @@ struct ScanResult: Equatable {
     let eventName: String?
     let customFields: [String: String]?
     let usedAt: String?
+    let registrationId: String?
 
     // Convenience for error case
     init(status: Status, title: String, name: String = "") {
         self.status = status; self.title = title; self.name = name
         self.firstName = nil; self.email = nil; self.eventName = nil
-        self.customFields = nil; self.usedAt = nil
+        self.customFields = nil; self.usedAt = nil; self.registrationId = nil
     }
 
     init(from response: ValidateResponse, status: Status, title: String) {
@@ -464,6 +465,7 @@ struct ScanResult: Equatable {
         self.eventName = response.eventName
         self.customFields = response.customFields
         self.usedAt = response.used_at
+        self.registrationId = response.registrationId
     }
 }
 
@@ -691,6 +693,29 @@ struct TicketDetailSheet: View {
                     ForEach(fields.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
                         DetailRow(label: key, value: value)
                     }
+                }
+                
+                if result.usedAt != nil, let regId = result.registrationId {
+                    Divider()
+                    Button(role: .destructive) {
+                        Task {
+                            try? await APIService.shared.undoCheckIn(registrationId: regId)
+                            await MainActor.run {
+                                dismiss()
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.uturn.backward.circle.fill")
+                            Text("Undo Check-In")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.red.opacity(0.1))
+                        .cornerRadius(12)
+                    }
+                    .padding(.top, 8)
                 }
             }
             .padding(24)

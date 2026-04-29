@@ -682,14 +682,35 @@
                 let msg;
                 try { msg = JSON.parse(e.data); } catch { return; }
                 if (msg.type === 'scanner_update') {
+                    const prev = scanners.get(msg.scanner.pairToken);
                     scanners.set(msg.scanner.pairToken, msg.scanner);
                     renderGrid();
                     document.getElementById('notifyAllBtn').style.display = '';
+                    
+                    // Flash the card if a new scan occurred
+                    if (msg.scanner.lastResult && (!prev || JSON.stringify(prev.lastResult) !== JSON.stringify(msg.scanner.lastResult))) {
+                        const card = document.getElementById(`card-${msg.scanner.pairToken}`);
+                        if (card) flashCard(card, msg.scanner.lastResult.status);
+                    }
                 }
             };
             monitorStream.onerror = () => {
                 setTimeout(startSSE, 5000);
             };
+        }
+        
+        function flashCard(card, status) {
+            let color = '';
+            if (status === 'valid' || status === 'reentry_enter' || status === 'checked_out') color = 'rgba(16,185,129,0.3)';
+            else if (status === 'used' || status === 'reentry_exit') color = 'rgba(245,158,11,0.3)';
+            else color = 'rgba(239,68,68,0.3)';
+            
+            card.style.transition = 'none';
+            card.style.backgroundColor = color;
+            setTimeout(() => {
+                card.style.transition = 'background-color 1.5s ease-out';
+                card.style.backgroundColor = '#fff';
+            }, 50);
         }
 
         // ── Event tabs ─────────────────────────────────────────────────────
