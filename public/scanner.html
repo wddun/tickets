@@ -1013,7 +1013,12 @@ async function startCamera() {
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+            video: { 
+                facingMode: 'environment', 
+                width: { ideal: 1280 }, 
+                height: { ideal: 720 },
+                advanced: [{ focusMode: 'continuous' }]
+            }
         });
         videoEl.srcObject = stream;
         videoEl.onloadedmetadata = () => {
@@ -1040,10 +1045,20 @@ async function scanLoop() {
                 }
             } catch (e) {}
         } else if (typeof jsQR !== 'undefined') {
-            canvasEl.width = videoEl.videoWidth;
-            canvasEl.height = videoEl.videoHeight;
-            canvasCtx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
-            const imageData = canvasCtx.getImageData(0, 0, canvasEl.width, canvasEl.height);
+            // Downscale heavily for jsQR performance
+            const maxDim = 500;
+            let w = videoEl.videoWidth;
+            let h = videoEl.videoHeight;
+            if (w > maxDim || h > maxDim) {
+                const ratio = Math.min(maxDim / w, maxDim / h);
+                w = Math.floor(w * ratio);
+                h = Math.floor(h * ratio);
+            }
+            
+            canvasEl.width = w;
+            canvasEl.height = h;
+            canvasCtx.drawImage(videoEl, 0, 0, w, h);
+            const imageData = canvasCtx.getImageData(0, 0, w, h);
             const code = jsQR(imageData.data, imageData.width, imageData.height, {
                 inversionAttempts: "dontInvert",
             });
@@ -1052,8 +1067,7 @@ async function scanLoop() {
             }
         }
     }
-    // Throttle to 10 FPS to save battery since this is a fast loop
-    setTimeout(() => { requestAnimationFrame(scanLoop); }, 100);
+    setTimeout(() => { requestAnimationFrame(scanLoop); }, 50);
 }
 
 // ── Tab switching ─────────────────────────────────────────
