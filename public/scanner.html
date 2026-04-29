@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-title" content="WTS Tickets">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
-    <script src="/html5-qrcode.min.js"></script>
+    <script src="/jsQR.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -987,24 +987,74 @@ function onScanSuccess(decodedText) {
     });
 }
 
-// ── Camera ────────────────────────────────────────────────
-function startCamera() { /* camera is started inline below */ }
-const scanner = new Html5Qrcode('reader');
-scanner.start(
-    { facingMode: 'environment' },
-    { fps: 15 },
-    onScanSuccess
-).then(() => {
-    const video = document.querySelector('#reader video');
-    if (video) Object.assign(video.style, {
-        position: 'absolute', inset: '0',
-        width: '100%', height: '100%', objectFit: 'cover'
-    });
-    const region = document.getElementById('reader__scan_region');
-    if (region) Object.assign(region.style, {
-        position: 'absolute', inset: '0', width: '100%', height: '100%'
-    });
-}).catch(err => console.error('Camera error:', err));
+let videoEl = null;
+let canvasEl = null;
+let canvasCtx = null;
+let scanning = false;
+let barcodeDetector = null;
+
+if ('BarcodeDetector' in window) {
+    try {
+        barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+    } catch (e) { console.warn('BarcodeDetector not fully supported', e); }
+}
+
+async function startCamera() {
+    videoEl = document.createElement('video');
+    videoEl.setAttribute('playsinline', 'true');
+    videoEl.setAttribute('autoplay', 'true');
+    videoEl.setAttribute('muted', 'true');
+    Object.assign(videoEl.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover' });
+    
+    document.getElementById('reader').appendChild(videoEl);
+
+    canvasEl = document.createElement('canvas');
+    canvasCtx = canvasEl.getContext('2d', { willReadFrequently: true });
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        videoEl.srcObject = stream;
+        videoEl.onloadedmetadata = () => {
+            videoEl.play();
+            scanning = true;
+            requestAnimationFrame(scanLoop);
+        };
+    } catch (err) {
+        console.error('Camera error:', err);
+        // Fallback for permissions
+        document.getElementById('reader').innerHTML = '<div style="color:white;text-align:center;padding:20px;">Camera access required. Please allow permissions.</div>';
+    }
+}
+
+async function scanLoop() {
+    if (!scanning) return;
+
+    if (videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
+        if (barcodeDetector) {
+            try {
+                const barcodes = await barcodeDetector.detect(videoEl);
+                if (barcodes.length > 0) {
+                    onScanSuccess(barcodes[0].rawValue);
+                }
+            } catch (e) {}
+        } else if (typeof jsQR !== 'undefined') {
+            canvasEl.width = videoEl.videoWidth;
+            canvasEl.height = videoEl.videoHeight;
+            canvasCtx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+            const imageData = canvasCtx.getImageData(0, 0, canvasEl.width, canvasEl.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "dontInvert",
+            });
+            if (code) {
+                onScanSuccess(code.data);
+            }
+        }
+    }
+    // Throttle to 10 FPS to save battery since this is a fast loop
+    setTimeout(() => { requestAnimationFrame(scanLoop); }, 100);
+}
 
 // ── Tab switching ─────────────────────────────────────────
 function switchTab(tab) {
