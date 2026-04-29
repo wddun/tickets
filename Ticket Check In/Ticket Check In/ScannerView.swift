@@ -35,6 +35,8 @@ struct ScannerView: View {
     @State private var flashResult: ScanResult?
     @State private var flashVisible = false
     @State private var flashTask: Task<Void, Never>?
+    @State private var flashScale: CGFloat = 1.0
+    @State private var flashOpacity: Double = 1.0
     @State private var heartbeatTask: Task<Void, Never>?
     @State private var notifTask: Task<Void, Never>?
     @State private var adminNotifTitle  = ""
@@ -55,6 +57,8 @@ struct ScannerView: View {
             // 1-second fullscreen scan flash
             if flashVisible, let result = flashResult {
                 ScanFlashOverlay(result: result)
+                    .scaleEffect(flashScale)
+                    .opacity(flashOpacity)
                     .transition(.opacity)
                     .allowsHitTesting(false)
             }
@@ -307,9 +311,22 @@ struct ScannerView: View {
         if recentScans.count > 1 { recentScans.removeLast() }
         flashTask?.cancel()
         flashResult = result
-        withAnimation(.easeInOut(duration: 0.15)) { flashVisible = true }
+        
+        if flashVisible {
+            flashScale = 0.95
+            flashOpacity = 0.7
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.6)) {
+                flashScale = 1.0
+                flashOpacity = 1.0
+            }
+        } else {
+            flashScale = 1.0
+            flashOpacity = 1.0
+            withAnimation(.easeInOut(duration: 0.15)) { flashVisible = true }
+        }
+        
         flashTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.25)) { flashVisible = false }
         }
