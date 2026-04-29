@@ -365,6 +365,7 @@ struct ScannerView: View {
 
     private func startHeartbeat() {
         heartbeatTask?.cancel()
+        if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
         heartbeatTask = Task { @MainActor in
             while !Task.isCancelled {
                 await api.sendHeartbeat(pairToken: scannerPairToken, eventId: selectedEventId())
@@ -376,6 +377,7 @@ struct ScannerView: View {
     /// Subscribe to the server SSE scanner stream so admin notifications arrive instantly.
     private func startNotifListener() {
         notifTask?.cancel()
+        if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
         let eventId = selectedEventId()
         notifTask = Task.detached(priority: .background) { [pairToken = scannerPairToken, baseURL] in
             var urlStr = "\(baseURL)/api/scan/stream/\(pairToken)?platform=ios-app"
