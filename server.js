@@ -2047,6 +2047,19 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     log('uncheckin', `[undo] Cleared ${clearedCount} ticket(s) — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${event?.name}  by: ${req.session.userId}`);
     await db.write();
     ticketStatusCache.clear();
+    
+    if (event?.displayToken) {
+        const allT = db.data.tickets.filter(t => t.eventId === event.id);
+        const payload = { type: 'scan', status: 'undo', name: tickets[0]?.name, registrationId, total: allT.length, scanned: allT.filter(t => t.used_at).length };
+        broadcastToDisplayToken(event.displayToken, payload);
+        
+        for (const [pairToken, data] of scannerRegistry.entries()) {
+            if (data.eventId === event.id) {
+                broadcastToPair(pairToken, payload);
+            }
+        }
+    }
+    
     res.json({ success: true });
     pushWalletIfChanged(tickets, event).catch(() => { });
 });
@@ -3169,7 +3182,12 @@ app.get('/api/monitor/stream', requireAuth, async (req, res) => {
         if (!userHasEventAccess(userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
         eventIds = new Set([eventId]);
     } else {
-        const userEvents = isAdmin ? db.data.events : db.data.events.filter(e => e.userId === userId);
+        const userEvents = isAdmin ? db.data.events : db.data.events.filter(e => {
+            if (e.userId === userId) return true;
+            const link = db.data.sheetLinks.find(l => l.eventId === e.id);
+            const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === userId) : null;
+            return !!access;
+        });
         eventIds = new Set(userEvents.map(e => e.id));
     }
 

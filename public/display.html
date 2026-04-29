@@ -257,7 +257,11 @@
                         total   = msg.total   ?? total;
                         scanned = msg.scanned ?? scanned;
                         updateIdle();
-                        showResult(msg);
+                        if (msg.status === 'undo') {
+                            setIdle();
+                        } else {
+                            showResult(msg);
+                        }
                     }
                 } catch { /* malformed */ }
             };
