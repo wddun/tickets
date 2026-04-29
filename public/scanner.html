@@ -786,16 +786,45 @@ function openDetail() {
         Object.entries(d.customFields).forEach(([k, v]) => { rows += detRow(k, v); });
     }
 
+    let undoBtnHtml = '';
+    if (d.used_at && d.registrationId) {
+        undoBtnHtml = `
+            <div style="padding: 16px 20px 24px; border-top: 1px solid rgba(255,255,255,0.07);">
+                <button onclick="undoCheckInWeb('${d.registrationId}')" 
+                        style="width:100%; padding: 14px; background: rgba(220,38,38,0.15); color: #f87171; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity 0.15s;"
+                        onactive="this.style.opacity=0.7">
+                    Undo Check-In
+                </button>
+            </div>
+        `;
+    }
+
     document.getElementById('detailContent').innerHTML = `
         <div class="det-header" style="background:${bg}">
             <div class="det-icon">${icon}</div>
             <div class="det-status">${escHtml(title)}</div>
             <div class="det-name">${escHtml(d.firstName || d.name || '')}</div>
         </div>
-        ${rows ? `<div class="det-body">${rows}</div>` : ''}`;
+        ${rows ? `<div class="det-body">${rows}</div>` : ''}
+        ${undoBtnHtml}`;
 
     document.getElementById('detailBackdrop').classList.add('show');
     document.getElementById('detailSheet').classList.add('show');
+}
+
+async function undoCheckInWeb(regId) {
+    if (!confirm('Undo check-in for this ticket?')) return;
+    try {
+        const r = await fetch('/api/checkin/' + regId, { method: 'DELETE' });
+        if (r.ok) {
+            closeDetail();
+            showBanner({ status: 'info', name: 'Check-in undone', firstName: 'Undo Successful' });
+        } else {
+            alert('Failed to undo check-in');
+        }
+    } catch (_) {
+        alert('Network error');
+    }
 }
 
 function detRow(label, value) {
