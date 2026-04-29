@@ -2158,7 +2158,15 @@ app.post('/api/checkout', async (req, res) => {
     res.json({ status: 'checked_out', message: 'Checked out successfully', ...ticketFields });
     if (event?.displayToken) {
         const allT = db.data.tickets.filter(t => t.eventId === event.id);
-        broadcastToDisplayToken(event.displayToken, { type: 'scan', status: 'checked_out', name: ticket.name, registrationId: ticket.registrationId, total: allT.length, scanned: allT.filter(t => t.used_at).length });
+        const payload = { type: 'scan', status: 'checked_out', name: ticket.name, registrationId: ticket.registrationId, total: allT.length, scanned: allT.filter(t => t.used_at).length };
+        broadcastToDisplayToken(event.displayToken, payload);
+        
+        // Notify all scanners for this event so they can dismiss their exit overlays
+        for (const [pairToken, data] of scannerRegistry.entries()) {
+            if (data.eventId === event.id) {
+                broadcastToPair(pairToken, payload);
+            }
+        }
     }
     pushWalletIfChanged([ticket], event).catch(() => { });
 });

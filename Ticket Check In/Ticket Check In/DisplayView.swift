@@ -357,10 +357,10 @@ struct DisplayView: View {
     private func resultIcon(_ result: BLEScanResult) -> some View {
         let name: String = {
             switch result.status {
-            case "valid", "reentry_enter": return "checkmark.circle.fill"
-            case "used":                   return "exclamationmark.circle.fill"
-            case "reentry_exit":            return "door.left.hand.open"
-            default:                       return "xmark.circle.fill"
+            case "valid", "reentry_enter", "checked_out": return "checkmark.circle.fill"
+            case "used":                                  return "exclamationmark.circle.fill"
+            case "reentry_exit":                          return "door.left.hand.open"
+            default:                                      return "xmark.circle.fill"
             }
         }()
         Image(systemName: name)
@@ -372,6 +372,7 @@ struct DisplayView: View {
         switch result.status {
         case "valid":          return "Checked In"
         case "reentry_enter":  return "Welcome Back"
+        case "checked_out":    return "Checked Out"
         case "used":           return "Already Checked In"
         case "reentry_exit":   return "Ready to Check Out"
         default:               return "Invalid Ticket"
@@ -380,7 +381,7 @@ struct DisplayView: View {
 
     private func resultBackground(_ result: BLEScanResult) -> Color {
         switch result.status {
-        case "valid", "reentry_enter": return Color(red: 0.07, green: 0.53, blue: 0.25)
+        case "valid", "reentry_enter", "checked_out": return Color(red: 0.07, green: 0.53, blue: 0.25)
         case "used":                   return Color(red: 0.75, green: 0.37, blue: 0.06)
         case "reentry_exit":           return Color(red: 0.18, green: 0.38, blue: 0.75)
         default:                       return Color(red: 0.72, green: 0.12, blue: 0.12)

@@ -321,6 +321,17 @@ struct ScannerView: View {
             try? await APIService.shared.confirmCheckout(token: token)
             await MainActor.run {
                 CheckInFeedback.shared.success()
+                
+                // If connected to a BLE display, update it so it doesn't get stuck on the prompt
+                let ble = BLEScanResult(
+                    status: "checked_out",
+                    name: scanResult?.name ?? "Guest",
+                    firstName: scanResult?.firstName,
+                    eventName: scanResult?.eventName,
+                    registrationId: lastRegistrationId
+                )
+                BluetoothManager.shared.sendScanResult(ble)
+                
                 dismissExitOverlay()
             }
         }
@@ -396,12 +407,25 @@ struct ScannerView: View {
                         if chunk.hasPrefix("data: "),
                            let data = chunk.dropFirst(6).data(using: .utf8),
                            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                           let type = json["type"] as? String, type == "notification",
-                           let message = json["message"] as? String {
-                            await MainActor.run {
-                                adminNotifTitle = json["title"] as? String ?? "Admin Message"
-                                adminNotifMsg   = message
-                                showAdminNotif  = true
+                           let type = json["type"] as? String {
+                            
+                            if type == "notification", let message = json["message"] as? String {
+                                await MainActor.run {
+                                    adminNotifTitle = json["title"] as? String ?? "Admin Message"
+                                    adminNotifMsg   = message
+                                    showAdminNotif  = true
+                                }
+                            } else if type == "scan", let status = json["status"] as? String {
+                                if status == "checked_out",
+                                   let regId = json["registrationId"] as? String,
+                                   regId == lastRegistrationId {
+                                    await MainActor.run {
+                                        if scanResult?.status == .reentryExitPrompt {
+                                            CheckInFeedback.shared.success()
+                                            dismissExitOverlay()
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
