@@ -2060,6 +2060,17 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
 
     if (!ticket) {
         log('validate', `[ERR] INVALID token: ${cleanToken}  ip: ${getIP(req)}`);
+        const pt = req.body.pairToken;
+        if (pt) {
+            const sd = scannerRegistry.get(pt);
+            if (sd?.eventId) {
+                const ev = db.data.events.find(e => e.id === sd.eventId);
+                if (ev?.displayToken) {
+                    const evT = db.data.tickets.filter(t => t.eventId === ev.id);
+                    broadcastToDisplayToken(ev.displayToken, { type: 'scan', status: 'invalid', name: 'Unknown Ticket', total: evT.length, scanned: evT.filter(t => t.used_at).length });
+                }
+            }
+        }
         return res.json({ status: 'invalid', message: 'Invalid ticket' });
     }
 
@@ -2076,6 +2087,10 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
             const currentStatus = ticket.reentry_status || 'inside';
             if (currentStatus === 'inside') {
                 log('validate', `[exit] REENTRY EXIT PROMPT — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
+                if (event?.displayToken) {
+                    const _t = db.data.tickets.filter(t => t.eventId === event.id);
+                    broadcastToDisplayToken(event.displayToken, { type: 'scan', status: 'reentry_exit', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length });
+                }
                 return res.json({ status: 'reentry_exit', message: 'Confirm check-out?', used_at: ticket.used_at, ...ticketFields });
             } else {
                 const reentryAt = new Date().toISOString();
@@ -2141,6 +2156,10 @@ app.post('/api/checkout', async (req, res) => {
 
     log('checkout', `[exit] CHECKED OUT — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event.name}  ip: ${getIP(req)}`);
     res.json({ status: 'checked_out', message: 'Checked out successfully', ...ticketFields });
+    if (event?.displayToken) {
+        const allT = db.data.tickets.filter(t => t.eventId === event.id);
+        broadcastToDisplayToken(event.displayToken, { type: 'scan', status: 'checked_out', name: ticket.name, registrationId: ticket.registrationId, total: allT.length, scanned: allT.filter(t => t.used_at).length });
+    }
     pushWalletIfChanged([ticket], event).catch(() => { });
 });
 
@@ -2973,10 +2992,10 @@ setInterval(async () => {
 
 
 // ── Door Display / SSE ──────────────────────────────────────────────────────
-const displayClients  = new Map(); // pairToken → Set<res>
-const scannerChannels = new Map(); // pairToken → res  (scanner's persistent SSE channel)
-const scannerRegistry = new Map(); // pairToken → flat scanner data object
-const monitorClients  = new Set(); // { res, eventIds: Set<string> }
+const displayTokenClients = new Map(); // displayToken → Set<res>  (display screens, event-scoped)
+const scannerChannels     = new Map(); // pairToken → res           (scanner's persistent SSE channel)
+const scannerRegistry     = new Map(); // pairToken → flat scanner data object
+const monitorClients      = new Set(); // { res, eventIds: Set<string> }
 
 function broadcastToMonitors(eventId, payload) {
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;
@@ -3000,7 +3019,8 @@ function upsertScanner(pairToken, patch) {
 }
 
 function recordScan(pairToken, event, status, ticket, allTickets) {
-    broadcastToPair(pairToken, { type: 'scan', status, name: ticket.name, registrationId: ticket.registrationId, total: allTickets.length, scanned: allTickets.filter(t => t.used_at).length });
+    const payload = { type: 'scan', status, name: ticket.name, registrationId: ticket.registrationId, total: allTickets.length, scanned: allTickets.filter(t => t.used_at).length };
+    if (event?.displayToken) broadcastToDisplayToken(event.displayToken, payload);
     if (!pairToken || !event) return;
     upsertScanner(pairToken, {
         eventId: event.id, eventName: event.name, lastSeen: new Date().toISOString(),
@@ -3008,9 +3028,18 @@ function recordScan(pairToken, event, status, ticket, allTickets) {
     });
 }
 
+// Send to a specific scanner's SSE channel (for admin notifications)
 function broadcastToPair(pairToken, payload) {
     if (!pairToken) return;
-    const clients = displayClients.get(pairToken);
+    const ch = scannerChannels.get(pairToken);
+    if (!ch) return;
+    try { ch.write(`data: ${JSON.stringify(payload)}\n\n`); } catch { /* disconnected */ }
+}
+
+// Send to all display screens connected for a given event (by displayToken)
+function broadcastToDisplayToken(displayToken, payload) {
+    if (!displayToken) return;
+    const clients = displayTokenClients.get(displayToken);
     if (!clients || clients.size === 0) return;
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;
     for (const client of clients) {
@@ -3085,9 +3114,8 @@ app.get('/api/display/info/:token', (req, res) => {
 // SSE stream — display token is the auth, pairToken routes to specific scanner
 app.get('/api/display/stream/:token', (req, res) => {
     const { token } = req.params;
-    const pairToken = req.query.pair;
+    // pair is accepted but no longer required — routing is by displayToken (event-scoped)
     if (!token || token.length < 32) return res.status(400).send('Invalid token');
-    if (!pairToken) return res.status(400).send('Missing pair token');
     const event = db.data.events.find(e => e.displayToken === token);
     if (!event) return res.status(404).send('Not found');
 
@@ -3107,8 +3135,8 @@ app.get('/api/display/stream/:token', (req, res) => {
         scanned: tickets.filter(t => t.used_at).length
     })}\n\n`);
 
-    if (!displayClients.has(pairToken)) displayClients.set(pairToken, new Set());
-    displayClients.get(pairToken).add(res);
+    if (!displayTokenClients.has(token)) displayTokenClients.set(token, new Set());
+    displayTokenClients.get(token).add(res);
 
     const keepAlive = setInterval(() => {
         try { res.write(': ping\n\n'); } catch { clearInterval(keepAlive); }
@@ -3116,7 +3144,7 @@ app.get('/api/display/stream/:token', (req, res) => {
 
     req.on('close', () => {
         clearInterval(keepAlive);
-        displayClients.get(pairToken)?.delete(res);
+        displayTokenClients.get(token)?.delete(res);
     });
 });
 // ── Scanner Monitor ──────────────────────────────────────────────────────────
@@ -3243,10 +3271,6 @@ app.get('/api/scan/stream/:pairToken', async (req, res) => {
     if (prev && prev !== res) { try { prev.end(); } catch (_) {} }
     scannerChannels.set(pairToken, res);
 
-    // Also add to displayClients so broadcastToPair reaches the scanner
-    if (!displayClients.has(pairToken)) displayClients.set(pairToken, new Set());
-    displayClients.get(pairToken).add(res);
-
     res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
 
     const keepAlive = setInterval(() => {
@@ -3260,7 +3284,6 @@ app.get('/api/scan/stream/:pairToken', async (req, res) => {
     req.on('close', () => {
         clearInterval(keepAlive);
         if (scannerChannels.get(pairToken) === res) scannerChannels.delete(pairToken);
-        displayClients.get(pairToken)?.delete(res);
         const s = scannerRegistry.get(pairToken);
         if (s) {
             s.online = false;

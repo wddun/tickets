@@ -145,10 +145,10 @@
     <script>
         const params = new URLSearchParams(window.location.search);
         const token = params.get('token');
-        const pair  = params.get('pair');
-        if (!token || !pair) {
-            document.getElementById('statusLabel').textContent = 'Invalid display link — regenerate it from the scanner app.';
-            throw new Error('No token or pair');
+        const pair  = params.get('pair'); // optional — kept for backward compat
+        if (!token) {
+            document.getElementById('statusLabel').textContent = 'Invalid display link — missing token.';
+            throw new Error('No token');
         }
 
         const app   = document.getElementById('app');
@@ -171,6 +171,7 @@
             reentry_exit:  { bg: 'rgb(185,85,15)',   icon: '🚪', text: 'Confirm Check-Out' },
             used:          { bg: 'rgb(185,85,15)',   icon: '!', text: 'Already Checked In' },
             invalid:       { bg: 'rgb(185,30,30)',   icon: '✕', text: 'Invalid Ticket' },
+            checked_out:   { bg: 'rgb(16,127,60)',   icon: '✓', text: 'Checked Out' },
         };
 
         function setIdle() {
@@ -232,7 +233,8 @@
             label.textContent = 'Connecting…';
             badge.classList.remove('visible');
 
-            const source = new EventSource(`/api/display/stream/${token}?pair=${encodeURIComponent(pair)}`);
+            const sseURL = pair ? `/api/display/stream/${token}?pair=${encodeURIComponent(pair)}` : `/api/display/stream/${token}`;
+            const source = new EventSource(sseURL);
             es = source;
 
             source.onopen = () => {
