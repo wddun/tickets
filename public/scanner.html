@@ -876,7 +876,6 @@ function addToHistory(data, status) {
         </div>`;
 }
 
-// Full-screen overlay — reentry exit only (needs explicit confirm)
 function openExitConfirm(data) {
     lastScannedRegistrationId = data.registrationId || null;
     pendingCheckoutToken = data._token || null;
@@ -888,9 +887,19 @@ function openExitConfirm(data) {
     document.getElementById('roEmail').style.display = 'none';
     document.getElementById('roEvent').style.display = 'none';
     document.getElementById('roFields').innerHTML = '';
-    document.getElementById('roBottom').innerHTML = `
-        <button class="ro-confirm-btn" id="roConfirmBtn" onclick="confirmCheckout()" style="color:rgba(180,60,0,1);">Confirm Check-Out</button>
-        <button class="ro-cancel-btn" onclick="closeResult()">Cancel</button>`;
+
+    const hasAccess = isLoggedIn && events.some(e => e.id === data.eventId);
+
+    if (hasAccess) {
+        document.getElementById('roBottom').innerHTML = `
+            <button class="ro-confirm-btn" id="roConfirmBtn" onclick="confirmCheckout()" style="color:rgba(180,60,0,1);">Confirm Check-Out</button>
+            <button class="ro-cancel-btn" onclick="closeResult()">Cancel</button>`;
+    } else {
+        document.getElementById('roBottom').innerHTML = `
+            <div style="color:rgba(255,255,255,0.8);font-size:14px;text-align:center;margin-bottom:16px;line-height:1.4;">Sign in with room access to check out</div>
+            <button class="ro-cancel-btn" onclick="closeResult()">Dismiss</button>`;
+    }
+
     overlay.classList.add('show');
 }
 
