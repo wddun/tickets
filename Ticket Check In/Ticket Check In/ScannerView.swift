@@ -417,10 +417,9 @@ struct ScannerView: View {
                                 }
                             } else if type == "scan", let status = json["status"] as? String {
                                 if status == "checked_out",
-                                   let regId = json["registrationId"] as? String,
-                                   regId == lastRegistrationId {
+                                   let regId = json["registrationId"] as? String {
                                     await MainActor.run {
-                                        if scanResult?.status == .reentryExitPrompt {
+                                        if regId == lastRegistrationId, scanResult?.status == .reentryExitPrompt {
                                             CheckInFeedback.shared.success()
                                             dismissExitOverlay()
                                         }
