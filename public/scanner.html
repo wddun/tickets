@@ -989,30 +989,38 @@ function onScanSuccess(decodedText) {
     });
 }
 
-// ── Camera ────────────────────────────────────────────────
 function startCamera() { /* camera is started inline below */ }
-const scanner = new Html5Qrcode('reader');
-scanner.start(
-    { facingMode: 'environment' },
-    { fps: 15 },
-    onScanSuccess
-).then(() => {
-    const video = document.querySelector('#reader video');
-    if (video) Object.assign(video.style, {
-        position: 'absolute', inset: '0',
-        width: '100%', height: '100%', objectFit: 'cover'
+try {
+    const scanner = new Html5Qrcode('reader');
+    scanner.start(
+        { facingMode: 'environment' },
+        { fps: 15 },
+        onScanSuccess
+    ).then(() => {
+        const video = document.querySelector('#reader video');
+        if (video) Object.assign(video.style, {
+            position: 'absolute', inset: '0',
+            width: '100%', height: '100%', objectFit: 'cover'
+        });
+        const region = document.getElementById('reader__scan_region');
+        if (region) Object.assign(region.style, {
+            position: 'absolute', inset: '0', width: '100%', height: '100%'
+        });
+    }).catch(err => {
+        console.error('Camera error:', err);
+        const errEl = document.createElement('div');
+        errEl.style.cssText = 'position:fixed;top:50%;left:20px;right:20px;background:rgba(220,38,38,0.9);color:white;padding:16px;border-radius:12px;text-align:center;font-weight:600;z-index:9999;';
+        errEl.innerHTML = 'Camera failed to start.<br><br>Make sure you are using HTTPS or localhost. Safari blocks cameras on HTTP network IPs.<br><br><span style="font-size:12px;font-weight:normal;opacity:0.8">' + (err.message || err) + '</span>';
+        document.body.appendChild(errEl);
     });
-    const region = document.getElementById('reader__scan_region');
-    if (region) Object.assign(region.style, {
-        position: 'absolute', inset: '0', width: '100%', height: '100%'
-    });
-}).catch(err => {
-    console.error('Camera error:', err);
+} catch (syncErr) {
+    console.error('Sync Camera Error:', syncErr);
     const errEl = document.createElement('div');
     errEl.style.cssText = 'position:fixed;top:50%;left:20px;right:20px;background:rgba(220,38,38,0.9);color:white;padding:16px;border-radius:12px;text-align:center;font-weight:600;z-index:9999;';
-    errEl.innerHTML = 'Camera failed to start.<br><br>Make sure you are using HTTPS or localhost. Safari blocks cameras on HTTP network IPs.<br><br><span style="font-size:12px;font-weight:normal;opacity:0.8">' + (err.message || err) + '</span>';
+    errEl.innerHTML = 'Scanner Library Error.<br><br><span style="font-size:12px;font-weight:normal;opacity:0.8">' + (syncErr.message || syncErr) + '</span>';
     document.body.appendChild(errEl);
-});
+}
+
 
 // ── Tab switching ─────────────────────────────────────────
 function switchTab(tab) {
