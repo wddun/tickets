@@ -146,35 +146,15 @@
         /* ── Recent scans history strip ── */
         #recentScans {
             position: fixed;
-            bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
-            left: 16px; right: 16px;
+            bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+            left: 0; right: 0;
             z-index: 20;
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-            pointer-events: none;
-        }
-        .scan-history-item {
-            display: flex;
-            align-items: center;
-            gap: 9px;
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border-radius: 10px;
-            padding: 8px 13px;
-            animation: slideUp 0.25s ease;
+            pointer-events: auto;
         }
         @keyframes slideUp {
             from { transform: translateY(12px); opacity: 0; }
             to   { transform: translateY(0);    opacity: 1; }
         }
-        .shi-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .shi-dot-green  { background: #4ade80; }
-        .shi-dot-orange { background: #fb923c; }
-        .shi-dot-red    { background: #f87171; }
-        .shi-name { font-size: 14px; font-weight: 600; color: #fff; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .shi-meta { font-size: 12px; color: rgba(255,255,255,0.45); white-space: nowrap; }
 
         /* ── Full-screen result overlay — reentry exit confirm only ── */
         #resultOverlay {
@@ -866,13 +846,8 @@ function showFlash(data) {
     document.getElementById('roIcon').innerHTML   = STATUS_ICONS[status]  || '!';
     document.getElementById('roTitle').textContent  = STATUS_TITLES[status] || 'Error';
     document.getElementById('roName').textContent   = data.firstName || data.name || '';
-    const email = data.email || '';
-    const emailEl = document.getElementById('roEmail');
-    emailEl.textContent = email;
-    emailEl.style.display = email ? '' : 'none';
-    const eventEl = document.getElementById('roEvent');
-    eventEl.textContent = data.eventName || '';
-    eventEl.style.display = data.eventName ? '' : 'none';
+    document.getElementById('roEmail').style.display = 'none';
+    document.getElementById('roEvent').style.display = 'none';
     document.getElementById('roFields').innerHTML = '';
     document.getElementById('roBottom').innerHTML = '';
     overlay.classList.add('show');
@@ -886,17 +861,18 @@ function showBanner(data) { showFlash(data); }
 
 function addToHistory(data, status) {
     lastScanData = { ...data, status };
-    recentScansList = [{
-        dotCls: STATUS_DOT_CLS[status] || 'shi-dot-red',
-        name:   data.firstName || data.name || 'Unknown',
-        meta:   `${STATUS_TITLES[status] || 'Error'} · ${new Date().toLocaleTimeString([], { hour:'numeric', minute:'2-digit' })}`
-    }];
-    const s = recentScansList[0];
+    const isSuccess = status === 'valid' || status === 'reentry_enter';
+    const color = isSuccess ? '#4ade80' : '#f59e0b';
+    const icon = isSuccess ? svgCheck : svgExclam;
+    
     document.getElementById('recentScans').innerHTML = `
-        <div class="scan-history-item" onclick="openDetail()">
-            <div class="shi-dot ${s.dotCls}"></div>
-            <div class="shi-name">${escHtml(s.name)}</div>
-            <div class="shi-meta">${escHtml(s.meta)}</div>
+        <div onclick="openDetail()" style="display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.15);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:14px;padding:12px 16px;margin:0 20px;cursor:pointer;animation:slideUp 0.25s ease;">
+            <div style="color:${color};width:20px;height:20px;display:flex;align-items:center;justify-content:center;">${icon}</div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:2px;overflow:hidden;">
+                <div style="color:#fff;font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(data.firstName || data.name || 'Unknown')}</div>
+                <div style="color:rgba(255,255,255,0.6);font-size:12px;font-weight:500;">${escHtml(STATUS_TITLES[status] || 'Error')}</div>
+            </div>
+            <div style="color:rgba(255,255,255,0.35);font-size:14px;font-weight:700;">›</div>
         </div>`;
 }
 
