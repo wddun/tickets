@@ -838,7 +838,7 @@ const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', u
 let recentScansList = [];
 let flashTimer = null;
 
-// Full-screen colored flash — auto-dismisses after 2s, tap also dismisses
+// Full-screen colored flash — auto-dismisses after 1.2s, tap also dismisses
 function showFlash(data) {
     const status = data.status || 'error';
     const overlay = document.getElementById('resultOverlay');
@@ -850,9 +850,25 @@ function showFlash(data) {
     document.getElementById('roEvent').style.display = 'none';
     document.getElementById('roFields').innerHTML = '';
     document.getElementById('roBottom').innerHTML = '';
-    overlay.classList.add('show');
+    
+    if (overlay.classList.contains('show')) {
+        // Quick pulse/blink if already showing
+        overlay.style.transform = 'scale(0.95)';
+        overlay.style.opacity = '0.7';
+        // Force reflow
+        void overlay.offsetWidth;
+        overlay.style.transition = 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.2s ease-out';
+        overlay.style.transform = 'scale(1)';
+        overlay.style.opacity = '1';
+    } else {
+        overlay.style.transition = 'opacity 0.15s ease-in-out';
+        overlay.style.transform = 'scale(1)';
+        overlay.style.opacity = '1';
+        overlay.classList.add('show');
+    }
+    
     clearTimeout(flashTimer);
-    flashTimer = setTimeout(closeResult, 2000);
+    flashTimer = setTimeout(closeResult, 1200);
     addToHistory(data, status);
 }
 
