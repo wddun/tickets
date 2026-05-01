@@ -247,7 +247,7 @@ class APIService: ObservableObject {
 
     func confirmCheckout(token: String) async throws {
         guard let url = URL(string: "\(baseURL)/api/checkout") else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["token": token])
@@ -258,7 +258,7 @@ class APIService: ObservableObject {
 
     func confirmCheckoutByRegistrationId(_ registrationId: String) async throws {
         guard let url = URL(string: "\(baseURL)/api/checkout") else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["registrationId": registrationId])

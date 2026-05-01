@@ -837,6 +837,7 @@ const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', u
 
 let recentScansList = [];
 let flashTimer = null;
+let exitConfirmTimer = null;
 
 // Full-screen colored flash — auto-dismisses after 1.2s, tap also dismisses
 function showFlash(data) {
@@ -917,10 +918,17 @@ function openExitConfirm(data) {
     }
 
     overlay.classList.add('show');
+
+    clearTimeout(exitConfirmTimer);
+    exitConfirmTimer = setTimeout(() => {
+        if (pendingCheckoutToken) closeResult();
+    }, 30000);
 }
 
 function closeResult() {
     clearTimeout(flashTimer);
+    clearTimeout(exitConfirmTimer);
+    exitConfirmTimer = null;
     document.getElementById('resultOverlay').classList.remove('show');
     pendingCheckoutToken = null;
 }
@@ -935,14 +943,19 @@ async function confirmCheckout() {
     if (!pendingCheckoutToken) { closeResult(); return; }
     const btn = document.getElementById('roConfirmBtn');
     if (btn) { btn.textContent = 'Checking out…'; btn.disabled = true; }
+    clearTimeout(exitConfirmTimer); // user acted — disable auto-cancel
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
         await fetch('/api/checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: pendingCheckoutToken })
+            body: JSON.stringify({ token: pendingCheckoutToken }),
+            signal: controller.signal
         });
         playSound('success');
     } catch (_) {}
+    clearTimeout(timeoutId);
     closeResult();
 }
 
@@ -961,6 +974,10 @@ function onScanSuccess(decodedText) {
 
     // Per-token debounce — same QR within 5s is ignored
     if (token === lastScannedToken && (now - lastScanTs) < SCAN_DEBOUNCE_MS) return;
+
+    // Don't interrupt a pending checkout confirmation — shared overlay state would conflict
+    if (pendingCheckoutToken) return;
+
     lastScannedToken = token;
     lastScanTs = now;
 

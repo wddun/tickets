@@ -39,6 +39,7 @@ struct ScannerView: View {
     @State private var flashOpacity: Double = 1.0
     @State private var heartbeatTask: Task<Void, Never>?
     @State private var notifTask: Task<Void, Never>?
+    @State private var exitOverlayAutoTask: Task<Void, Never>?
     @State private var adminNotifTitle  = ""
     @State private var adminNotifMsg    = ""
     @State private var showAdminNotif   = false
@@ -248,6 +249,9 @@ struct ScannerView: View {
             return
         }
 
+        // Don't interrupt a pending checkout confirmation
+        if scanResult != nil { return }
+
         // 5-second same-token debounce — prevents accidental double-scan
         let now = Date()
         if let lastToken = lastScannedToken, let lastTime = lastScanTime,
@@ -293,6 +297,7 @@ struct ScannerView: View {
             CheckInFeedback.shared.alreadyUsed()
             withAnimation { scanResult = result }
             sendToDisplay(response: response, status: "reentry_exit")
+            startExitOverlayAutoDismiss()
         case "used":
             result = ScanResult(from: response, status: .alreadyUsed, title: "Already Checked In")
             CheckInFeedback.shared.alreadyUsed()
@@ -334,12 +339,11 @@ struct ScannerView: View {
 
     private func handleConfirmCheckout() {
         guard let token = pendingCheckoutToken else { dismissExitOverlay(); return }
+        exitOverlayAutoTask?.cancel() // user acted — disable auto-dismiss
         Task {
             try? await APIService.shared.confirmCheckout(token: token)
             await MainActor.run {
                 CheckInFeedback.shared.success()
-                
-                // If connected to a BLE display, update it so it doesn't get stuck on the prompt
                 let ble = BLEScanResult(
                     status: "checked_out",
                     name: scanResult?.name ?? "Guest",
@@ -348,13 +352,23 @@ struct ScannerView: View {
                     registrationId: lastRegistrationId
                 )
                 BluetoothManager.shared.sendScanResult(ble)
-                
                 dismissExitOverlay()
             }
         }
     }
 
+    private func startExitOverlayAutoDismiss() {
+        exitOverlayAutoTask?.cancel()
+        exitOverlayAutoTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            guard !Task.isCancelled else { return }
+            dismissExitOverlay()
+        }
+    }
+
     private func dismissExitOverlay() {
+        exitOverlayAutoTask?.cancel()
+        exitOverlayAutoTask = nil
         withAnimation { scanResult = nil }
         pendingCheckoutToken = nil
     }
