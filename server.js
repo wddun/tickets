@@ -1932,11 +1932,11 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
     const actualCount = groupTickets.length;
 
     const qrBlocks = groupTickets.map((t, i) => `
-        <div style="text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa; break-inside:avoid;">
+        <div class="qr-block">
             <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
                 ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Ticket'}
             </p>
-            <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" style="width:180px; height:180px; display:block; margin:0 auto;" />
+            <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" width="180" height="180" style="display:block; margin:0 auto;" />
             <p style="font-size:11px; color:#aaa; margin:10px 0 0;">Token: ${t.token}</p>
             ${t.used_at ? `<p style="font-size:11px; color:#059669; margin:4px 0 0;">✓ Checked in ${new Date(t.used_at).toLocaleString()}</p>` : ''}
         </div>
@@ -1950,15 +1950,25 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ticket — ${ticket.name} — ${event.name}</title>
 <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 24px; color: #333; }
-    @media print { body { margin: 0; } .no-print { display: none; } }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 40px auto; padding: 24px; color: #333; }
+    .qr-block { text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa; }
+    @media print {
+        body { margin: 0; max-width: 100%; padding: 16px; }
+        .no-print { display: none !important; }
+        .qr-block { break-inside: avoid; page-break-inside: avoid; border: 1px solid #ccc; }
+    }
 </style>
 </head>
 <body>
-<div class="no-print" style="margin-bottom:20px;">
-    <button onclick="window.print()" style="padding:8px 18px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;">🖨️ Print</button>
+<div class="no-print" style="margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <button id="printBtn" onclick="triggerPrint()" disabled
+        style="padding:8px 18px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;opacity:0.5;transition:opacity 0.2s;">
+        🖨️ Print / Save PDF
+    </button>
+    <span id="loadHint" style="font-size:12px;color:#888;">Loading QR codes…</span>
 </div>
 <h2 style="margin-bottom:4px;">${ticket.name}</h2>
 <p style="color:#888;margin:0 0 4px;">${ticket.email}</p>
@@ -1969,6 +1979,33 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
 <p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>
 ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
 ${qrBlocks}
+<script>
+    // Enable print button only after all QR images are loaded so the PDF isn't blank
+    var imgs = document.querySelectorAll('img');
+    var remaining = imgs.length;
+    function onImgDone() {
+        if (--remaining <= 0) {
+            var btn = document.getElementById('printBtn');
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            document.getElementById('loadHint').textContent = '';
+        }
+    }
+    if (remaining === 0) { onImgDone(); }
+    else { imgs.forEach(function(img) {
+        if (img.complete) { onImgDone(); }
+        else { img.addEventListener('load', onImgDone); img.addEventListener('error', onImgDone); }
+    }); }
+
+    // iOS Safari leaves the page blank after window.print() dismisses — force a repaint
+    window.addEventListener('afterprint', function() {
+        document.body.style.display = 'none';
+        void document.body.offsetHeight;
+        document.body.style.display = '';
+    });
+
+    function triggerPrint() { window.print(); }
+<\/script>
 </body>
 </html>`);
 });
