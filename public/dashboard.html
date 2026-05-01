@@ -2209,6 +2209,11 @@
             return `${start.toLocaleString(undefined, opts)} – ${end.toLocaleString(undefined, opts)}`;
         }
 
+        // Re-fetch events when the tab becomes visible again (iOS evicts background tabs)
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible' && currentUser) loadEvents();
+        });
+
         init();
     </script>
 
