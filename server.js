@@ -1963,11 +1963,7 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
 </style>
 </head>
 <body>
-<div class="no-print" style="margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-    <button id="printBtn" onclick="triggerPrint()" disabled
-        style="padding:8px 18px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;opacity:0.5;transition:opacity 0.2s;">
-        🖨️ Print / Save PDF
-    </button>
+<div class="no-print" id="printBar" style="margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
     <span id="loadHint" style="font-size:12px;color:#888;">Loading QR codes…</span>
 </div>
 <h2 style="margin-bottom:4px;">${ticket.name}</h2>
@@ -1980,31 +1976,31 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
 ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
 ${qrBlocks}
 <script>
-    // Enable print button only after all QR images are loaded so the PDF isn't blank
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+    // Once all QR images are loaded, show the appropriate action
     var imgs = document.querySelectorAll('img');
     var remaining = imgs.length;
     function onImgDone() {
-        if (--remaining <= 0) {
-            var btn = document.getElementById('printBtn');
-            btn.disabled = false;
-            btn.style.opacity = '1';
-            document.getElementById('loadHint').textContent = '';
+        if (--remaining > 0) return;
+        document.getElementById('loadHint').textContent = '';
+        var bar = document.getElementById('printBar');
+        if (isIOS) {
+            // window.print() on iOS Safari blanks the page while the dialog is open — use native share instead
+            bar.innerHTML = '<span style="font-size:14px;color:#444;">Tap <strong style=\\'font-weight:700;\\'>&#xfe0f; Share</strong> then <strong style=\\'font-weight:700;\\'>Print</strong> to save as PDF</span>';
+        } else {
+            var btn = document.createElement('button');
+            btn.textContent = '🖨️ Print / Save PDF';
+            btn.style.cssText = 'padding:8px 18px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;';
+            btn.onclick = function() { window.print(); };
+            bar.appendChild(btn);
         }
     }
     if (remaining === 0) { onImgDone(); }
     else { imgs.forEach(function(img) {
-        if (img.complete) { onImgDone(); }
+        if (img.complete) onImgDone();
         else { img.addEventListener('load', onImgDone); img.addEventListener('error', onImgDone); }
     }); }
-
-    // iOS Safari leaves the page blank after window.print() dismisses — force a repaint
-    window.addEventListener('afterprint', function() {
-        document.body.style.display = 'none';
-        void document.body.offsetHeight;
-        document.body.style.display = '';
-    });
-
-    function triggerPrint() { window.print(); }
 <\/script>
 </body>
 </html>`);
