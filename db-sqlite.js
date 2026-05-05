@@ -1,0 +1,379 @@
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export const db = new Database(path.join(__dirname, 'tickets.db'));
+
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.pragma('foreign_keys = ON');
+
+// ── Schema ────────────────────────────────────────────────────────────────────
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT,
+    emailVerified INTEGER DEFAULT 0,
+    verifyToken TEXT,
+    createdAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    name TEXT,
+    time TEXT,
+    endTime TEXT,
+    color TEXT,
+    imageUrl TEXT,
+    scannerPin TEXT,
+    location TEXT,
+    allowReentry INTEGER DEFAULT 0,
+    capacity INTEGER,
+    displayToken TEXT,
+    reminderEnabled INTEGER DEFAULT 0,
+    reminderMessage TEXT,
+    reminderHoursBefore INTEGER DEFAULT 24,
+    reminderSentAt TEXT,
+    customFields TEXT,
+    createdAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS tickets (
+    id TEXT PRIMARY KEY,
+    eventId TEXT NOT NULL,
+    token TEXT UNIQUE,
+    registrationId TEXT,
+    name TEXT,
+    firstName TEXT,
+    lastName TEXT,
+    email TEXT,
+    customFields TEXT,
+    used_at TEXT,
+    reentry_status TEXT,
+    passHash TEXT,
+    updated_at TEXT,
+    created_at TEXT,
+    wallet_downloaded_at TEXT,
+    email_opened_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sheetLinks (
+    id TEXT PRIMARY KEY,
+    token TEXT UNIQUE,
+    spreadsheetId TEXT,
+    sheetName TEXT,
+    eventId TEXT,
+    createdAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sheetAccess (
+    id TEXT PRIMARY KEY,
+    userId TEXT,
+    sheetLinkId TEXT,
+    claimedAt TEXT,
+    permission TEXT DEFAULT 'view'
+);
+
+CREATE TABLE IF NOT EXISTS walletDevices (
+    id TEXT PRIMARY KEY,
+    deviceId TEXT,
+    passTypeId TEXT,
+    serialNumber TEXT,
+    pushToken TEXT,
+    registeredAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pushDevices (
+    id TEXT PRIMARY KEY,
+    userId TEXT,
+    token TEXT UNIQUE,
+    createdAt TEXT,
+    lastSeenAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pushSubscriptions (
+    id TEXT PRIMARY KEY,
+    userId TEXT,
+    eventId TEXT,
+    enabled INTEGER DEFAULT 1,
+    createdAt TEXT,
+    updatedAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS passwordResetTokens (
+    id TEXT PRIMARY KEY,
+    userId TEXT,
+    tokenHash TEXT UNIQUE,
+    expiresAt TEXT,
+    createdAt TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tickets_token ON tickets(token);
+CREATE INDEX IF NOT EXISTS idx_tickets_registrationId ON tickets(registrationId);
+CREATE INDEX IF NOT EXISTS idx_tickets_eventId ON tickets(eventId);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_events_userId ON events(userId);
+CREATE INDEX IF NOT EXISTS idx_events_displayToken ON events(displayToken);
+CREATE INDEX IF NOT EXISTS idx_walletDevices_serial ON walletDevices(serialNumber);
+CREATE INDEX IF NOT EXISTS idx_walletDevices_deviceId ON walletDevices(deviceId);
+CREATE INDEX IF NOT EXISTS idx_pushSubs_userEvent ON pushSubscriptions(userId, eventId);
+CREATE INDEX IF NOT EXISTS idx_sheetLinks_eventId ON sheetLinks(eventId);
+CREATE INDEX IF NOT EXISTS idx_sheetAccess_linkId ON sheetAccess(sheetLinkId);
+CREATE INDEX IF NOT EXISTS idx_sheetAccess_userId ON sheetAccess(userId);
+`);
+
+// ── One-time migration from db.json ──────────────────────────────────────────
+
+const migrationFlag = path.join(__dirname, 'db-migrated.flag');
+const legacyDb = path.join(__dirname, 'db.json');
+
+if (!fs.existsSync(migrationFlag) && fs.existsSync(legacyDb)) {
+    console.log('[migration] Starting migration from db.json...');
+    try {
+        const raw = JSON.parse(fs.readFileSync(legacyDb, 'utf8'));
+
+        const insertUser = db.prepare(`INSERT OR IGNORE INTO users (id, email, password, emailVerified, verifyToken, createdAt) VALUES (?,?,?,?,?,?)`);
+        const insertEvent = db.prepare(`INSERT OR IGNORE INTO events (id, userId, name, time, endTime, color, imageUrl, scannerPin, location, allowReentry, capacity, displayToken, reminderEnabled, reminderMessage, reminderHoursBefore, reminderSentAt, customFields, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+        const insertTicket = db.prepare(`INSERT OR IGNORE INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at, email_opened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+        const insertSheetLink = db.prepare(`INSERT OR IGNORE INTO sheetLinks (id, token, spreadsheetId, sheetName, eventId, createdAt) VALUES (?,?,?,?,?,?)`);
+        const insertSheetAccess = db.prepare(`INSERT OR IGNORE INTO sheetAccess (id, userId, sheetLinkId, claimedAt, permission) VALUES (?,?,?,?,?)`);
+        const insertWalletDevice = db.prepare(`INSERT OR IGNORE INTO walletDevices (id, deviceId, passTypeId, serialNumber, pushToken, registeredAt) VALUES (?,?,?,?,?,?)`);
+        const insertPushDevice = db.prepare(`INSERT OR IGNORE INTO pushDevices (id, userId, token, createdAt, lastSeenAt) VALUES (?,?,?,?,?)`);
+        const insertPushSub = db.prepare(`INSERT OR IGNORE INTO pushSubscriptions (id, userId, eventId, enabled, createdAt, updatedAt) VALUES (?,?,?,?,?,?)`);
+        const insertPwdToken = db.prepare(`INSERT OR IGNORE INTO passwordResetTokens (id, userId, tokenHash, expiresAt, createdAt) VALUES (?,?,?,?,?)`);
+
+        const migrate = db.transaction(() => {
+            let counts = {};
+
+            counts.users = 0;
+            for (const u of (raw.users || [])) {
+                insertUser.run(u.id, u.email, u.password, u.emailVerified ? 1 : 0, u.verifyToken || null, u.createdAt || null);
+                counts.users++;
+            }
+
+            counts.events = 0;
+            for (const e of (raw.events || [])) {
+                insertEvent.run(
+                    e.id, e.userId, e.name, e.time, e.endTime || null, e.color || null,
+                    e.imageUrl || null, e.scannerPin || null,
+                    e.location ? JSON.stringify(e.location) : null,
+                    e.allowReentry ? 1 : 0, e.capacity || null, e.displayToken || null,
+                    e.reminderEnabled ? 1 : 0, e.reminderMessage || null,
+                    e.reminderHoursBefore ?? 24, e.reminderSentAt || null,
+                    e.customFields ? JSON.stringify(e.customFields) : null,
+                    e.createdAt || null
+                );
+                counts.events++;
+            }
+
+            counts.tickets = 0;
+            for (const t of (raw.tickets || [])) {
+                insertTicket.run(
+                    t.id, t.eventId, t.token, t.registrationId || null,
+                    t.name || null, t.firstName || null, t.lastName || null, t.email || null,
+                    t.customFields ? JSON.stringify(t.customFields) : null,
+                    t.used_at || null, t.reentry_status || null, t.passHash || null,
+                    t.updated_at || null, t.created_at || null,
+                    t.wallet_downloaded_at || null, t.email_opened_at || null
+                );
+                counts.tickets++;
+            }
+
+            counts.sheetLinks = 0;
+            for (const l of (raw.sheetLinks || [])) {
+                insertSheetLink.run(l.id, l.token, l.spreadsheetId, l.sheetName || null, l.eventId || null, l.createdAt || null);
+                counts.sheetLinks++;
+            }
+
+            counts.sheetAccess = 0;
+            for (const a of (raw.sheetAccess || [])) {
+                insertSheetAccess.run(a.id, a.userId, a.sheetLinkId, a.claimedAt || null, a.permission || 'view');
+                counts.sheetAccess++;
+            }
+
+            counts.walletDevices = 0;
+            for (const d of (raw.walletDevices || [])) {
+                insertWalletDevice.run(d.id, d.deviceId, d.passTypeId || null, d.serialNumber, d.pushToken, d.registeredAt || null);
+                counts.walletDevices++;
+            }
+
+            counts.pushDevices = 0;
+            for (const d of (raw.pushDevices || [])) {
+                insertPushDevice.run(d.id, d.userId, d.token, d.createdAt || null, d.lastSeenAt || null);
+                counts.pushDevices++;
+            }
+
+            counts.pushSubscriptions = 0;
+            for (const s of (raw.pushSubscriptions || [])) {
+                insertPushSub.run(s.id, s.userId, s.eventId, s.enabled ? 1 : 0, s.createdAt || null, s.updatedAt || null);
+                counts.pushSubscriptions++;
+            }
+
+            counts.passwordResetTokens = 0;
+            for (const t of (raw.passwordResetTokens || [])) {
+                insertPwdToken.run(t.id, t.userId, t.tokenHash, t.expiresAt, t.createdAt || null);
+                counts.passwordResetTokens++;
+            }
+
+            return counts;
+        });
+
+        const counts = migrate();
+        fs.writeFileSync(migrationFlag, new Date().toISOString());
+        console.log(`[migration] Complete — tickets: ${counts.tickets}, users: ${counts.users}, events: ${counts.events}, sheetLinks: ${counts.sheetLinks}, walletDevices: ${counts.walletDevices}`);
+    } catch (err) {
+        console.error('[migration] FAILED:', err.message);
+        console.error('[migration] db.json is intact — fix the error and restart to retry');
+        process.exit(1);
+    }
+}
+
+// ── Row-to-object converters ───────────────────────────────────────────────────
+
+export function rowToTicket(row) {
+    if (!row) return null;
+    return {
+        ...row,
+        customFields: row.customFields ? JSON.parse(row.customFields) : {},
+    };
+}
+
+export function rowToEvent(row) {
+    if (!row) return null;
+    return {
+        ...row,
+        location: row.location ? JSON.parse(row.location) : null,
+        allowReentry: !!row.allowReentry,
+        reminderEnabled: !!row.reminderEnabled,
+        customFields: row.customFields ? JSON.parse(row.customFields) : null,
+    };
+}
+
+export function rowToUser(row) {
+    if (!row) return null;
+    return { ...row, emailVerified: !!row.emailVerified };
+}
+
+// ── Prepared statements ────────────────────────────────────────────────────────
+
+export const stmt = {
+    users: {
+        byId: db.prepare('SELECT * FROM users WHERE id = ?'),
+        byEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
+        byVerifyToken: db.prepare('SELECT * FROM users WHERE verifyToken = ?'),
+        all: db.prepare('SELECT * FROM users'),
+        insert: db.prepare(`INSERT INTO users (id, email, password, emailVerified, verifyToken, createdAt) VALUES (?,?,?,?,?,?)`),
+        setVerified: db.prepare(`UPDATE users SET emailVerified = 1, verifyToken = NULL WHERE id = ?`),
+        setVerifyToken: db.prepare(`UPDATE users SET verifyToken = ? WHERE email = ?`),
+        setPassword: db.prepare(`UPDATE users SET password = ? WHERE id = ?`),
+        deleteById: db.prepare(`DELETE FROM users WHERE id = ?`),
+    },
+    events: {
+        byId: db.prepare('SELECT * FROM events WHERE id = ?'),
+        byDisplayToken: db.prepare('SELECT * FROM events WHERE displayToken = ?'),
+        byUserId: db.prepare('SELECT * FROM events WHERE userId = ?'),
+        all: db.prepare('SELECT * FROM events'),
+        insert: db.prepare(`INSERT INTO events (id, userId, name, time, endTime, color, imageUrl, scannerPin, location, allowReentry, capacity, displayToken, reminderEnabled, reminderMessage, reminderHoursBefore, reminderSentAt, customFields, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+        update: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, imageUrl=?, allowReentry=?, capacity=?, location=? WHERE id=?`),
+        updateFull: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, imageUrl=?, allowReentry=?, capacity=?, location=?, reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=?, customFields=?, scannerPin=? WHERE id=?`),
+        setDisplayToken: db.prepare(`UPDATE events SET displayToken=? WHERE id=?`),
+        setReminderSentAt: db.prepare(`UPDATE events SET reminderSentAt=? WHERE id=?`),
+        setReminder: db.prepare(`UPDATE events SET reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=? WHERE id=?`),
+        setCustomFields: db.prepare(`UPDATE events SET customFields=? WHERE id=?`),
+        setImageUrl: db.prepare(`UPDATE events SET imageUrl=? WHERE id=?`),
+        setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
+        deleteById: db.prepare(`DELETE FROM events WHERE id=?`),
+        deleteByUserId: db.prepare(`DELETE FROM events WHERE userId=?`),
+        reminderDue: db.prepare(`SELECT * FROM events WHERE reminderEnabled=1 AND reminderSentAt IS NULL`),
+    },
+    tickets: {
+        byToken: db.prepare('SELECT * FROM tickets WHERE token = ?'),
+        byId: db.prepare('SELECT * FROM tickets WHERE id = ?'),
+        byRegistrationId: db.prepare('SELECT * FROM tickets WHERE registrationId = ?'),
+        firstByRegistrationId: db.prepare('SELECT * FROM tickets WHERE registrationId = ? LIMIT 1'),
+        firstByRegistrationIdOrId: db.prepare('SELECT * FROM tickets WHERE registrationId = ? OR id = ? LIMIT 1'),
+        byEventId: db.prepare('SELECT * FROM tickets WHERE eventId = ?'),
+        countByEventId: db.prepare('SELECT COUNT(*) as cnt FROM tickets WHERE eventId = ?'),
+        insert: db.prepare(`INSERT INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at, email_opened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+        updateInfo: db.prepare(`UPDATE tickets SET name=?, firstName=?, lastName=?, email=?, customFields=? WHERE id=?`),
+        checkIn: db.prepare(`UPDATE tickets SET used_at=?, updated_at=? WHERE id=?`),
+        checkInReentry: db.prepare(`UPDATE tickets SET used_at=?, updated_at=?, reentry_status='inside' WHERE id=?`),
+        reentryEnter: db.prepare(`UPDATE tickets SET reentry_status='inside', updated_at=? WHERE id=?`),
+        reentryExit: db.prepare(`UPDATE tickets SET reentry_status='outside', updated_at=? WHERE id=?`),
+        undoCheckIn: db.prepare(`UPDATE tickets SET used_at=NULL, reentry_status=NULL, updated_at=? WHERE id=?`),
+        setPassHash: db.prepare(`UPDATE tickets SET passHash=?, updated_at=? WHERE id=?`),
+        setWalletDownloaded: db.prepare(`UPDATE tickets SET wallet_downloaded_at=? WHERE token=?`),
+        setEmailOpened: db.prepare(`UPDATE tickets SET email_opened_at=? WHERE registrationId=? AND email_opened_at IS NULL`),
+        deleteById: db.prepare(`DELETE FROM tickets WHERE id=?`),
+        deleteByEventId: db.prepare(`DELETE FROM tickets WHERE eventId=?`),
+    },
+    walletDevices: {
+        byDeviceAndSerial: db.prepare(`SELECT * FROM walletDevices WHERE deviceId=? AND serialNumber=?`),
+        byDeviceId: db.prepare(`SELECT * FROM walletDevices WHERE deviceId=?`),
+        insert: db.prepare(`INSERT INTO walletDevices (id, deviceId, passTypeId, serialNumber, pushToken, registeredAt) VALUES (?,?,?,?,?,?)`),
+        setPushToken: db.prepare(`UPDATE walletDevices SET pushToken=? WHERE deviceId=? AND serialNumber=?`),
+        delete: db.prepare(`DELETE FROM walletDevices WHERE deviceId=? AND serialNumber=?`),
+        deleteByPushToken: db.prepare(`DELETE FROM walletDevices WHERE pushToken=?`),
+    },
+    pushDevices: {
+        byToken: db.prepare('SELECT * FROM pushDevices WHERE token=?'),
+        byUserId: db.prepare('SELECT * FROM pushDevices WHERE userId=?'),
+        insert: db.prepare(`INSERT INTO pushDevices (id, userId, token, createdAt, lastSeenAt) VALUES (?,?,?,?,?)`),
+        upsert: db.prepare(`UPDATE pushDevices SET userId=?, lastSeenAt=? WHERE token=?`),
+        deleteByToken: db.prepare(`DELETE FROM pushDevices WHERE token=?`),
+        deleteByUserId: db.prepare(`DELETE FROM pushDevices WHERE userId=?`),
+    },
+    pushSubscriptions: {
+        byUserAndEvent: db.prepare('SELECT * FROM pushSubscriptions WHERE userId=? AND eventId=?'),
+        byEventEnabled: db.prepare('SELECT * FROM pushSubscriptions WHERE eventId=? AND enabled=1'),
+        insert: db.prepare(`INSERT INTO pushSubscriptions (id, userId, eventId, enabled, createdAt, updatedAt) VALUES (?,?,?,?,?,?)`),
+        setEnabled: db.prepare(`UPDATE pushSubscriptions SET enabled=?, updatedAt=? WHERE userId=? AND eventId=?`),
+        deleteByEventId: db.prepare(`DELETE FROM pushSubscriptions WHERE eventId=?`),
+        deleteByUserId: db.prepare(`DELETE FROM pushSubscriptions WHERE userId=?`),
+    },
+    sheetLinks: {
+        bySpreadsheetId: db.prepare('SELECT * FROM sheetLinks WHERE spreadsheetId=?'),
+        byToken: db.prepare('SELECT * FROM sheetLinks WHERE token=?'),
+        byEventId: db.prepare('SELECT * FROM sheetLinks WHERE eventId=?'),
+        byId: db.prepare('SELECT * FROM sheetLinks WHERE id=?'),
+        insert: db.prepare(`INSERT INTO sheetLinks (id, token, spreadsheetId, sheetName, eventId, createdAt) VALUES (?,?,?,?,?,?)`),
+        update: db.prepare(`UPDATE sheetLinks SET eventId=?, sheetName=? WHERE id=?`),
+    },
+    sheetAccess: {
+        byId: db.prepare('SELECT * FROM sheetAccess WHERE id=?'),
+        byLinkId: db.prepare('SELECT * FROM sheetAccess WHERE sheetLinkId=?'),
+        byUserId: db.prepare('SELECT * FROM sheetAccess WHERE userId=?'),
+        byLinkAndUser: db.prepare('SELECT * FROM sheetAccess WHERE sheetLinkId=? AND userId=?'),
+        countByLinkId: db.prepare('SELECT COUNT(*) as cnt FROM sheetAccess WHERE sheetLinkId=?'),
+        insert: db.prepare(`INSERT INTO sheetAccess (id, userId, sheetLinkId, claimedAt, permission) VALUES (?,?,?,?,?)`),
+        setPermission: db.prepare(`UPDATE sheetAccess SET permission=? WHERE sheetLinkId=? AND userId=?`),
+        deleteById: db.prepare(`DELETE FROM sheetAccess WHERE id=?`),
+        deleteByUserId: db.prepare(`DELETE FROM sheetAccess WHERE userId=?`),
+    },
+    passwordResetTokens: {
+        byTokenHash: db.prepare('SELECT * FROM passwordResetTokens WHERE tokenHash=?'),
+        insert: db.prepare(`INSERT INTO passwordResetTokens (id, userId, tokenHash, expiresAt, createdAt) VALUES (?,?,?,?,?)`),
+        deleteByUserId: db.prepare(`DELETE FROM passwordResetTokens WHERE userId=?`),
+        deleteByTokenHash: db.prepare(`DELETE FROM passwordResetTokens WHERE tokenHash=?`),
+    },
+};
+
+// Dynamic IN clause helper for walletDevices serial lookup
+export function getWalletDevicesBySerials(serialNumbers) {
+    if (!serialNumbers.length) return [];
+    const placeholders = serialNumbers.map(() => '?').join(',');
+    return db.prepare(`SELECT * FROM walletDevices WHERE serialNumber IN (${placeholders})`).all(...serialNumbers);
+}
+
+// Dynamic IN clause helper for tickets by tokens
+export function getTicketsByTokens(tokens) {
+    if (!tokens.length) return [];
+    const placeholders = tokens.map(() => '?').join(',');
+    return db.prepare(`SELECT * FROM tickets WHERE token IN (${placeholders})`).all(...tokens).map(rowToTicket);
+}

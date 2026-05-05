@@ -1,5 +1,5 @@
 import express from 'express';
-import { JSONFilePreset } from 'lowdb/node';
+import { db, stmt, rowToTicket, rowToEvent, rowToUser, getWalletDevicesBySerials, getTicketsByTokens } from './db-sqlite.js';
 import { nanoid } from 'nanoid';
 import QRCode from 'qrcode';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
@@ -191,7 +191,7 @@ async function pushWalletUpdate(serialNumbers) {
     const jwt = getApnsJwt();
     if (!jwt) return;
 
-    const devices = (db.data.walletDevices || []).filter(d => serialNumbers.includes(d.serialNumber));
+    const devices = getWalletDevicesBySerials(serialNumbers);
     if (!devices.length) return;
     const pushTokens = [...new Set(devices.map(d => d.pushToken))];
 
@@ -213,9 +213,7 @@ async function pushWalletUpdate(serialNumbers) {
                     const status = headers[':status'];
                     log('apns', `[device] Push → ${pushToken.slice(0, 8)}… status: ${status}`);
                     if (status === 410) {
-                        db.update(data => {
-                            if (data.walletDevices) data.walletDevices = data.walletDevices.filter(d => d.pushToken !== pushToken);
-                        });
+                        stmt.walletDevices.deleteByPushToken.run(pushToken);
                     }
                     resolve();
                 });
@@ -232,9 +230,9 @@ async function pushAppNotificationToUser(userId, { title, body, data } = {}) {
     const jwt = getApnsJwt();
     if (!jwt) return;
 
-    const user = db.data.users.find(u => u.id === userId);
+    const user = rowToUser(stmt.users.byId.get(userId));
     if (!user) return;
-    const devices = (db.data.pushDevices || []).filter(d => d.userId === user.id);
+    const devices = stmt.pushDevices.byUserId.all(user.id);
     if (!devices.length) return;
 
     const pushTokens = [...new Set(devices.map(d => d.token))];
@@ -268,9 +266,7 @@ async function pushAppNotificationToUser(userId, { title, body, data } = {}) {
                     const status = headers[':status'];
                     log('apns', `[push] App push → ${pushToken.slice(0, 8)}… status: ${status}`);
                     if (status === 410) {
-                        db.update(data => {
-                            if (data.pushDevices) data.pushDevices = data.pushDevices.filter(d => d.token !== pushToken);
-                        });
+                        stmt.pushDevices.deleteByToken.run(pushToken);
                     }
                     resolve();
                 });
@@ -317,9 +313,7 @@ async function pushAppNotificationToTokens(tokens, { title, body, data } = {}) {
                     const status = headers[':status'];
                     log('apns', `[push] App push → ${pushToken.slice(0, 8)}… status: ${status}`);
                     if (status === 410) {
-                        db.update(data => {
-                            if (data.pushDevices) data.pushDevices = data.pushDevices.filter(d => d.token !== pushToken);
-                        });
+                        stmt.pushDevices.deleteByToken.run(pushToken);
                     }
                     resolve();
                 });
@@ -397,18 +391,25 @@ const validateLimiter = rateLimit({
     message: { error: 'Too many scan requests.' }
 });
 
-// Initialize Database
-const defaultData = {
-    users: [],
-    events: [],
-    tickets: [],
-    sheetLinks: [],
-    sheetAccess: [],
-    pushDevices: [],
-    pushSubscriptions: [],
-    passwordResetTokens: []
-};
-const db = await JSONFilePreset(path.resolve(__dirname, 'db.json'), defaultData);
+// Create pass-cache directory for pre-generated .pkpass files
+const passCacheDir = path.resolve(__dirname, 'pass-cache');
+fs.mkdirSync(passCacheDir, { recursive: true });
+
+// Backfill scannerPin on any events that don't have one yet
+{
+    const backfillPin = db.prepare(`UPDATE events SET scannerPin = ? WHERE id = ? AND (scannerPin IS NULL OR scannerPin = '')`);
+    const eventsNoPin = db.prepare(`SELECT id FROM events WHERE scannerPin IS NULL OR scannerPin = ''`).all();
+    if (eventsNoPin.length > 0) {
+        console.log(`[sync] Adding scanner PINs to ${eventsNoPin.length} existing event(s)...`);
+        const tx = db.transaction(() => {
+            for (const e of eventsNoPin) {
+                backfillPin.run(Math.floor(100000 + Math.random() * 900000).toString(), e.id);
+            }
+        });
+        tx();
+        console.log('[OK] Scanner PINs assigned. View them in the dashboard.');
+    }
+}
 
 const uploadsDir = path.resolve(__dirname, 'public', 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
@@ -442,57 +443,6 @@ const upload = multer({
     }
 });
 
-// Ensure arrays exist
-if (!db.data.users) db.data.users = [];
-if (!db.data.events) db.data.events = [];
-if (!db.data.tickets) db.data.tickets = [];
-if (!db.data.sheetLinks) db.data.sheetLinks = [];
-if (!db.data.sheetAccess) db.data.sheetAccess = [];
-if (!db.data.walletDevices) db.data.walletDevices = [];
-if (!db.data.pushDevices) db.data.pushDevices = [];
-if (!db.data.pushSubscriptions) db.data.pushSubscriptions = [];
-if (!db.data.passwordResetTokens) db.data.passwordResetTokens = [];
-
-// Migration: backfill scannerPin on any events that don't have one
-const eventsMissingPin = db.data.events.filter(e => !e.scannerPin);
-if (eventsMissingPin.length > 0) {
-    console.log(`[sync] Adding scanner PINs to ${eventsMissingPin.length} existing event(s)...`);
-    await db.update(data => {
-        data.events.forEach(e => {
-            if (!e.scannerPin) {
-                e.scannerPin = Math.floor(100000 + Math.random() * 900000).toString();
-            }
-        });
-    });
-    console.log('[OK] Scanner PINs assigned. View them in the dashboard.');
-}
-
-// Data Migration: If old structure exists, migrate it
-if (db.data.event && db.data.events.length === 0) {
-    console.log('[sync] Migrating legacy event data...');
-    await db.update(data => {
-        const legacyEvent = {
-            id: 'legacy-event',
-            userId: 'admin',
-            name: data.event.name,
-            time: data.event.time,
-            color: data.event.color,
-            location: {
-                name: 'Main Hall',
-                lat: 37.33182, // Apple HQ default for demo
-                lng: -122.03118
-            }
-        };
-        data.events.push(legacyEvent);
-
-        // Update existing tickets to point to legacy event
-        data.tickets.forEach(t => t.eventId = 'legacy-event');
-
-        // Cleanup old simplified field
-        delete data.event;
-    });
-}
-
 // --- Auth API ---
 // Signup enabled — creates a standard staff account
 app.post('/api/auth/signup', loginLimiter, async (req, res) => {
@@ -505,7 +455,7 @@ app.post('/api/auth/signup', loginLimiter, async (req, res) => {
     const normalizedEmail = email.toLowerCase();
     log('signup', `[note] Attempt — email: ${normalizedEmail}  ip: ${getIP(req)}`);
 
-    const existing = db.data.users.find(u => u.email === normalizedEmail);
+    const existing = rowToUser(stmt.users.byEmail.get(normalizedEmail));
     if (existing) {
         log('signup', `[warn] Already exists — email: ${normalizedEmail}`);
         return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
@@ -521,7 +471,7 @@ app.post('/api/auth/signup', loginLimiter, async (req, res) => {
         verifyToken,
         createdAt: new Date().toISOString()
     };
-    await db.update(data => data.users.push(newUser));
+    stmt.users.insert.run(newUser.id, newUser.email, newUser.password, 0, newUser.verifyToken, newUser.createdAt);
     log('signup', `[OK] Account created (unverified) — email: ${normalizedEmail}  id: ${newUser.id}`);
 
     const verifyURL = `${BASE_URL}/verify-email.html?token=${verifyToken}`;
@@ -564,7 +514,7 @@ app.post('/api/auth/setup-admin', async (req, res) => {
     if (!adminEmail) return res.status(500).json({ error: 'ADMIN_EMAIL not set in .env' });
     if (!password) return res.status(400).json({ error: 'password required' });
 
-    const existing = db.data.users.find(u => u.email === adminEmail);
+    const existing = rowToUser(stmt.users.byEmail.get(adminEmail));
     if (existing) {
         log('setup-admin', `[warn] Admin already exists — email: ${adminEmail}`);
         return res.status(400).json({ error: 'Admin account already exists' });
@@ -572,7 +522,7 @@ app.post('/api/auth/setup-admin', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = { id: nanoid(), email: adminEmail, password: hashedPassword, emailVerified: true, createdAt: new Date().toISOString() };
-    await db.update(data => data.users.push(newUser));
+    stmt.users.insert.run(newUser.id, newUser.email, newUser.password, 1, null, newUser.createdAt);
     req.session.userId = newUser.id;
     log('setup-admin', `[OK] Admin created — email: ${adminEmail}  id: ${newUser.id}`);
     res.json({ success: true, message: `Admin account created for ${adminEmail}` });
@@ -583,7 +533,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     const normalizedEmail = (email || '').toLowerCase();
     log('login', `[login] Attempt — email: ${normalizedEmail}  ip: ${getIP(req)}`);
 
-    const user = db.data.users.find(u => u.email === normalizedEmail);
+    const user = rowToUser(stmt.users.byEmail.get(normalizedEmail));
     if (!user) {
         log('login', `[ERR] No account found — email: ${normalizedEmail}  ip: ${getIP(req)}`);
         return res.status(401).json({ error: 'Invalid credentials' });
@@ -610,13 +560,9 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 app.get('/api/auth/verify/:token', async (req, res) => {
     const { token } = req.params;
     if (!token || token.length < 32) return res.status(400).json({ error: 'Invalid token.' });
-    await db.read();
-    const user = db.data.users.find(u => u.verifyToken === token);
+    const user = rowToUser(stmt.users.byVerifyToken.get(token));
     if (!user) return res.status(400).json({ error: 'This verification link is invalid or has already been used.' });
-    await db.update(data => {
-        const u = data.users.find(u => u.verifyToken === token);
-        if (u) { u.emailVerified = true; delete u.verifyToken; }
-    });
+    stmt.users.setVerified.run(user.id);
     req.session.userId = user.id;
     log('verify', `[OK] Email verified — email: ${user.email}  id: ${user.id}`);
     res.json({ success: true, user: { id: user.id, email: user.email } });
@@ -625,15 +571,11 @@ app.get('/api/auth/verify/:token', async (req, res) => {
 app.post('/api/auth/resend-verify', loginLimiter, async (req, res) => {
     const normalizedEmail = ((req.body.email || '') + '').toLowerCase().trim();
     if (!normalizedEmail) return res.status(400).json({ error: 'Email required.' });
-    await db.read();
-    const user = db.data.users.find(u => u.email === normalizedEmail);
+    const user = rowToUser(stmt.users.byEmail.get(normalizedEmail));
     // Always 200 — don't reveal account existence
     if (!user || user.emailVerified !== false) return res.json({ success: true });
     const verifyToken = crypto.randomBytes(32).toString('hex');
-    await db.update(data => {
-        const u = data.users.find(u => u.email === normalizedEmail);
-        if (u) u.verifyToken = verifyToken;
-    });
+    stmt.users.setVerifyToken.run(verifyToken, normalizedEmail);
     const verifyURL = `${BASE_URL}/verify-email.html?token=${verifyToken}`;
     sendEmail({
         to: normalizedEmail,
@@ -666,7 +608,7 @@ app.post('/api/auth/resend-verify', loginLimiter, async (req, res) => {
 
 app.get('/api/auth/me', (req, res) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user.email === process.env.ADMIN_EMAIL;
     res.json({ user: { id: user.id, email: user.email, isAdmin } });
 });
@@ -675,7 +617,7 @@ app.get('/api/auth/me', (req, res) => {
 
 app.post('/api/auth/logout', (req, res) => {
     const userId = req.session.userId;
-    const user = userId ? db.data.users.find(u => u.id === userId) : null;
+    const user = userId ? rowToUser(stmt.users.byId.get(userId)) : null;
     log('logout', `[logout] User logged out — email: ${user?.email || 'unknown'}  id: ${userId || 'none'}  ip: ${getIP(req)}`);
     req.session.destroy();
     res.json({ success: true });
@@ -683,7 +625,7 @@ app.post('/api/auth/logout', (req, res) => {
 
 app.post('/api/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
     const normalizedEmail = ((req.body.email || '') + '').toLowerCase().trim();
-    const user = db.data.users.find(u => u.email === normalizedEmail);
+    const user = rowToUser(stmt.users.byEmail.get(normalizedEmail));
     // Always respond 200 — don't reveal whether an account exists
     if (!user) {
         log('forgot-password', `[note] No account for email — ip: ${getIP(req)}`);
@@ -692,10 +634,8 @@ app.post('/api/auth/forgot-password', forgotPasswordLimiter, async (req, res) =>
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    await db.update(data => {
-        data.passwordResetTokens = (data.passwordResetTokens || []).filter(t => t.userId !== user.id);
-        data.passwordResetTokens.push({ userId: user.id, tokenHash, expiresAt, createdAt: new Date().toISOString() });
-    });
+    stmt.passwordResetTokens.deleteByUserId.run(user.id);
+    stmt.passwordResetTokens.insert.run(nanoid(10), user.id, tokenHash, expiresAt, new Date().toISOString());
     const resetUrl = `${BASE_URL}/reset-password.html?token=${rawToken}`;
     await sendEmail({
         to: normalizedEmail,
@@ -720,19 +660,16 @@ app.post('/api/auth/reset-password', forgotPasswordLimiter, async (req, res) => 
     if (!token || !password) return res.status(400).json({ error: 'Token and password are required.' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
     const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
-    const entry = (db.data.passwordResetTokens || []).find(t => t.tokenHash === tokenHash);
+    const entry = stmt.passwordResetTokens.byTokenHash.get(tokenHash);
     if (!entry || new Date(entry.expiresAt) < new Date()) {
         log('reset-password', `[ERR] Invalid or expired token  ip: ${getIP(req)}`);
         return res.status(400).json({ error: 'This reset link is invalid or has expired.' });
     }
-    const user = db.data.users.find(u => u.id === entry.userId);
+    const user = rowToUser(stmt.users.byId.get(entry.userId));
     if (!user) return res.status(400).json({ error: 'Account not found.' });
     const hashedPassword = await bcrypt.hash(password, 10);
-    await db.update(data => {
-        const u = data.users.find(u => u.id === entry.userId);
-        if (u) u.password = hashedPassword;
-        data.passwordResetTokens = (data.passwordResetTokens || []).filter(t => t.tokenHash !== tokenHash);
-    });
+    stmt.users.setPassword.run(hashedPassword, entry.userId);
+    stmt.passwordResetTokens.deleteByTokenHash.run(tokenHash);
     log('reset-password', `[OK] Password reset — email: ${user.email}  ip: ${getIP(req)}`);
     res.json({ success: true });
 });
@@ -740,18 +677,18 @@ app.post('/api/auth/reset-password', forgotPasswordLimiter, async (req, res) => 
 app.delete('/api/auth/account', async (req, res) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
     const userId = req.session.userId;
-    const userToDelete = db.data.users.find(u => u.id === userId);
+    const userToDelete = rowToUser(stmt.users.byId.get(userId));
     log('account', `[delete] Account deletion — email: ${userToDelete?.email || 'unknown'}  id: ${userId}  ip: ${getIP(req)}`);
-    await db.update(data => {
-        const eventIds = data.events.filter(e => e.userId === userId).map(e => e.id);
-        data.tickets = data.tickets.filter(t => !eventIds.includes(t.eventId));
-        data.events = data.events.filter(e => e.userId !== userId);
-        data.sheetLinks = (data.sheetLinks || []).filter(l => l.userId !== userId);
-        data.sheetAccess = (data.sheetAccess || []).filter(a => a.userId !== userId);
-        data.pushDevices = (data.pushDevices || []).filter(d => d.userId !== userId);
-        data.pushSubscriptions = (data.pushSubscriptions || []).filter(s => s.userId !== userId);
-        data.users = data.users.filter(u => u.id !== userId);
+    const deleteAccount = db.transaction(() => {
+        const eventIds = stmt.events.byUserId.all(userId).map(e => e.id);
+        for (const eventId of eventIds) stmt.tickets.deleteByEventId.run(eventId);
+        stmt.events.deleteByUserId.run(userId);
+        stmt.sheetAccess.deleteByUserId.run(userId);
+        stmt.pushDevices.deleteByUserId.run(userId);
+        stmt.pushSubscriptions.deleteByUserId.run(userId);
+        stmt.users.deleteById.run(userId);
     });
+    deleteAccount();
     req.session.destroy();
     res.json({ success: true });
 });
@@ -763,7 +700,7 @@ const requireAuth = (req, res, next) => {
 };
 
 app.get('/api/admin/logs', requireAuth, (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     if (!user || user.email !== process.env.ADMIN_EMAIL) return res.status(403).json({ error: 'Forbidden' });
     res.json(logBuffer);
 });
@@ -776,29 +713,19 @@ app.post('/api/push/register', requireAuth, async (req, res) => {
     const userId = req.session.userId;
     const now = new Date().toISOString();
 
-    await db.update(data => {
-        if (!data.pushDevices) data.pushDevices = [];
-        const existing = data.pushDevices.find(d => d.token === token);
-        if (existing) {
-            existing.userId = userId;
-            existing.lastSeenAt = now;
-        } else {
-            data.pushDevices.push({
-                id: nanoid(8),
-                userId,
-                token,
-                createdAt: now,
-                lastSeenAt: now
-            });
-        }
-    });
+    const existing = stmt.pushDevices.byToken.get(token);
+    if (existing) {
+        stmt.pushDevices.upsert.run(userId, now, token);
+    } else {
+        stmt.pushDevices.insert.run(nanoid(8), userId, token, now, now);
+    }
 
     res.json({ success: true });
 });
 
 const requireAdmin = (req, res, next) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     if (!user || user.email !== process.env.ADMIN_EMAIL) {
         return res.status(403).json({ error: 'Admin access required' });
     }
@@ -806,29 +733,29 @@ const requireAdmin = (req, res, next) => {
 };
 
 function userHasEventAccess(userId, eventId) {
-    const user = db.data.users.find(u => u.id === userId);
+    const user = rowToUser(stmt.users.byId.get(userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     if (isAdmin) return true;
-    const event = db.data.events.find(e => e.id === eventId);
+    const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return false;
     if (event.userId === userId) return true;
-    const myAccess = db.data.sheetAccess.filter(a => a.userId === userId);
+    const myAccess = stmt.sheetAccess.byUserId.all(userId);
     return myAccess.some(a => {
-        const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+        const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
         return link && link.eventId === eventId;
     });
 }
 
 function userHasEventFullAccess(userId, eventId) {
-    const user = db.data.users.find(u => u.id === userId);
+    const user = rowToUser(stmt.users.byId.get(userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     if (isAdmin) return true;
-    const event = db.data.events.find(e => e.id === eventId);
+    const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return false;
     if (event.userId === userId) return true;
-    const myAccess = db.data.sheetAccess.filter(a => a.userId === userId);
+    const myAccess = stmt.sheetAccess.byUserId.all(userId);
     return myAccess.some(a => {
-        const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+        const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
         return link && link.eventId === eventId && a.permission === 'full';
     });
 }
@@ -838,8 +765,8 @@ app.get('/api/event/:id/push-subscription', requireAuth, (req, res) => {
     if (!userHasEventAccess(req.session.userId, eventId)) {
         return res.status(403).json({ error: 'Not authorized' });
     }
-    const sub = (db.data.pushSubscriptions || []).find(s => s.userId === req.session.userId && s.eventId === eventId);
-    res.json({ enabled: !!sub?.enabled });
+    const sub = stmt.pushSubscriptions.byUserAndEvent.get(req.session.userId, eventId);
+    res.json({ enabled: !!(sub?.enabled) });
 });
 
 app.patch('/api/event/:id/push-subscription', requireAuth, async (req, res) => {
@@ -848,23 +775,13 @@ app.patch('/api/event/:id/push-subscription', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Not authorized' });
     }
     const enabled = !!req.body?.enabled;
-    await db.update(data => {
-        if (!data.pushSubscriptions) data.pushSubscriptions = [];
-        const sub = data.pushSubscriptions.find(s => s.userId === req.session.userId && s.eventId === eventId);
-        if (sub) {
-            sub.enabled = enabled;
-            sub.updatedAt = new Date().toISOString();
-        } else {
-            data.pushSubscriptions.push({
-                id: nanoid(8),
-                userId: req.session.userId,
-                eventId,
-                enabled,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-            });
-        }
-    });
+    const now = new Date().toISOString();
+    const sub = stmt.pushSubscriptions.byUserAndEvent.get(req.session.userId, eventId);
+    if (sub) {
+        stmt.pushSubscriptions.setEnabled.run(enabled ? 1 : 0, now, req.session.userId, eventId);
+    } else {
+        stmt.pushSubscriptions.insert.run(nanoid(8), req.session.userId, eventId, enabled ? 1 : 0, now, now);
+    }
     res.json({ success: true, enabled });
 });
 
@@ -873,20 +790,14 @@ app.get('/api/event/:id/push-devices', requireAuth, (req, res) => {
     if (!userHasEventFullAccess(req.session.userId, eventId)) {
         return res.status(403).json({ error: 'Not authorized' });
     }
-    const subs = (db.data.pushSubscriptions || []).filter(s => s.eventId === eventId && s.enabled);
+    const subs = stmt.pushSubscriptions.byEventEnabled.all(eventId);
     const userIds = new Set(subs.map(s => s.userId));
-    const devices = (db.data.pushDevices || [])
-        .filter(d => userIds.has(d.userId))
-        .map(d => {
-            const u = db.data.users.find(u => u.id === d.userId);
-            return {
-                id: d.id,
-                token: d.token,
-                userId: d.userId,
-                email: u?.email || 'unknown',
-                lastSeenAt: d.lastSeenAt || d.createdAt
-            };
-        });
+    const allDevices = db.prepare(`SELECT * FROM pushDevices WHERE userId IN (${[...userIds].map(() => '?').join(',') || "''"})`)
+        .all(...userIds);
+    const devices = allDevices.map(d => {
+        const u = rowToUser(stmt.users.byId.get(d.userId));
+        return { id: d.id, token: d.token, userId: d.userId, email: u?.email || 'unknown', lastSeenAt: d.lastSeenAt || d.createdAt };
+    });
     res.json(devices);
 });
 
@@ -895,7 +806,7 @@ app.post('/api/event/:id/push-send', requireAuth, async (req, res) => {
     if (!userHasEventFullAccess(req.session.userId, eventId)) {
         return res.status(403).json({ error: 'Not authorized' });
     }
-    const event = db.data.events.find(e => e.id === eventId);
+    const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     const title = String(req.body?.title || '').trim() || `Update • ${event.name}`;
@@ -909,9 +820,11 @@ app.post('/api/event/:id/push-send', requireAuth, async (req, res) => {
         return res.json({ success: true, sent: tokens.length });
     }
 
-    const subs = (db.data.pushSubscriptions || []).filter(s => s.eventId === eventId && s.enabled);
+    const subs = stmt.pushSubscriptions.byEventEnabled.all(eventId);
     const userIds = new Set(subs.map(s => s.userId));
-    const tokens = (db.data.pushDevices || []).filter(d => userIds.has(d.userId)).map(d => d.token);
+    const tokens = userIds.size
+        ? db.prepare(`SELECT token FROM pushDevices WHERE userId IN (${[...userIds].map(() => '?').join(',')})`).all(...userIds).map(d => d.token)
+        : [];
     await pushAppNotificationToTokens(tokens, { title, body });
     res.json({ success: true, sent: tokens.length });
 });
@@ -923,13 +836,10 @@ app.get('/api/track/open/:registrationId', async (req, res) => {
     res.send(TRANSPARENT_GIF);
     // Record after responding so we don't slow the email client
     const { registrationId } = req.params;
-    const tickets = db.data.tickets.filter(t => t.registrationId === registrationId);
+    const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
     if (tickets.length && !tickets[0].email_opened_at) {
         const now = new Date().toISOString();
-        await db.update(data => {
-            data.tickets.filter(t => t.registrationId === registrationId)
-                .forEach(t => { if (!t.email_opened_at) t.email_opened_at = now; });
-        });
+        stmt.tickets.setEmailOpened.run(now, registrationId);
         log('email-open', `[opened] Opened — regId: ${registrationId}  name: ${tickets[0].name}`);
     }
 });
@@ -938,7 +848,7 @@ app.get('/api/track/open/:registrationId', async (req, res) => {
 app.get('/admin.html', (req, res) => res.redirect('/dashboard.html'));
 app.get('/dashboard.html', (req, res, next) => {
     if (!req.session.userId) return res.redirect('/login.html');
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     if (!user || user.email !== process.env.ADMIN_EMAIL) return res.redirect('/login.html');
     next();
 });
@@ -958,7 +868,7 @@ app.post('/api/register_disabled', async (req, res) => {
         return res.status(400).json({ error: 'Name, email and eventId are required' });
     }
 
-    const event = db.data.events.find(e => e.id === eventId);
+    const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     const token = nanoid(12);
@@ -973,7 +883,7 @@ app.post('/api/register_disabled', async (req, res) => {
     };
 
     try {
-        await db.update(({ tickets }) => tickets.push(newTicket));
+        stmt.tickets.insert.run(newTicket.id, newTicket.eventId, newTicket.token, null, newTicket.name, null, null, newTicket.email, null, null, null, null, null, newTicket.created_at, null, null);
 
         // Generate QR Data URL for email
         const qrContent = `ticket:${token}`;
@@ -1027,7 +937,7 @@ app.post('/api/register-bulk', async (req, res) => {
 
     log('bulk-register', `[list] ${isResend ? 'Resend' : 'New'} registration — email: ${email}  name: ${firstName} ${lastName}  tickets: ${ticketCount}  eventId: ${eventId}  ip: ${getIP(req)}`);
 
-    const event = db.data.events.find(e => e.id === eventId);
+    const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     const count = parseInt(ticketCount, 10);
@@ -1037,7 +947,7 @@ app.post('/api/register-bulk', async (req, res) => {
 
     // Capacity check — only enforced for new registrations, not resends
     if (!isResend && event.capacity) {
-        const registered = db.data.tickets.filter(t => t.eventId === event.id).length;
+        const registered = stmt.tickets.countByEventId.get(event.id).cnt;
         if (registered + count > event.capacity) {
             return res.status(409).json({ error: `Event is at capacity (${event.capacity} tickets max, ${registered} registered)` });
         }
@@ -1053,9 +963,10 @@ app.post('/api/register-bulk', async (req, res) => {
     let existingTickets = [];
     if (isResend && Array.isArray(req.body.existingTokens) && req.body.existingTokens.length > 0) {
         const tokenSet = new Set(req.body.existingTokens);
-        const matched = db.data.tickets.find(t => tokenSet.has(t.token));
+        const placeholders = [...tokenSet].map(() => '?').join(',');
+        const matched = rowToTicket(db.prepare(`SELECT * FROM tickets WHERE token IN (${placeholders}) LIMIT 1`).get(...tokenSet));
         if (matched) {
-            existingTickets = db.data.tickets.filter(t => t.registrationId === matched.registrationId);
+            existingTickets = stmt.tickets.byRegistrationId.all(matched.registrationId).map(rowToTicket);
         }
     } else if (!isResend) {
         // New row — no lookup needed, always create fresh
@@ -1084,35 +995,24 @@ app.post('/api/register-bulk', async (req, res) => {
                 }
             });
 
+            const cfJson = JSON.stringify(customFields);
             if (count > existingCount) {
                 // Add more tickets with same registrationId
                 const newTickets = Array.from({ length: count - existingCount }, () => ({
-                    id: nanoid(8),
-                    token: nanoid(12),
-                    registrationId,
-                    eventId,
-                    name: fullName,
-                    firstName,
-                    lastName,
-                    email,
-                    customFields,
-                    created_at: new Date().toISOString(),
-                    used_at: null
+                    id: nanoid(8), token: nanoid(12), registrationId, eventId,
+                    name: fullName, firstName, lastName, email, customFields,
+                    created_at: new Date().toISOString(), used_at: null
                 }));
-                await db.update(({ tickets }) => {
-                    // Update existing
-                    existingTickets.forEach(t => {
-                        const dbTicket = tickets.find(dt => dt.id === t.id);
-                        if (dbTicket) {
-                            dbTicket.name = fullName;
-                            dbTicket.firstName = firstName;
-                            dbTicket.lastName = lastName;
-                            dbTicket.customFields = customFields;
-                        }
-                    });
-                    // Add new
-                    newTickets.forEach(t => tickets.push(t));
+                const bulkUpdate = db.transaction(() => {
+                    for (const t of existingTickets) {
+                        stmt.tickets.updateInfo.run(fullName, firstName, lastName, email, cfJson, t.id);
+                        t.name = fullName; t.firstName = firstName; t.lastName = lastName; t.customFields = customFields;
+                    }
+                    for (const t of newTickets) {
+                        stmt.tickets.insert.run(t.id, t.eventId, t.token, t.registrationId, t.name, t.firstName, t.lastName, t.email, cfJson, null, null, null, null, t.created_at, null, null);
+                    }
                 });
+                bulkUpdate();
                 ticketsToSend = [...existingTickets, ...newTickets];
                 countChanged = { from: existingCount, to: count };
             } else if (count < existingCount) {
@@ -1121,66 +1021,50 @@ app.post('/api/register-bulk', async (req, res) => {
                 const used = existingTickets.filter(t => t.used_at);
                 const toRemove = [...unused, ...used].slice(0, existingCount - count).map(t => t.id);
                 const toKeep = existingTickets.filter(t => !toRemove.includes(t.id));
-                await db.update(({ tickets }) => {
-                    // Remove extras
-                    toRemove.forEach(id => {
-                        const idx = tickets.findIndex(t => t.id === id);
-                        if (idx !== -1) tickets.splice(idx, 1);
-                    });
-                    // Update remaining
-                    toKeep.forEach(t => {
-                        const dbTicket = tickets.find(dt => dt.id === t.id);
-                        if (dbTicket) {
-                            dbTicket.name = fullName;
-                            dbTicket.firstName = firstName;
-                            dbTicket.lastName = lastName;
-                            dbTicket.customFields = customFields;
-                        }
-                    });
+                const bulkUpdate = db.transaction(() => {
+                    for (const id of toRemove) stmt.tickets.deleteById.run(id);
+                    for (const t of toKeep) {
+                        stmt.tickets.updateInfo.run(fullName, firstName, lastName, email, cfJson, t.id);
+                        t.name = fullName; t.firstName = firstName; t.lastName = lastName; t.customFields = customFields;
+                    }
                 });
+                bulkUpdate();
                 ticketsToSend = toKeep;
                 countChanged = { from: existingCount, to: count };
             } else {
                 // Same count — just update name/customFields
                 ticketsToSend = existingTickets;
-                await db.update(({ tickets }) => {
-                    ticketsToSend.forEach(t => {
-                        const dbTicket = tickets.find(dt => dt.id === t.id);
-                        if (dbTicket) {
-                            dbTicket.name = fullName;
-                            dbTicket.firstName = firstName;
-                            dbTicket.lastName = lastName;
-                            dbTicket.email = email;
-                            dbTicket.customFields = customFields;
-                        }
-                    });
+                const bulkUpdate = db.transaction(() => {
+                    for (const t of ticketsToSend) {
+                        stmt.tickets.updateInfo.run(fullName, firstName, lastName, email, cfJson, t.id);
+                        t.name = fullName; t.firstName = firstName; t.lastName = lastName; t.email = email; t.customFields = customFields;
+                    }
                 });
+                bulkUpdate();
             }
         } else {
             // New row (or resend with no existing tickets) — always create fresh tickets
             const registrationId = nanoid(10);
             ticketsToSend = Array.from({ length: count }, () => ({
-                id: nanoid(8),
-                token: nanoid(12),
-                registrationId,
-                eventId,
-                name: fullName,
-                firstName,
-                lastName,
-                email,
-                customFields,
-                created_at: new Date().toISOString(),
-                used_at: null
+                id: nanoid(8), token: nanoid(12), registrationId, eventId,
+                name: fullName, firstName, lastName, email, customFields,
+                created_at: new Date().toISOString(), used_at: null
             }));
-            await db.update(({ tickets }) => ticketsToSend.forEach(t => tickets.push(t)));
+            const cfJson = JSON.stringify(customFields);
+            const insertAll = db.transaction(() => {
+                for (const t of ticketsToSend) {
+                    stmt.tickets.insert.run(t.id, t.eventId, t.token, t.registrationId, t.name, t.firstName, t.lastName, t.email, cfJson, null, null, null, null, t.created_at, null, null);
+                }
+            });
+            insertAll();
         }
 
         if (!isResend) {
             const actualCount = ticketsToSend.length;
-            const subs = (db.data.pushSubscriptions || []).filter(s => s.eventId === event.id && s.enabled);
+            const subs = stmt.pushSubscriptions.byEventEnabled.all(event.id);
             const userIds = [...new Set(subs.map(s => s.userId))];
-            userIds.forEach(userId => {
-                pushAppNotificationToUser(userId, {
+            userIds.forEach(uid => {
+                pushAppNotificationToUser(uid, {
                     title: 'New registration',
                     body: `${event.name} — ${fullName} • ${actualCount} ticket${actualCount === 1 ? '' : 's'}`
                 }).catch(() => { });
@@ -1211,7 +1095,7 @@ app.post('/api/register-bulk', async (req, res) => {
             await sendEmail({
                 to: email,
                 fromName: `Tickets - ${event.name}`,
-                replyTo: db.data.users.find(u => u.id === event.userId)?.email,
+                replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
                 subject: isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`,
                 html: buildTicketEmailHtml({
                     firstName,
@@ -1262,7 +1146,7 @@ app.post('/api/sheet/update-event', async (req, res) => {
 
     if (!eventId) return res.status(400).json({ error: 'eventId is required' });
 
-    const event = db.data.events.find(e => e.id === eventId);
+    const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     try {
@@ -1270,6 +1154,7 @@ app.post('/api/sheet/update-event', async (req, res) => {
         if (time) event.time = time;
         if (endTime !== undefined) event.endTime = endTime || null;
         if (color) event.color = color;
+        if (!event.location) event.location = {};
         if (locationName) event.location.name = locationName;
         if (address) event.location.address = address;
         if (lat != null && !isNaN(parseFloat(lat))) event.location.lat = parseFloat(lat);
@@ -1280,7 +1165,8 @@ app.post('/api/sheet/update-event', async (req, res) => {
             catch (imgErr) { console.warn('Image update failed:', imgErr.message); }
         }
 
-        await db.write();
+        stmt.events.setSheetFields.run(event.name, event.time, event.endTime, event.color, JSON.stringify(event.location), event.id);
+        if (driveFileId) stmt.events.setImageUrl.run(event.imageUrl, event.id);
         res.json({ success: true, event });
     } catch (error) {
         console.error('Update event error:', error);
@@ -1298,7 +1184,7 @@ app.post('/api/sheet/create-event', async (req, res) => {
 
     // Find the owner account so events appear in the dashboard
     const ownerEmail = process.env.SHEET_USER_EMAIL;
-    const owner = ownerEmail ? db.data.users.find(u => u.email === ownerEmail) : null;
+    const owner = ownerEmail ? rowToUser(stmt.users.byEmail.get(ownerEmail)) : null;
     const userId = owner ? owner.id : 'sheet';
 
     let imageUrl = null;
@@ -1315,7 +1201,7 @@ app.post('/api/sheet/create-event', async (req, res) => {
         endTime: endTime || null,
         color: color || 'rgb(99, 102, 241)',
         imageUrl,
-        scannerPin: Math.floor(100000 + Math.random() * 900000).toString(), // 6-digit PIN
+        scannerPin: Math.floor(100000 + Math.random() * 900000).toString(),
         location: {
             name: locationName || address || 'Venue',
             address: address || '',
@@ -1324,7 +1210,7 @@ app.post('/api/sheet/create-event', async (req, res) => {
         }
     };
 
-    await db.update(data => data.events.push(newEvent));
+    stmt.events.insert.run(newEvent.id, newEvent.userId, newEvent.name, newEvent.time, newEvent.endTime, newEvent.color, newEvent.imageUrl, newEvent.scannerPin, JSON.stringify(newEvent.location), 0, null, null, 0, null, 24, null, null, new Date().toISOString());
 
     res.json({ success: true, eventId: newEvent.id, event: newEvent });
 });
@@ -1347,8 +1233,8 @@ app.post('/api/ticket-status', (req, res) => {
         return res.json(cached.result);
     }
 
-    // Build index for O(1) lookups instead of scanning the full array per token
-    const byToken = new Map(db.data.tickets.map(t => [t.token, t]));
+    const fetched = getTicketsByTokens(trimmed);
+    const byToken = new Map(fetched.map(t => [t.token, t]));
     const result = trimmed.map(token => {
         const ticket = byToken.get(token);
         if (!ticket) return { token, status: 'not found' };
@@ -1360,20 +1246,21 @@ app.post('/api/ticket-status', (req, res) => {
 });
 
 app.get('/api/events', requireAuth, (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (isAdmin) return res.json(db.data.events);
+    if (isAdmin) return res.json(stmt.events.all.all().map(rowToEvent));
 
-    // Events the user created + events they have sheetAccess to
-    const myAccess = db.data.sheetAccess.filter(a => a.userId === req.session.userId);
+    const myAccess = stmt.sheetAccess.byUserId.all(req.session.userId);
     const linkedEventIds = new Set(
         myAccess.map(a => {
-            const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+            const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
             return link ? link.eventId : null;
         }).filter(Boolean)
     );
-    const userEvents = db.data.events.filter(e => e.userId === req.session.userId || linkedEventIds.has(e.id));
-    res.json(userEvents);
+    const userEvents = stmt.events.byUserId.all(req.session.userId).map(rowToEvent);
+    const linkedEvents = [...linkedEventIds].map(id => rowToEvent(stmt.events.byId.get(id))).filter(Boolean);
+    const seen = new Set(userEvents.map(e => e.id));
+    res.json([...userEvents, ...linkedEvents.filter(e => !seen.has(e.id))]);
 });
 
 app.post('/api/events', requireAuth, async (req, res) => {
@@ -1393,36 +1280,40 @@ app.post('/api/events', requireAuth, async (req, res) => {
         location: { name: locationName ? locationName.trim() : '', address: '', lat: 0, lng: 0 },
     };
 
-    await db.update(data => data.events.push(newEvent));
+    stmt.events.insert.run(newEvent.id, newEvent.userId, newEvent.name, newEvent.time, newEvent.endTime, newEvent.color, newEvent.imageUrl, newEvent.scannerPin, JSON.stringify(newEvent.location), 0, null, null, 0, null, 24, null, null, new Date().toISOString());
     res.json({ success: true, eventId: newEvent.id, event: newEvent });
 });
 
 app.get('/api/events/counts', requireAuth, (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     let userEvents;
     if (isAdmin) {
-        userEvents = db.data.events;
+        userEvents = stmt.events.all.all().map(rowToEvent);
     } else {
-        const myAccess = db.data.sheetAccess.filter(a => a.userId === req.session.userId);
+        const myAccess = stmt.sheetAccess.byUserId.all(req.session.userId);
         const linkedEventIds = new Set(
             myAccess.map(a => {
-                const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+                const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
                 return link ? link.eventId : null;
             }).filter(Boolean)
         );
-        userEvents = db.data.events.filter(e => e.userId === req.session.userId || linkedEventIds.has(e.id));
+        const owned = stmt.events.byUserId.all(req.session.userId).map(rowToEvent);
+        const linked = [...linkedEventIds].map(id => rowToEvent(stmt.events.byId.get(id))).filter(Boolean);
+        const seen = new Set(owned.map(e => e.id));
+        userEvents = [...owned, ...linked.filter(e => !seen.has(e.id))];
     }
     const counts = {};
     userEvents.forEach(e => {
-        const tickets = db.data.tickets.filter(t => t.eventId === e.id);
-        counts[e.id] = { total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
+        const row = stmt.tickets.countByEventId.get(e.id);
+        const tickets = stmt.tickets.byEventId.all(e.id);
+        counts[e.id] = { total: row.cnt, scanned: tickets.filter(t => t.used_at).length };
     });
     res.json(counts);
 });
 
 app.get('/api/event/:id', (req, res) => {
-    const event = db.data.events.find(e => e.id === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     res.json(event);
 });
@@ -1459,16 +1350,16 @@ app.post('/api/events', requireAuth, upload.single('image'), async (req, res) =>
             lng: parseFloat(lng) || -122.03118
         }
     };
-    await db.update(data => data.events.push(newEvent));
+    stmt.events.insert.run(newEvent.id, newEvent.userId, newEvent.name, newEvent.time, newEvent.endTime, newEvent.color, newEvent.imageUrl, newEvent.scannerPin, JSON.stringify(newEvent.location), 0, newEvent.capacity || null, null, 0, null, 24, null, null, new Date().toISOString());
     res.json(newEvent);
 });
 
 // Edit event details
 app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) => {
-    const event = db.data.events.find(e => e.id === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     if (!isAdmin && event.userId !== req.session.userId) {
         return res.status(403).json({ error: 'Not authorized' });
@@ -1491,26 +1382,21 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
 
     const allowReentry = req.body.allowReentry === 'true';
     const capacityRaw = req.body.capacity !== undefined ? req.body.capacity : undefined;
+    const newName = name || event.name;
+    const newTime = time || event.time;
+    const newEndTime = endTime !== undefined ? (endTime || null) : event.endTime;
+    const newColor = color || event.color;
+    const newCapacity = capacityRaw !== undefined ? (parseInt(capacityRaw) || null) : event.capacity;
+    const newLocation = {
+        name: locationName || event.location?.name || 'Venue',
+        address: locationAddress || event.location?.address || '',
+        lat: parseFloat(lat) || event.location?.lat || 37.33182,
+        lng: parseFloat(lng) || event.location?.lng || -122.03118,
+    };
 
-    await db.update(data => {
-        const ev = data.events.find(e => e.id === req.params.id);
-        if (!ev) return;
-        if (name) ev.name = name;
-        if (time) ev.time = time;
-        ev.endTime = endTime || null;
-        if (color) ev.color = color;
-        ev.imageUrl = imageUrl;
-        ev.allowReentry = allowReentry;
-        if (capacityRaw !== undefined) ev.capacity = parseInt(capacityRaw) || null;
-        ev.location = {
-            name: locationName || ev.location?.name || 'Venue',
-            address: locationAddress || ev.location?.address || '',
-            lat: parseFloat(lat) || ev.location?.lat || 37.33182,
-            lng: parseFloat(lng) || ev.location?.lng || -122.03118,
-        };
-    });
+    stmt.events.update.run(newName, newTime, newEndTime, newColor, imageUrl, allowReentry ? 1 : 0, newCapacity, JSON.stringify(newLocation), req.params.id);
 
-    const updated = db.data.events.find(e => e.id === req.params.id);
+    const updated = rowToEvent(stmt.events.byId.get(req.params.id));
     log('event-edit', `[edit] Updated event — name: ${updated.name}  id: ${updated.id}  by: ${req.session.userId}`);
     res.json(updated);
 });
@@ -1520,60 +1406,58 @@ app.patch('/api/event/:id', requireAuth, async (req, res) => {
     const { customFields } = req.body;
     if (!Array.isArray(customFields)) return res.status(400).json({ error: 'customFields must be an array of strings' });
 
-    const event = db.data.events.find(e => e.id === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     if (!isAdmin && event.userId !== req.session.userId) {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
     const cleaned = [...new Set(customFields.map(f => String(f).trim()).filter(Boolean))];
-    await db.update(data => {
-        const ev = data.events.find(e => e.id === req.params.id);
-        if (ev) ev.customFields = cleaned;
-    });
+    stmt.events.setCustomFields.run(JSON.stringify(cleaned), req.params.id);
 
     log('event-settings', `[edit] Updated customFields — event: ${event.name}  fields: [${cleaned.join(', ')}]  by: ${req.session.userId}`);
     res.json({ success: true, customFields: cleaned });
 });
 
 app.get('/api/event/:id/tickets', requireAuth, (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
 
-    // Check if user has sheetAccess to this event
     let hasSheetAccess = false;
     if (!isAdmin) {
-        const myAccess = db.data.sheetAccess.filter(a => a.userId === req.session.userId);
+        const myAccess = stmt.sheetAccess.byUserId.all(req.session.userId);
         hasSheetAccess = myAccess.some(a => {
-            const link = db.data.sheetLinks.find(l => l.id === a.sheetLinkId);
+            const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
             return link && link.eventId === req.params.id;
         });
     }
 
-    const event = db.data.events.find(e => e.id === req.params.id && (isAdmin || e.userId === req.session.userId || hasSheetAccess));
-    if (!event) return res.status(401).json({ error: 'Unauthorized or not found' });
-    const tickets = db.data.tickets.filter(t => t.eventId === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event || (!isAdmin && event.userId !== req.session.userId && !hasSheetAccess)) {
+        return res.status(401).json({ error: 'Unauthorized or not found' });
+    }
+    const tickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
     res.json(tickets);
 });
 
 // Delete an event
 app.delete('/api/event/:id', requireAuth, async (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const eventIndex = db.data.events.findIndex(e => e.id === req.params.id && (isAdmin || e.userId === req.session.userId));
-    if (eventIndex === -1) return res.status(404).json({ error: 'Event not found' });
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event || (!isAdmin && event.userId !== req.session.userId)) {
+        return res.status(404).json({ error: 'Event not found' });
+    }
 
-    // Remove the event
-    db.data.events.splice(eventIndex, 1);
-    db.data.pushSubscriptions = (db.data.pushSubscriptions || []).filter(s => s.eventId !== req.params.id);
-
-    // Clean up associated tickets
-    db.data.tickets = db.data.tickets.filter(t => t.eventId !== req.params.id);
-
-    await db.write();
+    const deleteEvent = db.transaction(() => {
+        stmt.tickets.deleteByEventId.run(req.params.id);
+        stmt.pushSubscriptions.deleteByEventId.run(req.params.id);
+        stmt.events.deleteById.run(req.params.id);
+    });
+    deleteEvent();
     res.json({ success: true });
 });
 
@@ -1581,14 +1465,20 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
 app.delete('/api/events/bulk', requireAuth, async (req, res) => {
     const { eventIds } = req.body;
     if (!Array.isArray(eventIds) || !eventIds.length) return res.status(400).json({ error: 'eventIds required' });
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const allEvents = stmt.events.all.all().map(rowToEvent);
     const allowed = new Set(
-        db.data.events.filter(e => eventIds.includes(e.id) && (isAdmin || e.userId === req.session.userId)).map(e => e.id)
+        allEvents.filter(e => eventIds.includes(e.id) && (isAdmin || e.userId === req.session.userId)).map(e => e.id)
     );
-    db.data.events = db.data.events.filter(e => !allowed.has(e.id));
-    db.data.tickets = db.data.tickets.filter(t => !allowed.has(t.eventId));
-    await db.write();
+    const bulkDelete = db.transaction(() => {
+        for (const eventId of allowed) {
+            stmt.tickets.deleteByEventId.run(eventId);
+            stmt.pushSubscriptions.deleteByEventId.run(eventId);
+            stmt.events.deleteById.run(eventId);
+        }
+    });
+    bulkDelete();
     res.json({ success: true, deleted: allowed.size });
 });
 
@@ -1596,27 +1486,39 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
 app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
     const { registrationIds } = req.body;
     if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const before = db.data.tickets.length;
 
-    const eventIds = new Set(db.data.tickets.filter(t => registrationIds.includes(t.registrationId)).map(t => t.eventId));
-    let allowedRegistrationIds = new Set();
+    const allowedRegistrationIds = new Set();
+    const eventIdsForRegs = new Set();
+    for (const regId of registrationIds) {
+        const tickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
+        for (const t of tickets) eventIdsForRegs.add(t.eventId);
+    }
 
-    for (const eventId of eventIds) {
-        const event = db.data.events.find(e => e.id === eventId);
+    for (const eventId of eventIdsForRegs) {
+        const event = rowToEvent(stmt.events.byId.get(eventId));
         if (!event) continue;
-        const link = db.data.sheetLinks.find(l => l.eventId === eventId);
-        const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+        const link = stmt.sheetLinks.byEventId.get(eventId);
+        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
         if (isAdmin || event.userId === req.session.userId || (access && access.permission === 'full')) {
-            db.data.tickets.filter(t => registrationIds.includes(t.registrationId) && t.eventId === eventId)
-                .forEach(t => allowedRegistrationIds.add(t.registrationId));
+            for (const regId of registrationIds) {
+                const tickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket).filter(t => t.eventId === eventId);
+                for (const t of tickets) allowedRegistrationIds.add(t.registrationId);
+            }
         }
     }
 
-    db.data.tickets = db.data.tickets.filter(t => !allowedRegistrationIds.has(t.registrationId));
-    await db.write();
-    res.json({ success: true, deleted: before - db.data.tickets.length });
+    let deleted = 0;
+    const bulkDel = db.transaction(() => {
+        for (const regId of allowedRegistrationIds) {
+            const tickets = stmt.tickets.byRegistrationId.all(regId);
+            deleted += tickets.length;
+            for (const t of tickets) stmt.tickets.deleteById.run(t.id);
+        }
+    });
+    bulkDel();
+    res.json({ success: true, deleted });
 });
 
 // Create ticket manually
@@ -1624,13 +1526,13 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     const { name, email, ticketCount, customFields = {} } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
 
-    const event = db.data.events.find(e => e.id === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
-    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
 
     if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
         return res.status(403).json({ error: 'Not authorized to create tickets' });
@@ -1639,34 +1541,39 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     const count = Math.max(1, parseInt(ticketCount) || 1);
 
     if (event.capacity) {
-        const registered = db.data.tickets.filter(t => t.eventId === event.id).length;
+        const registered = stmt.tickets.countByEventId.get(event.id).cnt;
         if (registered + count > event.capacity) {
             return res.status(409).json({ error: `Event is at capacity (${event.capacity} tickets max, ${registered} registered)` });
         }
     }
     const registrationId = nanoid(10);
     const newTickets = [];
+    const now = new Date().toISOString();
 
-    for (let i = 0; i < count; i++) {
-        newTickets.push({
-            id: nanoid(8),
-            token: nanoid(12),
-            eventId: event.id,
-            registrationId,
-            name,
-            firstName: name.split(' ')[0],
-            lastName: name.split(' ').slice(1).join(' '),
-            email,
-            customFields: customFields || {},
-            created_at: new Date().toISOString(),
-            used_at: null
-        });
-    }
+    const insertTickets = db.transaction(() => {
+        for (let i = 0; i < count; i++) {
+            const t = {
+                id: nanoid(8),
+                token: nanoid(12),
+                eventId: event.id,
+                registrationId,
+                name,
+                firstName: name.split(' ')[0],
+                lastName: name.split(' ').slice(1).join(' '),
+                email,
+                customFields: customFields || {},
+                created_at: now,
+                used_at: null
+            };
+            stmt.tickets.insert.run(t.id, t.eventId, t.token, t.registrationId, t.name, t.firstName, t.lastName, t.email, JSON.stringify(t.customFields), null, null, null, null, t.created_at, null, null);
+            newTickets.push(t);
+        }
+    });
+    insertTickets();
 
-    await db.update(data => data.tickets.push(...newTickets));
     log('ticket-create', `[ticket] Created ${newTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${registrationId}  by: ${req.session.userId}`);
 
-    const subs = (db.data.pushSubscriptions || []).filter(s => s.eventId === event.id && s.enabled);
+    const subs = stmt.pushSubscriptions.byEventEnabled.all(event.id);
     const userIds = [...new Set(subs.map(s => s.userId))];
     userIds.forEach(userId => {
         pushAppNotificationToUser(userId, {
@@ -1678,11 +1585,12 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const actualCount = newTickets.length;
         const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
+        const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
 
         await sendEmail({
             to: email,
             fromName: `Tickets - ${event.name}`,
-            replyTo: db.data.users.find(u => u.id === event.userId)?.email,
+            replyTo: eventOwner?.email,
             subject: `Your ${ticketLabel} for ${event.name}`,
             html: buildTicketEmailHtml({
                 firstName: newTickets[0].firstName,
@@ -1704,48 +1612,39 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
     const { name, email, customFields = {}, noEmail } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
 
-    let updatedTickets = [];
-    let event = null;
-    await db.update(data => {
-        const queryTicket = data.tickets.find(t => t.id === req.params.id);
-        if (!queryTicket) throw new Error('Not found');
-        event = data.events.find(e => e.id === queryTicket.eventId);
-        if (!event) throw new Error('Event not found');
+    const queryTicket = rowToTicket(stmt.tickets.byId.get(req.params.id));
+    if (!queryTicket) return res.status(404).json({ error: 'Not found' });
+    const event = rowToEvent(stmt.events.byId.get(queryTicket.eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
 
-        const user = data.users.find(u => u.id === req.session.userId);
-        const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-        const link = data.sheetLinks.find(l => l.eventId === event.id);
-        const access = link ? data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
+    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+        return res.status(403).json({ error: 'Not authorized to edit tickets' });
+    }
 
-        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
-            throw new Error('Forbidden');
+    const groupTickets = stmt.tickets.byRegistrationId.all(queryTicket.registrationId).map(rowToTicket);
+    const firstName = name.split(' ')[0];
+    const lastName = name.split(' ').slice(1).join(' ');
+    const updateGroup = db.transaction(() => {
+        for (const t of groupTickets) {
+            stmt.tickets.updateInfo.run(name, firstName, lastName, email, JSON.stringify(customFields), t.id);
         }
-
-        const groupTickets = data.tickets.filter(t => t.registrationId === queryTicket.registrationId);
-        groupTickets.forEach(ticket => {
-            ticket.name = name;
-            ticket.firstName = name.split(' ')[0];
-            ticket.lastName = name.split(' ').slice(1).join(' ');
-            ticket.email = email;
-            ticket.customFields = customFields;
-            updatedTickets.push(ticket);
-        });
-    }).catch(e => {
-        if (e.message === 'Forbidden') res.status(403).json({ error: 'Not authorized to edit tickets' });
-        else res.status(404).json({ error: e.message });
     });
+    updateGroup();
 
-    if (!updatedTickets.length) return; // already sent response via catch
+    const updatedTickets = groupTickets.map(t => ({ ...t, name, firstName, lastName, email, customFields }));
 
     log('ticket-edit', `[edit] Edited ${updatedTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${updatedTickets[0].registrationId}  by: ${req.session.userId}`);
 
     if (!noEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
-        const actualCount = updatedTickets.length;
-
+        const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
         await sendEmail({
             to: email,
             fromName: `Tickets - ${event.name}`,
-            replyTo: db.data.users.find(u => u.id === event.userId)?.email,
+            replyTo: eventOwner?.email,
             subject: `Updated registration for ${event.name}`,
             html: buildTicketEmailHtml({
                 firstName: updatedTickets[0].firstName,
@@ -1764,26 +1663,26 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
     }
 
     res.json({ success: true, tickets: updatedTickets });
-    pushWalletIfChanged(updatedTickets, db.data.events).catch(() => { });
+    pushWalletIfChanged(updatedTickets, event).catch(() => { });
 });
 
 // Resend ticket email without changing any data
 app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
-    const ticket = db.data.tickets.find(t => t.id === req.params.id);
+    const ticket = rowToTicket(stmt.tickets.byId.get(req.params.id));
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
 
-    const event = db.data.events.find(e => e.id === ticket.eventId);
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
-    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
     if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const groupTickets = db.data.tickets.filter(t => t.registrationId === ticket.registrationId);
+    const groupTickets = stmt.tickets.byRegistrationId.all(ticket.registrationId).map(rowToTicket);
     log('resend-email', `[email] Resending ${groupTickets.length} ticket(s) — email: ${ticket.email}  event: ${event.name}  regId: ${ticket.registrationId}  by: ${req.session.userId}`);
 
     if (!process.env.SES_FROM || !process.env.AWS_ACCESS_KEY_ID) {
@@ -1791,10 +1690,11 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
     }
 
     const actualCount = groupTickets.length;
+    const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
     await sendEmail({
         to: ticket.email,
         fromName: `Tickets - ${event.name}`,
-        replyTo: db.data.users.find(u => u.id === event.userId)?.email,
+        replyTo: eventOwner?.email,
         subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
         html: buildTicketEmailHtml({
             firstName: groupTickets[0].firstName,
@@ -1813,16 +1713,16 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
 
 // Send a direct custom email to a ticket holder
 app.post('/api/ticket/:id/direct-email', requireAuth, async (req, res) => {
-    const ticket = db.data.tickets.find(t => t.id === req.params.id);
+    const ticket = rowToTicket(stmt.tickets.byId.get(req.params.id));
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
 
-    const event = db.data.events.find(e => e.id === ticket.eventId);
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
-    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
     if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
@@ -1836,11 +1736,12 @@ app.post('/api/ticket/:id/direct-email', requireAuth, async (req, res) => {
         </div>
     `;
 
+    const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
     try {
         await sendEmail({
             to: ticket.email,
             fromName: `Tickets - ${event.name}`,
-            replyTo: db.data.users.find(u => u.id === event.userId)?.email,
+            replyTo: eventOwner?.email,
             subject,
             html,
             registrationId: ticket.registrationId
@@ -1855,13 +1756,13 @@ app.post('/api/ticket/:id/direct-email', requireAuth, async (req, res) => {
 
 // Send a bulk custom email to all registrants of an event
 app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
-    const event = db.data.events.find(e => e.id === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
-    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
     if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
@@ -1870,7 +1771,7 @@ app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
     if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required' });
 
     // One email per unique registration (not per ticket); optionally filtered to specific regIds
-    const eventTickets = db.data.tickets.filter(t => t.eventId === event.id);
+    const eventTickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
     const seen = new Set();
     const registrations = eventTickets.filter(t => {
         if (registrationIds && !registrationIds.includes(t.registrationId)) return false;
@@ -1881,7 +1782,7 @@ app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
 
     if (registrations.length === 0) return res.status(400).json({ error: 'No registrations found for this event' });
 
-    const replyTo = db.data.users.find(u => u.id === event.userId)?.email;
+    const replyTo = rowToUser(stmt.users.byId.get(event.userId))?.email;
     const escapedMessage = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
 
     let sent = 0;
@@ -1914,21 +1815,21 @@ app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
 
 // Print-friendly email preview
 app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
-    const ticket = db.data.tickets.find(t => t.id === req.params.id);
+    const ticket = rowToTicket(stmt.tickets.byId.get(req.params.id));
     if (!ticket) return res.status(404).send('Ticket not found');
 
-    const event = db.data.events.find(e => e.id === ticket.eventId);
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event) return res.status(404).send('Event not found');
 
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
-    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
     if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
         return res.status(403).send('Not authorized');
     }
 
-    const groupTickets = db.data.tickets.filter(t => t.registrationId === ticket.registrationId);
+    const groupTickets = stmt.tickets.byRegistrationId.all(ticket.registrationId).map(rowToTicket);
     const actualCount = groupTickets.length;
 
     const qrBlocks = groupTickets.map((t, i) => `
@@ -2011,12 +1912,9 @@ ${qrBlocks}
 app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     const { registrationId } = req.params;
 
-    // Try matching by registrationId first (check in all tickets for this registration)
-    let tickets = db.data.tickets.filter(t => t.registrationId === registrationId);
-
-    // Fall back to matching a single ticket by its own id
+    let tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
     if (!tickets.length) {
-        const single = db.data.tickets.find(t => t.id === registrationId);
+        const single = rowToTicket(stmt.tickets.byId.get(registrationId));
         if (single) tickets = [single];
     }
 
@@ -2025,18 +1923,29 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
         return res.status(404).json({ error: 'Not found' });
     }
 
-    const checkinEvent = db.data.events.find(e => e.id === tickets[0].eventId);
+    const checkinEvent = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
     const now = new Date().toISOString();
     let checkedInCount = 0;
-    tickets.forEach(t => {
-        if (!t.used_at) {
-            t.used_at = now;
-            checkedInCount++;
-        }
-        if (checkinEvent && checkinEvent.allowReentry) {
-            t.reentry_status = 'inside';
+    const doCheckin = db.transaction(() => {
+        for (const t of tickets) {
+            const wasUsed = !!t.used_at;
+            if (!wasUsed) {
+                t.used_at = now;
+                checkedInCount++;
+            }
+            if (checkinEvent?.allowReentry) {
+                t.reentry_status = 'inside';
+                if (!wasUsed) {
+                    stmt.tickets.checkInReentry.run(now, now, t.id);
+                } else {
+                    stmt.tickets.reentryEnter.run(now, t.id);
+                }
+            } else if (!wasUsed) {
+                stmt.tickets.checkIn.run(now, now, t.id);
+            }
         }
     });
+    doCheckin();
 
     if (checkedInCount === 0) {
         log('checkin', `[warn] Already checked in — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${checkinEvent?.name}  by: ${req.session.userId}`);
@@ -2044,7 +1953,6 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
         log('checkin', `[OK] Checked in ${checkedInCount}/${tickets.length} ticket(s) — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${checkinEvent?.name}  by: ${req.session.userId}`);
     }
 
-    await db.write();
     ticketStatusCache.clear();
     res.json({ success: true });
     pushWalletIfChanged(tickets, checkinEvent).catch(() => { });
@@ -2053,46 +1961,46 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
 app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     const { registrationId } = req.params;
 
-    let tickets = db.data.tickets.filter(t => t.registrationId === registrationId);
+    let tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
     if (!tickets.length) {
-        const single = db.data.tickets.find(t => t.id === registrationId);
+        const single = rowToTicket(stmt.tickets.byId.get(registrationId));
         if (single) tickets = [single];
     }
 
     if (!tickets.length) return res.status(404).json({ error: 'Not found' });
 
-    // Only admin or event owner can undo checkin
-    const event = db.data.events.find(e => e.id === tickets[0].eventId);
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     if (!isAdmin && (!event || event.userId !== req.session.userId)) {
         return res.status(403).json({ error: 'Only event owners or admins can undo check-ins' });
     }
 
-    let clearedCount = 0;
-    tickets.forEach(t => {
-        if (t.used_at) { t.used_at = null; clearedCount++; }
-        t.reentry_status = null;
-    });
-
     const uncheckinNow = new Date().toISOString();
-    tickets.forEach(t => { t.updated_at = uncheckinNow; });
+    let clearedCount = 0;
+    const doUndo = db.transaction(() => {
+        for (const t of tickets) {
+            if (t.used_at) clearedCount++;
+            t.used_at = null;
+            t.reentry_status = null;
+            t.updated_at = uncheckinNow;
+            stmt.tickets.undoCheckIn.run(uncheckinNow, t.id);
+        }
+    });
+    doUndo();
+
     log('uncheckin', `[undo] Cleared ${clearedCount} ticket(s) — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${event?.name}  by: ${req.session.userId}`);
-    await db.write();
     ticketStatusCache.clear();
-    
+
     if (event?.displayToken) {
-        const allT = db.data.tickets.filter(t => t.eventId === event.id);
+        const allT = stmt.tickets.byEventId.all(event.id);
         const payload = { type: 'scan', status: 'undo', name: tickets[0]?.name, registrationId, total: allT.length, scanned: allT.filter(t => t.used_at).length };
         broadcastToDisplayToken(event.displayToken, payload);
-        
         for (const [pairToken, data] of scannerRegistry.entries()) {
-            if (data.eventId === event.id) {
-                broadcastToPair(pairToken, payload);
-            }
+            if (data.eventId === event.id) broadcastToPair(pairToken, payload);
         }
     }
-    
+
     res.json({ success: true });
     pushWalletIfChanged(tickets, event).catch(() => { });
 });
@@ -2102,7 +2010,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
     if (!token) return res.status(400).json({ error: 'Token is required' });
 
     const cleanToken = (token.startsWith('ticket:') ? token.split(':')[1] : token).trim();
-    const ticket = db.data.tickets.find(t => t.token === cleanToken);
+    const ticket = rowToTicket(stmt.tickets.byToken.get(cleanToken));
 
     if (!ticket) {
         log('validate', `[ERR] INVALID token: ${cleanToken}  ip: ${getIP(req)}`);
@@ -2110,9 +2018,9 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
         if (pt) {
             const sd = scannerRegistry.get(pt);
             if (sd?.eventId) {
-                const ev = db.data.events.find(e => e.id === sd.eventId);
+                const ev = rowToEvent(stmt.events.byId.get(sd.eventId));
                 if (ev?.displayToken) {
-                    const evT = db.data.tickets.filter(t => t.eventId === ev.id);
+                    const evT = stmt.tickets.byEventId.all(ev.id);
                     broadcastToDisplayToken(ev.displayToken, { type: 'scan', status: 'invalid', name: 'Unknown Ticket', total: evT.length, scanned: evT.filter(t => t.used_at).length });
                 }
             }
@@ -2120,7 +2028,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
         return res.json({ status: 'invalid', message: 'Invalid ticket' });
     }
 
-    const event = db.data.events.find(e => e.id === ticket.eventId);
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     const ticketFields = {
         name: ticket.name, firstName: ticket.firstName ?? null, lastName: ticket.lastName ?? null,
         email: ticket.email, customFields: ticket.customFields ?? null,
@@ -2134,7 +2042,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
             if (currentStatus === 'inside') {
                 log('validate', `[exit] REENTRY EXIT PROMPT — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
                 if (event?.displayToken) {
-                    const _t = db.data.tickets.filter(t => t.eventId === event.id);
+                    const _t = stmt.tickets.byEventId.all(event.id);
                     broadcastToDisplayToken(event.displayToken, { type: 'scan', status: 'reentry_exit', name: ticket.name, registrationId: ticket.registrationId, total: _t.length, scanned: _t.filter(t => t.used_at).length });
                 }
                 return res.json({ status: 'reentry_exit', message: 'Confirm check-out?', used_at: ticket.used_at, ...ticketFields });
@@ -2142,31 +2050,35 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
                 const reentryAt = new Date().toISOString();
                 ticket.reentry_status = 'inside';
                 ticket.updated_at = reentryAt;
-                await db.write();
+                stmt.tickets.reentryEnter.run(reentryAt, ticket.id);
                 ticketStatusCache.clear();
                 log('validate', `[OK] REENTRY ENTER — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
                 res.json({ status: 'reentry_enter', message: `Welcome back to ${event ? event.name : 'the event'}!`, ...ticketFields });
-                if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); recordScan(req.body.pairToken, event, 'reentry_enter', ticket, _t); }
+                if (event) { const _t = stmt.tickets.byEventId.all(event.id); recordScan(req.body.pairToken, event, 'reentry_enter', ticket, _t); }
                 pushWalletIfChanged([ticket], event).catch(() => { });
                 return;
             }
         }
         log('validate', `[warn] ALREADY USED — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  used_at: ${ticket.used_at}  ip: ${getIP(req)}`);
         res.json({ status: 'used', message: 'Ticket already used', used_at: ticket.used_at, ...ticketFields });
-        if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); recordScan(req.body.pairToken, event, 'used', ticket, _t); }
+        if (event) { const _t = stmt.tickets.byEventId.all(event.id); recordScan(req.body.pairToken, event, 'used', ticket, _t); }
         return;
     }
 
     const validatedAt = new Date().toISOString();
     ticket.used_at = validatedAt;
     ticket.updated_at = validatedAt;
-    if (event && event.allowReentry) ticket.reentry_status = 'inside';
-    await db.write();
+    if (event && event.allowReentry) {
+        ticket.reentry_status = 'inside';
+        stmt.tickets.checkInReentry.run(validatedAt, validatedAt, ticket.id);
+    } else {
+        stmt.tickets.checkIn.run(validatedAt, validatedAt, ticket.id);
+    }
     ticketStatusCache.clear();
 
     log('validate', `[OK] VALID — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  ip: ${getIP(req)}`);
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
-    if (event) { const _t = db.data.tickets.filter(t => t.eventId === event.id); recordScan(req.body.pairToken, event, 'valid', ticket, _t); }
+    if (event) { const _t = stmt.tickets.byEventId.all(event.id); recordScan(req.body.pairToken, event, 'valid', ticket, _t); }
     pushWalletIfChanged([ticket], event).catch(() => { });
 });
 
@@ -2178,13 +2090,13 @@ app.post('/api/checkout', async (req, res) => {
     let ticket;
     if (token) {
         const cleanToken = (token.startsWith('ticket:') ? token.split(':')[1] : token).trim();
-        ticket = db.data.tickets.find(t => t.token === cleanToken);
+        ticket = rowToTicket(stmt.tickets.byToken.get(cleanToken));
     } else {
-        ticket = db.data.tickets.find(t => t.registrationId === registrationId);
+        ticket = rowToTicket(stmt.tickets.firstByRegistrationId.get(registrationId));
     }
     if (!ticket) return res.json({ status: 'invalid', message: 'Invalid ticket' });
 
-    const event = db.data.events.find(e => e.id === ticket.eventId);
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event || !event.allowReentry) return res.status(400).json({ error: 'Reentry not enabled for this event' });
 
     const ticketFields = {
@@ -2197,21 +2109,17 @@ app.post('/api/checkout', async (req, res) => {
     const now = new Date().toISOString();
     ticket.reentry_status = 'outside';
     ticket.updated_at = now;
-    await db.write();
+    stmt.tickets.reentryExit.run(now, ticket.id);
     ticketStatusCache.clear();
 
     log('checkout', `[exit] CHECKED OUT — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event.name}  ip: ${getIP(req)}`);
     res.json({ status: 'checked_out', message: 'Checked out successfully', ...ticketFields });
     if (event?.displayToken) {
-        const allT = db.data.tickets.filter(t => t.eventId === event.id);
+        const allT = stmt.tickets.byEventId.all(event.id);
         const payload = { type: 'scan', status: 'checked_out', name: ticket.name, registrationId: ticket.registrationId, total: allT.length, scanned: allT.filter(t => t.used_at).length };
         broadcastToDisplayToken(event.displayToken, payload);
-        
-        // Notify all scanners for this event so they can dismiss their exit overlays
         for (const [pairToken, data] of scannerRegistry.entries()) {
-            if (data.eventId === event.id) {
-                broadcastToPair(pairToken, payload);
-            }
+            if (data.eventId === event.id) broadcastToPair(pairToken, payload);
         }
     }
     pushWalletIfChanged([ticket], event).catch(() => { });
@@ -2241,11 +2149,15 @@ async function pushWalletIfChanged(tickets, events) {
         if (ticket.passHash !== newHash) {
             ticket.passHash = newHash;
             ticket.updated_at = now;
+            stmt.tickets.setPassHash.run(newHash, now, ticket.id);
+            // Invalidate pass cache so next Apple fetch regenerates
+            const cachePath = path.join(passCacheDir, `${ticket.token}.pkpass`);
+            try { if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath); } catch (_) {}
+            try { if (fs.existsSync(cachePath + '.meta')) fs.unlinkSync(cachePath + '.meta'); } catch (_) {}
             changed.push(ticket.token);
         }
     }
     if (changed.length) {
-        await db.write();
         pushWalletUpdate(changed).catch(() => { });
     }
     return changed.length > 0;
@@ -2474,26 +2386,39 @@ function checkPassPrereqs() {
 app.get(['/api/pass/:token', '/api/pass/:token.pkpass'], async (req, res) => {
     const rawToken = req.params.token;
     const token = rawToken.endsWith('.pkpass') ? rawToken.slice(0, -7) : rawToken;
-    const ticket = db.data.tickets.find(t => t.token === token);
+    const ticket = rowToTicket(stmt.tickets.byToken.get(token));
     if (!ticket) return res.status(404).send('Ticket not found');
 
-    const event = db.data.events.find(e => e.id === ticket.eventId);
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event) return res.status(404).send('Event not found');
 
     const prereqError = checkPassPrereqs();
     if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError} `);
 
     try {
-        log('wallet-download', `[ticket] Generating pass — name: ${ticket.name}  token: ${ticket.token}`);
-        const buffer = await generatePassBuffer(ticket, event);
-        log('wallet-download', `[pass] Buffer ${buffer.length} bytes — token: ${ticket.token}`);
+        // Serve from pass cache when content hash matches
+        const currentHash = passContentHash(ticket, event);
+        const cachePath = path.join(passCacheDir, `${ticket.token}.pkpass`);
+        let buffer;
+        try {
+            if (fs.existsSync(cachePath) && fs.existsSync(cachePath + '.meta')) {
+                const meta = JSON.parse(fs.readFileSync(cachePath + '.meta', 'utf8'));
+                if (meta.hash === currentHash) buffer = fs.readFileSync(cachePath);
+            }
+        } catch (_) {}
 
-        // Record first download
+        if (!buffer) {
+            log('wallet-download', `[ticket] Generating pass — name: ${ticket.name}  token: ${ticket.token}`);
+            buffer = await generatePassBuffer(ticket, event);
+            log('wallet-download', `[pass] Buffer ${buffer.length} bytes — token: ${ticket.token}`);
+            try {
+                fs.writeFileSync(cachePath, buffer);
+                fs.writeFileSync(cachePath + '.meta', JSON.stringify({ hash: currentHash }));
+            } catch (_) {}
+        }
+
         if (!ticket.wallet_downloaded_at) {
-            await db.update(data => {
-                const t = data.tickets.find(t => t.token === token);
-                if (t) t.wallet_downloaded_at = new Date().toISOString();
-            });
+            stmt.tickets.setWalletDownloaded.run(new Date().toISOString(), token);
         }
 
         res.set('Content-Type', 'application/vnd.apple.pkpass');
@@ -2510,18 +2435,17 @@ app.get(['/api/pass/:token', '/api/pass/:token.pkpass'], async (req, res) => {
 // API: Bundle all passes for a registration into one .pkpassbundle
 app.get('/api/passes/bundle/:registrationId', async (req, res) => {
     const { registrationId } = req.params;
-    const tickets = db.data.tickets.filter(t => t.registrationId === registrationId);
+    const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
     if (!tickets.length) return res.status(404).send('No tickets found for this registration');
 
-    // Single ticket — redirect to the standard pass endpoint
     if (tickets.length === 1) {
-        return res.redirect(`/ api / passes / ${tickets[0].token} `);
+        return res.redirect(`/api/pass/${tickets[0].token}`);
     }
 
     const prereqError = checkPassPrereqs();
     if (prereqError) return res.status(503).send(`Apple Wallet not configured: ${prereqError} `);
 
-    const event = db.data.events.find(e => e.id === tickets[0].eventId);
+    const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
     if (!event) return res.status(404).send('Event not found');
 
     try {
@@ -2554,9 +2478,9 @@ app.get('/api/passes/bundle/:registrationId', async (req, res) => {
 function walletAuth(req, serialNumber) {
     const authHeader = req.headers['authorization'] || '';
     const token = authHeader.replace(/^ApplePass\s+/i, '').trim();
-    const ticket = db.data.tickets.find(t => t.token === serialNumber);
+    const ticket = rowToTicket(stmt.tickets.byToken.get(serialNumber));
     if (!ticket) return null;
-    if (ticket.id + ticket.token !== token) return null; // must match passOverride.authenticationToken
+    if (ticket.id + ticket.token !== token) return null;
     return ticket;
 }
 
@@ -2569,22 +2493,15 @@ app.post('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId/:serialNumb
     const { pushToken } = req.body;
     if (!pushToken) return res.status(400).send();
 
-    if (!db.data.walletDevices) await db.update(d => { d.walletDevices = []; });
-
-    const existing = db.data.walletDevices.find(d => d.deviceId === deviceId && d.serialNumber === serialNumber);
+    const existing = stmt.walletDevices.byDeviceAndSerial.get(deviceId, serialNumber);
     if (existing) {
         if (existing.pushToken !== pushToken) {
-            await db.update(data => {
-                const d = data.walletDevices.find(d => d.deviceId === deviceId && d.serialNumber === serialNumber);
-                if (d) d.pushToken = pushToken;
-            });
+            stmt.walletDevices.setPushToken.run(pushToken, deviceId, serialNumber);
         }
         return res.status(200).send();
     }
 
-    await db.update(data => {
-        data.walletDevices.push({ id: nanoid(8), deviceId, passTypeId: req.params.passTypeId, serialNumber, pushToken, registeredAt: new Date().toISOString() });
-    });
+    stmt.walletDevices.insert.run(nanoid(8), deviceId, req.params.passTypeId, serialNumber, pushToken, new Date().toISOString());
     log('wallet-register', `[push] Device registered — serial: ${serialNumber.slice(0, 8)}…  device: ${deviceId.slice(0, 8)}…`);
     res.status(201).send();
 });
@@ -2595,9 +2512,7 @@ app.delete('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId/:serialNu
     const ticket = walletAuth(req, serialNumber);
     if (!ticket) return res.status(401).send();
 
-    await db.update(data => {
-        if (data.walletDevices) data.walletDevices = data.walletDevices.filter(d => !(d.deviceId === deviceId && d.serialNumber === serialNumber));
-    });
+    stmt.walletDevices.delete.run(deviceId, serialNumber);
     log('wallet-register', `[push] Device unregistered — serial: ${serialNumber.slice(0, 8)}…`);
     res.status(200).send();
 });
@@ -2605,7 +2520,7 @@ app.delete('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId/:serialNu
 // List passes updated since a given date for a device
 app.get('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId', async (req, res) => {
     const { deviceId } = req.params;
-    const deviceEntries = (db.data.walletDevices || []).filter(d => d.deviceId === deviceId);
+    const deviceEntries = stmt.walletDevices.byDeviceId.all(deviceId);
     if (!deviceEntries.length) {
         log('wallet-list', `[list] Device not found — device: ${deviceId.slice(0, 8)}…`);
         return res.status(404).send();
@@ -2617,7 +2532,7 @@ app.get('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId', async (req
     if (since) {
         const sinceDate = new Date(since);
         serialNumbers = serialNumbers.filter(sn => {
-            const t = db.data.tickets.find(t => t.token === sn);
+            const t = stmt.tickets.byToken.get(sn);
             return t && new Date(t.updated_at || t.created_at) > sinceDate;
         });
     }
@@ -2639,16 +2554,12 @@ app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
         return res.status(401).send();
     }
 
-    const event = db.data.events.find(e => e.id === ticket.eventId);
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event) return res.status(404).send();
 
     const prereqError = checkPassPrereqs();
     if (prereqError) return res.status(503).send();
 
-    // 304 check: compare dates — passHash is pre-saved by stampPassUpdates before Apple
-    // ever fetches, so hash equality always fires too early and returns 304 on the first
-    // fetch after a real change. Date comparison is correct: updated_at is only bumped
-    // by stampPassUpdates when content actually changes, and Last-Modified echoes it back.
     const ims = req.headers['if-modified-since'];
     if (ims) {
         const lastMod = new Date(ticket.updated_at || ticket.created_at);
@@ -2659,7 +2570,25 @@ app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
     }
 
     try {
-        const buffer = await generatePassBuffer(ticket, event);
+        // Serve from pass cache when available and hash matches
+        const currentHash = passContentHash(ticket, event);
+        const cachePath = path.join(passCacheDir, `${ticket.token}.pkpass`);
+        let buffer;
+        try {
+            if (fs.existsSync(cachePath) && fs.existsSync(cachePath + '.meta')) {
+                const meta = JSON.parse(fs.readFileSync(cachePath + '.meta', 'utf8'));
+                if (meta.hash === currentHash) buffer = fs.readFileSync(cachePath);
+            }
+        } catch (_) {}
+
+        if (!buffer) {
+            buffer = await generatePassBuffer(ticket, event);
+            try {
+                fs.writeFileSync(cachePath, buffer);
+                fs.writeFileSync(cachePath + '.meta', JSON.stringify({ hash: currentHash }));
+            } catch (_) {}
+        }
+
         const lastMod = new Date(ticket.updated_at || ticket.created_at);
         res.set('Content-Type', 'application/vnd.apple.pkpass');
         res.set('Last-Modified', lastMod.toUTCString());
@@ -2689,14 +2618,13 @@ app.post('/api/sheet/generate-link', async (req, res) => {
     const { spreadsheetId, sheetName, eventId } = req.body;
     if (!spreadsheetId) return res.status(400).json({ error: 'spreadsheetId is required' });
 
-    // Reuse existing link for same spreadsheet
-    let link = db.data.sheetLinks.find(l => l.spreadsheetId === spreadsheetId);
+    let link = stmt.sheetLinks.bySpreadsheetId.get(spreadsheetId);
     if (link) {
-        // Update event ID and name if provided
-        if (eventId) link.eventId = eventId;
-        if (sheetName) link.sheetName = sheetName;
-        await db.write();
-        return res.json({ success: true, linkUrl: `${BASE_URL} /link/${link.token} `, token: link.token });
+        if (eventId || sheetName) {
+            stmt.sheetLinks.update.run(eventId || link.eventId, sheetName || link.sheetName, link.id);
+            link = stmt.sheetLinks.byId.get(link.id);
+        }
+        return res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token });
     }
 
     link = {
@@ -2707,8 +2635,8 @@ app.post('/api/sheet/generate-link', async (req, res) => {
         eventId: eventId || null,
         createdAt: new Date().toISOString()
     };
-    await db.update(data => data.sheetLinks.push(link));
-    res.json({ success: true, linkUrl: `${BASE_URL} /link/${link.token} `, token: link.token });
+    stmt.sheetLinks.insert.run(link.id, link.token, link.spreadsheetId, link.sheetName, link.eventId, link.createdAt);
+    res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token });
 });
 
 // Redirect /link/:token → link.html?token=...
@@ -2718,20 +2646,15 @@ app.get('/link/:token', (req, res) => {
 
 // Get info about a link token (public)
 app.get('/api/sheet/link-info/:token', (req, res) => {
-    const link = db.data.sheetLinks.find(l => l.token === req.params.token);
+    const link = stmt.sheetLinks.byToken.get(req.params.token);
     if (!link) return res.status(404).json({ error: 'Link not found or expired' });
 
-    const event = link.eventId ? db.data.events.find(e => e.id === link.eventId) : null;
+    const event = link.eventId ? rowToEvent(stmt.events.byId.get(link.eventId)) : null;
     let alreadyLinked = false;
-
     if (req.session.userId) {
-        alreadyLinked = !!db.data.sheetAccess.find(
-            a => a.sheetLinkId === link.id && a.userId === req.session.userId
-        );
+        alreadyLinked = !!stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
     }
-
-    // Count how many users have access
-    const accessCount = db.data.sheetAccess.filter(a => a.sheetLinkId === link.id).length;
+    const accessCount = stmt.sheetAccess.countByLinkId.get(link.id).cnt;
 
     res.json({
         sheetName: link.sheetName,
@@ -2747,23 +2670,13 @@ app.post('/api/sheet/claim', requireAuth, async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'token required' });
 
-    const link = db.data.sheetLinks.find(l => l.token === token);
+    const link = stmt.sheetLinks.byToken.get(token);
     if (!link) return res.status(404).json({ error: 'Link not found' });
 
-    // Check if already claimed
-    const existing = db.data.sheetAccess.find(
-        a => a.sheetLinkId === link.id && a.userId === req.session.userId
-    );
+    const existing = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
     if (existing) return res.json({ success: true, message: 'Already linked' });
 
-    const access = {
-        id: nanoid(10),
-        userId: req.session.userId,
-        sheetLinkId: link.id,
-        claimedAt: new Date().toISOString()
-    };
-    await db.update(data => data.sheetAccess.push(access));
-
+    stmt.sheetAccess.insert.run(nanoid(10), req.session.userId, link.id, new Date().toISOString(), 'view');
     res.json({ success: true, message: 'Sheet linked to your account!' });
 });
 
@@ -2773,33 +2686,30 @@ app.post('/api/auth/signup-for-link', async (req, res) => {
     if (!email || !password) return res.status(400).json({ error: 'email and password required' });
     if (!token) return res.status(400).json({ error: 'link token required' });
 
-    // Verify the link token is valid
-    const link = db.data.sheetLinks.find(l => l.token === token);
+    const link = stmt.sheetLinks.byToken.get(token);
     if (!link) return res.status(400).json({ error: 'Invalid link token' });
 
-    // Check if account already exists
-    const existing = db.data.users.find(u => u.email === email.toLowerCase());
+    const existing = rowToUser(stmt.users.byEmail.get(email.toLowerCase()));
     if (existing) return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = { id: nanoid(), email: email.toLowerCase(), password: hashedPassword };
-    await db.update(data => data.users.push(newUser));
+    stmt.users.insert.run(newUser.id, newUser.email, newUser.password, 0, null, new Date().toISOString());
     req.session.userId = newUser.id;
     res.json({ success: true, user: { id: newUser.id, email: newUser.email } });
 });
 
 // My Rooms — get all rooms/events the current user has access to
 app.get('/api/my-rooms', requireAuth, (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
 
     if (isAdmin) {
-        // Admin sees all events with all access entries
-        const rooms = db.data.events.map(event => {
-            const link = db.data.sheetLinks.find(l => l.eventId === event.id);
+        const rooms = stmt.events.all.all().map(rowToEvent).map(event => {
+            const link = stmt.sheetLinks.byEventId.get(event.id);
             const accessEntries = link
-                ? db.data.sheetAccess.filter(a => a.sheetLinkId === link.id).map(a => {
-                    const u = db.data.users.find(u2 => u2.id === a.userId);
+                ? stmt.sheetAccess.byLinkId.all(link.id).map(a => {
+                    const u = rowToUser(stmt.users.byId.get(a.userId));
                     return { id: a.id, email: u ? u.email : 'Unknown', claimedAt: a.claimedAt };
                 })
                 : [];
@@ -2808,12 +2718,11 @@ app.get('/api/my-rooms', requireAuth, (req, res) => {
         return res.json(rooms);
     }
 
-    // Regular user: events they have access to via sheetAccess
-    const myAccess = db.data.sheetAccess.filter(a => a.userId === req.session.userId);
+    const myAccess = stmt.sheetAccess.byUserId.all(req.session.userId);
     const rooms = myAccess.map(access => {
-        const link = db.data.sheetLinks.find(l => l.id === access.sheetLinkId);
+        const link = stmt.sheetLinks.byId.get(access.sheetLinkId);
         if (!link) return null;
-        const event = link.eventId ? db.data.events.find(e => e.id === link.eventId) : null;
+        const event = link.eventId ? rowToEvent(stmt.events.byId.get(link.eventId)) : null;
         return { event, sheetLink: link, accessId: access.id, claimedAt: access.claimedAt };
     }).filter(Boolean);
 
@@ -2822,28 +2731,25 @@ app.get('/api/my-rooms', requireAuth, (req, res) => {
 
 // Get access entries for a specific event (for settings cog in dashboard)
 app.get('/api/event/:id/access', requireAuth, (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const event = db.data.events.find(e => e.id === req.params.id);
-    const link = db.data.sheetLinks.find(l => l.eventId === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    const link = stmt.sheetLinks.byEventId.get(req.params.id);
 
     let hasAccess = false;
     if (isAdmin || (event && event.userId === req.session.userId)) hasAccess = true;
     else if (link) {
-        const myAccess = db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId);
+        const myAccess = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
         if (myAccess && myAccess.permission === 'full') hasAccess = true;
     }
 
     if (!hasAccess) return res.status(403).json({ error: 'Admin access required' });
-
     if (!link) return res.json({ access: [], linkUrl: null });
 
-    const accessEntries = db.data.sheetAccess
-        .filter(a => a.sheetLinkId === link.id)
-        .map(a => {
-            const u = db.data.users.find(u2 => u2.id === a.userId);
-            return { id: a.id, email: u ? u.email : 'Unknown', claimedAt: a.claimedAt, permission: a.permission || 'view' };
-        });
+    const accessEntries = stmt.sheetAccess.byLinkId.all(link.id).map(a => {
+        const u = rowToUser(stmt.users.byId.get(a.userId));
+        return { id: a.id, email: u ? u.email : 'Unknown', claimedAt: a.claimedAt, permission: a.permission || 'view' };
+    });
 
     res.json({ access: accessEntries, linkUrl: BASE_URL + '/link/' + link.token });
 });
@@ -2852,50 +2758,47 @@ app.post('/api/sheet/share', requireAuth, async (req, res) => {
     const { eventId, email, permission } = req.body;
     if (!eventId || !email || !permission) return res.status(400).json({ error: 'Missing fields' });
 
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const event = db.data.events.find(e => e.id === eventId);
+    const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    let link = db.data.sheetLinks.find(l => l.eventId === eventId);
+    let link = stmt.sheetLinks.byEventId.get(eventId);
     if (!link) {
-        link = { id: nanoid(10), token: nanoid(20), spreadsheetId: 'manual', sheetName: event.name, eventId: event.id, createdAt: new Date().toISOString() };
-        db.data.sheetLinks.push(link);
+        const newLink = { id: nanoid(10), token: nanoid(20), spreadsheetId: 'manual', sheetName: event.name, eventId: event.id, createdAt: new Date().toISOString() };
+        stmt.sheetLinks.insert.run(newLink.id, newLink.token, newLink.spreadsheetId, newLink.sheetName, newLink.eventId, newLink.createdAt);
+        link = newLink;
     }
 
-    const myAccess = db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId);
-
+    const myAccess = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
     if (!isAdmin && event.userId !== req.session.userId && (!myAccess || myAccess.permission !== 'full')) {
         return res.status(403).json({ error: 'Permission denied to share room' });
     }
 
-    const targetUser = db.data.users.find(u => u.email === email.toLowerCase());
+    const targetUser = rowToUser(stmt.users.byEmail.get(email.toLowerCase()));
     if (!targetUser) return res.status(404).json({ error: 'User ' + email + ' does not have an account. They must register first.' });
     if (targetUser.id === req.session.userId) return res.status(400).json({ error: 'Cannot share with yourself' });
 
-    let access = db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === targetUser.id);
-    if (access) {
-        access.permission = permission;
+    const existingAccess = stmt.sheetAccess.byLinkAndUser.get(link.id, targetUser.id);
+    if (existingAccess) {
+        stmt.sheetAccess.setPermission.run(permission, link.id, targetUser.id);
     } else {
-        access = { id: nanoid(10), userId: targetUser.id, sheetLinkId: link.id, claimedAt: new Date().toISOString(), permission };
-        db.data.sheetAccess.push(access);
+        stmt.sheetAccess.insert.run(nanoid(10), targetUser.id, link.id, new Date().toISOString(), permission);
     }
-    await db.write();
     res.json({ success: true, message: 'Access granted' });
 });
 
 // Revoke access to a room
 app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
 
-    const accessIdx = db.data.sheetAccess.findIndex(a => a.id === req.params.id);
-    if (accessIdx === -1) return res.status(404).json({ error: 'Access entry not found' });
+    const access = stmt.sheetAccess.byId.get(req.params.id);
+    if (!access) return res.status(404).json({ error: 'Access entry not found' });
 
-    const access = db.data.sheetAccess[accessIdx];
-    const link = db.data.sheetLinks.find(l => l.id === access.sheetLinkId);
-    const event = link && link.eventId ? db.data.events.find(e => e.id === link.eventId) : null;
-    const myAccess = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const link = stmt.sheetLinks.byId.get(access.sheetLinkId);
+    const event = link && link.eventId ? rowToEvent(stmt.events.byId.get(link.eventId)) : null;
+    const myAccess = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
     const isOwner = event && event.userId === req.session.userId;
     const hasFull = myAccess && myAccess.permission === 'full';
 
@@ -2903,8 +2806,7 @@ app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Not authorized to revoke others' });
     }
 
-    db.data.sheetAccess.splice(accessIdx, 1);
-    await db.write();
+    stmt.sheetAccess.deleteById.run(req.params.id);
     res.json({ success: true });
 });
 
@@ -2932,12 +2834,12 @@ function buildReminderHtml(event, customMessage) {
 
 // GET reminder settings
 app.get('/api/event/:id/reminder', requireAuth, async (req, res) => {
-    const event = db.data.events.find(e => e.id === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
-    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
     if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
@@ -2951,40 +2853,31 @@ app.get('/api/event/:id/reminder', requireAuth, async (req, res) => {
 
 // PUT reminder settings
 app.put('/api/event/:id/reminder', requireAuth, async (req, res) => {
-    const event = db.data.events.find(e => e.id === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
-    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
     if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
     const { enabled, message, hoursBefore } = req.body;
-    await db.update(data => {
-        const ev = data.events.find(e => e.id === req.params.id);
-        if (ev) {
-            ev.reminderEnabled = !!enabled;
-            ev.reminderMessage = message || '';
-            ev.reminderHoursBefore = Math.max(1, Math.min(168, parseInt(hoursBefore) || 24));
-            // Reset sentAt if hours changed so it can resend at the new time
-            if (ev.reminderSentAt && ev.reminderHoursBefore !== (event.reminderHoursBefore ?? 24)) {
-                ev.reminderSentAt = null;
-            }
-        }
-    });
+    const newHours = Math.max(1, Math.min(168, parseInt(hoursBefore) || 24));
+    const resetSentAt = event.reminderSentAt && newHours !== (event.reminderHoursBefore ?? 24) ? null : event.reminderSentAt;
+    stmt.events.setReminder.run(!!enabled ? 1 : 0, message || '', newHours, resetSentAt, req.params.id);
     log('reminder', `[config] Settings updated — event: ${event.name}  enabled: ${!!enabled}  by: ${req.session.userId}`);
     res.json({ success: true });
 });
 
 // GET reminder email preview
 app.get('/api/event/:id/reminder/preview', requireAuth, async (req, res) => {
-    const event = db.data.events.find(e => e.id === req.params.id);
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).send('Event not found');
-    const user = db.data.users.find(u => u.id === req.session.userId);
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = db.data.sheetLinks.find(l => l.eventId === event.id);
-    const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === req.session.userId) : null;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
     if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
         return res.status(403).send('Not authorized');
     }
@@ -2995,8 +2888,7 @@ app.get('/api/event/:id/reminder/preview', requireAuth, async (req, res) => {
 setInterval(async () => {
     const now = Date.now();
 
-    const due = db.data.events.filter(e => {
-        if (!e.reminderEnabled || e.reminderSentAt) return false;
+    const due = stmt.events.reminderDue.all().map(rowToEvent).filter(e => {
         const hours = e.reminderHoursBefore ?? 24;
         const eventMs = new Date(e.time).getTime();
         const windowStart = now + (hours - 1) * 60 * 60 * 1000;
@@ -3005,7 +2897,7 @@ setInterval(async () => {
     });
 
     for (const event of due) {
-        const tickets = db.data.tickets.filter(t => t.eventId === event.id);
+        const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
         const seen = new Set();
         const registrations = tickets.filter(t => {
             if (seen.has(t.registrationId)) return false;
@@ -3015,7 +2907,7 @@ setInterval(async () => {
 
         if (!registrations.length) continue;
 
-        const replyTo = db.data.users.find(u => u.id === event.userId)?.email;
+        const replyTo = rowToUser(stmt.users.byId.get(event.userId))?.email;
         const html = buildReminderHtml(event, event.reminderMessage);
         let sent = 0;
 
@@ -3035,11 +2927,7 @@ setInterval(async () => {
             }
         }
 
-        await db.update(data => {
-            const ev = data.events.find(e => e.id === event.id);
-            if (ev) ev.reminderSentAt = new Date().toISOString();
-        });
-
+        stmt.events.setReminderSentAt.run(new Date().toISOString(), event.id);
         log('reminder', `[email] Sent to ${sent} registrant(s) — event: ${event.name} (${event.id})`);
     }
 }, 5 * 60 * 1000);
@@ -3105,34 +2993,29 @@ function broadcastToDisplayToken(displayToken, payload) {
 app.get('/api/display/token/:eventId', requireAuth, async (req, res) => {
     const { eventId } = req.params;
     if (!userHasEventAccess(req.session.userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
-    const event = db.data.events.find(e => e.id === eventId);
+    let event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.displayToken) {
-        await db.update(data => {
-            const ev = data.events.find(e => e.id === eventId);
-            if (ev && !ev.displayToken) ev.displayToken = crypto.randomBytes(24).toString('hex');
-        });
+        const tok = crypto.randomBytes(24).toString('hex');
+        stmt.events.setDisplayToken.run(tok, eventId);
+        event = rowToEvent(stmt.events.byId.get(eventId));
     }
-    const tok = db.data.events.find(e => e.id === eventId).displayToken;
-    res.json({ token: tok, url: `${BASE_URL}/display.html?token=${tok}` });
+    res.json({ token: event.displayToken, url: `${BASE_URL}/display.html?token=${event.displayToken}` });
 });
 
 // QR code PNG for the display URL (used by web scanner settings page)
 app.get('/api/display/qr/:eventId', requireAuth, async (req, res) => {
     const { eventId } = req.params;
-    await db.read();
     if (!userHasEventAccess(req.session.userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
-    const event = db.data.events.find(e => e.id === eventId);
+    let event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.displayToken) {
-        await db.update(data => {
-            const ev = data.events.find(e => e.id === eventId);
-            if (ev && !ev.displayToken) ev.displayToken = crypto.randomBytes(24).toString('hex');
-        });
+        const tok = crypto.randomBytes(24).toString('hex');
+        stmt.events.setDisplayToken.run(tok, eventId);
+        event = rowToEvent(stmt.events.byId.get(eventId));
     }
-    const tok = db.data.events.find(e => e.id === eventId).displayToken;
     const pair = req.query.pair || '';
-    const url = `${BASE_URL}/display.html?token=${tok}${pair ? `&pair=${encodeURIComponent(pair)}` : ''}`;
+    const url = `${BASE_URL}/display.html?token=${event.displayToken}${pair ? `&pair=${encodeURIComponent(pair)}` : ''}`;
     try {
         const png = await QRCode.toBuffer(url, { width: 400, margin: 2 });
         res.set('Content-Type', 'image/png').set('Cache-Control', 'no-cache').send(png);
@@ -3145,19 +3028,16 @@ app.get('/api/display/qr/:eventId', requireAuth, async (req, res) => {
 app.post('/api/display/token/:eventId/rotate', requireAuth, async (req, res) => {
     const { eventId } = req.params;
     if (!userHasEventAccess(req.session.userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
-    await db.update(data => {
-        const ev = data.events.find(e => e.id === eventId);
-        if (ev) ev.displayToken = crypto.randomBytes(24).toString('hex');
-    });
-    const tok = db.data.events.find(e => e.id === eventId).displayToken;
+    const tok = crypto.randomBytes(24).toString('hex');
+    stmt.events.setDisplayToken.run(tok, eventId);
     res.json({ token: tok, url: `${BASE_URL}/display.html?token=${tok}` });
 });
 
 // Event info for display page (public — display token is the auth)
 app.get('/api/display/info/:token', (req, res) => {
-    const event = db.data.events.find(e => e.displayToken === req.params.token);
+    const event = rowToEvent(stmt.events.byDisplayToken.get(req.params.token));
     if (!event) return res.status(404).json({ error: 'Not found' });
-    const tickets = db.data.tickets.filter(t => t.eventId === event.id);
+    const tickets = stmt.tickets.byEventId.all(event.id);
     res.json({
         event: { id: event.id, name: event.name, time: event.time, location: event.location, capacity: event.capacity || null },
         total: tickets.length,
@@ -3168,9 +3048,8 @@ app.get('/api/display/info/:token', (req, res) => {
 // SSE stream — display token is the auth, pairToken routes to specific scanner
 app.get('/api/display/stream/:token', (req, res) => {
     const { token } = req.params;
-    // pair is accepted but no longer required — routing is by displayToken (event-scoped)
     if (!token || token.length < 32) return res.status(400).send('Invalid token');
-    const event = db.data.events.find(e => e.displayToken === token);
+    const event = rowToEvent(stmt.events.byDisplayToken.get(token));
     if (!event) return res.status(404).send('Not found');
 
     res.set({
@@ -3181,7 +3060,7 @@ app.get('/api/display/stream/:token', (req, res) => {
     });
     res.flushHeaders();
 
-    const tickets = db.data.tickets.filter(t => t.eventId === event.id);
+    const tickets = stmt.tickets.byEventId.all(event.id);
     res.write(`data: ${JSON.stringify({
         type: 'init',
         event: { id: event.id, name: event.name, time: event.time, capacity: event.capacity || null },
@@ -3204,9 +3083,8 @@ app.get('/api/display/stream/:token', (req, res) => {
 // ── Scanner Monitor ──────────────────────────────────────────────────────────
 
 app.get('/api/monitor/stream', requireAuth, async (req, res) => {
-    await db.read();
     const userId = req.session.userId;
-    const user = db.data.users.find(u => u.id === userId);
+    const user = rowToUser(stmt.users.byId.get(userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const { eventId } = req.query;
 
@@ -3215,13 +3093,15 @@ app.get('/api/monitor/stream', requireAuth, async (req, res) => {
         if (!userHasEventAccess(userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
         eventIds = new Set([eventId]);
     } else {
-        const userEvents = isAdmin ? db.data.events : db.data.events.filter(e => {
-            if (e.userId === userId) return true;
-            const link = db.data.sheetLinks.find(l => l.eventId === e.id);
-            const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === userId) : null;
-            return !!access;
-        });
-        eventIds = new Set(userEvents.map(e => e.id));
+        const allEvents = isAdmin ? stmt.events.all.all().map(rowToEvent) : stmt.events.byUserId.all(userId).map(rowToEvent);
+        if (!isAdmin) {
+            const myAccess = stmt.sheetAccess.byUserId.all(userId);
+            for (const a of myAccess) {
+                const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
+                if (link?.eventId) allEvents.push(rowToEvent(stmt.events.byId.get(link.eventId)));
+            }
+        }
+        eventIds = new Set(allEvents.filter(Boolean).map(e => e.id));
     }
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -3246,19 +3126,21 @@ app.get('/api/monitor/stream', requireAuth, async (req, res) => {
 // ── Scanner-side notification SSE stream ──────────────────────────────────────
 // ── Monitor bootstrap: list all known scanners ─────────────────────────────────
 app.get('/api/monitor/scanners', requireAuth, async (req, res) => {
-    await db.read();
     const userId = req.session.userId;
-    const user = db.data.users.find(u => u.id === userId);
+    const user = rowToUser(stmt.users.byId.get(userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
 
-    const userEvents = isAdmin
-        ? db.data.events
-        : db.data.events.filter(e => {
-            if (e.userId === userId) return true;
-            const link = db.data.sheetLinks.find(l => l.eventId === e.id);
-            const access = link ? db.data.sheetAccess.find(a => a.sheetLinkId === link.id && a.userId === userId) : null;
-            return !!access;
-        });
+    let userEvents = isAdmin ? stmt.events.all.all().map(rowToEvent) : stmt.events.byUserId.all(userId).map(rowToEvent);
+    if (!isAdmin) {
+        const myAccess = stmt.sheetAccess.byUserId.all(userId);
+        for (const a of myAccess) {
+            const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
+            if (link?.eventId) {
+                const ev = rowToEvent(stmt.events.byId.get(link.eventId));
+                if (ev && !userEvents.find(e => e.id === ev.id)) userEvents.push(ev);
+            }
+        }
+    }
 
     const userEventIds = new Set(userEvents.map(e => e.id));
 
@@ -3277,8 +3159,7 @@ app.post('/api/scan/heartbeat', async (req, res) => {
     const { pairToken, eventId, platform, deviceName, appVersion, osVersion } = req.body;
     if (!pairToken) return res.status(400).json({ error: 'pairToken required' });
 
-    await db.read();
-    const ev = eventId ? db.data.events.find(e => e.id === eventId) : null;
+    const ev = eventId ? rowToEvent(stmt.events.byId.get(eventId)) : null;
 
     upsertScanner(pairToken, {
         ip: getClientIP(req),
@@ -3309,8 +3190,7 @@ app.get('/api/scan/stream/:pairToken', async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
-    await db.read();
-    const ev = eventId ? db.data.events.find(e => e.id === eventId) : null;
+    const ev = eventId ? rowToEvent(stmt.events.byId.get(eventId)) : null;
 
     upsertScanner(pairToken, {
         ip: getClientIP(req),
@@ -3354,19 +3234,17 @@ app.get('/api/scan/stream/:pairToken', async (req, res) => {
 // ── Monitor Notifications ────────────────────────────────────────────────────
 // Send a message to one or all scanners (SSE → app shows alert/notification)
 app.post('/api/monitor/notify', requireAuth, async (req, res) => {
-    await db.read();
     const { pairToken, title = 'Admin Message', message } = req.body;
     if (!message) return res.status(400).json({ error: 'message is required' });
 
     const userId = req.session.userId;
-    const user = db.data.users.find(u => u.id === userId);
+    const user = rowToUser(stmt.users.byId.get(userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
 
-    // Gather pairTokens that belong to events the user owns
     const userEventIds = new Set(
         isAdmin
-            ? db.data.events.map(e => e.id)
-            : db.data.events.filter(e => e.userId === userId).map(e => e.id)
+            ? stmt.events.all.all().map(e => e.id)
+            : stmt.events.byUserId.all(userId).map(e => e.id)
     );
 
     const payload = { type: 'notification', title, message, sentAt: new Date().toISOString() };

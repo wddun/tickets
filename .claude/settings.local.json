@@ -2,7 +2,22 @@
   "permissions": {
     "allow": [
       "Bash(node -e \"console.log\\('v8 heap limit:', \\(require\\('v8'\\).getHeapStatistics\\(\\).heap_size_limit / 1024 / 1024\\).toFixed\\(0\\) + 'MB'\\)\")",
-      "Bash(ps aux *)"
+      "Bash(ps aux *)",
+      "Bash(find C:\\\\\\\\tickets -name \"server.js\" -type f)",
+      "Bash(node -e \"const d = JSON.parse\\(require\\('fs'\\).readFileSync\\('/c/tickets/db.json','utf8'\\)\\); console.log\\('users:', d.users?.length || 0\\); console.log\\('events:', d.events?.length || 0\\); console.log\\('tickets:', d.tickets?.length || 0\\); console.log\\('walletDevices:', d.walletDevices?.length || 0\\); console.log\\('pushDevices:', d.pushDevices?.length || 0\\); const t = d.tickets?.[0] || {}; console.log\\('sample ticket keys:', Object.keys\\(t\\)\\); const e = d.events?.[0] || {}; console.log\\('sample event keys:', Object.keys\\(e\\)\\);\")",
+      "Bash(node --input-type=module)",
+      "Bash(npm install *)",
+      "Bash(node -e \"import\\('/c/tickets/node_modules/better-sqlite3/build/Release/better_sqlite3.node'\\)\")",
+      "Bash(node -e \"const Database = require\\('/c/tickets/node_modules/better-sqlite3'\\); const db = new Database\\(':memory:'\\); console.log\\('OK', db.prepare\\('SELECT 1'\\).get\\(\\)\\)\")",
+      "Bash(node -e \"const Database = require\\('better-sqlite3'\\); const db = new Database\\(':memory:'\\); console.log\\('OK', db.prepare\\('SELECT 1 as n'\\).get\\(\\)\\)\")",
+      "Bash(node --input-type=module --check)",
+      "Bash(node -e \"import\\('/c/tickets/server.js'\\).then\\(\\(\\) => console.log\\('OK'\\)\\).catch\\(e => console.error\\(e.message, e.stack\\)\\)\")",
+      "Bash(node --check server.js)",
+      "Bash(node --experimental-vm-modules -e ' *)",
+      "Bash(node -e \"require\\('./db-sqlite.js'\\)\")",
+      "Bash(timeout 5 node server.js)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(node -e ' *)"
     ]
   }
 }
