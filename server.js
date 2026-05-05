@@ -2645,21 +2645,21 @@ app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
     const prereqError = checkPassPrereqs();
     if (prereqError) return res.status(503).send();
 
-    // Use content hash so we only serve a new pass when something actually changed
-    const currentHash = passContentHash(ticket, event);
+    // 304 check: compare dates — passHash is pre-saved by stampPassUpdates before Apple
+    // ever fetches, so hash equality always fires too early and returns 304 on the first
+    // fetch after a real change. Date comparison is correct: updated_at is only bumped
+    // by stampPassUpdates when content actually changes, and Last-Modified echoes it back.
     const ims = req.headers['if-modified-since'];
-    if (ims && ticket.passHash === currentHash) {
-        log('wallet-pass', `[skip] Not modified — serial: ${serialNumber.slice(0, 8)}…`);
-        return res.status(304).send();
+    if (ims) {
+        const lastMod = new Date(ticket.updated_at || ticket.created_at);
+        if (lastMod <= new Date(ims)) {
+            log('wallet-pass', `[skip] Not modified — serial: ${serialNumber.slice(0, 8)}…`);
+            return res.status(304).send();
+        }
     }
 
     try {
         const buffer = await generatePassBuffer(ticket, event);
-        // Store hash so future requests can short-circuit
-        if (ticket.passHash !== currentHash) {
-            ticket.passHash = currentHash;
-            db.write().catch(() => { });
-        }
         const lastMod = new Date(ticket.updated_at || ticket.created_at);
         res.set('Content-Type', 'application/vnd.apple.pkpass');
         res.set('Last-Modified', lastMod.toUTCString());
