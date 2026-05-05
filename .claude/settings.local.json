@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"console.log\\('v8 heap limit:', \\(require\\('v8'\\).getHeapStatistics\\(\\).heap_size_limit / 1024 / 1024\\).toFixed\\(0\\) + 'MB'\\)\")",
+      "Bash(ps aux *)"
+    ]
+  }
+}
