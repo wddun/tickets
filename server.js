@@ -1305,9 +1305,8 @@ app.get('/api/events/counts', requireAuth, (req, res) => {
     }
     const counts = {};
     userEvents.forEach(e => {
-        const row = stmt.tickets.countByEventId.get(e.id);
         const tickets = stmt.tickets.byEventId.all(e.id);
-        counts[e.id] = { total: row.cnt, scanned: tickets.filter(t => t.used_at).length };
+        counts[e.id] = { total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
     });
     res.json(counts);
 });

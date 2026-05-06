@@ -17,7 +17,9 @@
       "Bash(node -e \"require\\('./db-sqlite.js'\\)\")",
       "Bash(timeout 5 node server.js)",
       "Bash(echo \"exit: $?\")",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(timeout 6 node server.js)",
+      "Bash(PORT=3099 timeout 5 node server.js)"
     ]
   }
 }
