@@ -334,6 +334,10 @@ app.use((req, res, next) => {
     next();
 });
 app.use(express.json({ limit: '20mb' }));
+app.get('/sw.js', (req, res) => {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(path.resolve(__dirname, 'public/sw.js'));
+});
 app.use(express.static('public', { extensions: ['html'] }));
 app.get('/html5-qrcode.min.js', (req, res) => {
     res.sendFile(path.resolve(__dirname, 'node_modules/html5-qrcode/html5-qrcode.min.js'));

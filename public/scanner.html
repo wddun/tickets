@@ -508,38 +508,44 @@ const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 const comp = audioCtx.createDynamicsCompressor();
 comp.connect(audioCtx.destination);
 
+let soundTimers = [];
+let activeNodes = [];
+
+function stopAllSounds() {
+    soundTimers.forEach(id => clearTimeout(id));
+    soundTimers = [];
+    const t = audioCtx.currentTime;
+    activeNodes.forEach(({ g, o }) => {
+        try { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(0, t); o.stop(t + 0.01); } catch (_) {}
+    });
+    activeNodes = [];
+}
+
+function playNote(hz, dur, destination, waveType, gain) {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.connect(g); g.connect(destination);
+    o.type = waveType; o.frequency.value = hz;
+    g.gain.setValueAtTime(gain, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+    activeNodes.push({ o, g });
+}
+
 function playSound(type) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
+    stopAllSounds();
     if (type === 'success') {
         // C5 → A5, matching iOS timing: note at 0ms, note at 180ms
-        [[523.25, 0, 0.22], [880, 180, 0.32]].forEach(([hz, ms, dur]) => setTimeout(() => {
-            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-            o.connect(g); g.connect(comp);
-            o.type = 'sine'; o.frequency.value = hz;
-            g.gain.setValueAtTime(2.5, audioCtx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
-            o.start(); o.stop(audioCtx.currentTime + dur);
-        }, ms));
+        playNote(523.25, 0.22, comp, 'sine', 2.5);
+        soundTimers.push(setTimeout(() => playNote(880, 0.32, comp, 'sine', 2.5), 180));
     } else if (type === 'checkout') {
         // Soft descending sine: C5 → G4, gentle and neutral
-        [[523.25, 0, 0.18], [392, 160, 0.26]].forEach(([hz, ms, dur]) => setTimeout(() => {
-            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-            o.connect(g); g.connect(comp);
-            o.type = 'sine'; o.frequency.value = hz;
-            g.gain.setValueAtTime(1.2, audioCtx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
-            o.start(); o.stop(audioCtx.currentTime + dur);
-        }, ms));
+        playNote(523.25, 0.18, comp, 'sine', 1.2);
+        soundTimers.push(setTimeout(() => playNote(392, 0.26, comp, 'sine', 1.2), 160));
     } else {
-        // A3 → A#2 square, matching iOS timing: note at 0ms, note at 180ms
-        [[220, 0, 0.18], [180, 180, 0.32]].forEach(([hz, ms, dur]) => setTimeout(() => {
-            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-            o.connect(g); g.connect(audioCtx.destination);
-            o.type = 'square'; o.frequency.value = hz;
-            g.gain.setValueAtTime(0.8, audioCtx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
-            o.start(); o.stop(audioCtx.currentTime + dur);
-        }, ms));
+        // A3 → A#2 square
+        playNote(220, 0.18, audioCtx.destination, 'square', 0.8);
+        soundTimers.push(setTimeout(() => playNote(180, 0.32, audioCtx.destination, 'square', 0.8), 180));
     }
 }
 
