@@ -929,7 +929,11 @@ function closeResult() {
     clearTimeout(flashTimer);
     clearTimeout(exitConfirmTimer);
     exitConfirmTimer = null;
-    document.getElementById('resultOverlay').classList.remove('show');
+    const overlay = document.getElementById('resultOverlay');
+    overlay.style.opacity = '';
+    overlay.style.transform = '';
+    overlay.style.transition = '';
+    overlay.classList.remove('show');
     pendingCheckoutToken = null;
 }
 
