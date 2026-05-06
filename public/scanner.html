@@ -520,6 +520,16 @@ function playSound(type) {
             g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
             o.start(); o.stop(audioCtx.currentTime + dur);
         }, ms));
+    } else if (type === 'checkout') {
+        // Soft descending sine: C5 → G4, gentle and neutral
+        [[523.25, 0, 0.18], [392, 160, 0.26]].forEach(([hz, ms, dur]) => setTimeout(() => {
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.connect(g); g.connect(comp);
+            o.type = 'sine'; o.frequency.value = hz;
+            g.gain.setValueAtTime(1.2, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+            o.start(); o.stop(audioCtx.currentTime + dur);
+        }, ms));
     } else {
         // A3 → A#2 square, matching iOS timing: note at 0ms, note at 180ms
         [[220, 0, 0.18], [180, 180, 0.32]].forEach(([hz, ms, dur]) => setTimeout(() => {
@@ -957,7 +967,6 @@ async function confirmCheckout() {
             body: JSON.stringify({ token: pendingCheckoutToken }),
             signal: controller.signal
         });
-        playSound('success');
     } catch (_) {}
     clearTimeout(timeoutId);
     closeResult();
@@ -996,7 +1005,8 @@ function onScanSuccess(decodedText) {
     .then(data => {
         data._token = token;
         const isSuccess = data.status === 'valid' || data.status === 'reentry_enter';
-        playSound(isSuccess ? 'success' : 'error');
+        const sound = isSuccess ? 'success' : data.status === 'reentry_exit' ? 'checkout' : 'error';
+        playSound(sound);
         if (data.status === 'reentry_exit') {
             openExitConfirm(data);
         } else {
