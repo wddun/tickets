@@ -887,7 +887,7 @@ function showFlash(data) {
     }
     
     clearTimeout(flashTimer);
-    flashTimer = setTimeout(closeResult, 1200);
+    flashTimer = setTimeout(closeResult, 800);
     addToHistory(data, status);
 }
 
@@ -1002,13 +1002,8 @@ function onScanSuccess(decodedText) {
     // Per-token debounce — same QR within 5s is ignored
     if (token === lastScannedToken && (now - lastScanTs) < SCAN_DEBOUNCE_MS) return;
 
-    // Don't interrupt a pending checkout confirmation — shared overlay state would conflict
-    if (pendingCheckoutToken) return;
-
     lastScannedToken = token;
     lastScanTs = now;
-
-    // Camera keeps running — no isProcessing block
 
     fetch('/api/validate', {
         method: 'POST',
@@ -1020,6 +1015,15 @@ function onScanSuccess(decodedText) {
         data._token = token;
         const isSuccess = data.status === 'valid' || data.status === 'reentry_enter';
         const sound = isSuccess ? 'success' : data.status === 'reentry_exit' ? 'checkout' : 'error';
+
+        // Checkout confirm is showing — process silently so it isn't disrupted
+        if (pendingCheckoutToken) {
+            if (data.status === 'reentry_exit') return; // can't nest two checkout confirms
+            playSound(sound);
+            addToHistory(data, data.status);
+            return;
+        }
+
         playSound(sound);
         if (data.status === 'reentry_exit') {
             openExitConfirm(data);
@@ -1028,6 +1032,7 @@ function onScanSuccess(decodedText) {
         }
     })
     .catch(() => {
+        if (pendingCheckoutToken) return;
         playSound('error');
         showFlash({ status: 'error', name: 'Server Error' });
     });
