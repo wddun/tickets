@@ -152,8 +152,8 @@
             pointer-events: auto;
         }
         @keyframes slideUp {
-            from { transform: translateY(12px); opacity: 0; }
-            to   { transform: translateY(0);    opacity: 1; }
+            from { transform: translateY(18px) scale(0.97); opacity: 0; }
+            to   { transform: translateY(0)    scale(1);    opacity: 1; }
         }
 
         /* ── Full-screen result overlay — reentry exit confirm only ── */
@@ -375,15 +375,21 @@
         .dp-copy-btn:active { opacity: 0.6; }
 
         /* ── Scan detail sheet ── */
-        .scan-history-item { cursor: pointer; pointer-events: auto; }
         #detailSheet { max-height: 82dvh; }
         .det-header {
-            padding: 28px 20px 22px; text-align: center;
-            border-radius: 0;
+            padding: 28px 20px 20px; text-align: center;
+            background: #1c1c1e; border-radius: 20px 20px 0 0;
+            border-top: 4px solid transparent; /* set inline per-status */
         }
-        .det-icon  { font-size: 52px; line-height: 1; margin-bottom: 8px; }
-        .det-status{ font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.78); margin-bottom: 4px; }
-        .det-name  { font-size: 32px; font-weight: 800; color: #fff; line-height: 1.1; word-break: break-word; }
+        .det-icon-circle {
+            width: 56px; height: 56px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 14px;
+        }
+        .det-icon-circle svg { width: 30px; height: 30px; }
+        .det-status{ font-size: 12px; font-weight: 700; letter-spacing: 0.05em;
+                     text-transform: uppercase; margin-bottom: 6px; }
+        .det-name  { font-size: 30px; font-weight: 800; color: #fff; line-height: 1.1; word-break: break-word; }
         .det-body  { padding: 0 20px 24px; }
         .det-row {
             display: flex; justify-content: space-between; align-items: flex-start;
@@ -807,10 +813,16 @@ function openDetail() {
         `;
     }
 
+    const accent = STATUS_COLORS[status] || '#818cf8';
+
     document.getElementById('detailContent').innerHTML = `
-        <div class="det-header" style="background:${bg}">
-            <div class="det-icon">${icon}</div>
-            <div class="det-status">${escHtml(title)}</div>
+        <div class="det-header" style="border-top-color:${accent};">
+            <div class="det-icon-circle" style="background:${accent}22;">
+                <svg viewBox="0 0 24 24" fill="currentColor" style="color:${accent};">
+                    ${STATUS_ICONS[status] ? STATUS_ICONS[status].replace(/^<svg[^>]*>|<\/svg>$/g,'') : ''}
+                </svg>
+            </div>
+            <div class="det-status" style="color:${accent};">${escHtml(title)}</div>
             <div class="det-name">${escHtml(d.firstName || d.name || '')}</div>
         </div>
         ${rows ? `<div class="det-body">${rows}</div>` : ''}
@@ -862,10 +874,13 @@ const svgDoor = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 19H5V
 const STATUS_ICONS   = { valid:svgCheck, reentry_enter:svgCheck, reentry_exit:svgDoor, checkout_done:svgCheck, used:svgExclam, invalid:svgXmark, error:svgXmark, info:svgCheck };
 const STATUS_TITLES  = { valid:'Checked In!', reentry_enter:'Checked Back In!', reentry_exit:'Confirm Check-Out', checkout_done:'Checked Out', used:'Already Checked In', invalid:'Invalid QR', error:'Error', info:'Admin Message' };
 const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', checkout_done:'shi-dot-orange', invalid:'shi-dot-red', error:'shi-dot-red', info:'shi-dot-green' };
+const STATUS_COLORS  = { valid:'#4ade80', reentry_enter:'#4ade80', reentry_exit:'#fbbf24', checkout_done:'#fbbf24', used:'#fbbf24', invalid:'#f87171', error:'#f87171', info:'#818cf8' };
 
 let recentScansList = [];
 let flashTimer = null;
 let exitConfirmTimer = null;
+let scanCardTimer = null;
+let scanFadeTimer = null;
 
 // Full-screen colored flash — auto-dismisses after 1.2s, tap also dismisses
 function showFlash(data) {
@@ -906,19 +921,53 @@ function showBanner(data) { showFlash(data); }
 
 function addToHistory(data, status) {
     lastScanData = { ...data, status };
-    const isSuccess = status === 'valid' || status === 'reentry_enter';
-    const color = isSuccess ? '#4ade80' : '#f59e0b';
-    const icon = isSuccess ? svgCheck : svgExclam;
-    
-    document.getElementById('recentScans').innerHTML = `
-        <div onclick="openDetail()" style="display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.15);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:14px;padding:12px 16px;margin:0 20px;cursor:pointer;animation:slideUp 0.25s ease;">
-            <div style="color:${color};width:20px;height:20px;display:flex;align-items:center;justify-content:center;">${icon}</div>
-            <div style="flex:1;display:flex;flex-direction:column;gap:2px;overflow:hidden;">
-                <div style="color:#fff;font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(data.firstName || data.name || 'Unknown')}</div>
-                <div style="color:rgba(255,255,255,0.6);font-size:12px;font-weight:500;">${escHtml(STATUS_TITLES[status] || 'Error')}</div>
+    clearTimeout(scanCardTimer);
+    clearTimeout(scanFadeTimer);
+
+    const accent = STATUS_COLORS[status] || '#818cf8';
+    const name   = escHtml(data.firstName || data.name || 'Unknown');
+    const label  = escHtml(STATUS_TITLES[status] || 'Unknown');
+
+    const container = document.getElementById('recentScans');
+    container.innerHTML = `
+        <div id="scanHistCard" onclick="openDetail()"
+             style="display:flex;align-items:center;gap:12px;
+                    background:rgba(22,22,24,0.96);
+                    backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+                    border:1px solid rgba(255,255,255,0.09);
+                    border-left:3px solid ${accent};
+                    border-radius:14px;padding:12px 16px;margin:0 14px;
+                    cursor:pointer;pointer-events:none;
+                    animation:slideUp 0.38s cubic-bezier(0.34,1.56,0.64,1);">
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:15px;font-weight:700;color:#fff;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+                            margin-bottom:2px;">${name}</div>
+                <div style="font-size:12px;font-weight:600;color:${accent};">${label}</div>
             </div>
-            <div style="color:rgba(255,255,255,0.35);font-size:14px;font-weight:700;">›</div>
+            <svg width="7" height="12" viewBox="0 0 7 12" fill="none"
+                 stroke="rgba(255,255,255,0.22)" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="1 1 6 6 1 11"/>
+            </svg>
         </div>`;
+
+    // Block taps for 1.5 s — prevents accidentally opening the sheet while
+    // the finger is still moving after dismissing the scan result overlay
+    scanCardTimer = setTimeout(() => {
+        const c = document.getElementById('scanHistCard');
+        if (c) c.style.pointerEvents = 'auto';
+    }, 1500);
+
+    // Auto-fade after 8 s
+    scanFadeTimer = setTimeout(() => {
+        const c = document.getElementById('scanHistCard');
+        if (c) {
+            c.style.transition = 'opacity 0.5s ease';
+            c.style.opacity = '0';
+            setTimeout(() => { container.innerHTML = ''; }, 500);
+        }
+    }, 8000);
 }
 
 let pendingCheckoutName = null;
