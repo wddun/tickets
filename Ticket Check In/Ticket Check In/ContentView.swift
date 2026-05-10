@@ -26,6 +26,9 @@ struct ContentView: View {
                 EventsView(switchToScanner: { selectedTab = 0 })
                     .tabItem { Label("Events", systemImage: "calendar") }
                     .tag(1)
+                SettingsView()
+                    .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                    .tag(2)
             }
             // Fullscreen display mode — covers entire app when active
             .fullScreenCover(isPresented: $displayModeActive) {

@@ -28,7 +28,6 @@ struct ScannerView: View {
     @State private var isScanning = true
     @State private var lastRegistrationId: String?
     @State private var showingDetail = false
-    @State private var showSettings = false
     @State private var lastScannedToken: String?
     @State private var lastScanTime: Date?
     @State private var pendingCheckoutToken: String?
@@ -50,8 +49,6 @@ struct ScannerView: View {
             CameraPreviewView(isScanning: $isScanning, onCode: handleCode)
                 .ignoresSafeArea()
             viewfinderFrame
-            topBar
-            statusPills
             bottomBar
             // Full-screen overlay only for reentry exit confirmation
             exitConfirmOverlay
@@ -97,78 +94,6 @@ struct ScannerView: View {
                 TicketDetailSheet(result: result)
             }
         }
-        .sheet(isPresented: $showSettings) {
-            DisplaySetupView(bluetooth: bluetooth)
-        }
-    }
-
-    @ViewBuilder private var topBar: some View {
-        VStack {
-            HStack {
-                Spacer()
-                Button { showSettings = true } label: {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .padding(10)
-                        .background(.black.opacity(0.45), in: Circle())
-                }
-                .padding(.top, 56)
-                .padding(.trailing, 16)
-            }
-            Spacer()
-        }
-    }
-
-    // MARK: - Status Pills
-
-    @ViewBuilder private var statusPills: some View {
-        VStack {
-            // Sits just below the top bar (gear button is ~56pt top + 10pt padding + icon)
-            HStack(spacing: 8) {
-                blePill
-                wifiPill
-            }
-            .padding(.top, 110)   // below the gear button
-            Spacer()
-        }
-    }
-
-    @ViewBuilder private var blePill: some View {
-        if scannerMode == "ble" {
-            let dot: Color = {
-                switch bluetooth.bleState {
-                case .connected:              return .green
-                case .scanning, .connecting:  return .yellow
-                case .disconnected:           return .orange
-                case .unauthorized:           return .red
-                default:                      return .gray
-                }
-            }()
-            Label {
-                Text("Scanner - BLE").font(.system(size: 12, weight: .semibold))
-            } icon: {
-                Circle().fill(dot).frame(width: 7, height: 7)
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.black.opacity(0.55), in: Capsule())
-        }
-    }
-
-    @ViewBuilder private var wifiPill: some View {
-        let dot: Color = api.isAuthenticated ? .green : .gray
-        let labelText = scannerMode == "internet" ? "Scanner - Internet" : "Server"
-        Label {
-            Text(labelText).font(.system(size: 12, weight: .semibold))
-        } icon: {
-            Circle().fill(dot).frame(width: 7, height: 7)
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.55), in: Capsule())
     }
 
     @ViewBuilder private var viewfinderFrame: some View {

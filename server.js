@@ -3545,6 +3545,115 @@ app.post('/api/monitor/notify', requireAuth, async (req, res) => {
     res.json({ ok: true, notified });
 });
 
+// ── Per-Event Metrics ────────────────────────────────────────────────────────
+
+app.get('/api/event/:id/metrics', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
+    if (!isAdmin && event.userId !== req.session.userId && !access) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
+    const total = tickets.length;
+    const scanned = tickets.filter(t => t.used_at).length;
+    const pct = total ? Math.round(scanned / total * 100) : 0;
+    const uniqueRegistrations = new Set(tickets.map(t => t.registrationId || t.id)).size;
+    const walletDownloads = tickets.filter(t => t.wallet_downloaded_at).length;
+    const emailOpens = tickets.filter(t => t.email_opened_at).length;
+
+    // Check-in timeline grouped by hour (server local time)
+    const checkinByHour = {};
+    tickets.filter(t => t.used_at).forEach(t => {
+        const d = new Date(t.used_at);
+        const key = `${d.getHours().toString().padStart(2, '0')}:00`;
+        checkinByHour[key] = (checkinByHour[key] || 0) + 1;
+    });
+    const checkinTimeline = Object.entries(checkinByHour)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([hour, count]) => ({ hour, count }));
+
+    // Registration timeline grouped by day
+    const regByDay = {};
+    tickets.forEach(t => {
+        if (!t.created_at) return;
+        const day = t.created_at.substring(0, 10);
+        regByDay[day] = (regByDay[day] || 0) + 1;
+    });
+    const registrationTimeline = Object.entries(regByDay)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([day, count]) => ({ day, count }));
+
+    // Custom field value breakdowns
+    const customFieldBreakdowns = {};
+    tickets.forEach(t => {
+        const fields = t.customFields || {};
+        Object.entries(fields).forEach(([key, val]) => {
+            if (val == null || val === '') return;
+            if (!customFieldBreakdowns[key]) customFieldBreakdowns[key] = {};
+            const v = String(val).trim();
+            customFieldBreakdowns[key][v] = (customFieldBreakdowns[key][v] || 0) + 1;
+        });
+    });
+
+    res.json({ total, scanned, pct, uniqueRegistrations, walletDownloads, emailOpens, checkinTimeline, registrationTimeline, customFieldBreakdowns });
+});
+
+// ── Admin Overview Metrics ───────────────────────────────────────────────────
+
+app.get('/api/admin/metrics', requireAuth, (req, res) => {
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user || user.email !== process.env.ADMIN_EMAIL) {
+        return res.status(403).json({ error: 'Admin only' });
+    }
+
+    const allEvents = stmt.events.all.all().map(rowToEvent);
+    let totalTickets = 0, totalScanned = 0, totalWallet = 0, totalEmailOpens = 0;
+
+    const eventStats = allEvents.map(event => {
+        const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
+        const total = tickets.length;
+        const scanned = tickets.filter(t => t.used_at).length;
+        const walletDownloads = tickets.filter(t => t.wallet_downloaded_at).length;
+        const emailOpens = tickets.filter(t => t.email_opened_at).length;
+        const uniqueRegistrations = new Set(tickets.map(t => t.registrationId || t.id)).size;
+        totalTickets += total;
+        totalScanned += scanned;
+        totalWallet += walletDownloads;
+        totalEmailOpens += emailOpens;
+        return {
+            id: event.id,
+            name: event.name,
+            time: event.time,
+            color: event.color,
+            total,
+            scanned,
+            pct: total ? Math.round(scanned / total * 100) : 0,
+            walletDownloads,
+            emailOpens,
+            uniqueRegistrations
+        };
+    });
+
+    // Sort by event time descending (most recent first)
+    eventStats.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+
+    res.json({
+        totalEvents: allEvents.length,
+        totalTickets,
+        totalScanned,
+        totalPct: totalTickets ? Math.round(totalScanned / totalTickets * 100) : 0,
+        totalWalletDownloads: totalWallet,
+        totalEmailOpens,
+        events: eventStats
+    });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\nTicket Check-in System running at:\n - Local: http://localhost:${PORT}\n   - Network:  http://0.0.0.0:${PORT}\n`);
 });
