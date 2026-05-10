@@ -1374,8 +1374,12 @@
                 <button class="btn btn-primary btn-sm" onclick="openBulkImportModal()">➕ Add Tickets</button>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
-                <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;">
+                <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
+                    <button class="btn btn-secondary btn-sm" onclick="checkInSelected('${event.id}')">Check In</button>
+                    <button class="btn btn-secondary btn-sm" onclick="undoCheckInSelected('${event.id}')">Undo Check-In</button>
+                    <button class="btn btn-secondary btn-sm" onclick="resendSelectedTickets('${event.id}')">Resend Tickets</button>
                     <button class="btn btn-secondary btn-sm" onclick="openBulkEmailModal('${event.id}', 0, true)">Email Selected</button>
+                    <button class="btn btn-secondary btn-sm" onclick="exportSelectedCSV()">Export CSV</button>
                     <button class="btn btn-secondary btn-sm" onclick="printSelectedTickets()">Print Selected</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteSelectedTickets('${event.id}')">Delete Selected</button>
                 </span>
@@ -1557,6 +1561,64 @@
             if (!checkedRegIds.size) return;
             const ids = [...checkedRegIds].join(',');
             window.open('/api/tickets/bulk-preview?regIds=' + encodeURIComponent(ids), '_blank');
+        }
+
+        function exportSelectedCSV() {
+            if (!checkedRegIds.size) return;
+            const ids = [...checkedRegIds].join(',');
+            window.location.href = '/api/tickets/export-csv?regIds=' + encodeURIComponent(ids);
+        }
+
+        async function checkInSelected(eventId) {
+            if (!checkedRegIds.size) return;
+            const r = await fetch('/api/checkin/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+            });
+            if (r.ok) {
+                const d = await r.json();
+                checkedRegIds.clear();
+                const event = events.find(e => e.id === eventId);
+                if (event) await fetchAndRender(event);
+                if (d.checkedIn === 0) alert('All selected attendees were already checked in.');
+            } else {
+                alert('Check-in failed.');
+            }
+        }
+
+        async function undoCheckInSelected(eventId) {
+            if (!checkedRegIds.size) return;
+            if (!confirm(`Undo check-in for ${checkedRegIds.size} registration(s)?`)) return;
+            const r = await fetch('/api/checkin/bulk', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+            });
+            if (r.ok) {
+                checkedRegIds.clear();
+                const event = events.find(e => e.id === eventId);
+                if (event) await fetchAndRender(event);
+            } else {
+                alert('Undo check-in failed.');
+            }
+        }
+
+        async function resendSelectedTickets(eventId) {
+            if (!checkedRegIds.size) return;
+            if (!confirm(`Resend ticket emails to ${checkedRegIds.size} registration(s)?`)) return;
+            const r = await fetch('/api/registrations/bulk-resend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+            });
+            if (r.ok) {
+                const d = await r.json();
+                alert(`Sent to ${d.sent} registration${d.sent !== 1 ? 's' : ''}${d.failed > 0 ? ` (${d.failed} failed)` : ''}.`);
+            } else {
+                const d = await r.json().catch(() => ({}));
+                alert(d.error || 'Failed to resend emails.');
+            }
         }
 
         async function deleteSelectedTickets(eventId) {

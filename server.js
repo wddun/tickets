@@ -2014,6 +2014,171 @@ ${sections.join('\n<hr style="border:none;border-top:2px solid #e5e7eb;margin:32
 </html>`);
 });
 
+// Bulk check-in (must be defined before /:registrationId to avoid route conflict)
+app.post('/api/checkin/bulk', requireAuth, async (req, res) => {
+    const { registrationIds } = req.body;
+    if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
+
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const now = new Date().toISOString();
+    let checkedIn = 0;
+
+    for (const regId of registrationIds) {
+        const tickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
+        if (!tickets.length) continue;
+        const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+        if (!event) continue;
+        const link = stmt.sheetLinks.byEventId.get(event.id);
+        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
+        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission === 'view')) continue;
+
+        db.transaction(() => {
+            for (const t of tickets) {
+                if (!t.used_at) {
+                    checkedIn++;
+                    if (event.allowReentry) {
+                        stmt.tickets.checkInReentry.run(now, now, t.id);
+                    } else {
+                        stmt.tickets.checkIn.run(now, now, t.id);
+                    }
+                }
+            }
+        })();
+        pushWalletIfChanged(tickets, event).catch(() => {});
+    }
+
+    ticketStatusCache.clear();
+    log('checkin', `[bulk] Checked in ${checkedIn} ticket(s) across ${registrationIds.length} registration(s)  by: ${req.session.userId}`);
+    res.json({ success: true, checkedIn });
+});
+
+// Bulk undo check-in (must be defined before /:registrationId)
+app.delete('/api/checkin/bulk', requireAuth, async (req, res) => {
+    const { registrationIds } = req.body;
+    if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
+
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const now = new Date().toISOString();
+    let cleared = 0;
+
+    for (const regId of registrationIds) {
+        const tickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
+        if (!tickets.length) continue;
+        const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+        if (!event) continue;
+        if (!isAdmin && event.userId !== req.session.userId) continue;
+
+        db.transaction(() => {
+            for (const t of tickets) {
+                if (t.used_at) cleared++;
+                stmt.tickets.undoCheckIn.run(now, t.id);
+            }
+        })();
+        pushWalletIfChanged(tickets, event).catch(() => {});
+    }
+
+    ticketStatusCache.clear();
+    log('uncheckin', `[bulk] Cleared ${cleared} ticket(s) across ${registrationIds.length} registration(s)  by: ${req.session.userId}`);
+    res.json({ success: true, cleared });
+});
+
+// Bulk resend ticket emails
+app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
+    const { registrationIds } = req.body;
+    if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
+
+    if (!process.env.SES_FROM || !process.env.AWS_ACCESS_KEY_ID) {
+        return res.status(503).json({ error: 'Email not configured' });
+    }
+
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    let sent = 0, failed = 0;
+
+    for (const regId of registrationIds) {
+        const groupTickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
+        if (!groupTickets.length) continue;
+        const ticket = groupTickets[0];
+        const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
+        if (!event) continue;
+        const link = stmt.sheetLinks.byEventId.get(event.id);
+        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
+        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) continue;
+
+        const actualCount = groupTickets.length;
+        const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
+        try {
+            await sendEmail({
+                to: ticket.email,
+                fromName: `Tickets - ${event.name}`,
+                replyTo: eventOwner?.email,
+                subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
+                html: buildTicketEmailHtml({
+                    firstName: ticket.firstName,
+                    intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
+                    event,
+                    tickets: groupTickets,
+                }),
+                registrationId: regId
+            });
+            sent++;
+        } catch (err) {
+            failed++;
+            log('resend-email', `[ERR] Bulk resend failed — email: ${ticket.email}  err: ${err.message}`);
+        }
+    }
+
+    log('resend-email', `[bulk] Resent to ${sent} registration(s)  failed: ${failed}  by: ${req.session.userId}`);
+    res.json({ success: true, sent, failed });
+});
+
+// CSV export for selected registrations
+app.get('/api/tickets/export-csv', requireAuth, async (req, res) => {
+    const rawIds = (req.query.regIds || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!rawIds.length) return res.status(400).send('No registration IDs provided');
+
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+
+    const rows = [];
+    const customFieldKeys = new Set();
+
+    for (const regId of rawIds) {
+        const groupTickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
+        if (!groupTickets.length) continue;
+        const ticket = groupTickets[0];
+        const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
+        if (!event) continue;
+        const link = stmt.sheetLinks.byEventId.get(event.id);
+        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
+        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) continue;
+
+        Object.keys(ticket.customFields || {}).forEach(k => customFieldKeys.add(k));
+        rows.push({ ticket, groupTickets, event });
+    }
+
+    if (!rows.length) return res.status(404).send('No accessible registrations found');
+
+    const cfKeys = [...customFieldKeys];
+    const headers = ['Name', 'Email', 'Tickets', 'Registered', 'Status', ...cfKeys];
+    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+    const csvRows = [headers.map(esc).join(',')];
+    for (const { ticket, groupTickets } of rows) {
+        const checkedIn = groupTickets.filter(t => t.used_at).length;
+        const total = groupTickets.length;
+        const status = checkedIn === 0 ? 'Pending' : checkedIn === total ? 'Checked In' : `${checkedIn}/${total} Checked In`;
+        const registered = ticket.created_at ? new Date(ticket.created_at).toLocaleDateString('en-US') : '';
+        csvRows.push([ticket.name, ticket.email, total, registered, status, ...cfKeys.map(k => ticket.customFields?.[k] ?? '')].map(esc).join(','));
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="tickets-export.csv"`);
+    res.send(csvRows.join('\r\n'));
+});
+
 // API: Validate QR Code
 // Manual check-in by registrationId (marks all tickets in the group)
 app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
