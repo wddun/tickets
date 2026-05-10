@@ -20,7 +20,10 @@
       "Bash(node -e ' *)",
       "Bash(timeout 6 node server.js)",
       "Bash(PORT=3099 timeout 5 node server.js)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(grep -E \"\\\\.\\(js|html\\)$\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
