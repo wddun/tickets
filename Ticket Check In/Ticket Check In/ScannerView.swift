@@ -39,9 +39,10 @@ struct ScannerView: View {
     @State private var heartbeatTask: Task<Void, Never>?
     @State private var notifTask: Task<Void, Never>?
     @State private var exitOverlayAutoTask: Task<Void, Never>?
-    @State private var adminNotifTitle  = ""
-    @State private var adminNotifMsg    = ""
-    @State private var showAdminNotif   = false
+    @State private var notifBannerTitle = ""
+    @State private var notifBannerMsg   = ""
+    @State private var showNotifBanner  = false
+    @State private var notifDismissTask: Task<Void, Never>?
     private let scanDebounceInterval: TimeInterval = 5.0
 
     var body: some View {
@@ -60,7 +61,18 @@ struct ScannerView: View {
                     .transition(.opacity)
                     .allowsHitTesting(false)
             }
+            // In-app notification banner (top of screen, works in Guided Access)
+            if showNotifBanner {
+                NotificationBanner(
+                    title: notifBannerTitle,
+                    message: notifBannerMsg,
+                    onDismiss: dismissNotifBanner
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(200)
+            }
         }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showNotifBanner)
         .task { await api.checkAuth() }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
@@ -71,12 +83,6 @@ struct ScannerView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             heartbeatTask?.cancel()
             notifTask?.cancel()
-        }
-        .alert(adminNotifTitle.isEmpty ? "Admin Message" : adminNotifTitle,
-               isPresented: $showAdminNotif) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(adminNotifMsg)
         }
         .onChange(of: bluetooth.receivedResult) { result in
             if let result = result {
@@ -342,6 +348,23 @@ struct ScannerView: View {
     }
 
     /// Subscribe to the server SSE scanner stream so admin notifications arrive instantly.
+    private func dismissNotifBanner() {
+        notifDismissTask?.cancel()
+        withAnimation { showNotifBanner = false }
+    }
+
+    private func showNotifBannerWith(title: String, message: String) {
+        notifBannerTitle = title
+        notifBannerMsg   = message
+        withAnimation { showNotifBanner = true }
+        notifDismissTask?.cancel()
+        notifDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 9_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation { showNotifBanner = false }
+        }
+    }
+
     private func startNotifListener() {
         notifTask?.cancel()
         if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
@@ -364,12 +387,11 @@ struct ScannerView: View {
                            let data = chunk.dropFirst(6).data(using: .utf8),
                            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                            let type = json["type"] as? String {
-                            
+
                             if type == "notification", let message = json["message"] as? String {
+                                let title = json["title"] as? String ?? "Message from Admin"
                                 await MainActor.run {
-                                    adminNotifTitle = json["title"] as? String ?? "Admin Message"
-                                    adminNotifMsg   = message
-                                    showAdminNotif  = true
+                                    self.showNotifBannerWith(title: title, message: message)
                                 }
                             } else if type == "scan", let status = json["status"] as? String {
                                 if status == "checked_out",
@@ -459,6 +481,60 @@ struct ScanFlashOverlay: View {
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.8))
             }
+        }
+    }
+}
+
+// MARK: - In-App Notification Banner
+
+struct NotificationBanner: View {
+    let title: String
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: onDismiss) {
+                HStack(alignment: .top, spacing: 12) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(LinearGradient(colors: [Color(red: 0.39, green: 0.40, blue: 0.95), Color(red: 0.51, green: 0.55, blue: 0.97)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            Image(systemName: "bell.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white)
+                        )
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("WTS TICKETS")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.45))
+                            Spacer()
+                            Text("tap to dismiss")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.25))
+                        }
+                        Text(title)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text(message)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(14)
+                .background(.ultraThinMaterial)
+                .background(Color.black.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.12), lineWidth: 1))
+                .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            Spacer()
         }
     }
 }

@@ -429,6 +429,57 @@
         .det-row:last-child { border-bottom: none; }
         .det-label { font-size: 14px; color: rgba(255,255,255,0.42); flex-shrink: 0; }
         .det-val   { font-size: 14px; font-weight: 500; color: #fff; text-align: right; word-break: break-word; }
+
+        /* ── In-app notification banner ── */
+        #inAppNotifContainer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: env(safe-area-inset-top, 0px) 12px 0;
+            z-index: 9998;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: stretch;
+        }
+        .in-app-notif {
+            pointer-events: auto;
+            background: rgba(22, 22, 24, 0.97);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255,255,255,0.13);
+            border-radius: 16px;
+            padding: 14px 16px 12px;
+            margin-top: 8px;
+            cursor: pointer;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            animation: notifSlideIn 0.38s cubic-bezier(0.34,1.4,0.64,1) both;
+        }
+        .in-app-notif.notif-exit {
+            animation: notifSlideOut 0.28s ease forwards;
+        }
+        @keyframes notifSlideIn {
+            from { transform: translateY(-110%); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+        @keyframes notifSlideOut {
+            from { transform: translateY(0);    opacity: 1; }
+            to   { transform: translateY(-110%); opacity: 0; }
+        }
+        .ian-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+        .ian-app-icon {
+            width: 24px; height: 24px; border-radius: 6px;
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .ian-app-icon svg { width: 14px; height: 14px; fill: #fff; }
+        .ian-app-name { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.5); flex: 1; }
+        .ian-dismiss-hint { font-size: 11px; color: rgba(255,255,255,0.25); }
+        .ian-title { font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+        .ian-msg { font-size: 14px; color: rgba(255,255,255,0.82); line-height: 1.4; }
     </style>
 </head>
 <body>
@@ -436,6 +487,9 @@
 <div id="reader"></div>
 
 <div class="scan-guide"><div class="scan-box"><span></span></div></div>
+
+<!-- In-app notification banners -->
+<div id="inAppNotifContainer"></div>
 
 <!-- Recent scan history strip (bottom) -->
 <div id="recentScans"></div>
@@ -747,6 +801,44 @@ function sendHeartbeat() {
     }).catch(() => {});
 }
 
+// ── In-app notification system ────────────────────────────────────────────────
+
+let _notifQueue = [];
+let _notifTimers = new WeakMap();
+
+function showInAppNotif(title, message) {
+    const container = document.getElementById('inAppNotifContainer');
+    if (!container) return;
+
+    const el = document.createElement('div');
+    el.className = 'in-app-notif';
+    el.innerHTML = `
+        <div class="ian-header">
+            <div class="ian-app-icon">
+                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/></svg>
+            </div>
+            <span class="ian-app-name">WTS TICKETS</span>
+            <span class="ian-dismiss-hint">tap to dismiss</span>
+        </div>
+        <div class="ian-title">${escHtml(title)}</div>
+        <div class="ian-msg">${escHtml(message)}</div>`;
+
+    el.onclick = () => dismissInAppNotif(el);
+    container.appendChild(el);
+
+    // Auto-dismiss after 9 s
+    const tid = setTimeout(() => dismissInAppNotif(el), 9000);
+    _notifTimers.set(el, tid);
+}
+
+function dismissInAppNotif(el) {
+    clearTimeout(_notifTimers.get(el));
+    el.classList.add('notif-exit');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+}
+
+// ── Scanner channel (heartbeat + SSE) ─────────────────────
+
 let scannerSSE = null;
 function initScannerChannel() {
     sendHeartbeat();
@@ -758,17 +850,14 @@ function initScannerChannel() {
         const eventId = sel ? sel.value : '';
         const url = `/api/scan/stream/${encodeURIComponent(SCANNER_PAIR_TOKEN)}?platform=web&eventId=${encodeURIComponent(eventId)}`;
         scannerSSE = new EventSource(url);
-        scannerSSE.addEventListener('notify', e => {
+        scannerSSE.onmessage = (e) => {
             try {
                 const d = JSON.parse(e.data);
-                const msg = d.message || 'Notification from admin';
-                if (Notification.permission === 'granted') {
-                    new Notification('WTS Tickets', { body: msg, icon: '/icons/icon-192.png' });
-                } else {
-                    showBanner({ status: 'info', name: msg });
+                if (d.type === 'notification') {
+                    showInAppNotif(d.title || 'Message from Admin', d.message || '');
                 }
             } catch (_) {}
-        });
+        };
         scannerSSE.onerror = () => {
             scannerSSE.close();
             setTimeout(openSSE, 5000);
@@ -783,19 +872,7 @@ function initScannerChannel() {
     });
 }
 
-function requestNotificationPermission() {
-    if (!('Notification' in window)) return;
-    if (Notification.permission === 'granted' || Notification.permission === 'denied') return;
-    // Show explanation banner before prompting
-    const banner = document.createElement('div');
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#1a1f3c;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;z-index:9999;font-size:14px;';
-    banner.innerHTML = `
-        <span style="flex:1">Enable notifications to receive messages from the admin dashboard.</span>
-        <button onclick="Notification.requestPermission().then(()=>this.closest('div').remove())" style="background:#e63946;border:none;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;white-space:nowrap;">Allow</button>
-        <button onclick="this.closest('div').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;">Dismiss</button>
-    `;
-    document.body.appendChild(banner);
-}
+function requestNotificationPermission() { /* no-op — using in-app notifications */ }
 
 // ── Events / rooms ────────────────────────────────────────
 async function loadEvents() {

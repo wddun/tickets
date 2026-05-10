@@ -1015,6 +1015,26 @@
             background: linear-gradient(90deg, #6366f1, #818cf8);
             border-radius: 4px;
         }
+
+        /* ── Live scan flash animation ── */
+        @keyframes rowFlashGreen {
+            0%   { background-color: transparent; }
+            15%  { background-color: rgba(16, 185, 129, 0.22); }
+            100% { background-color: transparent; }
+        }
+        @keyframes rowFlashOrange {
+            0%   { background-color: transparent; }
+            15%  { background-color: rgba(245, 158, 11, 0.22); }
+            100% { background-color: transparent; }
+        }
+        @keyframes rowFlashRed {
+            0%   { background-color: transparent; }
+            15%  { background-color: rgba(239, 68, 68, 0.15); }
+            100% { background-color: transparent; }
+        }
+        .row-flash-in  { animation: rowFlashGreen  1.8s ease forwards; }
+        .row-flash-out { animation: rowFlashOrange 1.8s ease forwards; }
+        .row-flash-dup { animation: rowFlashRed    1.8s ease forwards; }
     </style>
 </head>
 
@@ -1316,6 +1336,8 @@
         let currentUser = null;
         let logsInterval = null;
 
+        let dashboardSSE = null;
+
         async function init() {
             const r = await fetch('/api/auth/me');
             if (!r.ok) return location.href = '/login.html';
@@ -1327,6 +1349,108 @@
             }
             await loadEvents();
             setInterval(loadEvents, 30000);
+            startDashboardSSE();
+        }
+
+        function startDashboardSSE() {
+            if (dashboardSSE) dashboardSSE.close();
+            dashboardSSE = new EventSource('/api/monitor/stream');
+            dashboardSSE.onmessage = (e) => {
+                try {
+                    const msg = JSON.parse(e.data);
+                    if (msg.type === 'ticket_scan') handleLiveTicketScan(msg);
+                } catch (_) {}
+            };
+            dashboardSSE.onerror = () => {
+                dashboardSSE.close();
+                setTimeout(startDashboardSSE, 6000);
+            };
+        }
+
+        function handleLiveTicketScan(msg) {
+            // Only update if we're viewing this event right now
+            if (!selectedId || msg.eventId !== selectedId) return;
+            const { registrationId, status, usedAt, reentryStatus } = msg;
+
+            // Update in-memory ticket data
+            if (allTickets && registrationId) {
+                allTickets.forEach(t => {
+                    if ((t.registrationId || t.id) !== registrationId) return;
+                    if (status === 'valid' || status === 'reentry_enter') {
+                        t.used_at = usedAt || new Date().toISOString();
+                        t.reentry_status = reentryStatus || 'inside';
+                    } else if (status === 'checked_out') {
+                        t.reentry_status = 'outside';
+                    }
+                });
+
+                // Recompute counts
+                const total = allTickets.length;
+                const scanned = allTickets.filter(t => t.used_at).length;
+                const pct = total ? Math.round(scanned / total * 100) : 0;
+
+                const scannedEl  = document.getElementById('liveStatScanned');
+                const pendingEl  = document.getElementById('liveStatPending');
+                const pctEl      = document.getElementById('liveStatPct');
+                const barEl      = document.getElementById('liveProgressBar');
+                if (scannedEl) scannedEl.textContent = scanned;
+                if (pendingEl) pendingEl.textContent = total - scanned;
+                if (pctEl)    pctEl.textContent = `${pct}% checked in`;
+                if (barEl)    barEl.style.width = `${pct}%`;
+
+                // Also sync sidebar count
+                const ev = events.find(e => e.id === selectedId);
+                if (ev) { ev._counts = { total, scanned }; renderSidebar(); }
+            }
+
+            // Find the row and update its pill + flash it
+            const row = document.querySelector(`.attendee-row[data-regid="${CSS.escape(registrationId)}"]`);
+            if (!row) return;
+
+            // Update status pill
+            const pillEl = row.querySelector('.status-pill');
+            if (pillEl) {
+                const currentEvent = events.find(e => e.id === selectedId);
+                const useReentry = !!currentEvent?.allowReentry;
+                if (status === 'valid') {
+                    pillEl.className = 'status-pill scanned'; pillEl.textContent = '✓ Checked In';
+                } else if (status === 'reentry_enter') {
+                    pillEl.className = 'status-pill inside'; pillEl.textContent = '↑ Inside';
+                } else if (status === 'checked_out') {
+                    pillEl.className = 'status-pill outside'; pillEl.textContent = '↓ Outside';
+                } else if (status === 'used') {
+                    // Already checked in — pill stays, just flash
+                }
+            }
+
+            // Update action buttons: hide Check In if now fully checked in
+            if (status === 'valid' || status === 'reentry_enter') {
+                const actionsEl = row.querySelector('div:last-child');
+                if (actionsEl) {
+                    const regTickets = allTickets.filter(t => (t.registrationId || t.id) === registrationId);
+                    const allIn = regTickets.every(t => t.used_at);
+                    if (allIn) {
+                        const checkBtns = actionsEl.querySelectorAll('.btn-primary.btn-sm');
+                        checkBtns.forEach(b => b.remove());
+                        const partialBtns = actionsEl.querySelectorAll('.btn-secondary.btn-sm');
+                        partialBtns.forEach(b => { if (b.textContent.includes('Check In')) b.remove(); });
+                    }
+                }
+            }
+
+            // Flash the row
+            row.classList.remove('row-flash-in', 'row-flash-out', 'row-flash-dup');
+            void row.offsetWidth; // reflow to restart animation
+            if (status === 'valid' || status === 'reentry_enter') {
+                row.classList.add('row-flash-in');
+            } else if (status === 'checked_out') {
+                row.classList.add('row-flash-out');
+            } else if (status === 'used') {
+                row.classList.add('row-flash-dup');
+            }
+            row.addEventListener('animationend', () => {
+                row.classList.remove('row-flash-in', 'row-flash-out', 'row-flash-dup');
+            }, { once: true });
         }
 
         async function loadEvents() {
@@ -1504,16 +1628,16 @@
                 <div class="stat-label">Tickets${event.capacity ? ` · ${Math.round(total/event.capacity*100)}% full` : ''}</div>
             </div>
             <div class="stat-box${activeStatFilter === 'checked' ? ' stat-active' : ''}" onclick="setStatFilter('checked')">
-                <div class="stat-num" style="color:#10b981;">${scanned}</div>
+                <div class="stat-num" style="color:#10b981;" id="liveStatScanned">${scanned}</div>
                 <div class="stat-label">Checked In</div>
                 <div class="progress-bar-wrap">
-                    <div class="progress-bar-fill" style="width:${pct}%"></div>
+                    <div class="progress-bar-fill" id="liveProgressBar" style="width:${pct}%"></div>
                 </div>
             </div>
             <div class="stat-box${activeStatFilter === 'pending' ? ' stat-active' : ''}" onclick="setStatFilter('pending')">
-                <div class="stat-num" style="color:#f59e0b;">${total - scanned}</div>
+                <div class="stat-num" style="color:#f59e0b;" id="liveStatPending">${total - scanned}</div>
                 <div class="stat-label">Not Yet In</div>
-                <div style="font-size:11px;color:#bbb;margin-top:4px;">${pct}% checked in</div>
+                <div style="font-size:11px;color:#bbb;margin-top:4px;" id="liveStatPct">${pct}% checked in</div>
             </div>
         </div>
 
@@ -1653,7 +1777,7 @@
                 const editBtn = `<button class="btn btn-secondary btn-sm" onclick="openEditTicketModal(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Edit</button>`;
                 const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap">${checkInBtns}${undoBtn}${editBtn}</div>`;
                 return `
-        <div class="attendee-row${isChecked ? ' row-selected' : ''}">
+        <div class="attendee-row${isChecked ? ' row-selected' : ''}" data-regid="${g.registrationId}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
                 onchange="toggleTicketCheck('${g.registrationId}', this.checked)">
             <div>
