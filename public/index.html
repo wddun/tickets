@@ -214,6 +214,179 @@
             .footer-inner { justify-content: center; text-align: center; }
             .footer-links { justify-content: center; }
         }
+
+        /* ── Real-time spotlight section ── */
+        .realtime-section {
+            background: var(--navy);
+            color: white;
+            padding: 64px 20px;
+        }
+        .realtime-section .section-title { color: white; }
+        .realtime-section .section-sub   { color: rgba(255,255,255,.58); max-width: 500px; }
+
+        .rt-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+            margin-top: 40px;
+        }
+        .rt-card {
+            background: rgba(255,255,255,.05);
+            border: 1px solid rgba(255,255,255,.10);
+            border-radius: 16px;
+            padding: 22px;
+        }
+        .rt-card-label {
+            font-size: 13px; font-weight: 700;
+            color: #e07b8e;
+            text-transform: uppercase; letter-spacing: .6px;
+            margin-bottom: 8px;
+        }
+        .rt-card-desc {
+            font-size: 14px; color: rgba(255,255,255,.6);
+            line-height: 1.55; margin-bottom: 22px;
+        }
+
+        /* Dashboard row demo */
+        .rt-demo-table { border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,.1); }
+        .rt-demo-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255,255,255,.07);
+            transition: background .3s;
+        }
+        .rt-demo-row:last-child { border-bottom: none; }
+        .rt-demo-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,.9); }
+        .rt-demo-pill {
+            font-size: 11px; font-weight: 700;
+            padding: 3px 10px; border-radius: 20px;
+        }
+        .rt-pill-pending { background: rgba(254,249,195,.15); color: #fde68a; }
+        .rt-pill-checked { background: rgba(16,185,129,.2); color: #6ee7b7; }
+        .rt-pill-outside { background: rgba(245,158,11,.18); color: #fcd34d; }
+
+        @keyframes demoRowFlash {
+            0%   { background: rgba(16,185,129,.0); }
+            18%  { background: rgba(16,185,129,.28); }
+            60%  { background: rgba(16,185,129,.10); }
+            100% { background: rgba(16,185,129,.0); }
+        }
+        .rt-demo-row-anim { animation: demoRowFlash 2.8s ease-in-out infinite; }
+
+        /* Notification banner demo */
+        .rt-notif-wrap { position: relative; height: 90px; overflow: hidden; }
+        @keyframes demoNotifSlide {
+            0%, 15% { transform: translateY(-110%); opacity: 0; }
+            28%, 72% { transform: translateY(0);    opacity: 1; }
+            85%, 100%{ transform: translateY(-110%); opacity: 0; }
+        }
+        .rt-notif-banner {
+            display: flex; align-items: flex-start; gap: 12px;
+            background: rgba(22,22,26,.95);
+            border: 1px solid rgba(255,255,255,.13);
+            border-radius: 14px;
+            padding: 12px 14px;
+            animation: demoNotifSlide 5s ease-in-out infinite;
+        }
+        .rt-notif-icon-wrap {
+            width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .rt-notif-icon-wrap svg { width: 16px; height: 16px; }
+        .rt-notif-app { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.4); margin-bottom: 2px; }
+        .rt-notif-title { font-size: 13px; font-weight: 700; color: #fff; }
+        .rt-notif-msg   { font-size: 13px; color: rgba(255,255,255,.75); line-height: 1.4; }
+
+        /* Analytics bar chart demo */
+        .rt-chart-bars {
+            display: flex; align-items: flex-end; gap: 6px;
+            height: 70px; margin-bottom: 12px;
+        }
+        .rt-bar {
+            flex: 1; border-radius: 5px 5px 0 0;
+            background: rgba(99,102,241,.45);
+            display: flex; align-items: flex-end; justify-content: center;
+            padding-bottom: 3px;
+            transition: background .2s;
+        }
+        .rt-bar-peak { background: rgba(99,102,241,.9); }
+        .rt-bar span { font-size: 10px; color: rgba(255,255,255,.5); }
+        .rt-chart-stats {
+            display: flex; gap: 16px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 12px;
+        }
+        .rt-cs-num   { font-size: 22px; font-weight: 800; color: #fff; }
+        .rt-cs-label { font-size: 11px; color: rgba(255,255,255,.4); margin-top: 1px; }
+
+        /* iOS app callout */
+        .ios-app-section {
+            background: var(--white);
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            padding: 64px 20px;
+        }
+        .ios-split {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 48px;
+            align-items: center;
+            max-width: 860px;
+            margin: 36px auto 0;
+        }
+        @media (max-width: 640px) { .ios-split { grid-template-columns: 1fr; } }
+        .ios-feature-list { display: flex; flex-direction: column; gap: 18px; }
+        .ios-feature-item { display: flex; align-items: flex-start; gap: 12px; }
+        .ios-feature-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--red); flex-shrink: 0; margin-top: 6px;
+        }
+        .ios-feature-title { font-size: 14px; font-weight: 700; color: var(--navy); margin-bottom: 2px; }
+        .ios-feature-desc  { font-size: 13px; color: var(--muted); line-height: 1.5; }
+        .ios-phone-mock {
+            background: var(--navy);
+            border-radius: 32px;
+            padding: 28px 16px 24px;
+            max-width: 220px;
+            margin: 0 auto;
+            border: 6px solid #0d101f;
+            box-shadow: 0 24px 56px rgba(26,31,60,.3);
+            position: relative;
+        }
+        .ios-phone-notch {
+            width: 80px; height: 8px; background: #0d101f;
+            border-radius: 0 0 10px 10px;
+            margin: -28px auto 18px;
+        }
+        .ios-tab-bar {
+            display: flex; border-top: 1px solid rgba(255,255,255,.1);
+            padding-top: 10px; gap: 0;
+        }
+        .ios-tab {
+            flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+            font-size: 9px; font-weight: 500; color: rgba(255,255,255,.4);
+        }
+        .ios-tab.active { color: #fff; }
+        .ios-tab svg { width: 18px; height: 18px; }
+        .ios-scan-area {
+            border: 2px solid rgba(255,255,255,.55);
+            border-radius: 10px;
+            height: 100px;
+            margin: 0 auto 16px;
+            display: flex; align-items: center; justify-content: center;
+            color: rgba(255,255,255,.25);
+            font-size: 11px;
+        }
+        .ios-last-scan {
+            background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.1);
+            border-left: 3px solid #4ade80;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 11px;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .ios-scan-name { font-weight: 700; color: #fff; }
+        .ios-scan-status { color: #4ade80; font-size: 10px; }
     </style>
 </head>
 <body>
@@ -308,7 +481,7 @@
                 <div class="feature-card">
                     <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
                     <div class="feature-title">Live Dashboard</div>
-                    <div class="feature-desc">Check-ins, email opens, and wallet downloads — all visible in real time.</div>
+                    <div class="feature-desc">Attendee rows flash green the instant a ticket scans. Counters and progress bars update in real time — no refresh.</div>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/></svg></div>
@@ -319,6 +492,156 @@
                     <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
                     <div class="feature-title">Team Access</div>
                     <div class="feature-desc">Share events with staff at view-only or full-access permission levels.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Real-time Operations Spotlight -->
+    <section class="realtime-section">
+        <div class="section-inner">
+            <div class="section-eyebrow" style="color:#e07b8e;">Real-Time Operations</div>
+            <div class="section-title">Everything updates the moment it happens</div>
+            <p class="section-sub">Built for the speed of the door — every scan reflects across your entire team instantly.</p>
+
+            <div class="rt-grid">
+
+                <!-- Live row flash -->
+                <div class="rt-card">
+                    <div class="rt-card-label">Instant Row Updates</div>
+                    <div class="rt-card-desc">As attendees are scanned, their row in the dashboard turns green in real time. Status pills and checked-in counts update across every open browser tab simultaneously.</div>
+                    <div class="rt-demo-table">
+                        <div class="rt-demo-row rt-demo-row-anim">
+                            <div class="rt-demo-name">Sarah Chen</div>
+                            <span class="rt-demo-pill rt-pill-checked">✓ Checked In</span>
+                        </div>
+                        <div class="rt-demo-row">
+                            <div class="rt-demo-name">James Miller</div>
+                            <span class="rt-demo-pill rt-pill-pending">Pending</span>
+                        </div>
+                        <div class="rt-demo-row">
+                            <div class="rt-demo-name">Priya Kapoor</div>
+                            <span class="rt-demo-pill rt-pill-outside">↓ Outside</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notification banner -->
+                <div class="rt-card">
+                    <div class="rt-card-label">In-App Staff Notifications</div>
+                    <div class="rt-card-desc">Message scan staff directly from the dashboard. Banners appear inside the scanner — no OS permission required, and they work even during Guided Access lockdown.</div>
+                    <div class="rt-notif-wrap">
+                        <div class="rt-notif-banner">
+                            <div class="rt-notif-icon-wrap">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                            </div>
+                            <div>
+                                <div class="rt-notif-app">WTS TICKETS</div>
+                                <div class="rt-notif-title">Message from Admin</div>
+                                <div class="rt-notif-msg">VIP line is open — direct guests to gate 3</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Analytics -->
+                <div class="rt-card">
+                    <div class="rt-card-label">Event Analytics</div>
+                    <div class="rt-card-desc">Hourly check-in breakdown, attendance rate, wallet downloads, and custom field breakdowns (T-shirt sizes, meal preferences) — for every event, one tap away.</div>
+                    <div class="rt-chart-bars">
+                        <div class="rt-bar" style="height:28%"><span>5p</span></div>
+                        <div class="rt-bar" style="height:52%"><span>6p</span></div>
+                        <div class="rt-bar rt-bar-peak" style="height:100%"><span>7p</span></div>
+                        <div class="rt-bar" style="height:74%"><span>8p</span></div>
+                        <div class="rt-bar" style="height:38%"><span>9p</span></div>
+                        <div class="rt-bar" style="height:15%"><span>10p</span></div>
+                    </div>
+                    <div class="rt-chart-stats">
+                        <div>
+                            <div class="rt-cs-num">87%</div>
+                            <div class="rt-cs-label">Attendance Rate</div>
+                        </div>
+                        <div>
+                            <div class="rt-cs-num" style="color:#e07b8e;">312</div>
+                            <div class="rt-cs-label">Checked In</div>
+                        </div>
+                        <div>
+                            <div class="rt-cs-num" style="color:#818cf8;">48</div>
+                            <div class="rt-cs-label">Wallet Downloads</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- iOS App Callout -->
+    <section class="ios-app-section">
+        <div class="section-inner">
+            <div class="section-eyebrow">iOS App</div>
+            <div class="section-title">A dedicated scanner app for your team</div>
+            <p class="section-sub">The iOS scanner app gives your staff a dedicated, distraction-free scanning experience.</p>
+
+            <div class="ios-split">
+                <div class="ios-feature-list">
+                    <div class="ios-feature-item">
+                        <div class="ios-feature-dot"></div>
+                        <div>
+                            <div class="ios-feature-title">Works in Guided Access</div>
+                            <div class="ios-feature-desc">Lock staff to the scanner so nothing else can be opened. In-app notification banners still appear for admin messages.</div>
+                        </div>
+                    </div>
+                    <div class="ios-feature-item">
+                        <div class="ios-feature-dot"></div>
+                        <div>
+                            <div class="ios-feature-title">Clean Settings Tab</div>
+                            <div class="ios-feature-desc">Account info, sign out, and Display pairing all live in one organized Settings tab — no cluttered overlays.</div>
+                        </div>
+                    </div>
+                    <div class="ios-feature-item">
+                        <div class="ios-feature-dot"></div>
+                        <div>
+                            <div class="ios-feature-title">Bluetooth Display Sync</div>
+                            <div class="ios-feature-desc">Pair a second phone over Bluetooth to show scan results on a large display screen — no internet required.</div>
+                        </div>
+                    </div>
+                    <div class="ios-feature-item">
+                        <div class="ios-feature-dot"></div>
+                        <div>
+                            <div class="ios-feature-title">Instant Haptic + Sound Feedback</div>
+                            <div class="ios-feature-desc">Distinct tones and vibrations for check-in, already-checked-in, and errors — recognizable without looking at the screen.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Phone mockup -->
+                <div class="ios-phone-mock">
+                    <div class="ios-phone-notch"></div>
+                    <div class="ios-scan-area">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/></svg>
+                    </div>
+                    <div class="ios-last-scan">
+                        <div>
+                            <div class="ios-scan-name">Alex Johnson</div>
+                            <div class="ios-scan-status">✓ Checked In</div>
+                        </div>
+                        <svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 5 5 1 9"/></svg>
+                    </div>
+                    <div class="ios-tab-bar">
+                        <div class="ios-tab active">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/></svg>
+                            Scanner
+                        </div>
+                        <div class="ios-tab">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                            Events
+                        </div>
+                        <div class="ios-tab">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                            Settings
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
