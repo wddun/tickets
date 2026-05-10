@@ -2386,13 +2386,28 @@ app.post('/api/checkout', async (req, res) => {
 
     log('checkout', `[exit] CHECKED OUT — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event.name}  ip: ${getIP(req)}`);
     res.json({ status: 'checked_out', message: 'Checked out successfully', ...ticketFields });
-    if (event?.displayToken) {
-        const allT = stmt.tickets.byEventId.all(event.id);
-        const payload = { type: 'scan', status: 'checked_out', name: ticket.name, registrationId: ticket.registrationId, total: allT.length, scanned: allT.filter(t => t.used_at).length };
-        broadcastToDisplayToken(event.displayToken, payload);
-        for (const [pairToken, data] of scannerRegistry.entries()) {
-            if (data.eventId === event.id) broadcastToPair(pairToken, payload);
+    {
+        const allT = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
+        const scanned = allT.filter(t => t.used_at).length;
+        if (event?.displayToken) {
+            const payload = { type: 'scan', status: 'checked_out', name: ticket.name, registrationId: ticket.registrationId, total: allT.length, scanned };
+            broadcastToDisplayToken(event.displayToken, payload);
+            for (const [pairToken, data] of scannerRegistry.entries()) {
+                if (data.eventId === event.id) broadcastToPair(pairToken, payload);
+            }
         }
+        // Broadcast to dashboard / monitor so checkout reflects live
+        broadcastToMonitors(event.id, {
+            type: 'ticket_scan',
+            eventId: event.id,
+            registrationId: ticket.registrationId,
+            status: 'checked_out',
+            name: ticket.name,
+            total: allT.length,
+            scanned,
+            usedAt: ticket.used_at,
+            reentryStatus: 'outside',
+        });
     }
     pushWalletIfChanged([ticket], event).catch(() => { });
 });
@@ -3233,12 +3248,29 @@ function upsertScanner(pairToken, patch) {
 }
 
 function recordScan(pairToken, event, status, ticket, allTickets) {
-    const payload = { type: 'scan', status, name: ticket.name, registrationId: ticket.registrationId, total: allTickets.length, scanned: allTickets.filter(t => t.used_at).length };
-    if (event?.displayToken) broadcastToDisplayToken(event.displayToken, payload);
+    const scanned = allTickets.filter(t => t.used_at).length;
+    const displayPayload = { type: 'scan', status, name: ticket.name, registrationId: ticket.registrationId, total: allTickets.length, scanned };
+    if (event?.displayToken) broadcastToDisplayToken(event.displayToken, displayPayload);
+
+    // Broadcast per-ticket update to dashboard / monitor clients so rows update live
+    if (event) {
+        broadcastToMonitors(event.id, {
+            type: 'ticket_scan',
+            eventId: event.id,
+            registrationId: ticket.registrationId,
+            status,
+            name: ticket.name,
+            total: allTickets.length,
+            scanned,
+            usedAt: ticket.used_at || null,
+            reentryStatus: ticket.reentry_status || null,
+        });
+    }
+
     if (!pairToken || !event) return;
     upsertScanner(pairToken, {
         eventId: event.id, eventName: event.name, lastSeen: new Date().toISOString(),
-        lastResult: { status, name: ticket.name || '', total: allTickets.length, scanned: allTickets.filter(t => t.used_at).length }
+        lastResult: { status, name: ticket.name || '', registrationId: ticket.registrationId, total: allTickets.length, scanned }
     });
 }
 
