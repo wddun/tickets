@@ -1,11 +1,13 @@
-const CACHE = 'wts-v8';
+const CACHE = 'wts-v9';
 const PRECACHE = [
-    '/scanner.html',
-    '/login.html',
     '/',
+    '/scanner.html',
+    '/checkin.html',
+    '/settings.html',
+    '/login.html',
     '/style.css',
     '/manifest.json',
-    '/html5-qrcode.min.js',
+    '/jsQR.js',
 ];
 
 self.addEventListener('install', e => {
