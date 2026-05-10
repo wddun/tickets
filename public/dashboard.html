@@ -888,6 +888,133 @@
         .igr-del:hover {
             color: #dc2626;
         }
+
+        /* ── Metrics ── */
+        .metrics-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .metrics-stat {
+            background: #f8f9fb;
+            border-radius: 10px;
+            padding: 12px 14px;
+            text-align: center;
+        }
+        .metrics-stat-num {
+            font-size: 24px;
+            font-weight: 800;
+            color: #1a1f3c;
+            line-height: 1;
+        }
+        .metrics-stat-label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 4px;
+            font-weight: 500;
+        }
+        .metrics-section-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            margin: 16px 0 8px;
+        }
+        .metrics-bar-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .metrics-bar-label {
+            font-size: 12px;
+            color: #555;
+            width: 52px;
+            flex-shrink: 0;
+            text-align: right;
+        }
+        .metrics-bar-track {
+            flex: 1;
+            height: 10px;
+            background: #eef0f4;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .metrics-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #818cf8);
+            border-radius: 6px;
+            transition: width 0.4s ease;
+        }
+        .metrics-bar-fill.green { background: linear-gradient(90deg, #10b981, #34d399); }
+        .metrics-bar-value {
+            font-size: 11px;
+            color: #888;
+            width: 28px;
+            flex-shrink: 0;
+        }
+        .metrics-field-section { margin-bottom: 14px; }
+        .metrics-field-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #444;
+            margin-bottom: 6px;
+        }
+        .metrics-field-bar-label { width: 90px; font-size: 12px; }
+
+        /* ── Admin overview panel ── */
+        .admin-overview-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 24px 28px 20px;
+            border-bottom: 1px solid #eef0f4;
+        }
+        .admin-overview-stat {
+            background: #f8f9fb;
+            border-radius: 10px;
+            padding: 14px 18px;
+            flex: 1;
+            text-align: center;
+        }
+        .admin-events-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .admin-events-table th {
+            text-align: left;
+            font-size: 11px;
+            font-weight: 600;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            padding: 6px 12px;
+            border-bottom: 1px solid #eef0f4;
+        }
+        .admin-events-table td {
+            padding: 9px 12px;
+            border-bottom: 1px solid #f4f5f7;
+            vertical-align: middle;
+        }
+        .admin-events-table tr:last-child td { border-bottom: none; }
+        .admin-events-table tr:hover td { background: #fafbff; }
+        .admin-mini-bar-track {
+            height: 6px;
+            background: #eef0f4;
+            border-radius: 4px;
+            overflow: hidden;
+            width: 80px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        .admin-mini-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #818cf8);
+            border-radius: 4px;
+        }
     </style>
 </head>
 
@@ -908,6 +1035,10 @@
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
                 Monitor
             </a>
+            <button id="adminOverviewBtn" class="topbar-btn" onclick="openAdminOverview()" style="display:none;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                Overview
+            </button>
             <button class="topbar-btn" onclick="logout()">Sign Out</button>
             <button class="topbar-btn topbar-btn-danger topbar-hide-mobile" onclick="confirmDeleteAccount()">Delete Account</button>
         </div>
@@ -968,6 +1099,20 @@
         <a href="/support.html" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;">Support</a>
     </footer>
 
+
+    <!-- Metrics Modal -->
+    <div class="modal-overlay" id="metricsModal" style="display:none;z-index:200;"
+        onclick="if(event.target===this)closeMetricsModal()">
+        <div class="modal" style="max-width:560px;background:#fff;border-radius:14px;max-height:88vh;">
+            <div class="modal-header">
+                <h2 id="metricsModalTitle">Metrics</h2>
+                <button class="modal-close" onclick="closeMetricsModal()">&times;</button>
+            </div>
+            <div id="metricsModalBody" style="min-height:120px;">
+                <div style="text-align:center;padding:32px;color:#bbb;">Loading…</div>
+            </div>
+        </div>
+    </div>
 
     <!-- New Event Modal -->
     <div class="modal-overlay" id="newEventModal" style="display:none;z-index:200;"
@@ -1176,7 +1321,10 @@
             if (!r.ok) return location.href = '/login.html';
             const d = await r.json();
             currentUser = d.user;
-            if (currentUser.isAdmin) initLogsPanel();
+            if (currentUser.isAdmin) {
+                initLogsPanel();
+                document.getElementById('adminOverviewBtn').style.display = '';
+            }
             await loadEvents();
             setInterval(loadEvents, 30000);
         }
@@ -1341,6 +1489,7 @@
                 </div>
                 <div class="detail-actions">
                     <a href="/scanner.html" target="_blank" class="btn btn-scanner">Open Scanner</a>
+                    <button class="btn-settings" onclick="openMetricsModal('${event.id}')">📊 Metrics</button>
                     <button class="btn-settings" onclick="openEditEventModal('${event.id}')">Edit Event</button>
                     <button class="btn-settings" onclick="openSettings('${event.id}')">Settings</button>
                     <button class="btn-settings" onclick="openBulkEmailModal('${event.id}', ${grouped.length})">✉️ Email All</button>
@@ -2244,6 +2393,155 @@
         async function logout() {
             await fetch('/api/auth/logout', { method: 'POST' });
             location.href = '/login.html';
+        }
+
+        // ── Metrics Modal ──────────────────────────────────────────────────────
+
+        function openMetricsModal(eventId) {
+            const ev = events.find(e => e.id === eventId);
+            document.getElementById('metricsModalTitle').textContent = (ev ? ev.name + ' — ' : '') + 'Metrics';
+            document.getElementById('metricsModalBody').innerHTML = '<div style="text-align:center;padding:32px;color:#bbb;">Loading…</div>';
+            document.getElementById('metricsModal').style.display = 'flex';
+            fetch(`/api/event/${eventId}/metrics`)
+                .then(r => r.json())
+                .then(d => { document.getElementById('metricsModalBody').innerHTML = renderMetrics(d); })
+                .catch(() => { document.getElementById('metricsModalBody').innerHTML = '<div style="padding:24px;color:#c00;">Failed to load metrics.</div>'; });
+        }
+
+        function closeMetricsModal() {
+            document.getElementById('metricsModal').style.display = 'none';
+        }
+
+        function renderMetrics(d) {
+            const maxBar = d.checkinTimeline.length ? Math.max(...d.checkinTimeline.map(x => x.count)) : 1;
+            const maxReg = d.registrationTimeline.length ? Math.max(...d.registrationTimeline.map(x => x.count)) : 1;
+
+            const checkinBars = d.checkinTimeline.length
+                ? d.checkinTimeline.map(({hour, count}) => `
+                    <div class="metrics-bar-row">
+                        <span class="metrics-bar-label">${esc(hour)}</span>
+                        <div class="metrics-bar-track"><div class="metrics-bar-fill green" style="width:${Math.round(count/maxBar*100)}%"></div></div>
+                        <span class="metrics-bar-value">${count}</span>
+                    </div>`).join('')
+                : '<div style="color:#bbb;font-size:13px;padding:8px 0;">No check-ins recorded yet.</div>';
+
+            const regBars = d.registrationTimeline.length
+                ? d.registrationTimeline.map(({day, count}) => `
+                    <div class="metrics-bar-row">
+                        <span class="metrics-bar-label" style="width:72px">${esc(day.slice(5))}</span>
+                        <div class="metrics-bar-track"><div class="metrics-bar-fill" style="width:${Math.round(count/maxReg*100)}%"></div></div>
+                        <span class="metrics-bar-value">${count}</span>
+                    </div>`).join('')
+                : '<div style="color:#bbb;font-size:13px;padding:8px 0;">No registration data.</div>';
+
+            const fieldSections = Object.entries(d.customFieldBreakdowns || {}).map(([field, vals]) => {
+                const maxVal = Math.max(...Object.values(vals));
+                const rows = Object.entries(vals).sort((a,b)=>b[1]-a[1]).map(([v, c]) => `
+                    <div class="metrics-bar-row">
+                        <span class="metrics-bar-label metrics-field-bar-label" style="width:90px">${esc(v)}</span>
+                        <div class="metrics-bar-track"><div class="metrics-bar-fill" style="width:${Math.round(c/maxVal*100)}%"></div></div>
+                        <span class="metrics-bar-value">${c}</span>
+                    </div>`).join('');
+                return `<div class="metrics-field-section"><div class="metrics-field-title">${esc(field)}</div>${rows}</div>`;
+            }).join('');
+
+            return `
+                <div class="metrics-stat-grid">
+                    <div class="metrics-stat">
+                        <div class="metrics-stat-num">${d.total}</div>
+                        <div class="metrics-stat-label">Tickets</div>
+                    </div>
+                    <div class="metrics-stat">
+                        <div class="metrics-stat-num" style="color:#10b981">${d.scanned}</div>
+                        <div class="metrics-stat-label">Checked In</div>
+                    </div>
+                    <div class="metrics-stat">
+                        <div class="metrics-stat-num" style="color:#6366f1">${d.pct}%</div>
+                        <div class="metrics-stat-label">Attendance</div>
+                    </div>
+                    <div class="metrics-stat">
+                        <div class="metrics-stat-num">${d.uniqueRegistrations}</div>
+                        <div class="metrics-stat-label">Registrations</div>
+                    </div>
+                    <div class="metrics-stat">
+                        <div class="metrics-stat-num">${d.walletDownloads}</div>
+                        <div class="metrics-stat-label">Wallet DL</div>
+                    </div>
+                    <div class="metrics-stat">
+                        <div class="metrics-stat-num">${d.emailOpens}</div>
+                        <div class="metrics-stat-label">Email Opens</div>
+                    </div>
+                </div>
+                <div class="metrics-section-title">Check-In by Hour</div>
+                ${checkinBars}
+                <div class="metrics-section-title" style="margin-top:18px;">Registrations by Day</div>
+                ${regBars}
+                ${fieldSections ? `<div class="metrics-section-title" style="margin-top:18px;">Custom Field Breakdown</div>${fieldSections}` : ''}
+            `;
+        }
+
+        // ── Admin Overview ─────────────────────────────────────────────────────
+
+        async function openAdminOverview() {
+            selectedId = null;
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('eventDetail').style.display = 'block';
+            document.getElementById('eventDetail').innerHTML = '<div style="padding:32px;color:#bbb;text-align:center;">Loading overview…</div>';
+            document.body.classList.add('event-selected');
+
+            try {
+                const r = await fetch('/api/admin/metrics');
+                const d = await r.json();
+                renderAdminOverview(d);
+            } catch (_) {
+                document.getElementById('eventDetail').innerHTML = '<div style="padding:24px;color:#c00;">Failed to load overview.</div>';
+            }
+        }
+
+        function renderAdminOverview(d) {
+            const eventRows = d.events.map(e => `
+                <tr style="cursor:pointer;" onclick="selectEvent('${e.id}')">
+                    <td>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="width:10px;height:10px;border-radius:50%;background:${esc(e.color||'#6366f1')};flex-shrink:0;display:inline-block;"></span>
+                            <span style="font-weight:600;">${esc(e.name)}</span>
+                        </div>
+                    </td>
+                    <td style="color:#888;">${e.time ? new Date(e.time).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : '—'}</td>
+                    <td style="font-weight:600;">${e.total}</td>
+                    <td style="color:#10b981;font-weight:600;">${e.scanned}</td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <div class="admin-mini-bar-track"><div class="admin-mini-bar-fill" style="width:${e.pct}%"></div></div>
+                            <span style="font-size:12px;color:#888;">${e.pct}%</span>
+                        </div>
+                    </td>
+                    <td style="color:#888;">${e.walletDownloads}</td>
+                    <td style="color:#888;">${e.emailOpens}</td>
+                </tr>`).join('');
+
+            document.getElementById('eventDetail').innerHTML = `
+                <div style="padding:24px 28px;">
+                    <div style="font-size:20px;font-weight:800;margin-bottom:18px;">Admin Overview</div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:24px;">
+                        <div class="metrics-stat"><div class="metrics-stat-num">${d.totalEvents}</div><div class="metrics-stat-label">Events</div></div>
+                        <div class="metrics-stat"><div class="metrics-stat-num">${d.totalTickets}</div><div class="metrics-stat-label">Total Tickets</div></div>
+                        <div class="metrics-stat"><div class="metrics-stat-num" style="color:#10b981">${d.totalScanned}</div><div class="metrics-stat-label">Checked In</div></div>
+                        <div class="metrics-stat"><div class="metrics-stat-num" style="color:#6366f1">${d.totalPct}%</div><div class="metrics-stat-label">Overall Rate</div></div>
+                        <div class="metrics-stat"><div class="metrics-stat-num">${d.totalWalletDownloads}</div><div class="metrics-stat-label">Wallet DLs</div></div>
+                        <div class="metrics-stat"><div class="metrics-stat-num">${d.totalEmailOpens}</div><div class="metrics-stat-label">Email Opens</div></div>
+                    </div>
+                    <div class="metrics-section-title">All Events</div>
+                    <div style="overflow-x:auto;">
+                        <table class="admin-events-table">
+                            <thead><tr>
+                                <th>Event</th><th>Date</th><th>Tickets</th><th>Checked In</th><th>Rate</th><th>Wallet</th><th>Emails</th>
+                            </tr></thead>
+                            <tbody>${eventRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
         }
 
         async function confirmDeleteAccount() {
