@@ -395,6 +395,7 @@
 <!-- Top bar: anon shows sign-in, auth shows room picker + list btn -->
 <div class="top-bar" id="topBar">
     <a id="signInBtn" class="pill-btn" href="/login.html?next=/scanner.html" style="display:none;">Sign In</a>
+    <button id="torchBtn" class="pill-btn" onclick="toggleTorch()" style="display:none;" aria-label="Toggle flashlight">🔦</button>
 
     <div class="room-wrap" id="roomWrap" style="display:none;">
         <select id="roomSelect"><option value="">Loading rooms…</option></select>
@@ -1043,6 +1044,9 @@ let canvasEl = null;
 let canvasCtx = null;
 let scanning = false;
 let barcodeDetector = null;
+let torchOn = false;
+let torchSupported = false;
+let lastJsQrMs = 0;
 
 if ('BarcodeDetector' in window) {
     try {
@@ -1050,75 +1054,157 @@ if ('BarcodeDetector' in window) {
     } catch (e) { console.warn('BarcodeDetector not fully supported', e); }
 }
 
+function showCameraError(msg, retryable = true) {
+    document.getElementById('reader').innerHTML = `
+        <div style="color:#fff;text-align:center;padding:60px 24px;display:flex;flex-direction:column;align-items:center;gap:16px;">
+            <div style="font-size:52px;">📷</div>
+            <div style="font-size:16px;font-weight:600;">${msg}</div>
+            ${retryable ? `<button onclick="restartCamera()" style="margin-top:4px;background:#fff;color:#111;border:none;padding:12px 28px;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;">Try Again</button>` : ''}
+        </div>`;
+}
+
 async function startCamera() {
+    // Stop any existing stream
+    if (videoEl && videoEl.srcObject) {
+        videoEl.srcObject.getTracks().forEach(t => t.stop());
+    }
+    scanning = false;
+    torchOn = false;
+    torchSupported = false;
+    document.getElementById('torchBtn').style.display = 'none';
+    document.getElementById('torchBtn').style.background = '';
+
     videoEl = document.createElement('video');
     videoEl.setAttribute('playsinline', 'true');
     videoEl.setAttribute('autoplay', 'true');
     videoEl.setAttribute('muted', 'true');
     Object.assign(videoEl.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover' });
-    
-    document.getElementById('reader').appendChild(videoEl);
 
-    canvasEl = document.createElement('canvas');
-    canvasCtx = canvasEl.getContext('2d', { willReadFrequently: true });
+    const reader = document.getElementById('reader');
+    reader.innerHTML = '';
+    reader.appendChild(videoEl);
+
+    canvasEl = canvasEl || document.createElement('canvas');
+    canvasCtx = canvasCtx || canvasEl.getContext('2d', { willReadFrequently: true });
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
-            video: { 
-                facingMode: 'environment', 
-                width: { ideal: 1280 }, 
-                height: { ideal: 720 },
-                advanced: [{ focusMode: 'continuous' }]
+            video: {
+                facingMode: { ideal: 'environment' },
+                width:  { ideal: 1920 },
+                height: { ideal: 1080 },
             }
         });
+
         videoEl.srcObject = stream;
-        videoEl.onloadedmetadata = () => {
-            videoEl.play();
-            scanning = true;
-            requestAnimationFrame(scanLoop);
-        };
+        await new Promise(res => { videoEl.onloadedmetadata = res; });
+        await videoEl.play();
+        scanning = true;
+        requestAnimationFrame(scanLoop);
+
+        // Apply continuous autofocus separately — doesn't block stream start
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+            const caps = track.getCapabilities ? track.getCapabilities() : {};
+
+            if (caps.torch) {
+                torchSupported = true;
+                document.getElementById('torchBtn').style.display = 'block';
+            }
+
+            if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+            }
+
+            // Recover if camera stream ends (backgrounded, permission revoked, etc.)
+            track.addEventListener('ended', () => {
+                scanning = false;
+                showCameraError('Camera disconnected', true);
+            });
+        }
     } catch (err) {
-        console.error('Camera error:', err);
-        // Fallback for permissions
-        document.getElementById('reader').innerHTML = '<div style="color:white;text-align:center;padding:20px;">Camera access required. Please allow permissions.</div>';
+        const isDenied = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError';
+        showCameraError(
+            isDenied
+                ? 'Camera permission denied — check your browser settings'
+                : 'Could not access camera',
+            !isDenied
+        );
+    }
+}
+
+async function restartCamera() {
+    await startCamera();
+}
+
+// Resume camera when returning to the tab
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !scanning) restartCamera();
+});
+
+async function toggleTorch() {
+    if (!torchSupported) return;
+    const track = videoEl?.srcObject?.getVideoTracks()[0];
+    if (!track) return;
+    try {
+        torchOn = !torchOn;
+        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+        const btn = document.getElementById('torchBtn');
+        btn.style.background = torchOn ? 'rgba(255,210,0,0.35)' : '';
+    } catch (_) {
+        torchOn = !torchOn; // revert on failure
     }
 }
 
 async function scanLoop() {
     if (!scanning) return;
 
-    if (videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
+    if (videoEl.readyState >= videoEl.HAVE_ENOUGH_DATA) {
         if (barcodeDetector) {
+            // Native BarcodeDetector — GPU-accelerated, no throttle needed
             try {
                 const barcodes = await barcodeDetector.detect(videoEl);
-                if (barcodes.length > 0) {
-                    onScanSuccess(barcodes[0].rawValue);
-                }
-            } catch (e) {}
+                if (barcodes.length > 0) onScanSuccess(barcodes[0].rawValue);
+            } catch (_) {}
         } else if (typeof jsQR !== 'undefined') {
-            // Downscale heavily for jsQR performance
-            const maxDim = 500;
-            let w = videoEl.videoWidth;
-            let h = videoEl.videoHeight;
-            if (w > maxDim || h > maxDim) {
-                const ratio = Math.min(maxDim / w, maxDim / h);
-                w = Math.floor(w * ratio);
-                h = Math.floor(h * ratio);
-            }
-            
-            canvasEl.width = w;
-            canvasEl.height = h;
-            canvasCtx.drawImage(videoEl, 0, 0, w, h);
-            const imageData = canvasCtx.getImageData(0, 0, w, h);
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert",
-            });
-            if (code) {
-                onScanSuccess(code.data);
+            // jsQR — CPU-bound, throttle to ~15fps
+            const now = performance.now();
+            if (now - lastJsQrMs >= 66) {
+                lastJsQrMs = now;
+
+                const vw = videoEl.videoWidth;
+                const vh = videoEl.videoHeight;
+
+                // Pass 1: centre 75% crop at up to 640px — best for typical use
+                // (user is pointing the QR at the scan-box guide in the centre)
+                const crop = 0.75;
+                const cx = Math.floor(vw * (1 - crop) / 2);
+                const cy = Math.floor(vh * (1 - crop) / 2);
+                const cw = Math.floor(vw * crop);
+                const ch = Math.floor(vh * crop);
+                const s1 = Math.min(1, 640 / Math.max(cw, ch));
+                const w1 = Math.floor(cw * s1), h1 = Math.floor(ch * s1);
+                canvasEl.width = w1; canvasEl.height = h1;
+                canvasCtx.drawImage(videoEl, cx, cy, cw, ch, 0, 0, w1, h1);
+                const d1 = canvasCtx.getImageData(0, 0, w1, h1);
+                const r1 = jsQR(d1.data, w1, h1, { inversionAttempts: 'attemptBoth' });
+                if (r1) {
+                    onScanSuccess(r1.data);
+                } else {
+                    // Pass 2: full frame at 480px — catches QR codes near the edges or far away
+                    const s2 = Math.min(1, 480 / Math.max(vw, vh));
+                    const w2 = Math.floor(vw * s2), h2 = Math.floor(vh * s2);
+                    canvasEl.width = w2; canvasEl.height = h2;
+                    canvasCtx.drawImage(videoEl, 0, 0, w2, h2);
+                    const d2 = canvasCtx.getImageData(0, 0, w2, h2);
+                    const r2 = jsQR(d2.data, w2, h2, { inversionAttempts: 'attemptBoth' });
+                    if (r2) onScanSuccess(r2.data);
+                }
             }
         }
     }
-    setTimeout(() => { requestAnimationFrame(scanLoop); }, 50);
+
+    requestAnimationFrame(scanLoop);
 }
 
 // ── Tab switching ─────────────────────────────────────────
