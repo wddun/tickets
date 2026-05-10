@@ -226,21 +226,6 @@
         </div>
     </div>
 
-    <!-- Display connect section -->
-    <div class="section-title">Display Screen</div>
-    <div class="card">
-        <div class="event-select-wrap">
-            <select class="event-select" id="eventSelect" onchange="loadQR()">
-                <option value="">Select an event…</option>
-            </select>
-        </div>
-        <div class="qr-wrap" id="qrWrap">
-            <div class="qr-img-container" id="qrImgContainer">
-                <span class="qr-placeholder">Select an event above</span>
-            </div>
-            <div class="qr-hint">Scan this code on a display device to show real-time check-in results on that screen.</div>
-        </div>
-    </div>
 
 </div>
 
@@ -255,8 +240,8 @@
             Check-In
         </button>
         <button class="tab-btn active" onclick="">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            Account
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Settings
         </button>
     </div>
     <div class="tab-bar-safe"></div>
@@ -277,50 +262,7 @@
     }
 
     document.getElementById('emailVal').textContent = user.email || '—';
-
-    // Load events and restore selection from scanner page
-    try {
-        const r = await fetch('/api/events');
-        if (r.ok) {
-            const events = await r.json();
-            const sel = document.getElementById('eventSelect');
-            events.forEach(e => {
-                const opt = document.createElement('option');
-                opt.value = e.id;
-                opt.textContent = e.name;
-                sel.appendChild(opt);
-            });
-            // Auto-select: current scanner event → only event → nothing
-            const saved = localStorage.getItem('selectedEventId');
-            if (saved && events.find(e => e.id === saved)) {
-                sel.value = saved;
-            } else if (events.length === 1) {
-                sel.value = events[0].id;
-            }
-            if (sel.value) loadQR();
-        }
-    } catch (_) {}
 })();
-
-async function loadQR() {
-    const eventId = document.getElementById('eventSelect').value;
-    const container = document.getElementById('qrImgContainer');
-    if (!eventId) {
-        container.innerHTML = '<span class="qr-placeholder">Select an event above</span>';
-        return;
-    }
-    container.innerHTML = '<span class="qr-loading">Loading…</span>';
-    try {
-        const pairToken = localStorage.getItem('scannerPairToken') || '';
-        const r = await fetch(`/api/display/qr/${encodeURIComponent(eventId)}?pair=${encodeURIComponent(pairToken)}`);
-        if (!r.ok) throw new Error('Failed');
-        const blob = await r.blob();
-        const url = URL.createObjectURL(blob);
-        container.innerHTML = `<img src="${url}" alt="Display QR code">`;
-    } catch (_) {
-        container.innerHTML = '<span class="qr-placeholder">Could not load QR code</span>';
-    }
-}
 
 async function signOut() {
     try {
