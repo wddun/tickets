@@ -1376,6 +1376,7 @@
             <div style="display:flex;align-items:center;gap:8px;">
                 <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;">
                     <button class="btn btn-secondary btn-sm" onclick="openBulkEmailModal('${event.id}', 0, true)">Email Selected</button>
+                    <button class="btn btn-secondary btn-sm" onclick="printSelectedTickets()">Print Selected</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteSelectedTickets('${event.id}')">Delete Selected</button>
                 </span>
                 <span class="refresh-hint"><span class="live-dot"></span>auto-refreshing</span>
@@ -1550,6 +1551,12 @@
                 selectAll.checked = allRows.length > 0 && checkedRegIds.size === allRows.length;
                 selectAll.indeterminate = checkedRegIds.size > 0 && checkedRegIds.size < allRows.length;
             }
+        }
+
+        function printSelectedTickets() {
+            if (!checkedRegIds.size) return;
+            const ids = [...checkedRegIds].join(',');
+            window.open('/api/tickets/bulk-preview?regIds=' + encodeURIComponent(ids), '_blank');
         }
 
         async function deleteSelectedTickets(eventId) {
