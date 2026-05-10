@@ -464,9 +464,16 @@
     <div class="tab-bar-safe"></div>
 </div>
 
-<!-- Settings panel (Display + Account) -->
+<!-- Settings panel (Account + Display) -->
 <div id="displayPanel">
-    <div class="settings-section-label">Door Display</div>
+    <div class="settings-section-label">Account</div>
+    <a href="/settings.html" class="settings-nav-row">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Account Settings
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4;flex-shrink:0;margin-left:auto;"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <div class="settings-section-label" style="margin-top:12px;">Door Display</div>
     <div class="dp-event-name" id="dpEventName"></div>
 
     <div id="dpQRWrap" class="dp-qr-wrap" style="display:none">
@@ -495,12 +502,6 @@
     </div>
 
     <button class="dp-rotate-btn" id="dpRotateBtn" onclick="rotateDisplayToken()">Regenerate Link</button>
-
-    <div class="settings-section-label" style="margin-top:12px;">Account</div>
-    <a href="/settings.html" class="settings-nav-row">
-        Account Settings
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4;flex-shrink:0;"><polyline points="9 18 15 12 9 6"/></svg>
-    </a>
 </div>
 
 
