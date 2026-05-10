@@ -1910,6 +1910,110 @@ ${qrBlocks}
 </html>`);
 });
 
+// Bulk print-friendly preview for multiple registrations
+app.get('/api/tickets/bulk-preview', requireAuth, async (req, res) => {
+    const rawIds = (req.query.regIds || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!rawIds.length) return res.status(400).send('No registration IDs provided');
+
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+
+    const sections = [];
+    for (const regId of rawIds) {
+        const groupTickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
+        if (!groupTickets.length) continue;
+
+        const ticket = groupTickets[0];
+        const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
+        if (!event) continue;
+
+        const link = stmt.sheetLinks.byEventId.get(event.id);
+        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
+        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) continue;
+
+        const actualCount = groupTickets.length;
+        const qrBlocks = groupTickets.map((t, i) => `
+        <div class="qr-block">
+            <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
+                ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Ticket'}
+            </p>
+            <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" width="180" height="180" style="display:block; margin:0 auto;" />
+            <p style="font-size:11px; color:#aaa; margin:10px 0 0;">Token: ${t.token}</p>
+            ${t.used_at ? `<p style="font-size:11px; color:#059669; margin:4px 0 0;">✓ Checked in ${new Date(t.used_at).toLocaleString()}</p>` : ''}
+        </div>`).join('');
+
+        const customFieldRows = Object.entries(groupTickets[0].customFields || {}).map(([k, v]) =>
+            `<tr><td style="padding:6px 12px;font-weight:600;color:#555;border-bottom:1px solid #f0f0f0;">${k}</td><td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;">${v}</td></tr>`
+        ).join('');
+
+        sections.push(`
+<div class="registration-block">
+    <h2 style="margin-bottom:4px;">${ticket.name}</h2>
+    <p style="color:#888;margin:0 0 4px;">${ticket.email}</p>
+    <p style="color:#888;margin:0 0 16px;">Registered ${new Date(ticket.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+    <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
+    <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
+    <p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
+    <p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>
+    ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
+    ${qrBlocks}
+</div>`);
+    }
+
+    if (!sections.length) return res.status(404).send('No accessible registrations found');
+
+    res.type('html').send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tickets (${sections.length})</title>
+<style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 40px auto; padding: 24px; color: #333; }
+    .qr-block { text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa; }
+    .registration-block { margin-bottom: 40px; }
+    @media print {
+        body { margin: 0; max-width: 100%; padding: 16px; }
+        .no-print { display: none !important; }
+        .qr-block { break-inside: avoid; page-break-inside: avoid; border: 1px solid #ccc; }
+        .registration-block { page-break-after: always; }
+        .registration-block:last-child { page-break-after: avoid; }
+    }
+</style>
+</head>
+<body>
+<div class="no-print" style="margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <span id="loadHint" style="font-size:12px;color:#888;">Loading QR codes…</span>
+</div>
+${sections.join('\n<hr style="border:none;border-top:2px solid #e5e7eb;margin:32px 0;">\n')}
+<script>
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    var imgs = document.querySelectorAll('img');
+    var remaining = imgs.length;
+    function onImgDone() {
+        if (--remaining > 0) return;
+        document.getElementById('loadHint').textContent = '';
+        var bar = document.querySelector('.no-print');
+        if (isIOS) {
+            bar.innerHTML = '<span style="font-size:14px;color:#444;">Tap <strong style=\\'font-weight:700;\\'>&#xfe0f; Share</strong> then <strong style=\\'font-weight:700;\\'>Print</strong> to save as PDF</span>';
+        } else {
+            var btn = document.createElement('button');
+            btn.textContent = '🖨️ Print / Save PDF';
+            btn.style.cssText = 'padding:8px 18px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;';
+            btn.onclick = function() { window.print(); };
+            bar.appendChild(btn);
+        }
+    }
+    if (remaining === 0) { onImgDone(); }
+    else { imgs.forEach(function(img) {
+        if (img.complete) onImgDone();
+        else { img.addEventListener('load', onImgDone); img.addEventListener('error', onImgDone); }
+    }); }
+<\/script>
+</body>
+</html>`);
+});
+
 // API: Validate QR Code
 // Manual check-in by registrationId (marks all tickets in the group)
 app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
