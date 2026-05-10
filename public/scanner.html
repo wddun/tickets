@@ -296,7 +296,7 @@
             bottom: calc(49px + env(safe-area-inset-bottom, 0px) + 12px);
         }
 
-        /* ── Display tab panel ── */
+        /* ── Settings / Display tab panel ── */
         #displayPanel {
             position: fixed;
             inset: 0;
@@ -309,10 +309,22 @@
             background: #080810;
             padding: calc(env(safe-area-inset-top, 0px) + 28px) 24px
                      calc(49px + env(safe-area-inset-bottom, 0px) + 28px);
-            gap: 24px;
+            gap: 20px;
         }
         #displayPanel.active { display: flex; }
-        .dp-title { font-size: 26px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+        .settings-section-label {
+            font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+            text-transform: uppercase; color: rgba(255,255,255,0.35);
+            width: 100%; max-width: 360px;
+        }
+        .settings-nav-row {
+            display: flex; align-items: center; justify-content: space-between;
+            width: 100%; max-width: 360px;
+            background: rgba(255,255,255,0.07); border-radius: 12px;
+            padding: 14px 16px; color: #fff; font-size: 15px; font-weight: 500;
+            text-decoration: none; -webkit-tap-highlight-color: transparent;
+        }
+        .settings-nav-row:active { opacity: 0.6; }
         .dp-event-name { font-size: 13px; color: rgba(255,255,255,0.35); margin-top: -16px; text-align: center; }
         .dp-qr-wrap {
             background: #fff; border-radius: 16px; padding: 14px;
@@ -444,27 +456,23 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             Check-In
         </button>
-        <button class="tab-btn" id="tabDisplay" onclick="switchTab('display')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-            Display
-        </button>
-        <button class="tab-btn" id="tabSettings" onclick="window.location.href='/settings.html'">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            Account
+        <button class="tab-btn" id="tabSettings" onclick="switchTab('settings')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Settings
         </button>
     </div>
     <div class="tab-bar-safe"></div>
 </div>
 
-<!-- Display tab panel -->
+<!-- Settings panel (Display + Account) -->
 <div id="displayPanel">
-    <div class="dp-title">Door Display</div>
+    <div class="settings-section-label">Door Display</div>
     <div class="dp-event-name" id="dpEventName"></div>
 
     <div id="dpQRWrap" class="dp-qr-wrap" style="display:none">
         <img id="dpQRImg" alt="Display QR Code">
     </div>
-    <div id="dpQRPlaceholder" class="dp-qr-placeholder">Select an event to generate a QR code</div>
+    <div id="dpQRPlaceholder" class="dp-qr-placeholder">No event selected</div>
 
     <div class="dp-copy-row" id="dpCopyRow" style="display:none">
         <input class="dp-url-box" id="dpUrlBox" readonly>
@@ -481,18 +489,18 @@
         <div class="dp-step">
             <div class="dp-step-num">2</div>
             <div class="dp-step-text">
-                <strong>iOS Tickets app</strong> — on the display device open the app, tap the <strong>gear icon → Display Setup</strong>, set the role to <strong>Display</strong>, connection to <strong>WiFi</strong>, tap <strong>Start</strong>, then scan this code with the in-app scanner that appears.
-            </div>
-        </div>
-        <div class="dp-step">
-            <div class="dp-step-num">3</div>
-            <div class="dp-step-text">
-                <strong>Tip:</strong> the display page works great in <strong>landscape mode</strong> on a tablet mounted sideways at the door. You can also paste the copied link directly into any browser.
+                <strong>Tip:</strong> works great in <strong>landscape mode</strong> on a tablet mounted at the door. You can also paste the copied link directly into any browser.
             </div>
         </div>
     </div>
 
     <button class="dp-rotate-btn" id="dpRotateBtn" onclick="rotateDisplayToken()">Regenerate Link</button>
+
+    <div class="settings-section-label" style="margin-top:12px;">Account</div>
+    <a href="/settings.html" class="settings-nav-row">
+        Account Settings
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4;flex-shrink:0;"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
 </div>
 
 
@@ -594,7 +602,7 @@ let pendingCheckoutToken = null;
     initScannerChannel();
     requestNotificationPermission();
     if (isLoggedIn) startSessionWatcher();
-    if (new URLSearchParams(location.search).get('tab') === 'display') switchTab('display');
+    if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
 })();
 
 // ── Session expiry watcher ────────────────────────────────
@@ -1209,11 +1217,11 @@ async function scanLoop() {
 
 // ── Tab switching ─────────────────────────────────────────
 function switchTab(tab) {
-    const isDisplay = tab === 'display';
-    document.getElementById('tabScanner').classList.toggle('active', !isDisplay);
-    document.getElementById('tabDisplay').classList.toggle('active', isDisplay);
-    document.getElementById('displayPanel').classList.toggle('active', isDisplay);
-    if (isDisplay) loadDisplayQR();
+    const isSettings = tab === 'settings';
+    document.getElementById('tabScanner').classList.toggle('active', !isSettings);
+    document.getElementById('tabSettings').classList.toggle('active', isSettings);
+    document.getElementById('displayPanel').classList.toggle('active', isSettings);
+    if (isSettings) loadDisplayQR();
 }
 
 // ── Display QR code ───────────────────────────────────────
@@ -1234,7 +1242,7 @@ function loadDisplayQR() {
 
     if (!eventId || !isLoggedIn) {
         placeholder.textContent = isLoggedIn
-            ? 'Select an event above to generate a QR code'
+            ? 'Select an event from the scanner tab'
             : 'Sign in to use display mode';
         placeholder.style.display = 'flex';
         wrap.style.display = 'none';
