@@ -1375,7 +1375,7 @@
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
                 <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
-                    <button class="btn btn-secondary btn-sm" onclick="checkInSelected('${event.id}')">Check In</button>
+                    <button class="btn btn-secondary btn-sm" onclick="bulkCheckIn('${event.id}')">Check In</button>
                     <button class="btn btn-secondary btn-sm" onclick="undoCheckInSelected('${event.id}')">Undo Check-In</button>
                     <button class="btn btn-secondary btn-sm" onclick="resendSelectedTickets('${event.id}')">Resend Tickets</button>
                     <button class="btn btn-secondary btn-sm" onclick="openBulkEmailModal('${event.id}', 0, true)">Email Selected</button>
@@ -1569,7 +1569,7 @@
             window.location.href = '/api/tickets/export-csv?regIds=' + encodeURIComponent(ids);
         }
 
-        async function checkInSelected(eventId) {
+        async function bulkCheckIn(eventId) {
             if (!checkedRegIds.size) return;
             const r = await fetch('/api/checkin/bulk', {
                 method: 'POST',
