@@ -758,7 +758,7 @@
 
             // Last seen
             const lastSeenEl = card.querySelector('.last-seen');
-            if (lastSeenEl) lastSeenEl.textContent = `Last seen ${timeAgo(s.lastSeen, s.online)}`;
+            if (lastSeenEl) lastSeenEl.textContent = s.online ? 'Connected' : `Last seen ${timeAgo(s.lastSeen, false)}`;
 
             // Scan result pill + name
             const lastR = s.lastResult;
@@ -863,7 +863,7 @@
                 if (mapped) { [pillClass, pillLabel] = mapped; }
             }
 
-            const lastSeenLabel = s.lastSeen ? timeAgo(s.lastSeen, s.online) : 'Never';
+            const lastSeenLabel = s.online ? 'Connected' : (s.lastSeen ? timeAgo(s.lastSeen, false) : 'Never');
             const eventName = s.eventName || (s.eventId ? 'Unknown event' : 'No event');
 
             return `<div class="scanner-card status-${status}" id="card-${s.pairToken}">
@@ -995,7 +995,7 @@
 
         // ── Helpers ───────────────────────────────────────────────────────
         function timeAgo(iso, isOnline) {
-            if (isOnline) return 'Live';
+            if (isOnline) return 'Connected';
             const sec = Math.floor((Date.now() - new Date(iso)) / 1000);
             if (sec < 15) return 'Just now';
             if (sec < 60) return `${sec}s ago`;
@@ -1019,7 +1019,7 @@
                 if (!card) return;
                 const id = card.id.replace('card-', '');
                 const s = scanners.get(id);
-                if (s) el.textContent = `Last seen ${timeAgo(s.lastSeen, s.online)}`;
+                if (s) el.textContent = s.online ? 'Connected' : `Last seen ${timeAgo(s.lastSeen, false)}`;
             });
             // Also update status dot colours
             for (const [pt, s] of scanners) {
