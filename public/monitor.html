@@ -900,15 +900,9 @@
             if (r.ok) {
                 document.getElementById(`notify-${pairToken}`).classList.remove('open');
                 document.getElementById(`nmsg-${pairToken}`).value = '';
-                flashCard(pairToken);
+                const sentCard = document.getElementById(`card-${pairToken}`);
+                if (sentCard) { sentCard.style.outline = '3px solid #6366f1'; setTimeout(() => sentCard.style.outline = '', 1200); }
             }
-        }
-
-        function flashCard(pairToken) {
-            const card = document.getElementById(`card-${pairToken}`);
-            if (!card) return;
-            card.style.outline = '3px solid #6366f1';
-            setTimeout(() => card.style.outline = '', 1200);
         }
 
         // ── Notify All ────────────────────────────────────────────────────

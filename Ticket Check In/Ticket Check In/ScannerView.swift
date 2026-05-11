@@ -370,44 +370,50 @@ struct ScannerView: View {
         if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
         let eventId = selectedEventId()
         notifTask = Task.detached(priority: .background) { [pairToken = scannerPairToken, baseURL] in
-            var urlStr = "\(baseURL)/api/scan/stream/\(pairToken)?platform=ios-app"
-            if let eid = eventId { urlStr += "&eventId=\(eid)" }
-            guard let url = URL(string: urlStr) else { return }
-            let request = URLRequest(url: url, timeoutInterval: .infinity)
-            guard let (bytes, _) = try? await URLSession.shared.bytes(for: request) else { return }
-            var buffer = ""
-            do {
-                for try await byte in bytes {
-                    if Task.isCancelled { break }
-                    buffer += String(bytes: [byte], encoding: .utf8) ?? ""
-                    while let range = buffer.range(of: "\n\n") {
-                        let chunk = String(buffer[buffer.startIndex..<range.lowerBound])
-                        buffer = String(buffer[range.upperBound...])
-                        if chunk.hasPrefix("data: "),
-                           let data = chunk.dropFirst(6).data(using: .utf8),
-                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                           let type = json["type"] as? String {
+            while !Task.isCancelled {
+                var urlStr = "\(baseURL)/api/scan/stream/\(pairToken)?platform=ios-app"
+                if let eid = eventId { urlStr += "&eventId=\(eid)" }
+                guard let url = URL(string: urlStr) else { return }
+                let request = URLRequest(url: url, timeoutInterval: .infinity)
+                if let (bytes, _) = try? await URLSession.shared.bytes(for: request) {
+                    var buffer = ""
+                    do {
+                        for try await byte in bytes {
+                            if Task.isCancelled { break }
+                            buffer += String(bytes: [byte], encoding: .utf8) ?? ""
+                            while let range = buffer.range(of: "\n\n") {
+                                let chunk = String(buffer[buffer.startIndex..<range.lowerBound])
+                                buffer = String(buffer[range.upperBound...])
+                                if chunk.hasPrefix("data: "),
+                                   let data = chunk.dropFirst(6).data(using: .utf8),
+                                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                                   let type = json["type"] as? String {
 
-                            if type == "notification", let message = json["message"] as? String {
-                                let title = json["title"] as? String ?? "Message from Admin"
-                                await MainActor.run {
-                                    self.showNotifBannerWith(title: title, message: message)
-                                }
-                            } else if type == "scan", let status = json["status"] as? String {
-                                if status == "checked_out",
-                                   let regId = json["registrationId"] as? String {
-                                    await MainActor.run {
-                                        if regId == lastRegistrationId, scanResult?.status == .reentryExitPrompt {
-                                            CheckInFeedback.shared.success()
-                                            dismissExitOverlay()
+                                    if type == "notification", let message = json["message"] as? String {
+                                        let title = json["title"] as? String ?? "Message from Admin"
+                                        await MainActor.run {
+                                            self.showNotifBannerWith(title: title, message: message)
+                                        }
+                                    } else if type == "scan", let status = json["status"] as? String {
+                                        if status == "checked_out",
+                                           let regId = json["registrationId"] as? String {
+                                            await MainActor.run {
+                                                if regId == self.lastRegistrationId, self.scanResult?.status == .reentryExitPrompt {
+                                                    CheckInFeedback.shared.success()
+                                                    self.dismissExitOverlay()
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
+                    } catch { /* stream ended — will reconnect */ }
                 }
-            } catch { /* stream ended or cancelled — ignore */ }
+                if !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000) // retry after 5s
+                }
+            }
         }
     }
 }

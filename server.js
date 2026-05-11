@@ -3257,6 +3257,7 @@ function recordScan(pairToken, event, status, ticket, allTickets) {
         broadcastToMonitors(event.id, {
             type: 'ticket_scan',
             eventId: event.id,
+            pairToken: pairToken || null,
             registrationId: ticket.registrationId,
             status,
             name: ticket.name,
