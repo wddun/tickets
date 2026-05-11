@@ -3280,7 +3280,18 @@ function broadcastToPair(pairToken, payload) {
     if (!pairToken) return false;
     const ch = scannerChannels.get(pairToken);
     if (!ch) return false;
-    try { ch.write(`data: ${JSON.stringify(payload)}\n\n`); return true; } catch { return false; }
+    // Detect stale sockets (common on Windows where close events don't always fire)
+    if (!ch.writable || ch.socket?.destroyed || ch.socket?.readyState === 'closed') {
+        scannerChannels.delete(pairToken);
+        return false;
+    }
+    try {
+        ch.write(`data: ${JSON.stringify(payload)}\n\n`);
+        return true;
+    } catch {
+        scannerChannels.delete(pairToken);
+        return false;
+    }
 }
 
 // Send to all display screens connected for a given event (by displayToken)
