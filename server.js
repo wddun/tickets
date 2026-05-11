@@ -2364,7 +2364,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
 
 // Confirm reentry check-out (no auth required — scanner uses PIN, not session)
 app.post('/api/checkout', async (req, res) => {
-    const { token, registrationId } = req.body;
+    const { token, registrationId, pairToken } = req.body;
     if (!token && !registrationId) return res.status(400).json({ error: 'Token or registrationId is required' });
 
     let ticket;
@@ -2408,6 +2408,7 @@ app.post('/api/checkout', async (req, res) => {
         broadcastToMonitors(event.id, {
             type: 'ticket_scan',
             eventId: event.id,
+            pairToken: pairToken || null,
             registrationId: ticket.registrationId,
             status: 'checked_out',
             name: ticket.name,
@@ -2416,6 +2417,12 @@ app.post('/api/checkout', async (req, res) => {
             usedAt: ticket.used_at,
             reentryStatus: 'outside',
         });
+        if (pairToken) {
+            upsertScanner(pairToken, {
+                lastSeen: new Date().toISOString(),
+                lastResult: { status: 'checked_out', name: ticket.name || '', registrationId: ticket.registrationId, total: allT.length, scanned }
+            });
+        }
     }
     pushWalletIfChanged([ticket], event).catch(() => { });
 });

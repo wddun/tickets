@@ -272,7 +272,7 @@ struct ScannerView: View {
         guard let token = pendingCheckoutToken else { dismissExitOverlay(); return }
         exitOverlayAutoTask?.cancel() // user acted — disable auto-dismiss
         Task {
-            try? await APIService.shared.confirmCheckout(token: token)
+            try? await APIService.shared.confirmCheckout(token: token, pairToken: scannerPairToken)
             await MainActor.run {
                 CheckInFeedback.shared.success()
                 let ble = BLEScanResult(

@@ -27,6 +27,7 @@ struct DisplayView: View {
 
     // Internet (SSE) mode
     @AppStorage("displayInitialMode") private var displayInitialMode = "bluetooth"
+    @AppStorage("scannerPairToken")    private var scannerPairToken: String = ""
     @State private var displayMode: DisplayMode = .bluetooth
     @State private var sseState: SSEState = .idle
     @State private var sseEventName: String = ""
@@ -332,7 +333,7 @@ struct DisplayView: View {
                         if displayMode == .internet {
                             Task {
                                 if let rid = displayRegistrationId {
-                                    try? await APIService.shared.confirmCheckoutByRegistrationId(rid)
+                                    try? await APIService.shared.confirmCheckoutByRegistrationId(rid, pairToken: scannerPairToken)
                                 }
                                 await MainActor.run {
                                     withAnimation { showCheckoutConfirm = false; showResult = false; resultBg = .black }

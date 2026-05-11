@@ -245,23 +245,23 @@ class APIService: ObservableObject {
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
 
-    func confirmCheckout(token: String) async throws {
+    func confirmCheckout(token: String, pairToken: String) async throws {
         guard let url = URL(string: "\(baseURL)/api/checkout") else { throw APIError.invalidURL }
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["token": token])
+        request.httpBody = try JSONEncoder().encode(["token": token, "pairToken": pairToken])
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
 
-    func confirmCheckoutByRegistrationId(_ registrationId: String) async throws {
+    func confirmCheckoutByRegistrationId(_ registrationId: String, pairToken: String) async throws {
         guard let url = URL(string: "\(baseURL)/api/checkout") else { throw APIError.invalidURL }
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["registrationId": registrationId])
+        request.httpBody = try JSONEncoder().encode(["registrationId": registrationId, "pairToken": pairToken])
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
