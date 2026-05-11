@@ -2988,9 +2988,11 @@
             const q = row.querySelector('.igr-qty');
             q.onkeydown = (e) => {
                 if (e.key === 'Tab' && !e.shiftKey) {
-                    // If this is the last row, make a new one
-                    if (!row.nextElementSibling) {
-                        e.preventDefault();
+                    e.preventDefault();
+                    const nextRow = row.nextElementSibling;
+                    if (nextRow) {
+                        nextRow.querySelector('.igr-name').focus();
+                    } else {
                         makeImportRow();
                     }
                 }
@@ -3020,6 +3022,9 @@
             container.appendChild(row);
             row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             syncImportBtn();
+            if (!data.name && !data.email) {
+                row.querySelector('.igr-name').focus();
+            }
             return row;
         }
 
