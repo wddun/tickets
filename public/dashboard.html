@@ -1368,9 +1368,21 @@
         }
 
         function handleLiveTicketScan(msg) {
-            // Only update if we're viewing this event right now
-            if (!selectedId || msg.eventId !== selectedId) return;
-            const { registrationId, status, usedAt, reentryStatus } = msg;
+            const { registrationId, status, usedAt, reentryStatus, eventId } = msg;
+
+            // Always update sidebar count live for every event, not just the selected one
+            const evEntry = events.find(e => e.id === eventId);
+            if (evEntry && evEntry._counts) {
+                if (status === 'valid' || status === 'reentry_enter') {
+                    evEntry._counts.scanned = Math.min(evEntry._counts.scanned + 1, evEntry._counts.total);
+                } else if (status === 'checked_out') {
+                    evEntry._counts.scanned = Math.max(evEntry._counts.scanned - 1, 0);
+                }
+                renderSidebar();
+            }
+
+            // Detail-view updates only apply when this event is open
+            if (!selectedId || eventId !== selectedId) return;
 
             // Update in-memory ticket data
             if (allTickets && registrationId) {
@@ -1398,9 +1410,9 @@
                 if (pctEl)    pctEl.textContent = `${pct}% checked in`;
                 if (barEl)    barEl.style.width = `${pct}%`;
 
-                // Also sync sidebar count
+                // Sync accurate count for selected event (sidebar already updated above)
                 const ev = events.find(e => e.id === selectedId);
-                if (ev) { ev._counts = { total, scanned }; renderSidebar(); }
+                if (ev) ev._counts = { total, scanned };
             }
 
             // Find the row and update its pill + flash it

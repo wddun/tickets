@@ -1,4 +1,4 @@
-const CACHE = 'wts-v10';
+const CACHE = 'wts-v11';
 const PRECACHE = [
     '/',
     '/scanner.html',
