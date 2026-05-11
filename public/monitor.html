@@ -691,10 +691,18 @@
                 if (msg.type === 'scanner_update') {
                     const prev = scanners.get(msg.scanner.pairToken);
                     scanners.set(msg.scanner.pairToken, msg.scanner);
-                    renderGrid();
                     document.getElementById('notifyAllBtn').style.display = '';
 
-                    // Flash if no ticket_scan already did it (e.g. heartbeat-only updates)
+                    const existingCard = document.getElementById(`card-${msg.scanner.pairToken}`);
+                    if (existingCard) {
+                        // Surgical update — leave any open notify/details forms untouched
+                        updateCardSurgically(existingCard, msg.scanner);
+                    } else {
+                        // New scanner appeared — full rebuild
+                        renderGrid();
+                    }
+
+                    // Flash on new scan result
                     if (msg.scanner.lastResult && (!prev || JSON.stringify(prev.lastResult) !== JSON.stringify(msg.scanner.lastResult))) {
                         const card = document.getElementById(`card-${msg.scanner.pairToken}`);
                         if (card && !card._flashing) flashCard(card, msg.scanner.lastResult.status);
@@ -733,6 +741,48 @@
                 card.style.borderColor = borderMap[statusClass] || '#e8e8e8';
                 setTimeout(() => { card._flashing = false; }, 1000);
             }, 1800);
+        }
+
+        function updateCardSurgically(card, s) {
+            const status = onlineStatus(s);
+            // Update card border class
+            card.className = `scanner-card status-${status}`;
+            if (card._flashing) {
+                // Keep flash colors while animating
+                card.className = `scanner-card status-${status}`;
+            }
+
+            // Status dot
+            const dot = card.querySelector('.scanner-status-dot');
+            if (dot) dot.className = `scanner-status-dot dot-${status}`;
+
+            // Last seen
+            const lastSeenEl = card.querySelector('.last-seen');
+            if (lastSeenEl) lastSeenEl.textContent = `Last seen ${timeAgo(s.lastSeen)}`;
+
+            // Scan result pill + name
+            const lastR = s.lastResult;
+            const pillEl = card.querySelector('.scan-result-pill');
+            const nameEl = card.querySelector('.scan-result-name');
+            const cntEl  = card.querySelector('.scan-result-event');
+            if (pillEl && lastR) {
+                const statusMap = {
+                    valid: ['pill-valid', '✓ Valid'],
+                    used: ['pill-used', 'Already Used'],
+                    invalid: ['pill-invalid', '✗ Invalid'],
+                    reentry_enter: ['pill-reentry', 'Re-Entry'],
+                    reentry_exit: ['pill-reentry', 'Check-Out'],
+                };
+                const [cls, lbl] = statusMap[lastR.status] || ['pill-idle', 'Idle'];
+                pillEl.className = `scan-result-pill ${cls}`;
+                pillEl.textContent = lbl;
+            }
+            if (nameEl && lastR) nameEl.textContent = lastR.name || '';
+            if (cntEl  && lastR && lastR.total !== undefined) cntEl.textContent = `${lastR.scanned}/${lastR.total}`;
+
+            // Event meta
+            const metaEl = card.querySelector('.scanner-meta');
+            if (metaEl) metaEl.textContent = s.eventName || (s.eventId ? 'Unknown event' : 'No event');
         }
 
         // ── Event tabs ─────────────────────────────────────────────────────
@@ -847,6 +897,7 @@
         <div class="notify-form" id="notify-${s.pairToken}">
             <input type="text" class="notify-input" placeholder="Title (optional)" id="ntitle-${s.pairToken}" style="height:auto;">
             <textarea class="notify-input" rows="2" placeholder="Message…" id="nmsg-${s.pairToken}"></textarea>
+            <div class="notify-err" style="display:none;color:#ef4444;font-size:12px;margin-top:4px;"></div>
             <div style="display:flex;gap:8px;">
                 <button class="btn btn-primary btn-sm" onclick="sendNotify('${s.pairToken}')">Send</button>
                 <button class="btn btn-secondary btn-sm" onclick="toggleNotify('${s.pairToken}')">Cancel</button>
@@ -889,19 +940,28 @@
         }
 
         async function sendNotify(pairToken) {
-            const title = document.getElementById(`ntitle-${pairToken}`).value.trim();
-            const message = document.getElementById(`nmsg-${pairToken}`).value.trim();
+            const titleEl = document.getElementById(`ntitle-${pairToken}`);
+            const msgEl   = document.getElementById(`nmsg-${pairToken}`);
+            if (!titleEl || !msgEl) return;
+            const title   = titleEl.value.trim();
+            const message = msgEl.value.trim();
             if (!message) return;
             const r = await fetch('/api/monitor/notify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pairToken, title: title || 'Admin Message', message }),
             });
-            if (r.ok) {
-                document.getElementById(`notify-${pairToken}`).classList.remove('open');
-                document.getElementById(`nmsg-${pairToken}`).value = '';
+            const data = r.ok ? await r.json() : null;
+            const notifForm = document.getElementById(`notify-${pairToken}`);
+            if (data && data.delivered > 0) {
+                if (notifForm) notifForm.classList.remove('open');
+                if (msgEl) msgEl.value = '';
                 const sentCard = document.getElementById(`card-${pairToken}`);
                 if (sentCard) { sentCard.style.outline = '3px solid #6366f1'; setTimeout(() => sentCard.style.outline = '', 1200); }
+            } else {
+                // Scanner is in the registry but its SSE channel is not active
+                const errEl = notifForm?.querySelector('.notify-err');
+                if (errEl) { errEl.textContent = 'Scanner offline — notification not delivered.'; errEl.style.display = 'block'; setTimeout(() => errEl.style.display = 'none', 4000); }
             }
         }
 
