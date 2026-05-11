@@ -831,6 +831,8 @@
             background: #eee;
         }
 
+        .btn-settings.has-dropdown::after { content: ' ▾'; font-size: 11px; }
+
         .settings-empty {
             text-align: center;
             padding: 20px;
@@ -1042,6 +1044,74 @@
         @keyframes rowFlashBlue   { 0%,30% { background:#2563eb; } 100% { background:transparent; } }
         @keyframes rowFlashOrange { 0%,30% { background:#d97706; } 100% { background:transparent; } }
         @keyframes rowFlashRed    { 0%,30% { background:#dc2626; } 100% { background:transparent; } }
+
+        /* ── Dropdown menus ── */
+        .dropdown-wrap { position: relative; }
+        .dropdown-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 10px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.13);
+            min-width: 190px;
+            z-index: 300;
+            overflow: hidden;
+        }
+        .dropdown-menu.open { display: block; }
+        .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            width: 100%;
+            padding: 10px 16px;
+            font-size: 13px;
+            color: #333;
+            background: none;
+            border: none;
+            text-align: left;
+            cursor: pointer;
+            text-decoration: none;
+            font-family: inherit;
+            white-space: nowrap;
+            box-sizing: border-box;
+        }
+        .dropdown-item:hover { background: #f4f5f7; }
+        .dropdown-item.danger { color: #dc2626; }
+        .dropdown-item.danger:hover { background: #fef2f2; }
+        .dropdown-divider { height: 1px; background: #f0f0f0; margin: 4px 0; }
+        .topbar-btn.has-dropdown::after { content: '▾'; margin-left: 3px; font-size: 11px; }
+
+        /* ── Settings tabs ── */
+        .settings-tab-bar {
+            display: flex;
+            border-bottom: 1px solid #f0f0f0;
+            margin: 0 -24px 20px;
+            padding: 0 24px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        .settings-tab-bar::-webkit-scrollbar { display: none; }
+        .settings-tab {
+            padding: 10px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #999;
+            cursor: pointer;
+            border: none;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            white-space: nowrap;
+            background: none;
+            font-family: inherit;
+            transition: color 0.15s;
+        }
+        .settings-tab.active { color: #1a1f3c; border-bottom-color: #1a1f3c; }
+        .settings-tab:hover:not(.active) { color: #555; }
+        .settings-section { display: none; }
+        .settings-section.active { display: block; }
     </style>
 </head>
 
@@ -1050,10 +1120,6 @@
     <div class="topbar">
         <a href="/" class="topbar-logo"><img src="/logo-nav.svg" alt="WTS Tickets"></a>
         <div class="topbar-actions">
-            <a href="/" class="topbar-btn topbar-hide-mobile">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                Home
-            </a>
             <a href="/scanner.html" class="topbar-btn">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/></svg>
                 Scanner
@@ -1062,12 +1128,28 @@
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
                 Monitor
             </a>
-            <button id="adminOverviewBtn" class="topbar-btn" onclick="openAdminOverview()" style="display:none;">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                Overview
-            </button>
-            <button class="topbar-btn" onclick="logout()">Sign Out</button>
-            <button class="topbar-btn topbar-btn-danger topbar-hide-mobile" onclick="confirmDeleteAccount()">Delete Account</button>
+            <div class="dropdown-wrap">
+                <button class="topbar-btn has-dropdown" onclick="toggleDropdown('accountMenu')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                    Account
+                </button>
+                <div class="dropdown-menu" id="accountMenu">
+                    <button id="adminOverviewBtn" class="dropdown-item" onclick="openAdminOverview();closeAllDropdowns()" style="display:none;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                        Admin Overview
+                    </button>
+                    <div class="dropdown-divider" id="adminDivider" style="display:none;"></div>
+                    <button class="dropdown-item" onclick="logout()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                        Sign Out
+                    </button>
+                    <div class="dropdown-divider"></div>
+                    <button class="dropdown-item danger" onclick="confirmDeleteAccount()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                        Delete Account
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1241,8 +1323,13 @@
         onclick="if(event.target===this)closeSettings()">
         <div class="modal">
             <div class="modal-header">
-                <h2>Room Settings</h2>
+                <h2>Event Settings</h2>
                 <button class="modal-close" onclick="closeSettings()">&times;</button>
+            </div>
+            <div class="settings-tab-bar">
+                <button class="settings-tab active" onclick="switchSettingsTab(this,'tab-fields')">Custom Fields</button>
+                <button class="settings-tab" onclick="switchSettingsTab(this,'tab-access')">Access & Sharing</button>
+                <button class="settings-tab" onclick="switchSettingsTab(this,'tab-notifications')">Notifications</button>
             </div>
             <div id="settingsContent">Loading…</div>
         </div>
@@ -1353,6 +1440,7 @@
             if (currentUser.isAdmin) {
                 initLogsPanel();
                 document.getElementById('adminOverviewBtn').style.display = '';
+                document.getElementById('adminDivider').style.display = '';
             }
             await loadEvents();
             setInterval(loadEvents, 30000);
@@ -1655,12 +1743,32 @@
                     <svg style="display:inline;vertical-align:text-top;margin-right:4px;opacity:.6" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>${esc(event.location?.name || '')}${event.location?.address ? ' — ' + esc(event.location.address) : ''}
                 </div>
                 <div class="detail-actions">
-                    <a href="/scanner.html" target="_blank" class="btn btn-scanner">Open Scanner</a>
+                    <a href="/scanner.html" target="_blank" class="btn btn-scanner">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/></svg>
+                        Open Scanner
+                    </a>
                     <button class="btn-settings" onclick="openMetricsModal('${event.id}')">📊 Metrics</button>
-                    <button class="btn-settings" onclick="openEditEventModal('${event.id}')">Edit Event</button>
-                    <button class="btn-settings" onclick="openSettings('${event.id}')">Settings</button>
                     <button class="btn-settings" onclick="openBulkEmailModal('${event.id}', ${grouped.length})">✉️ Email All</button>
-                    <button class="btn btn-danger" onclick="deleteEvent('${event.id}')">Delete Event</button>
+                    <div class="dropdown-wrap">
+                        <button class="btn-settings has-dropdown" onclick="toggleDropdown('manageMenu-${event.id}')">
+                            ⚙ Manage
+                        </button>
+                        <div class="dropdown-menu" id="manageMenu-${event.id}">
+                            <button class="dropdown-item" onclick="openEditEventModal('${event.id}');closeAllDropdowns()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                Edit Details
+                            </button>
+                            <button class="dropdown-item" onclick="openSettings('${event.id}');closeAllDropdowns()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                Fields, Access & Notifications
+                            </button>
+                            <div class="dropdown-divider"></div>
+                            <button class="dropdown-item danger" onclick="closeAllDropdowns();deleteEvent('${event.id}')">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                                Delete Event
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2316,7 +2424,10 @@
                         ? '<div class="settings-empty" style="padding:10px 0;text-align:left;">Push settings unavailable.</div>'
                         : renderPushSection(eventId, devices);
                     const reminderHtml = await loadReminderSection(eventId);
-                    document.getElementById('settingsContent').innerHTML = cfHtml + note + pushHtml + reminderHtml;
+                    document.getElementById('settingsContent').innerHTML =
+                        `<div class="settings-section active" id="tab-fields">${cfHtml}</div>` +
+                        `<div class="settings-section" id="tab-access">${note}</div>` +
+                        `<div class="settings-section" id="tab-notifications">${pushHtml}${reminderHtml}</div>`;
                     togglePushDeviceList();
                     return;
                 }
@@ -2343,7 +2454,7 @@
                 }
 
                 let accessHtml = `
-                    <div class="modal-section-title" style="margin-top:20px;">Share with user</div>
+                    <div class="modal-section-title" style="margin-top:4px;">Share with user</div>
                     <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
                         <input type="email" id="shareEmail" placeholder="User email" style="flex:1;min-width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;" />
                         <select id="sharePermission" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
@@ -2372,7 +2483,7 @@
                 } else {
                     accessHtml += `
                         <div class="modal-section-title">Users with access</div>
-                        <div class="settings-empty">No users have been added to this room yet.</div>
+                        <div class="settings-empty">No users have been added yet.</div>
                     `;
                 }
 
@@ -2381,7 +2492,10 @@
                     ? '<div class="settings-empty" style="padding:10px 0;text-align:left;">Push settings unavailable.</div>'
                     : renderPushSection(eventId, devices);
                 const reminderHtml = await loadReminderSection(eventId);
-                document.getElementById('settingsContent').innerHTML = cfHtml + linkHtml + accessHtml + pushHtml + reminderHtml;
+                document.getElementById('settingsContent').innerHTML =
+                    `<div class="settings-section active" id="tab-fields">${cfHtml}</div>` +
+                    `<div class="settings-section" id="tab-access">${linkHtml}${accessHtml}</div>` +
+                    `<div class="settings-section" id="tab-notifications">${pushHtml}${reminderHtml}</div>`;
                 togglePushDeviceList();
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
@@ -2560,6 +2674,32 @@
         async function logout() {
             await fetch('/api/auth/logout', { method: 'POST' });
             location.href = '/login.html';
+        }
+
+        // ── Dropdown menus ──────────────────────────────────────────────────────
+        function toggleDropdown(id) {
+            const menu = document.getElementById(id);
+            if (!menu) return;
+            const isOpen = menu.classList.contains('open');
+            closeAllDropdowns();
+            if (!isOpen) menu.classList.add('open');
+        }
+
+        function closeAllDropdowns() {
+            document.querySelectorAll('.dropdown-menu.open').forEach(m => m.classList.remove('open'));
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.dropdown-wrap')) closeAllDropdowns();
+        });
+
+        // ── Settings tabs ───────────────────────────────────────────────────────
+        function switchSettingsTab(btn, tabId) {
+            document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.settings-section').forEach(s => s.classList.remove('active'));
+            btn.classList.add('active');
+            const section = document.getElementById(tabId);
+            if (section) section.classList.add('active');
         }
 
         // ── Metrics Modal ──────────────────────────────────────────────────────
@@ -2857,14 +2997,11 @@
             <div id="editTicketCustomFields" style="margin-bottom:16px;"></div>
             <input type="hidden" id="editTicketId" />
             <input type="hidden" id="editRegId" />
+            <button class="btn btn-primary" style="width:100%;margin-bottom:8px;" onclick="submitEditTicket(true)">Save Changes</button>
             <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket(false)">Save &amp;
-                    Resend</button>
-                <button class="btn btn-secondary" style="flex:1;" onclick="submitEditTicket(true)">Save Only</button>
-                <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Only</button>
+                <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Ticket</button>
+                <button class="btn btn-secondary" style="flex:1;" onclick="openDirectEmailModal()">Custom Email</button>
             </div>
-            <button class="btn btn-secondary" style="width:100%;margin-top:4px;" onclick="openDirectEmailModal()">Send
-                Email</button>
             <button class="btn btn-danger" style="width:100%;margin-top:4px;"
                 onclick="deleteRegistrationFromModal()">Delete Registration</button>
             <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:#666;"></div>
