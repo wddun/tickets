@@ -1032,48 +1032,20 @@
             15%  { background-color: rgba(239, 68, 68, 0.15); }
             100% { background-color: transparent; }
         }
-        .row-flash-in  { animation: rowFlashGreen  1.8s ease forwards; }
-        .row-flash-out { animation: rowFlashOrange 1.8s ease forwards; }
-        .row-flash-dup { animation: rowFlashRed    1.8s ease forwards; }
+        .row-flash-in  { animation: rowFlashGreen  2s ease-out forwards; }
+        .row-flash-out { animation: rowFlashBlue   2s ease-out forwards; }
+        .row-flash-dup { animation: rowFlashOrange 2s ease-out forwards; }
+        .row-flash-bad { animation: rowFlashRed    2s ease-out forwards; }
 
-        /* ── Full-screen scan flash overlay ── */
-        #scanFlash {
-            display: none;
-            position: fixed;
-            inset: 0;
-            z-index: 9999;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            pointer-events: none;
-        }
-        #scanFlash.flash-active {
-            display: flex;
-            animation: scanFlashFade 1.6s cubic-bezier(0.4, 0, 0.6, 1) forwards;
-        }
-        @keyframes scanFlashFade {
-            0%   { opacity: 0; }
-            10%  { opacity: 1; }
-            60%  { opacity: 1; }
-            100% { opacity: 0; }
-        }
-        #scanFlash.color-green  { background: #059669; }
-        #scanFlash.color-blue   { background: #2563eb; }
-        #scanFlash.color-orange { background: #d97706; }
-        #scanFlash.color-red    { background: #dc2626; }
-        #scanFlash .sf-icon { font-size: 64px; line-height: 1; }
-        #scanFlash .sf-status { font-size: 22px; font-weight: 800; color: #fff; letter-spacing: 0.01em; }
-        #scanFlash .sf-name   { font-size: 36px; font-weight: 700; color: #fff; }
+        /* ── Per-row scan flash (solid color takeover, fades out) ── */
+        @keyframes rowFlashGreen  { 0%,30% { background:#059669; } 100% { background:transparent; } }
+        @keyframes rowFlashBlue   { 0%,30% { background:#2563eb; } 100% { background:transparent; } }
+        @keyframes rowFlashOrange { 0%,30% { background:#d97706; } 100% { background:transparent; } }
+        @keyframes rowFlashRed    { 0%,30% { background:#dc2626; } 100% { background:transparent; } }
     </style>
 </head>
 
 <body>
-<div id="scanFlash">
-    <div class="sf-icon" id="sfIcon"></div>
-    <div class="sf-status" id="sfStatus"></div>
-    <div class="sf-name" id="sfName"></div>
-</div>
 
     <div class="topbar">
         <a href="/" class="topbar-logo"><img src="/logo-nav.svg" alt="WTS Tickets"></a>
@@ -1410,7 +1382,16 @@
             };
             dashboardSSE.onerror = () => {
                 dashboardSSE.close();
-                setTimeout(startDashboardSSE, 6000);
+                setTimeout(() => {
+                    startDashboardSSE();
+                    // Re-fetch data so the view is current without a page reload
+                    loadEvents().then(() => {
+                        if (selectedId) {
+                            const ev = events.find(e => e.id === selectedId);
+                            if (ev) fetchAndRender(ev, true);
+                        }
+                    });
+                }, 5000);
             };
         }
 
@@ -1499,52 +1480,20 @@
             }
 
             // Flash the row
-            row.classList.remove('row-flash-in', 'row-flash-out', 'row-flash-dup');
-            void row.offsetWidth; // reflow to restart animation
+            row.classList.remove('row-flash-in', 'row-flash-out', 'row-flash-dup', 'row-flash-bad');
+            void row.offsetWidth;
             if (status === 'valid' || status === 'reentry_enter') {
                 row.classList.add('row-flash-in');
             } else if (status === 'checked_out') {
                 row.classList.add('row-flash-out');
             } else if (status === 'used') {
                 row.classList.add('row-flash-dup');
+            } else {
+                row.classList.add('row-flash-bad');
             }
             row.addEventListener('animationend', () => {
-                row.classList.remove('row-flash-in', 'row-flash-out', 'row-flash-dup');
+                row.classList.remove('row-flash-in', 'row-flash-out', 'row-flash-dup', 'row-flash-bad');
             }, { once: true });
-
-            // Full-screen scan flash (iOS-style takeover)
-            showScanFlash(status, msg.name);
-        }
-
-        let _flashTimer = null;
-        function showScanFlash(status, name) {
-            const el = document.getElementById('scanFlash');
-            if (!el) return;
-            el.classList.remove('flash-active', 'color-green', 'color-blue', 'color-orange', 'color-red');
-            void el.offsetWidth;
-
-            let icon, label, color;
-            if (status === 'valid') {
-                icon = '✓'; label = 'Checked In'; color = 'color-green';
-            } else if (status === 'reentry_enter') {
-                icon = '↑'; label = 'Re-Entered'; color = 'color-green';
-            } else if (status === 'checked_out') {
-                icon = '↓'; label = 'Checked Out'; color = 'color-blue';
-            } else if (status === 'used') {
-                icon = '⚠'; label = 'Already Used'; color = 'color-orange';
-            } else {
-                icon = '✗'; label = 'Invalid'; color = 'color-red';
-            }
-
-            document.getElementById('sfIcon').textContent   = icon;
-            document.getElementById('sfStatus').textContent = label;
-            document.getElementById('sfName').textContent   = name || '';
-            el.classList.add('flash-active', color);
-
-            clearTimeout(_flashTimer);
-            _flashTimer = setTimeout(() => {
-                el.classList.remove('flash-active', 'color-green', 'color-blue', 'color-orange', 'color-red');
-            }, 1650);
         }
 
         async function loadEvents() {

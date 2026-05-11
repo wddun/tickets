@@ -758,7 +758,7 @@
 
             // Last seen
             const lastSeenEl = card.querySelector('.last-seen');
-            if (lastSeenEl) lastSeenEl.textContent = `Last seen ${timeAgo(s.lastSeen)}`;
+            if (lastSeenEl) lastSeenEl.textContent = `Last seen ${timeAgo(s.lastSeen, s.online)}`;
 
             // Scan result pill + name
             const lastR = s.lastResult;
@@ -863,7 +863,7 @@
                 if (mapped) { [pillClass, pillLabel] = mapped; }
             }
 
-            const lastSeenLabel = s.lastSeen ? timeAgo(s.lastSeen) : 'Never';
+            const lastSeenLabel = s.lastSeen ? timeAgo(s.lastSeen, s.online) : 'Never';
             const eventName = s.eventName || (s.eventId ? 'Unknown event' : 'No event');
 
             return `<div class="scanner-card status-${status}" id="card-${s.pairToken}">
@@ -994,8 +994,10 @@
         }
 
         // ── Helpers ───────────────────────────────────────────────────────
-        function timeAgo(iso) {
+        function timeAgo(iso, isOnline) {
+            if (isOnline) return 'Live';
             const sec = Math.floor((Date.now() - new Date(iso)) / 1000);
+            if (sec < 15) return 'Just now';
             if (sec < 60) return `${sec}s ago`;
             if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
             return `${Math.floor(sec / 3600)}h ago`;
@@ -1010,14 +1012,14 @@
             location.href = '/login.html';
         }
 
-        // Refresh lastSeen labels every 15 s without full re-render if nothing changed
+        // Refresh lastSeen labels every 5 s without full re-render if nothing changed
         setInterval(() => {
             document.querySelectorAll('.last-seen').forEach(el => {
                 const card = el.closest('.scanner-card');
                 if (!card) return;
                 const id = card.id.replace('card-', '');
                 const s = scanners.get(id);
-                if (s) el.textContent = `Last seen ${timeAgo(s.lastSeen)}`;
+                if (s) el.textContent = `Last seen ${timeAgo(s.lastSeen, s.online)}`;
             });
             // Also update status dot colours
             for (const [pt, s] of scanners) {
@@ -1028,7 +1030,7 @@
                 const dot = card.querySelector('.scanner-status-dot');
                 if (dot) dot.className = `scanner-status-dot dot-${newStatus}`;
             }
-        }, 15000);
+        }, 5000);
 
         init();
     </script>
