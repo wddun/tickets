@@ -23,7 +23,8 @@
       "Bash(git push *)",
       "Bash(grep -E \"\\\\.\\(js|html\\)$\")",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git commit *)"
     ]
   }
 }
