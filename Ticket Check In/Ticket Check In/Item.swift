@@ -57,6 +57,7 @@ struct ValidateResponse: Codable {
 struct AuthUser: Codable {
     let id: String
     let email: String
+    let isAdmin: Bool?
 }
 
 struct AuthUserResponse: Codable {
