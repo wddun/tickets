@@ -325,7 +325,15 @@ async function pushAppNotificationToTokens(tokens, { title, body, data } = {}) {
 }
 
 app.set('trust proxy', 1);
-app.use(compression());
+app.use(compression({
+    filter: (req, res) => {
+        // Never gzip Server-Sent Events — compression buffers small chunks and
+        // breaks real-time delivery. Skip on path prefix because Content-Type may
+        // not be set yet when the filter runs.
+        if (req.path && /\/(stream|monitor\/stream)(\/|$)/.test(req.path)) return false;
+        return compression.filter(req, res);
+    }
+}));
 app.use((req, res, next) => {
     res.set('X-Content-Type-Options', 'nosniff');
     res.set('X-Frame-Options', 'SAMEORIGIN');
@@ -3228,11 +3236,19 @@ const monitorClients      = new Set(); // { res, eventIds: Set<string> }
 
 function broadcastToMonitors(eventId, payload) {
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;
+    let sent = 0, eligible = 0;
     for (const client of monitorClients) {
         if (client.eventIds.has(eventId)) {
-            try { client.res.write(chunk); } catch (_) { }
+            eligible++;
+            try {
+                if (client.res.writable && !client.res.socket?.destroyed) {
+                    client.res.write(chunk);
+                    sent++;
+                }
+            } catch (_) { }
         }
     }
+    log('monitor-broadcast', `[${payload.type}] event=${eventId} sent=${sent}/${eligible} (${monitorClients.size} total clients)`);
 }
 
 function getClientIP(req) {
@@ -3421,9 +3437,13 @@ app.get('/api/monitor/stream', requireAuth, async (req, res) => {
     }
 
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
+    // 2KB padding chunk forces Cloudflare/nginx to release its buffer immediately
+    res.write(`: ${' '.repeat(2048)}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'monitor_connected' })}\n\n`);
 
     const client = { res, eventIds };
     monitorClients.add(client);
@@ -3502,9 +3522,11 @@ app.get('/api/scan/stream/:pairToken', async (req, res) => {
     if (!pairToken) return res.status(400).send('pairToken required');
 
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
+    res.write(`: ${' '.repeat(2048)}\n\n`);
 
     const ev = eventId ? rowToEvent(stmt.events.byId.get(eventId)) : null;
 
