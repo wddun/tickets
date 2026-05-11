@@ -683,9 +683,28 @@
                 try { msg = JSON.parse(e.data); } catch { return; }
 
                 if (msg.type === 'ticket_scan') {
-                    // Instant flash on scan — fire before scanner_update arrives
                     const card = document.getElementById(`card-${msg.pairToken}`);
-                    if (card) flashCard(card, msg.status);
+                    if (card) {
+                        // Update name + pill immediately without waiting for scanner_update
+                        const nameEl = card.querySelector('.scan-result-name');
+                        const pillEl = card.querySelector('.scan-result-pill');
+                        const cntEl  = card.querySelector('.scan-result-event');
+                        if (nameEl && msg.name) nameEl.textContent = msg.name;
+                        if (cntEl && msg.total !== undefined) cntEl.textContent = `${msg.scanned}/${msg.total}`;
+                        if (pillEl) {
+                            const pillMap = {
+                                valid: ['pill-valid', '✓ Check In'],
+                                reentry_enter: ['pill-reentry', '↩ Re-Entry'],
+                                checked_out: ['pill-valid', '↪ Checked Out'],
+                                used: ['pill-used', 'Already Used'],
+                                invalid: ['pill-invalid', '✗ Invalid'],
+                            };
+                            const [cls, lbl] = pillMap[msg.status] || ['pill-idle', msg.status];
+                            pillEl.className = `scan-result-pill ${cls}`;
+                            pillEl.textContent = lbl;
+                        }
+                        flashCard(card, msg.status);
+                    }
                 }
 
                 if (msg.type === 'scanner_update') {
@@ -717,24 +736,26 @@
         function flashCard(card, status) {
             let bg, border;
             if (status === 'valid' || status === 'reentry_enter') {
-                bg = '#dcfce7'; border = '#86efac';
+                bg = '#16a34a'; border = '#15803d';       // solid green
             } else if (status === 'checked_out') {
-                bg = '#dbeafe'; border = '#93c5fd';
+                bg = '#2563eb'; border = '#1d4ed8';       // solid blue
             } else if (status === 'used' || status === 'reentry_exit') {
-                bg = '#fef9c3'; border = '#fde047';
+                bg = '#d97706'; border = '#b45309';       // solid amber
             } else {
-                bg = '#fee2e2'; border = '#fca5a5';
+                bg = '#dc2626'; border = '#b91c1c';       // solid red
             }
 
             card._flashing = true;
             card.style.transition = 'none';
             card.style.backgroundColor = bg;
             card.style.borderColor = border;
+            card.style.color = '#fff';
 
             // Hold the color for 1.8s then fade back
             setTimeout(() => {
-                card.style.transition = 'background-color 1s ease-out, border-color 1s ease-out';
+                card.style.transition = 'background-color 1s ease-out, border-color 1s ease-out, color 0.5s ease-out';
                 card.style.backgroundColor = '#fff';
+                card.style.color = '';
                 // Restore border to its status class color after fade
                 const statusClass = [...card.classList].find(c => c.startsWith('status-'));
                 const borderMap = { 'status-online': '#6ee7b7', 'status-idle': '#fde68a', 'status-offline': '#fecaca' };

@@ -1165,7 +1165,7 @@ async function confirmCheckout() {
         await fetch('/api/checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: pendingCheckoutToken }),
+            body: JSON.stringify({ token: pendingCheckoutToken, pairToken: SCANNER_PAIR_TOKEN }),
             signal: controller.signal
         });
     } catch (_) {}
