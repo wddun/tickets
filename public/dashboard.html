@@ -2809,8 +2809,26 @@
         }
 
         function renderMetrics(d) {
-            const checkinData = d.checkinTimeline.map(({ hour, count }) => ({ label: fmt12h(hour), count }));
-            const regData = d.registrationTimeline.map(({ day, count }) => ({ label: day.slice(5), count }));
+            const maxCheckin = d.checkinTimeline.length ? Math.max(...d.checkinTimeline.map(x => x.count)) : 1;
+            const maxReg = d.registrationTimeline.length ? Math.max(...d.registrationTimeline.map(x => x.count)) : 1;
+
+            const checkinBars = d.checkinTimeline.length
+                ? d.checkinTimeline.map(({ hour, count }) => `
+                    <div class="metrics-bar-row">
+                        <span class="metrics-bar-label">${fmt12h(hour)}</span>
+                        <div class="metrics-bar-track"><div class="metrics-bar-fill green" style="width:${Math.round(count / maxCheckin * 100)}%"></div></div>
+                        <span class="metrics-bar-value">${count}</span>
+                    </div>`).join('')
+                : '<div style="color:#bbb;font-size:13px;padding:8px 0;">No check-ins recorded yet.</div>';
+
+            const regBars = d.registrationTimeline.length
+                ? d.registrationTimeline.map(({ day, count }) => `
+                    <div class="metrics-bar-row">
+                        <span class="metrics-bar-label" style="width:72px">${esc(day.slice(5))}</span>
+                        <div class="metrics-bar-track"><div class="metrics-bar-fill" style="width:${Math.round(count / maxReg * 100)}%"></div></div>
+                        <span class="metrics-bar-value">${count}</span>
+                    </div>`).join('')
+                : '<div style="color:#bbb;font-size:13px;padding:8px 0;">No registration data.</div>';
 
             const fieldSections = Object.entries(d.customFieldBreakdowns || {}).map(([field, vals]) => {
                 const maxVal = Math.max(...Object.values(vals));
@@ -2833,10 +2851,10 @@
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.emailOpens}</div><div class="metrics-stat-label">Email Opens</div></div>
                 </div>
                 <div class="metrics-section-title">Check-Ins by Hour</div>
-                ${svgBarChart(checkinData, { labelKey: 'label', valueKey: 'count', color: '#10b981', h: 190 })}
-                <div class="metrics-section-title" style="margin-top:22px;">Registrations by Day</div>
-                ${svgLineChart(regData, { labelKey: 'label', valueKey: 'count', color: '#6366f1', h: 170 })}
-                ${fieldSections ? `<div class="metrics-section-title" style="margin-top:22px;">Custom Field Breakdown</div>${fieldSections}` : ''}
+                ${checkinBars}
+                <div class="metrics-section-title" style="margin-top:18px;">Registrations by Day</div>
+                ${regBars}
+                ${fieldSections ? `<div class="metrics-section-title" style="margin-top:18px;">Custom Field Breakdown</div>${fieldSections}` : ''}
             `;
         }
 
