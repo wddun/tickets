@@ -1358,7 +1358,19 @@
             dashboardSSE.onmessage = (e) => {
                 try {
                     const msg = JSON.parse(e.data);
-                    if (msg.type === 'ticket_scan') handleLiveTicketScan(msg);
+                    if (msg.type === 'ticket_scan') {
+                        handleLiveTicketScan(msg);
+                    } else if (msg.type === 'scanner_update' && msg.scanner?.lastResult) {
+                        // Use scanner_update as a backup source of truth for counts
+                        const lr = msg.scanner.lastResult;
+                        if (lr.total !== undefined) {
+                            const evEntry = events.find(ev => ev.id === msg.scanner.eventId);
+                            if (evEntry) {
+                                evEntry._counts = { total: lr.total, scanned: lr.scanned };
+                                renderSidebar();
+                            }
+                        }
+                    }
                 } catch (_) {}
             };
             dashboardSSE.onerror = () => {
@@ -1372,8 +1384,9 @@
 
             // Always update sidebar count live for every event, not just the selected one
             const evEntry = events.find(e => e.id === eventId);
-            if (evEntry && evEntry._counts) {
-                if (status === 'valid' || status === 'reentry_enter') {
+            if (evEntry) {
+                if (!evEntry._counts) evEntry._counts = { total: msg.total || 0, scanned: msg.scanned || 0 };
+                else if (status === 'valid' || status === 'reentry_enter') {
                     evEntry._counts.scanned = Math.min(evEntry._counts.scanned + 1, evEntry._counts.total);
                 } else if (status === 'checked_out') {
                     evEntry._counts.scanned = Math.max(evEntry._counts.scanned - 1, 0);
