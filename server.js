@@ -3277,10 +3277,10 @@ function recordScan(pairToken, event, status, ticket, allTickets) {
 
 // Send to a specific scanner's SSE channel (for admin notifications)
 function broadcastToPair(pairToken, payload) {
-    if (!pairToken) return;
+    if (!pairToken) return false;
     const ch = scannerChannels.get(pairToken);
-    if (!ch) return;
-    try { ch.write(`data: ${JSON.stringify(payload)}\n\n`); } catch { /* disconnected */ }
+    if (!ch) return false;
+    try { ch.write(`data: ${JSON.stringify(payload)}\n\n`); return true; } catch { return false; }
 }
 
 // Send to all display screens connected for a given event (by displayToken)
@@ -3555,11 +3555,12 @@ app.post('/api/monitor/notify', requireAuth, async (req, res) => {
     const payload = { type: 'notification', title, message, sentAt: new Date().toISOString() };
     let notified = 0;
 
+    let delivered = 0;
     if (pairToken === '*') {
         // Broadcast to all scanners for owned events
         for (const [token, data] of scannerRegistry) {
             if (!data.eventId || userEventIds.has(data.eventId)) {
-                broadcastToPair(token, payload);
+                if (broadcastToPair(token, payload)) delivered++;
                 notified++;
             }
         }
@@ -3570,12 +3571,12 @@ app.post('/api/monitor/notify', requireAuth, async (req, res) => {
         if (scannerData.eventId && !userEventIds.has(scannerData.eventId)) {
             return res.status(403).json({ error: 'Not authorized' });
         }
-        broadcastToPair(pairToken, payload);
+        if (broadcastToPair(pairToken, payload)) delivered++;
         notified = 1;
     }
 
-    log('monitor-notify', `[notify] Sent to ${notified} scanner(s) — by: ${userId}  msg: ${message.slice(0, 60)}`);
-    res.json({ ok: true, notified });
+    log('monitor-notify', `[notify] Delivered to ${delivered}/${notified} scanner(s) — by: ${userId}  msg: ${message.slice(0, 60)}`);
+    res.json({ ok: true, notified, delivered });
 });
 
 // ── Per-Event Metrics ────────────────────────────────────────────────────────
