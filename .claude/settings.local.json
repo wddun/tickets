@@ -28,7 +28,16 @@
       "Bash(pm2 logs *)",
       "Bash(node -e \"import\\('@aws-sdk/client-ses'\\).then\\(\\(\\)=>console.log\\('ses ok'\\)\\).catch\\(e=>console.log\\('ses missing:',e.code\\)\\)\")",
       "Bash(node -e \"import\\('express-rate-limit'\\).then\\(\\(\\)=>console.log\\('rateLimit ok'\\)\\).catch\\(e=>console.log\\('rateLimit missing:',e.code\\)\\)\")",
-      "Bash(pm2 restart *)"
+      "Bash(pm2 restart *)",
+      "Bash(pm2 list *)",
+      "Bash(pm2 info *)",
+      "Bash(curl -s -I http://localhost:3002/monitor.html)",
+      "Bash(curl -s http://localhost:3002/monitor.html)",
+      "Bash(curl -s http://localhost:3002/api/monitor/scanners)",
+      "Bash(curl -s -I \"http://localhost:3002/monitor.html\" -H \"Cache-Control: no-cache\")",
+      "Bash(node --check public/monitor.html)",
+      "Bash(node -e \"const fs=require\\('fs'\\);const html=fs.readFileSync\\('public/monitor.html','utf8'\\);const m=html.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);if\\(!m\\){console.log\\('no scripts'\\);process.exit\\(0\\)}for\\(const s of m\\){try{new Function\\(s.replace\\(/<\\\\/?script>/g,''\\)\\);console.log\\('OK',s.length,'chars'\\)}catch\\(e\\){console.log\\('ERR',e.message,s.slice\\(0,80\\)\\)}}\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);const html=fs.readFileSync\\('public/dashboard.html','utf8'\\);const m=html.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);if\\(!m\\){console.log\\('no scripts'\\);process.exit\\(0\\)}for\\(const s of m\\){try{new Function\\(s.replace\\(/<\\\\/?script>/g,''\\)\\);console.log\\('OK',s.length,'chars'\\)}catch\\(e\\){console.log\\('ERR',e.message,s.slice\\(0,200\\)\\)}}\")"
     ]
   }
 }
