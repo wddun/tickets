@@ -51,76 +51,83 @@ struct LoginView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    Spacer().frame(height: 40)
-
-                    LogoView(size: 80)
-
-                    Text("WTS Tickets")
-                        .font(.title.bold())
-
-                    VStack(spacing: 16) {
-                        TextField("Email", text: $email)
-                            .keyboardType(.emailAddress)
-                            .autocapitalization(.none)
-                            .textContentType(.emailAddress)
-                            .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                        SecureField("Password", text: $password)
-                            .textContentType(.password)
-                            .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .padding(.horizontal)
-
-                    if let error = errorMessage {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.footnote)
-                    }
-
-                    Button(action: login) {
-                        Group {
-                            if isLoading {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Text("Sign In")
-                                    .font(.headline)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.accentColor)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .disabled(isLoading || email.isEmpty || password.isEmpty)
-                    .padding(.horizontal)
-
-                    Button("Skip — Scanner Only") {
-                        switchToScanner()
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                    Text("© Will's Tech Support · support@willstechsupport.com")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-
-                    Spacer().frame(height: 40)
-                }
-            }
-            .navigationTitle("Sign In")
-            .navigationBarTitleDisplayMode(.inline)
+        if #available(iOS 16, *) {
+            NavigationStack { loginContent }
+        } else {
+            NavigationView { loginContent }
         }
+    }
+
+    @ViewBuilder
+    private var loginContent: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                Spacer().frame(height: 40)
+
+                LogoView(size: 80)
+
+                Text("WTS Tickets")
+                    .font(.title.bold())
+
+                VStack(spacing: 16) {
+                    TextField("Email", text: $email)
+                        .keyboardType(.emailAddress)
+                        .autocapitalization(.none)
+                        .textContentType(.emailAddress)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                    SecureField("Password", text: $password)
+                        .textContentType(.password)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .padding(.horizontal)
+
+                if let error = errorMessage {
+                    Text(error)
+                        .foregroundStyle(.red)
+                        .font(.footnote)
+                }
+
+                Button(action: login) {
+                    Group {
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text("Sign In")
+                                .font(.headline)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.accentColor)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(isLoading || email.isEmpty || password.isEmpty)
+                .padding(.horizontal)
+
+                Button("Skip — Scanner Only") {
+                    switchToScanner()
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+                Text("© Will's Tech Support · support@willstechsupport.com")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
+                Spacer().frame(height: 40)
+            }
+        }
+        .navigationTitle("Sign In")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func login() {
@@ -142,6 +149,19 @@ struct LoginView: View {
 // MARK: - Events List
 
 struct EventsListView: View {
+    var body: some View {
+        if #available(iOS 16, *) {
+            EventsListViewModern()
+        } else {
+            EventsListViewLegacy()
+        }
+    }
+}
+
+// MARK: Events List – iOS 16+ (NavigationStack + path-based navigation)
+
+@available(iOS 16, *)
+struct EventsListViewModern: View {
     @StateObject private var api = APIService.shared
     @State private var events: [Event] = []
     @State private var isLoading = false
@@ -249,6 +269,101 @@ struct EventsListView: View {
             }
             await loadEvents()
         }
+    }
+
+    private func saveLastEvent(_ event: Event) {
+        lastSelectedEventData = (try? JSONEncoder().encode(event)) ?? Data()
+    }
+
+    private func loadEvents() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            events = try await api.getEvents()
+        } catch is CancellationError {
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+}
+
+// MARK: Events List – iOS 15 (NavigationView + NavigationLink)
+
+struct EventsListViewLegacy: View {
+    @StateObject private var api = APIService.shared
+    @State private var events: [Event] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var showDeleteConfirm = false
+    @State private var showDisplaySetup = false
+    @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if isLoading && events.isEmpty {
+                    ProgressView("Loading events…")
+                } else if let error = errorMessage {
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle").font(.largeTitle)
+                        Text("Error").font(.headline)
+                        Text(error).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } else if events.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "calendar.badge.exclamationmark").font(.largeTitle)
+                        Text("No Events").font(.headline)
+                        Text("No events found.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } else {
+                    List(events) { event in
+                        NavigationLink(destination: AttendeesView(event: event)) {
+                            EventRow(event: event)
+                        }
+                        .simultaneousGesture(TapGesture().onEnded { saveLastEvent(event) })
+                    }
+                    .refreshable { await loadEvents() }
+                }
+            }
+            .navigationTitle("Events")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button {
+                            showDisplaySetup = true
+                        } label: {
+                            Label("Display Setup", systemImage: "tv")
+                        }
+                        Divider()
+                        Button("Sign Out", role: .destructive) {
+                            Task { try? await api.logout() }
+                        }
+                        Button("Delete Account", role: .destructive) {
+                            showDeleteConfirm = true
+                        }
+                    } label: {
+                        Image(systemName: "person.circle")
+                    }
+                }
+            }
+            .confirmationDialog(
+                "Delete Account",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Account", role: .destructive) {
+                    Task { try? await api.deleteAccount() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will permanently delete your account and all associated events and tickets. This cannot be undone.")
+            }
+            .sheet(isPresented: $showDisplaySetup) {
+                DisplaySetupView(bluetooth: BluetoothManager.shared)
+            }
+        }
+        .task { await loadEvents() }
     }
 
     private func saveLastEvent(_ event: Event) {
@@ -552,53 +667,60 @@ private struct NotificationSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            Form {
+        if #available(iOS 16, *) {
+            NavigationStack { formContent }
+                .presentationDetents([.medium])
+        } else {
+            NavigationView { formContent }
+        }
+    }
+
+    @ViewBuilder
+    private var formContent: some View {
+        Form {
+            Section {
+                Toggle(isOn: Binding(
+                    get: { enabled },
+                    set: { onToggle($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("New registrations")
+                            .font(.headline)
+                        Text("Get a push notification when someone registers for this event.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(isLoading)
+            } header: {
+                Text(eventName)
+            }
+
+            if isLoading {
                 Section {
-                    Toggle(isOn: Binding(
-                        get: { enabled },
-                        set: { onToggle($0) }
-                    )) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("New registrations")
-                                .font(.headline)
-                            Text("Get a push notification when someone registers for this event.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .disabled(isLoading)
-                } header: {
-                    Text(eventName)
-                }
-
-                if isLoading {
-                    Section {
-                        HStack {
-                            ProgressView()
-                            Text("Loading…")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
+                    HStack {
+                        ProgressView()
+                        Text("Loading…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            .navigationTitle("Notifications")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+
+            if let errorMessage {
+                Section {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
                 }
             }
         }
-        .presentationDetents([.medium])
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
     }
 }
 
@@ -615,52 +737,59 @@ struct TicketPickerSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List(uncheckedTickets, id: \.id) { ticket in
-                Button {
+        if #available(iOS 16, *) {
+            NavigationStack { pickerContent }
+                .presentationDetents([.medium, .large])
+        } else {
+            NavigationView { pickerContent }
+        }
+    }
+
+    @ViewBuilder
+    private var pickerContent: some View {
+        List(uncheckedTickets, id: \.id) { ticket in
+            Button {
+                if selected.contains(ticket.id) {
+                    selected.remove(ticket.id)
+                } else {
+                    selected.insert(ticket.id)
+                }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(ticket.name)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                        Text(ticket.id)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
                     if selected.contains(ticket.id) {
-                        selected.remove(ticket.id)
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color.accentColor)
                     } else {
-                        selected.insert(ticket.id)
-                    }
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(ticket.name)
-                                .font(.body)
-                                .foregroundStyle(.primary)
-                            Text(ticket.id)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        if selected.contains(ticket.id) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(Color.accentColor)
-                        } else {
-                            Image(systemName: "circle")
-                                .foregroundStyle(.secondary)
-                        }
+                        Image(systemName: "circle")
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .buttonStyle(.plain)
             }
-            .navigationTitle("Select Tickets")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { onConfirm([]) }
+            .buttonStyle(.plain)
+        }
+        .navigationTitle("Select Tickets")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { onConfirm([]) }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Check In \(selected.isEmpty ? "" : "(\(selected.count))")") {
+                    onConfirm(Array(selected))
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Check In \(selected.isEmpty ? "" : "(\(selected.count))")") {
-                        onConfirm(Array(selected))
-                    }
-                    .disabled(selected.isEmpty)
-                }
+                .disabled(selected.isEmpty)
             }
         }
-        .presentationDetents([.medium, .large])
     }
 }
 
