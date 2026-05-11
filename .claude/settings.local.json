@@ -24,7 +24,11 @@
       "Bash(grep -E \"\\\\.\\(js|html\\)$\")",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(pm2 logs *)",
+      "Bash(node -e \"import\\('@aws-sdk/client-ses'\\).then\\(\\(\\)=>console.log\\('ses ok'\\)\\).catch\\(e=>console.log\\('ses missing:',e.code\\)\\)\")",
+      "Bash(node -e \"import\\('express-rate-limit'\\).then\\(\\(\\)=>console.log\\('rateLimit ok'\\)\\).catch\\(e=>console.log\\('rateLimit missing:',e.code\\)\\)\")",
+      "Bash(pm2 restart *)"
     ]
   }
 }
