@@ -2778,7 +2778,7 @@
                 clearTimeout(_acTimers[inputId]);
                 const q = this.value.trim();
                 if (q.length < 3) { dropdown.style.display = 'none'; return; }
-                _acTimers[inputId] = setTimeout(() => _acSearch(q, input, dropdown, latId, lngId), 380);
+                _acTimers[inputId] = setTimeout(() => _acSearch(q, input, dropdown, latId, lngId), 200);
             });
 
             input.addEventListener('blur', function () {
@@ -2803,9 +2803,12 @@
                 if (!results.length) { dropdown.style.display = 'none'; return; }
 
                 dropdown.innerHTML = results.map((item, i) => {
-                    const parts = item.display_name.split(', ');
-                    const main  = parts.slice(0, 2).join(', ');
-                    const rest  = parts.slice(2).join(', ');
+                    const parts  = item.display_name.split(', ');
+                    // Nominatim separates street number and street name with a comma;
+                    // join them with a space instead when the first segment is numeric.
+                    const numericFirst = parts.length >= 2 && /^\d+(-\d+)?[A-Za-z]?$/.test(parts[0]);
+                    const main   = numericFirst ? `${parts[0]} ${parts[1]}` : parts.slice(0, 2).join(', ');
+                    const rest   = parts.slice(numericFirst ? 2 : 2).join(', ');
                     return `<div class="ac-item" data-idx="${i}">
                         <strong>${esc(main)}</strong>
                         ${rest ? `<span>${esc(rest)}</span>` : ''}
