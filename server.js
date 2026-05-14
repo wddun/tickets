@@ -2514,7 +2514,7 @@ async function pushWalletIfChanged(tickets, events) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 2;
+const PASS_TEMPLATE_VERSION = 3;
 function passContentHash(ticket, event) {
     const data = JSON.stringify({
         _v: PASS_TEMPLATE_VERSION,
