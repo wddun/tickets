@@ -7,8 +7,6 @@ import SwiftUI
 import AVFoundation
 import AudioToolbox
 
-private let adminEmail = "willdunning01@gmail.com"
-
 struct ScannerView: View {
     let switchToManual: () -> Void
 
@@ -135,9 +133,10 @@ struct ScannerView: View {
                     Button(action: { showingDetail = true }) {
                         HStack(spacing: 12) {
                             let isGreen = last.status == .success || last.status == .reentryEnter
-                            Image(systemName: isGreen ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                            let isBlue  = last.status == .checkedOut
+                            Image(systemName: isGreen ? "checkmark.circle.fill" : isBlue ? "arrow.uturn.left.circle.fill" : "exclamationmark.circle.fill")
                                 .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(isGreen ? .green : Color(red: 0.9, green: 0.5, blue: 0.1))
+                                .foregroundStyle(isGreen ? .green : isBlue ? Color(red: 0.15, green: 0.39, blue: 0.92) : Color(red: 0.9, green: 0.5, blue: 0.1))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(last.firstName ?? last.name)
                                     .font(.system(size: 16, weight: .bold))
@@ -270,20 +269,29 @@ struct ScannerView: View {
 
     private func handleConfirmCheckout() {
         guard let token = pendingCheckoutToken else { dismissExitOverlay(); return }
-        exitOverlayAutoTask?.cancel() // user acted — disable auto-dismiss
+        exitOverlayAutoTask?.cancel()
+        let captured = scanResult
         Task {
             try? await APIService.shared.confirmCheckout(token: token, pairToken: scannerPairToken)
             await MainActor.run {
                 CheckInFeedback.shared.success()
                 let ble = BLEScanResult(
                     status: "checked_out",
-                    name: scanResult?.name ?? "Guest",
-                    firstName: scanResult?.firstName,
-                    eventName: scanResult?.eventName,
+                    name: captured?.name ?? "Guest",
+                    firstName: captured?.firstName,
+                    eventName: captured?.eventName,
                     registrationId: lastRegistrationId
                 )
                 BluetoothManager.shared.sendScanResult(ble)
+                let checkoutResult = ScanResult(
+                    status: .checkedOut,
+                    title: "Checked Out",
+                    name: captured?.name ?? "Guest",
+                    firstName: captured?.firstName,
+                    eventName: captured?.eventName
+                )
                 dismissExitOverlay()
+                showBanner(checkoutResult)
             }
         }
     }
@@ -421,7 +429,7 @@ struct ScannerView: View {
 // MARK: - Scan Result Model
 
 struct ScanResult: Equatable {
-    enum Status { case success, alreadyUsed, reentryExitPrompt, reentryEnter, error }
+    enum Status { case success, alreadyUsed, reentryExitPrompt, reentryEnter, checkedOut, error }
     let status: Status
     let title: String
     let name: String
@@ -432,10 +440,9 @@ struct ScanResult: Equatable {
     let usedAt: String?
     let registrationId: String?
 
-    // Convenience for error case
-    init(status: Status, title: String, name: String = "") {
+    init(status: Status, title: String, name: String = "", firstName: String? = nil, email: String? = nil, eventName: String? = nil) {
         self.status = status; self.title = title; self.name = name
-        self.firstName = nil; self.email = nil; self.eventName = nil
+        self.firstName = firstName; self.email = email; self.eventName = eventName
         self.customFields = nil; self.usedAt = nil; self.registrationId = nil
     }
 
@@ -457,15 +464,17 @@ struct ScanFlashOverlay: View {
 
     private var color: Color {
         switch result.status {
-        case .success, .reentryEnter: return Color(red: 0.07, green: 0.53, blue: 0.25)
+        case .success, .reentryEnter:  return Color(red: 0.07, green: 0.53, blue: 0.25)
+        case .checkedOut:              return Color(red: 0.15, green: 0.39, blue: 0.92)
         case .alreadyUsed, .reentryExitPrompt: return Color(red: 0.75, green: 0.37, blue: 0.06)
-        case .error: return Color(red: 0.72, green: 0.12, blue: 0.12)
+        case .error:                   return Color(red: 0.72, green: 0.12, blue: 0.12)
         }
     }
 
     private var icon: String {
         switch result.status {
         case .success, .reentryEnter: return "checkmark.circle.fill"
+        case .checkedOut:             return "arrow.uturn.left.circle.fill"
         case .alreadyUsed:            return "exclamationmark.circle.fill"
         default:                      return "xmark.circle.fill"
         }
@@ -681,7 +690,11 @@ struct TicketDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var statusColor: Color {
-        result.status == .success ? .green : Color(red: 0.9, green: 0.5, blue: 0.1)
+        switch result.status {
+        case .success, .reentryEnter: return .green
+        case .checkedOut: return Color(red: 0.15, green: 0.39, blue: 0.92)
+        default: return Color(red: 0.9, green: 0.5, blue: 0.1)
+        }
     }
 
     @ViewBuilder
@@ -692,7 +705,7 @@ struct TicketDetailSheet: View {
                 // Status badge + name
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        Image(systemName: result.status == .success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        Image(systemName: (result.status == .success || result.status == .reentryEnter) ? "checkmark.circle.fill" : result.status == .checkedOut ? "arrow.uturn.left.circle.fill" : "exclamationmark.circle.fill")
                             .foregroundStyle(statusColor)
                         Text(result.title)
                             .font(.system(size: 14, weight: .semibold))
