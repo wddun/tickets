@@ -2514,7 +2514,7 @@ async function pushWalletIfChanged(tickets, events) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 10;
+const PASS_TEMPLATE_VERSION = 11;
 function passContentHash(ticket, event) {
     const data = JSON.stringify({
         _v: PASS_TEMPLATE_VERSION,
@@ -2594,11 +2594,10 @@ async function generatePassBuffer(ticket, event) {
     const lat = event.location?.lat;
     const lng = event.location?.lng;
     if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
-        pass.setLocations({
-            latitude: Number(lat),
-            longitude: Number(lng),
-            relevantText: humanEventTime(new Date(event.time))
-        });
+        const multiDay = !!(event.endTime && !Number.isNaN(new Date(event.endTime).getTime()));
+        const locObj = { latitude: Number(lat), longitude: Number(lng) };
+        if (!multiDay) locObj.relevantText = humanEventTime(new Date(event.time));
+        pass.setLocations(locObj);
     }
 
     // When checked in, show name + greyed-out event name; logoText already says "✓ CHECKED IN"
