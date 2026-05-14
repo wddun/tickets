@@ -2514,7 +2514,7 @@ async function pushWalletIfChanged(tickets, events) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 6;
+const PASS_TEMPLATE_VERSION = 7;
 function passContentHash(ticket, event) {
     const data = JSON.stringify({
         _v: PASS_TEMPLATE_VERSION,
@@ -2679,23 +2679,21 @@ async function generatePassBuffer(ticket, event) {
     // Auxiliary row: Location (two lines)
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
-    const locValue = locName && locAddress && locName !== locAddress
-        ? `${locName}\n${locAddress}`
-        : locName || locAddress;
-    if (locValue) {
-        pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: locValue });
+    // Front: venue name, or just the street portion of the address
+    const frontLoc = locName || (locAddress ? locAddress.split(',')[0].trim() : null);
+    if (frontLoc) {
+        pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: frontLoc });
     }
-
 
     // Back: remaining custom fields
     cfEntries.slice(1).forEach(([label, value], i) => {
         pass.backFields.push({ key: `cf_back_${i} `, label: label, value: String(value) });
     });
 
-    if (locAddress && (!locValue || locValue === locName)) {
+    if (locAddress) {
         pass.backFields.push({
             key: 'venue_address',
-            label: locName || 'VENUE',
+            label: locName || 'VENUE ADDRESS',
             value: locAddress
         });
     }
