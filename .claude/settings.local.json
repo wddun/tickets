@@ -38,7 +38,8 @@
       "Bash(node --check public/monitor.html)",
       "Bash(node -e \"const fs=require\\('fs'\\);const html=fs.readFileSync\\('public/monitor.html','utf8'\\);const m=html.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);if\\(!m\\){console.log\\('no scripts'\\);process.exit\\(0\\)}for\\(const s of m\\){try{new Function\\(s.replace\\(/<\\\\/?script>/g,''\\)\\);console.log\\('OK',s.length,'chars'\\)}catch\\(e\\){console.log\\('ERR',e.message,s.slice\\(0,80\\)\\)}}\")",
       "Bash(node -e \"const fs=require\\('fs'\\);const html=fs.readFileSync\\('public/dashboard.html','utf8'\\);const m=html.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);if\\(!m\\){console.log\\('no scripts'\\);process.exit\\(0\\)}for\\(const s of m\\){try{new Function\\(s.replace\\(/<\\\\/?script>/g,''\\)\\);console.log\\('OK',s.length,'chars'\\)}catch\\(e\\){console.log\\('ERR',e.message,s.slice\\(0,200\\)\\)}}\")",
-      "Bash(node -e \"const fs=require\\('fs'\\);const html=fs.readFileSync\\('public/dashboard.html','utf8'\\);const m=html.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);let ok=true;for\\(const s of m\\){try{new Function\\(s.replace\\(/<\\\\/?script>/g,''\\)\\)}catch\\(e\\){console.log\\('ERR',e.message.slice\\(0,120\\)\\);ok=false}}if\\(ok\\)console.log\\('JS OK'\\)\")"
+      "Bash(node -e \"const fs=require\\('fs'\\);const html=fs.readFileSync\\('public/dashboard.html','utf8'\\);const m=html.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);let ok=true;for\\(const s of m\\){try{new Function\\(s.replace\\(/<\\\\/?script>/g,''\\)\\)}catch\\(e\\){console.log\\('ERR',e.message.slice\\(0,120\\)\\);ok=false}}if\\(ok\\)console.log\\('JS OK'\\)\")",
+      "Bash(node -e \"const sharp = require\\('sharp'\\); console.log\\(sharp.format\\);\")"
     ]
   }
 }
