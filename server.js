@@ -2586,7 +2586,7 @@ async function generatePassBuffer(ticket, event) {
         pass.setLocations({
             latitude: Number(lat),
             longitude: Number(lng),
-            relevantText: `${event.name} is starting!`
+            relevantText: `Tap to view your ticket for ${event.name}`
         });
     }
 
