@@ -3320,6 +3320,10 @@ function upsertScanner(pairToken, patch) {
     const existing = scannerRegistry.get(pairToken) || {};
     const updated = { ...existing, ...patch, pairToken };
     scannerRegistry.set(pairToken, updated);
+    // If scanner switched events, notify the old event's monitors so they can remove the stale card
+    if (existing.eventId && existing.eventId !== updated.eventId) {
+        broadcastToMonitors(existing.eventId, { type: 'scanner_update', scanner: updated });
+    }
     if (updated.eventId) broadcastToMonitors(updated.eventId, { type: 'scanner_update', scanner: updated });
     return updated;
 }

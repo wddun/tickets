@@ -714,8 +714,13 @@
 
                     const existingCard = document.getElementById(`card-${msg.scanner.pairToken}`);
                     if (existingCard) {
-                        // Surgical update — leave any open notify/details forms untouched
-                        updateCardSurgically(existingCard, msg.scanner);
+                        // Scanner moved to a different event — remove its card from this view
+                        if (activeEventFilter !== 'all' && msg.scanner.eventId !== activeEventFilter) {
+                            existingCard.remove();
+                        } else {
+                            // Surgical update — leave any open notify/details forms untouched
+                            updateCardSurgically(existingCard, msg.scanner);
+                        }
                     } else {
                         // New scanner appeared — full rebuild
                         renderGrid();
@@ -793,6 +798,7 @@
                     invalid: ['pill-invalid', '✗ Invalid'],
                     reentry_enter: ['pill-reentry', 'Re-Entry'],
                     reentry_exit: ['pill-reentry', 'Check-Out'],
+                    checked_out: ['pill-valid', '↪ Checked Out'],
                 };
                 const [cls, lbl] = statusMap[lastR.status] || ['pill-idle', 'Idle'];
                 pillEl.className = `scan-result-pill ${cls}`;
