@@ -2514,7 +2514,7 @@ async function pushWalletIfChanged(tickets, events) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 9;
+const PASS_TEMPLATE_VERSION = 10;
 function passContentHash(ticket, event) {
     const data = JSON.stringify({
         _v: PASS_TEMPLATE_VERSION,
@@ -2534,22 +2534,11 @@ function passContentHash(ticket, event) {
 }
 
 function humanEventTime(date) {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const eventDay  = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    const diffDays  = Math.round((eventDay - todayStart) / 86400000);
-    const timeStr   = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    if (diffDays === 0) {
-        const h = date.getHours();
-        if (h < 12) return `This morning at ${timeStr}`;
-        if (h < 17) return `This afternoon at ${timeStr}`;
-        return `Tonight at ${timeStr}`;
-    }
-    if (diffDays === 1) return `Tomorrow at ${timeStr}`;
-    if (diffDays > 1 && diffDays < 7) {
-        return `${date.toLocaleDateString('en-US', { weekday: 'long' })} at ${timeStr}`;
-    }
-    return `${date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} at ${timeStr}`;
+    const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    const h = date.getHours();
+    if (h < 12) return `This morning at ${timeStr}`;
+    if (h < 17) return `This afternoon at ${timeStr}`;
+    return `Tonight at ${timeStr}`;
 }
 
 // Shared helper — builds and returns a .pkpass Buffer for a ticket+event
@@ -3299,40 +3288,6 @@ setInterval(async () => {
     }
 }, 5 * 60 * 1000);
 
-// Hourly: refresh Wallet passes for events happening today so relevantText
-// says "Tonight at X:XX PM" rather than the day-of-week set at download time.
-const passRefreshedToday = new Set();
-setInterval(async () => {
-    const now = new Date();
-    const todayKey = now.toDateString();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const todayEnd   = todayStart + 86400000;
-
-    const todayEvents = stmt.events.all.all().map(rowToEvent).filter(e => {
-        const t = new Date(e.time).getTime();
-        return t >= todayStart && t < todayEnd;
-    });
-
-    for (const event of todayEvents) {
-        const key = `${event.id}:${todayKey}`;
-        if (passRefreshedToday.has(key)) continue;
-        passRefreshedToday.add(key);
-
-        const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
-        if (!tickets.length) continue;
-
-        const ts = now.toISOString();
-        for (const ticket of tickets) {
-            const cachePath = path.join(passCacheDir, `${ticket.token}.pkpass`);
-            try { if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath); } catch (_) {}
-            try { if (fs.existsSync(cachePath + '.meta')) fs.unlinkSync(cachePath + '.meta'); } catch (_) {}
-            stmt.tickets.setPassHash.run(ticket.passHash ?? null, ts, ticket.id);
-        }
-        const tokens = tickets.map(t => t.token);
-        pushWalletUpdate(tokens).catch(() => {});
-        log('wallet', `[pass refresh] Refreshed ${tokens.length} passes for today's event: ${event.name}`);
-    }
-}, 60 * 60 * 1000);
 
 
 // ── Door Display / SSE ──────────────────────────────────────────────────────
