@@ -98,63 +98,104 @@ function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = 
             });
             if (event.endTime) {
                 const end = new Date(event.endTime).toLocaleString('en-US', {
-                    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
                     hour: 'numeric', minute: '2-digit', hour12: true
                 });
-                return `${start} – ${end}`;
+                return `${start} &ndash; ${end}`;
             }
             return start;
         } catch (_) { return String(event.time); }
     })();
+
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
-    const locHtml = locAddress
-        ? `<a href="https://maps.apple.com/?q=${encodeURIComponent(locAddress)}" style="color:#666;text-decoration:underline;">${locName || locAddress}</a>`
-        : (locName ? `<span style="color:#666;">${locName}</span>` : '');
+    const mapsQuery = encodeURIComponent(locAddress || locName);
+    const googleMapsUrl = mapsQuery ? `https://www.google.com/maps/search/?api=1&query=${mapsQuery}` : null;
+    const appleMapsUrl  = mapsQuery ? `https://maps.apple.com/?q=${mapsQuery}` : null;
+    const locRowHtml = (locName || locAddress) ? `
+        <tr>
+          <td style="padding:5px 0;font-size:14px;color:#6b7280;vertical-align:top;white-space:nowrap;width:20px;">📍</td>
+          <td style="padding:5px 0 5px 8px;font-size:14px;color:#374151;">
+            ${locName || locAddress}
+            ${googleMapsUrl ? `<br><span style="font-size:12px;"><a href="${googleMapsUrl}" style="color:#6366f1;text-decoration:none;font-weight:500;">Google Maps</a>&nbsp;&middot;&nbsp;<a href="${appleMapsUrl}" style="color:#6366f1;text-decoration:none;font-weight:500;">Apple Maps</a></span>` : ''}
+          </td>
+        </tr>` : '';
+
+    // Accent color: convert "rgb(r,g,b)" → hex if needed
+    const rawColor = event.color || 'rgb(99,102,241)';
+    const accentHex = rawColor.startsWith('rgb')
+        ? '#' + rawColor.match(/\d+/g).map(n => parseInt(n).toString(16).padStart(2, '0')).join('')
+        : rawColor;
 
     const n = tickets.length;
     const qrBlocksHtml = tickets.map((t, i) => `
-<div style="border:1px solid #eee; border-radius:12px; padding:24px; text-align:center; margin-bottom:16px; background:#fafafa;">
-  ${n > 1 ? `<p style="font-size:12px; font-weight:700; color:#aaa; text-transform:uppercase; letter-spacing:1px; margin:0 0 12px;">Ticket ${i + 1} of ${n}</p>` : ''}
-  <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" style="width:200px; height:200px; display:block; margin:0 auto 12px; border:1px solid #eee; border-radius:8px; background:#fff; padding:8px;">
-  <p style="font-size:11px; color:#aaa; font-family:monospace; margin:0 0 12px;">${t.token}</p>
-  <a href="${BASE_URL}/api/pass/${t.token}.pkpass" style="display:inline-block; text-decoration:none;">
-    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px; display:block; margin:0 auto;">
-  </a>
+<div style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:16px;background:#fff;">
+  ${n > 1 ? `<div style="background:${accentHex};padding:7px 16px;"><p style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.9);text-transform:uppercase;letter-spacing:1px;margin:0;">Ticket ${i + 1} of ${n}</p></div>` : ''}
+  <div style="padding:24px;text-align:center;">
+    <p style="font-size:15px;font-weight:600;color:#111;margin:0 0 16px;">${t.name}</p>
+    <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" style="width:200px;height:200px;display:block;margin:0 auto 12px;border:1px solid #f3f4f6;border-radius:8px;background:#fff;padding:8px;">
+    <p style="font-size:10px;color:#9ca3af;font-family:monospace;margin:0 0 16px;word-break:break-all;">${t.token}</p>
+    <a href="${BASE_URL}/api/pass/${t.token}.pkpass" style="display:inline-block;text-decoration:none;">
+      <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px;width:auto;display:block;margin:0 auto;">
+    </a>
+  </div>
 </div>`).join('');
 
     const addAllHtml = n > 1 ? `
-<div style="text-align:center; margin-bottom:24px; padding:16px; background:#f9fafb; border-radius:12px; border:1px solid #eee;">
-  <p style="font-size:13px; font-weight:600; color:#555; margin:0 0 10px;">Add all ${n} tickets to Apple Wallet at once:</p>
-  <a href="${BASE_URL}/api/passes/bundle/${tickets[0].registrationId}" style="display:inline-block; text-decoration:none;">
-    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px; display:block; margin:0 auto;">
+<div style="text-align:center;margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;">
+  <p style="font-size:13px;font-weight:600;color:#555;margin:0 0 10px;">Add all ${n} tickets to Apple Wallet at once:</p>
+  <a href="${BASE_URL}/api/passes/bundle/${tickets[0].registrationId}" style="display:inline-block;text-decoration:none;">
+    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px;width:auto;display:block;margin:0 auto;">
   </a>
 </div>` : '';
 
     return `
-<div style="background:#fff; padding:24px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#333; line-height:1.5;">
-  <div style="max-width:600px; margin:0 auto; border:1px solid #eee; border-radius:16px; padding:32px; box-shadow:0 2px 10px rgba(0,0,0,0.02);">
-    <h2 style="font-size:24px; font-weight:800; margin:0 0 8px; color:#111;">Hey ${firstName}!</h2>
-    <p style="font-size:16px; color:#555; margin:0 0 20px;">${intro}</p>
-    
-    <div style="margin-bottom:24px; padding:16px 20px; background:#f8f9fa; border-radius:12px; border:1px solid #eee;">
-      <p style="font-weight:700; font-size:16px; color:#111; margin:0 0 4px;">${event.name}</p>
-      <p style="font-size:14px; color:#666; margin:0 0 2px;">📅 ${dateStr}</p>
-      ${locHtml ? `<p style="font-size:14px; color:#666; margin:0;">📍 ${locHtml}</p>` : ''}
-    </div>
+<div style="margin:0;padding:0;background:#f3f4f6;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
+<tr><td align="center" style="padding:24px 16px;">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
+
+  <!-- Header -->
+  <tr><td style="background:${accentHex};padding:28px 32px;text-align:center;">
+    <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Your Ticket</p>
+    <h1 style="margin:0;font-size:26px;font-weight:800;color:#fff;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${event.name}</h1>
+  </td></tr>
+
+  <!-- Body -->
+  <tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <p style="font-size:16px;color:#374151;margin:0 0 24px;line-height:1.6;">Hi <strong>${firstName}</strong>,<br>${intro}</p>
+
+    <!-- Event details card -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:24px;">
+    <tr><td style="padding:18px 20px;">
+      <table cellpadding="0" cellspacing="0" width="100%">
+        <tr>
+          <td style="padding:5px 0;font-size:14px;color:#6b7280;vertical-align:top;white-space:nowrap;width:20px;">📅</td>
+          <td style="padding:5px 0 5px 8px;font-size:14px;color:#374151;">${dateStr}</td>
+        </tr>
+        ${locRowHtml}
+      </table>
+    </td></tr>
+    </table>
 
     ${changesHtml}
     ${customFieldsHtml}
 
-    <div style="margin-top:24px;">
-      ${addAllHtml}
-      ${qrBlocksHtml}
-    </div>
+    <!-- Tickets -->
+    ${addAllHtml}
+    ${qrBlocksHtml}
 
-    <p style="text-align:center; font-size:12px; color:#aaa; margin-top:24px;">
-      Keep this email — it&rsquo;s your entry ticket. Don&rsquo;t share your QR code.
-    </p>
-  </div>
+    <!-- Footer note -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f3f4f6;margin-top:8px;">
+    <tr><td style="padding-top:20px;text-align:center;">
+      <p style="font-size:12px;color:#9ca3af;margin:0 0 4px;">Keep this email &mdash; it&rsquo;s your entry ticket.</p>
+      <p style="font-size:12px;color:#9ca3af;margin:0;">Don&rsquo;t share your QR code with others.</p>
+    </td></tr>
+    </table>
+
+  </td></tr>
+</table>
+</td></tr>
+</table>
 </div>`;
 }
 
