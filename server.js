@@ -2514,7 +2514,7 @@ async function pushWalletIfChanged(tickets, events) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 5;
+const PASS_TEMPLATE_VERSION = 6;
 function passContentHash(ticket, event) {
     const data = JSON.stringify({
         _v: PASS_TEMPLATE_VERSION,
@@ -2531,6 +2531,25 @@ function passContentHash(ticket, event) {
         allowReentry: !!event.allowReentry
     });
     return crypto.createHash('sha256').update(data).digest('hex').slice(0, 16);
+}
+
+function humanEventTime(date) {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const eventDay  = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const diffDays  = Math.round((eventDay - todayStart) / 86400000);
+    const timeStr   = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    if (diffDays === 0) {
+        const h = date.getHours();
+        if (h < 12) return `This morning at ${timeStr}`;
+        if (h < 17) return `This afternoon at ${timeStr}`;
+        return `Tonight at ${timeStr}`;
+    }
+    if (diffDays === 1) return `Tomorrow at ${timeStr}`;
+    if (diffDays > 1 && diffDays < 7) {
+        return `${date.toLocaleDateString('en-US', { weekday: 'long' })} at ${timeStr}`;
+    }
+    return `${date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} at ${timeStr}`;
 }
 
 // Shared helper — builds and returns a .pkpass Buffer for a ticket+event
@@ -2605,7 +2624,7 @@ async function generatePassBuffer(ticket, event) {
     const hasNote = !!cfEntries[0];
 
     const buildDateLabel = () => {
-        if (!isMultiDay) return 'DATE';
+        if (!isMultiDay) return 'WHEN';
         return 'DATES';
     };
 
@@ -2637,10 +2656,7 @@ async function generatePassBuffer(ticket, event) {
             if (isMultiDay) {
                 pass.headerFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
             } else {
-                pass.headerFields.push({
-                    key: "date", label: buildDateLabel(), value: eventDate,
-                    dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
-                });
+                pass.headerFields.push({ key: "date", label: buildDateLabel(), value: humanEventTime(eventDate) });
             }
             setRelevantDatesAndExpiry();
         } else {
@@ -2652,10 +2668,7 @@ async function generatePassBuffer(ticket, event) {
             if (isMultiDay) {
                 pass.secondaryFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
             } else {
-                pass.secondaryFields.push({
-                    key: "date", label: buildDateLabel(), value: eventDate,
-                    dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
-                });
+                pass.secondaryFields.push({ key: "date", label: buildDateLabel(), value: humanEventTime(eventDate) });
             }
             setRelevantDatesAndExpiry();
         } else {
