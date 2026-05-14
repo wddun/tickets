@@ -2514,7 +2514,7 @@ async function pushWalletIfChanged(tickets, events) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 8;
+const PASS_TEMPLATE_VERSION = 9;
 function passContentHash(ticket, event) {
     const data = JSON.stringify({
         _v: PASS_TEMPLATE_VERSION,
@@ -2624,7 +2624,7 @@ async function generatePassBuffer(ticket, event) {
     const hasNote = !!cfEntries[0];
 
     const buildDateLabel = () => {
-        if (!isMultiDay) return 'WHEN';
+        if (!isMultiDay) return 'DATE';
         return 'DATES';
     };
 
@@ -2656,7 +2656,10 @@ async function generatePassBuffer(ticket, event) {
             if (isMultiDay) {
                 pass.headerFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
             } else {
-                pass.headerFields.push({ key: "date", label: buildDateLabel(), value: humanEventTime(eventDate) });
+                pass.headerFields.push({
+                    key: "date", label: buildDateLabel(), value: eventDate,
+                    dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
+                });
             }
             setRelevantDatesAndExpiry();
         } else {
@@ -2668,7 +2671,10 @@ async function generatePassBuffer(ticket, event) {
             if (isMultiDay) {
                 pass.secondaryFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
             } else {
-                pass.secondaryFields.push({ key: "date", label: buildDateLabel(), value: humanEventTime(eventDate) });
+                pass.secondaryFields.push({
+                    key: "date", label: buildDateLabel(), value: eventDate,
+                    dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
+                });
             }
             setRelevantDatesAndExpiry();
         } else {
@@ -3292,6 +3298,41 @@ setInterval(async () => {
         log('reminder', `[email] Sent to ${sent} registrant(s) — event: ${event.name} (${event.id})`);
     }
 }, 5 * 60 * 1000);
+
+// Hourly: refresh Wallet passes for events happening today so relevantText
+// says "Tonight at X:XX PM" rather than the day-of-week set at download time.
+const passRefreshedToday = new Set();
+setInterval(async () => {
+    const now = new Date();
+    const todayKey = now.toDateString();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todayEnd   = todayStart + 86400000;
+
+    const todayEvents = stmt.events.all.all().map(rowToEvent).filter(e => {
+        const t = new Date(e.time).getTime();
+        return t >= todayStart && t < todayEnd;
+    });
+
+    for (const event of todayEvents) {
+        const key = `${event.id}:${todayKey}`;
+        if (passRefreshedToday.has(key)) continue;
+        passRefreshedToday.add(key);
+
+        const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
+        if (!tickets.length) continue;
+
+        const ts = now.toISOString();
+        for (const ticket of tickets) {
+            const cachePath = path.join(passCacheDir, `${ticket.token}.pkpass`);
+            try { if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath); } catch (_) {}
+            try { if (fs.existsSync(cachePath + '.meta')) fs.unlinkSync(cachePath + '.meta'); } catch (_) {}
+            stmt.tickets.setPassHash.run(ticket.passHash ?? null, ts, ticket.id);
+        }
+        const tokens = tickets.map(t => t.token);
+        pushWalletUpdate(tokens).catch(() => {});
+        log('wallet', `[pass refresh] Refreshed ${tokens.length} passes for today's event: ${event.name}`);
+    }
+}, 60 * 60 * 1000);
 
 
 // ── Door Display / SSE ──────────────────────────────────────────────────────
