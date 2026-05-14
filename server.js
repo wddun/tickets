@@ -1317,7 +1317,7 @@ app.get('/api/events', requireAuth, (req, res) => {
 });
 
 app.post('/api/events', requireAuth, async (req, res) => {
-    const { name, time, endTime, locationName, color } = req.body;
+    const { name, time, endTime, locationName, locationAddress, lat, lng, color } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Event name is required' });
     if (!time) return res.status(400).json({ error: 'Event date/time is required' });
 
@@ -1330,7 +1330,12 @@ app.post('/api/events', requireAuth, async (req, res) => {
         color: color || 'rgb(99, 102, 241)',
         imageUrl: null,
         scannerPin: Math.floor(100000 + Math.random() * 900000).toString(),
-        location: { name: locationName ? locationName.trim() : '', address: '', lat: 0, lng: 0 },
+        location: {
+            name:    locationName    ? locationName.trim()    : '',
+            address: locationAddress ? locationAddress.trim() : '',
+            lat:     lat != null && !isNaN(parseFloat(lat)) ? parseFloat(lat) : null,
+            lng:     lng != null && !isNaN(parseFloat(lng)) ? parseFloat(lng) : null,
+        },
     };
 
     stmt.events.insert.run(newEvent.id, newEvent.userId, newEvent.name, newEvent.time, newEvent.endTime, newEvent.color, newEvent.imageUrl, newEvent.scannerPin, JSON.stringify(newEvent.location), 0, null, null, 0, null, 24, null, null, new Date().toISOString());

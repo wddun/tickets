@@ -724,6 +724,22 @@
             position: absolute; inset: 0; width: 100%; height: 100%;
             opacity: 0; cursor: pointer; border: none; padding: 0;
         }
+        /* Address autocomplete */
+        .addr-wrap { position: relative; }
+        .ac-dropdown {
+            display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+            background: #fff; border: 1px solid #dde3ed; border-radius: 8px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.1); z-index: 2000;
+            max-height: 220px; overflow-y: auto;
+        }
+        .ac-item {
+            padding: 9px 12px; cursor: pointer; font-size: 13px;
+            border-bottom: 1px solid #f4f5f7; line-height: 1.4;
+        }
+        .ac-item:last-child { border-bottom: none; }
+        .ac-item:hover { background: #f8f9fa; }
+        .ac-item strong { color: #1a1a2e; display: block; }
+        .ac-item span { color: #888; font-size: 12px; }
 
         .modal-section-title {
             font-size: 12px;
@@ -1257,10 +1273,21 @@
                         style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
                 </div>
             </div>
+            <div class="form-group" style="margin-bottom:10px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                <input type="text" id="newEventLocName" placeholder="e.g. The Grand Ballroom"
+                    style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+            </div>
             <div class="form-group" style="margin-bottom:14px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue / Location <span style="color:#aaa;font-weight:400;">(optional)</span></label>
-                <input type="text" id="newEventLocation" placeholder="e.g. The Grand Ballroom"
-                    style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                <div class="addr-wrap">
+                    <input type="text" id="newEventAddress" placeholder="Start typing an address…"
+                        autocomplete="off"
+                        style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+                    <div class="ac-dropdown" id="newEventAddressAC"></div>
+                </div>
+                <input type="hidden" id="newEventLat">
+                <input type="hidden" id="newEventLng">
             </div>
             <div class="form-group" style="margin-bottom:20px;">
                 <label style="display:block;margin-bottom:8px;font-size:13px;font-weight:600;">Color</label>
@@ -1383,22 +1410,16 @@
                 <input type="text" id="editEventLocName"
                     style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
             </div>
-            <div style="margin-bottom:12px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Address</label>
-                <input type="text" id="editEventLocAddress" placeholder="123 Main St, City, State"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
-            </div>
-            <div style="display:flex;gap:8px;margin-bottom:16px;">
-                <div style="flex:1;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Latitude</label>
-                    <input type="number" step="any" id="editEventLat"
+            <div style="margin-bottom:16px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address</label>
+                <div class="addr-wrap">
+                    <input type="text" id="editEventLocAddress" placeholder="Start typing an address…"
+                        autocomplete="off"
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                    <div class="ac-dropdown" id="editEventAddressAC"></div>
                 </div>
-                <div style="flex:1;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Longitude</label>
-                    <input type="number" step="any" id="editEventLng"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
-                </div>
+                <input type="hidden" id="editEventLat">
+                <input type="hidden" id="editEventLng">
             </div>
             <div style="margin-bottom:20px;">
                 <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Image <span
@@ -2621,7 +2642,11 @@
             document.getElementById('newEventName').value = '';
             document.getElementById('newEventTime').value = '';
             document.getElementById('newEventEndTime').value = '';
-            document.getElementById('newEventLocation').value = '';
+            document.getElementById('newEventLocName').value = '';
+            document.getElementById('newEventAddress').value = '';
+            document.getElementById('newEventLat').value = '';
+            document.getElementById('newEventLng').value = '';
+            document.getElementById('newEventAddressAC').style.display = 'none';
             document.getElementById('newEventError').style.display = 'none';
             selectedColor = 'rgb(99,102,241)';
             document.querySelectorAll('.color-swatch').forEach(s => {
@@ -2665,12 +2690,15 @@
         }
 
         async function submitNewEvent() {
-            const name     = document.getElementById('newEventName').value.trim();
-            const timeVal  = document.getElementById('newEventTime').value;
-            const endVal   = document.getElementById('newEventEndTime').value;
-            const location = document.getElementById('newEventLocation').value.trim();
-            const errEl    = document.getElementById('newEventError');
-            const btn      = document.getElementById('newEventSubmitBtn');
+            const name        = document.getElementById('newEventName').value.trim();
+            const timeVal     = document.getElementById('newEventTime').value;
+            const endVal      = document.getElementById('newEventEndTime').value;
+            const locName     = document.getElementById('newEventLocName').value.trim();
+            const locAddress  = document.getElementById('newEventAddress').value.trim();
+            const lat         = document.getElementById('newEventLat').value;
+            const lng         = document.getElementById('newEventLng').value;
+            const errEl       = document.getElementById('newEventError');
+            const btn         = document.getElementById('newEventSubmitBtn');
 
             if (!name) { errEl.textContent = 'Event name is required.'; errEl.style.display = 'block'; return; }
             if (!timeVal) { errEl.textContent = 'Date & time is required.'; errEl.style.display = 'block'; return; }
@@ -2685,7 +2713,10 @@
                         name,
                         time: new Date(timeVal).toISOString(),
                         endTime: endVal ? new Date(endVal).toISOString() : null,
-                        locationName: location,
+                        locationName: locName,
+                        locationAddress: locAddress,
+                        lat: lat || null,
+                        lng: lng || null,
                         color: selectedColor,
                     }),
                 });
@@ -2726,6 +2757,81 @@
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.dropdown-wrap')) closeAllDropdowns();
         });
+
+        // ── Address autocomplete (Nominatim + IP-bias) ──────────────────────────
+
+        let _ipLat = null, _ipLng = null, _ipCountry = null;
+        let _acTimers = {}, _acResults = {};
+
+        // Fetch approximate location from IP on load
+        fetch('https://ipapi.co/json/')
+            .then(r => r.json())
+            .then(d => { _ipLat = d.latitude; _ipLng = d.longitude; _ipCountry = d.country_code; })
+            .catch(() => {});
+
+        function initAddressAutocomplete(inputId, dropdownId, latId, lngId) {
+            const input    = document.getElementById(inputId);
+            const dropdown = document.getElementById(dropdownId);
+            if (!input || !dropdown) return;
+
+            input.addEventListener('input', function () {
+                clearTimeout(_acTimers[inputId]);
+                const q = this.value.trim();
+                if (q.length < 3) { dropdown.style.display = 'none'; return; }
+                _acTimers[inputId] = setTimeout(() => _acSearch(q, input, dropdown, latId, lngId), 380);
+            });
+
+            input.addEventListener('blur', function () {
+                // Small delay so mousedown on item fires first
+                setTimeout(() => { dropdown.style.display = 'none'; }, 150);
+            });
+        }
+
+        async function _acSearch(query, input, dropdown, latId, lngId) {
+            try {
+                let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&addressdetails=1`;
+                if (_ipLat && _ipLng) {
+                    const d = 1.5; // ~150 km viewbox half-extent
+                    url += `&viewbox=${_ipLng - d},${_ipLat + d},${_ipLng + d},${_ipLat - d}`;
+                }
+                if (_ipCountry) url += `&countrycodes=${_ipCountry.toLowerCase()}`;
+
+                const r = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+                const results = await r.json();
+                _acResults[input.id] = results;
+
+                if (!results.length) { dropdown.style.display = 'none'; return; }
+
+                dropdown.innerHTML = results.map((item, i) => {
+                    const parts = item.display_name.split(', ');
+                    const main  = parts.slice(0, 2).join(', ');
+                    const rest  = parts.slice(2).join(', ');
+                    return `<div class="ac-item" data-idx="${i}">
+                        <strong>${esc(main)}</strong>
+                        ${rest ? `<span>${esc(rest)}</span>` : ''}
+                    </div>`;
+                }).join('');
+
+                dropdown.querySelectorAll('.ac-item').forEach(el => {
+                    el.addEventListener('mousedown', function (e) {
+                        e.preventDefault();
+                        const item = _acResults[input.id][parseInt(this.dataset.idx)];
+                        input.value = item.display_name;
+                        document.getElementById(latId).value = item.lat;
+                        document.getElementById(lngId).value = item.lon;
+                        dropdown.style.display = 'none';
+                    });
+                });
+
+                dropdown.style.display = 'block';
+            } catch (_) {
+                dropdown.style.display = 'none';
+            }
+        }
+
+        // Init autocomplete for both modals once DOM is ready
+        initAddressAutocomplete('newEventAddress',    'newEventAddressAC', 'newEventLat',    'newEventLng');
+        initAddressAutocomplete('editEventLocAddress','editEventAddressAC','editEventLat',   'editEventLng');
 
         // ── Settings tabs ───────────────────────────────────────────────────────
         function switchSettingsTab(btn, tabId) {
