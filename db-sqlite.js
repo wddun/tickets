@@ -126,10 +126,27 @@ CREATE INDEX IF NOT EXISTS idx_pushSubs_userEvent ON pushSubscriptions(userId, e
 CREATE INDEX IF NOT EXISTS idx_sheetLinks_eventId ON sheetLinks(eventId);
 CREATE INDEX IF NOT EXISTS idx_sheetAccess_linkId ON sheetAccess(sheetLinkId);
 CREATE INDEX IF NOT EXISTS idx_sheetAccess_userId ON sheetAccess(userId);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id TEXT PRIMARY KEY,
+    sessionId TEXT UNIQUE,
+    eventId TEXT,
+    registrationId TEXT,
+    buyerName TEXT,
+    buyerEmail TEXT,
+    amount INTEGER,
+    currency TEXT DEFAULT 'usd',
+    status TEXT DEFAULT 'pending',
+    createdAt TEXT,
+    fulfilledAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orders_sessionId ON orders(sessionId);
+CREATE INDEX IF NOT EXISTS idx_orders_eventId ON orders(eventId);
 `);
 
 // ── Column migrations ─────────────────────────────────────────────────────────
 try { db.exec(`ALTER TABLE events ADD COLUMN allowPublicRegistration INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketPrice INTEGER DEFAULT 0`); } catch {}
 
 // ── One-time migration from db.json ──────────────────────────────────────────
 
@@ -254,6 +271,7 @@ export function rowToEvent(row) {
         location: row.location ? JSON.parse(row.location) : null,
         allowReentry: !!row.allowReentry,
         allowPublicRegistration: !!row.allowPublicRegistration,
+        ticketPrice: row.ticketPrice || 0,
         reminderEnabled: !!row.reminderEnabled,
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
     };
@@ -292,6 +310,7 @@ export const stmt = {
         setCustomFields: db.prepare(`UPDATE events SET customFields=? WHERE id=?`),
         setImageUrl: db.prepare(`UPDATE events SET imageUrl=? WHERE id=?`),
         setPublicRegistration: db.prepare(`UPDATE events SET allowPublicRegistration=? WHERE id=?`),
+        setTicketPrice: db.prepare(`UPDATE events SET ticketPrice=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM events WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM events WHERE userId=?`),
@@ -366,6 +385,12 @@ export const stmt = {
         insert: db.prepare(`INSERT INTO passwordResetTokens (id, userId, tokenHash, expiresAt, createdAt) VALUES (?,?,?,?,?)`),
         deleteByUserId: db.prepare(`DELETE FROM passwordResetTokens WHERE userId=?`),
         deleteByTokenHash: db.prepare(`DELETE FROM passwordResetTokens WHERE tokenHash=?`),
+    },
+    orders: {
+        bySessionId: db.prepare('SELECT * FROM orders WHERE sessionId=?'),
+        byEventId: db.prepare('SELECT * FROM orders WHERE eventId=? ORDER BY createdAt DESC'),
+        insert: db.prepare(`INSERT INTO orders (id, sessionId, eventId, registrationId, buyerName, buyerEmail, amount, currency, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`),
+        fulfill: db.prepare(`UPDATE orders SET status='fulfilled', registrationId=?, fulfilledAt=? WHERE sessionId=?`),
     },
 };
 

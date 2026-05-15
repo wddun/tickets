@@ -19,6 +19,7 @@ import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import http2 from 'http2';
+import Stripe from 'stripe';
 
 const FileStore = FileStoreFactory(session);
 
@@ -30,6 +31,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3002;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+
+const stripe = process.env.STRIPE_SECRET_KEY
+    ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
+    : null;
 
 const logBuffer = [];
 const MAX_LOG_ENTRIES = 500;
@@ -382,7 +387,10 @@ app.use((req, res, next) => {
     res.set('X-XSS-Protection', '0');
     next();
 });
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({
+    limit: '20mb',
+    verify: (req, _res, buf) => { if (req.path === '/api/stripe/webhook') req.rawBody = buf; },
+}));
 app.get('/sw.js', (req, res) => {
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.resolve(__dirname, 'public/sw.js'));
@@ -973,6 +981,132 @@ app.put('/api/event/:id/public-registration', requireAuth, (req, res) => {
     res.json({ success: true, allowPublicRegistration: enabled });
 });
 
+// ── Stripe ────────────────────────────────────────────────────────────────────
+
+// Create a Checkout Session for a paid ticket
+app.post('/api/checkout/:eventId', async (req, res) => {
+    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+    const { name, email } = req.body;
+    if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
+
+    const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!event.allowPublicRegistration) return res.status(403).json({ error: 'Registration is not open for this event' });
+    if (!event.ticketPrice) return res.status(400).json({ error: 'This event is free — use /api/register' });
+
+    if (event.capacity) {
+        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
+        if (registered >= event.capacity) return res.status(400).json({ error: 'This event is sold out' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName  = name.trim();
+    const dateLabel  = (() => { try { return new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); } catch { return ''; } })();
+
+    const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [{
+            price_data: {
+                currency: 'usd',
+                product_data: {
+                    name: `${event.name} — Ticket`,
+                    description: [event.location?.name, dateLabel].filter(Boolean).join(' · ') || undefined,
+                    images: event.imageUrl ? [`${BASE_URL}${event.imageUrl}`] : [],
+                },
+                unit_amount: event.ticketPrice,
+            },
+            quantity: 1,
+        }],
+        mode: 'payment',
+        customer_email: cleanEmail,
+        metadata: { eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail },
+        success_url: `${BASE_URL}/register.html?session={CHECKOUT_SESSION_ID}&id=${event.id}`,
+        cancel_url: `${BASE_URL}/register.html?id=${event.id}`,
+    });
+
+    stmt.orders.insert.run(nanoid(8), session.id, event.id, null, cleanName, cleanEmail, event.ticketPrice, 'usd', 'pending', new Date().toISOString());
+    log('stripe', `[checkout] Session created — name: ${cleanName}  event: ${event.name}  amount: ${event.ticketPrice}`);
+    res.json({ url: session.url });
+});
+
+// Get order/ticket status for the post-payment success page
+app.get('/api/stripe/session/:sessionId', async (req, res) => {
+    const order = stmt.orders.bySessionId.get(req.params.sessionId);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    const ticket = order.registrationId
+        ? stmt.tickets.byRegistrationId.all(order.registrationId).map(rowToTicket)[0]
+        : null;
+    let qr = null;
+    if (ticket) {
+        try { qr = await QRCode.toDataURL(`ticket:${ticket.token}`); } catch {}
+    }
+    res.json({
+        status: order.status,
+        name: order.buyerName,
+        ticket: ticket ? { token: ticket.token } : null,
+        qr,
+    });
+});
+
+// Stripe webhook — issues ticket after confirmed payment
+app.post('/api/stripe/webhook', async (req, res) => {
+    if (!stripe) return res.status(503).send('Stripe not configured');
+    const sig = req.headers['stripe-signature'];
+    let stripeEvent;
+    try {
+        stripeEvent = stripe.webhooks.constructEvent(req.rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+        log('stripe', `[webhook] Bad signature: ${err.message}`);
+        return res.status(400).send(`Webhook error: ${err.message}`);
+    }
+
+    if (stripeEvent.type === 'checkout.session.completed') {
+        const session = stripeEvent.data.object;
+        const { eventId, buyerName, buyerEmail } = session.metadata || {};
+        if (!eventId || !buyerName || !buyerEmail) return res.json({ received: true });
+
+        // Idempotency — skip if already fulfilled
+        const existing = stmt.orders.bySessionId.get(session.id);
+        if (existing?.status === 'fulfilled') return res.json({ received: true });
+
+        const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
+        if (!dbEvent) return res.json({ received: true });
+
+        const nameParts = buyerName.split(/\s+/);
+        const firstName = nameParts[0];
+        const lastName  = nameParts.slice(1).join(' ') || null;
+        const token = nanoid(12);
+        const ticketId = nanoid(8);
+        const registrationId = nanoid(10);
+        const now = new Date().toISOString();
+
+        stmt.tickets.insert.run(ticketId, eventId, token, registrationId, buyerName, firstName, lastName, buyerEmail, null, null, null, null, null, now, null, null);
+        stmt.orders.fulfill.run(registrationId, now, session.id);
+
+        const ticket = rowToTicket(stmt.tickets.byToken.get(token));
+
+        if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+            sendEmail({
+                to: buyerEmail,
+                fromName: `Tickets - ${dbEvent.name}`,
+                replyTo: rowToUser(stmt.users.byId.get(dbEvent.userId))?.email,
+                subject: `Your ticket for ${dbEvent.name}`,
+                html: buildTicketEmailHtml({
+                    firstName,
+                    intro: `You&rsquo;re all set for <strong>${dbEvent.name}</strong>! We&rsquo;ll see you there.`,
+                    event: dbEvent,
+                    tickets: [ticket],
+                }),
+                registrationId,
+            }).catch(() => {});
+        }
+
+        log('stripe', `[webhook] Ticket issued — name: ${buyerName}  event: ${dbEvent.name}  session: ${session.id}`);
+    }
+
+    res.json({ received: true });
+});
+
 // API: Bulk Register Tickets (for Google Sheets integration)
 app.post('/api/register-bulk', async (req, res) => {
     const { firstName, lastName, email, eventId, ticketCount } = req.body;
@@ -1450,6 +1584,11 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     };
 
     stmt.events.update.run(newName, newTime, newEndTime, newColor, imageUrl, allowReentry ? 1 : 0, newCapacity, JSON.stringify(newLocation), req.params.id);
+
+    const priceCents = req.body.ticketPrice !== undefined
+        ? Math.round(Math.max(0, parseFloat(req.body.ticketPrice) || 0) * 100)
+        : event.ticketPrice;
+    stmt.events.setTicketPrice.run(priceCents, req.params.id);
 
     const updated = rowToEvent(stmt.events.byId.get(req.params.id));
     log('event-edit', `[edit] Updated event — name: ${updated.name}  id: ${updated.id}  by: ${req.session.userId}`);
