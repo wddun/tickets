@@ -41,7 +41,8 @@
       "Bash(node -e \"const fs=require\\('fs'\\);const html=fs.readFileSync\\('public/dashboard.html','utf8'\\);const m=html.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);let ok=true;for\\(const s of m\\){try{new Function\\(s.replace\\(/<\\\\/?script>/g,''\\)\\)}catch\\(e\\){console.log\\('ERR',e.message.slice\\(0,120\\)\\);ok=false}}if\\(ok\\)console.log\\('JS OK'\\)\")",
       "Bash(node -e \"const sharp = require\\('sharp'\\); console.log\\(sharp.format\\);\")",
       "Bash(git checkout *)",
-      "Bash(node -e \"const sharp = require\\('sharp'\\); sharp\\('pass-assets.pass/logo@2x.png'\\).metadata\\(\\).then\\(m => console.log\\(m.width, 'x', m.height, m.format\\)\\);\")"
+      "Bash(node -e \"const sharp = require\\('sharp'\\); sharp\\('pass-assets.pass/logo@2x.png'\\).metadata\\(\\).then\\(m => console.log\\(m.width, 'x', m.height, m.format\\)\\);\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3002/api/events)"
     ]
   }
 }

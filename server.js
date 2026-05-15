@@ -6,6 +6,7 @@ import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import fs from 'fs';
 import { PKPass } from 'passkit-generator';
 import JSZip from 'jszip';
@@ -19,8 +20,6 @@ import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import http2 from 'http2';
-import Stripe from 'stripe';
-
 const FileStore = FileStoreFactory(session);
 
 dotenv.config();
@@ -32,9 +31,15 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
-const stripe = process.env.STRIPE_SECRET_KEY
-    ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
-    : null;
+let stripe = null;
+if (process.env.STRIPE_SECRET_KEY) {
+    const _require = createRequire(import.meta.url);
+    try {
+        _require.resolve('stripe');
+        const { default: Stripe } = await import('stripe');
+        stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
+    } catch { console.warn('[stripe] Package not installed — Stripe features disabled.'); }
+}
 
 const logBuffer = [];
 const MAX_LOG_ENTRIES = 500;
