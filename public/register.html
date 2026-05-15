@@ -57,6 +57,7 @@
                 <div class="event-header">
                     <div class="event-name" id="eventTitle">Loading…</div>
                     <div class="event-meta" id="eventDesc"></div>
+                    <div id="ticketsLeft" style="display:none;margin-top:10px;padding:7px 12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;font-size:13px;font-weight:600;color:#92400e;"></div>
                 </div>
                 <form id="registerForm" style="margin-top:24px;">
                     <div class="form-group">
@@ -106,6 +107,22 @@
                 document.getElementById('eventDesc').textContent  =
                     `${event.location?.name || ''} · ${new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
                 document.title = `Register — ${event.name}`;
+                if (event.capacity && event.ticketsRemaining != null) {
+                    const left = event.ticketsRemaining;
+                    const lowCount = left < 20;
+                    const lowPct   = left / event.capacity < 0.20;
+                    if (lowCount || lowPct) {
+                        const el = document.getElementById('ticketsLeft');
+                        el.textContent = left === 0 ? '⚠ Sold out' : `🔥 Only ${left} ticket${left === 1 ? '' : 's'} left`;
+                        el.style.display = 'block';
+                        if (left === 0) {
+                            document.getElementById('submitBtn').disabled = true;
+                            el.style.background = '#fef2f2';
+                            el.style.borderColor = '#fca5a5';
+                            el.style.color = '#991b1b';
+                        }
+                    }
+                }
             } catch {
                 alert('Event not found or has been removed.');
                 window.location.href = '/';
