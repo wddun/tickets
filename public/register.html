@@ -113,7 +113,7 @@
                     const lowPct   = left / event.capacity < 0.20;
                     if (lowCount || lowPct) {
                         const el = document.getElementById('ticketsLeft');
-                        el.textContent = left === 0 ? '⚠ Sold out' : `🔥 Only ${left} ticket${left === 1 ? '' : 's'} left`;
+                        el.textContent = left === 0 ? 'Sold out' : `Only ${left} ticket${left === 1 ? '' : 's'} left`;
                         el.style.display = 'block';
                         if (left === 0) {
                             document.getElementById('submitBtn').disabled = true;
