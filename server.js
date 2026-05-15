@@ -1366,6 +1366,10 @@ app.get('/api/events/counts', requireAuth, (req, res) => {
 app.get('/api/event/:id', (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (event.capacity) {
+        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
+        event.ticketsRemaining = Math.max(0, event.capacity - registered);
+    }
     res.json(event);
 });
 
