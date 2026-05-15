@@ -906,77 +906,71 @@ app.get('/dashboard.html', (req, res, next) => {
     next();
 });
 
-// Block the public register page entirely
-app.get('/register.html', (req, res) => res.redirect('/login.html'));
-
-// API: Register Ticket — disabled, registration is handled via Google Sheets
-app.post('/api/register', (req, res) => {
-    res.status(403).json({ error: 'Public registration is not available' });
-});
-
-app.post('/api/register_disabled', async (req, res) => {
+// Public self-registration — creates a free ticket and emails it
+app.post('/api/register', async (req, res) => {
     const { name, email, eventId } = req.body;
-
     if (!name || !email || !eventId) {
-        return res.status(400).json({ error: 'Name, email and eventId are required' });
+        return res.status(400).json({ error: 'Name, email, and event are required' });
     }
 
     const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-
-    const token = nanoid(12);
-    const newTicket = {
-        id: nanoid(8),
-        token,
-        eventId,
-        name,
-        email,
-        created_at: new Date().toISOString(),
-        used_at: null
-    };
-
-    try {
-        stmt.tickets.insert.run(newTicket.id, newTicket.eventId, newTicket.token, null, newTicket.name, null, null, newTicket.email, null, null, null, null, null, newTicket.created_at, null, null);
-
-        // Generate QR Data URL for email
-        const qrContent = `ticket:${token}`;
-        const qrDataUrl = await QRCode.toDataURL(qrContent);
-
-        // Send Email
-        if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 're_your_api_key') {
-            await resend.emails.send({
-                from: process.env.RESEND_FROM || 'onboarding@resend.dev',
-                to: email,
-                subject: `Your Ticket for ${event.name}`,
-                html: `
-                    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-                        <h2 style="color: #333;">Hello ${name}!</h2>
-                        <p>Your registration for <strong>${event.name}</strong> was successful.</p>
-                        ${event.imageUrl ? `
-                        <div style="text-align: center; margin: 20px 0;">
-                            <img src="${BASE_URL}${event.imageUrl}" alt="${event.name}" style="max-width: 100%; border-radius: 12px;" />
-                        </div>` : ''}
-                        <div style="text-align: center; margin: 30px 0;">
-                            <img src="${BASE_URL}/qr/${token}" alt="QR Code" style="width: 200px; height: 200px;" />
-                        </div>
-                        <div style="text-align: center; margin-bottom: 20px;">
-                            <a href="${BASE_URL}/api/pass/${token}.pkpass">
-                                <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height: 40px;">
-                            </a>
-                        </div>
-                        <p style="font-size: 12px; color: #666;">Token: ${token}</p>
-                        <p>Location: ${event.location.name}</p>
-                        <p>Time: ${new Date(event.time).toLocaleString()}</p>
-                    </div>
-                `
-            });
-        }
-
-        res.json({ success: true, ticket: newTicket, qr: qrDataUrl });
-    } catch (error) {
-        console.error('Registration error:', error);
-        res.status(500).json({ error: 'Failed to process registration' });
+    if (!event.allowPublicRegistration) {
+        return res.status(403).json({ error: 'Registration is not open for this event' });
     }
+
+    if (event.capacity) {
+        const count = stmt.tickets.byEventId.all(eventId).length;
+        if (count >= event.capacity) {
+            return res.status(400).json({ error: 'This event is sold out' });
+        }
+    }
+
+    const nameParts = name.trim().split(/\s+/);
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(' ') || null;
+    const token = nanoid(12);
+    const ticketId = nanoid(8);
+    const registrationId = nanoid(10);
+    const now = new Date().toISOString();
+
+    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, name.trim(), firstName, lastName, email.trim().toLowerCase(), null, null, null, null, null, now, null, null);
+    const ticket = rowToTicket(stmt.tickets.byToken.get(token));
+
+    const qrDataUrl = await QRCode.toDataURL(`ticket:${token}`);
+
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        sendEmail({
+            to: email.trim().toLowerCase(),
+            fromName: `Tickets - ${event.name}`,
+            replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
+            subject: `Your ticket for ${event.name}`,
+            html: buildTicketEmailHtml({
+                firstName,
+                intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+                event,
+                tickets: [ticket],
+            }),
+            registrationId,
+        }).catch(() => {});
+    }
+
+    log('register', `[public] New registration — name: ${name}  email: ${email}  event: ${event.name}`);
+    res.json({ success: true, ticket: { token, registrationId }, qr: qrDataUrl });
+});
+
+// Toggle public registration on/off for an event
+app.put('/api/event/:id/public-registration', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const isOwner = event.userId === req.session.userId;
+    const isAdmin = req.session.userEmail === process.env.ADMIN_EMAIL;
+    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
+
+    const enabled = req.body.enabled === true || req.body.enabled === 'true';
+    stmt.events.setPublicRegistration.run(enabled ? 1 : 0, req.params.id);
+    log('event-settings', `[edit] Public registration ${enabled ? 'enabled' : 'disabled'} — event: ${event.name}  by: ${req.session.userId}`);
+    res.json({ success: true, allowPublicRegistration: enabled });
 });
 
 // API: Bulk Register Tickets (for Google Sheets integration)

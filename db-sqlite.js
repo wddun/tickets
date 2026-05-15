@@ -128,6 +128,9 @@ CREATE INDEX IF NOT EXISTS idx_sheetAccess_linkId ON sheetAccess(sheetLinkId);
 CREATE INDEX IF NOT EXISTS idx_sheetAccess_userId ON sheetAccess(userId);
 `);
 
+// ── Column migrations ─────────────────────────────────────────────────────────
+try { db.exec(`ALTER TABLE events ADD COLUMN allowPublicRegistration INTEGER DEFAULT 0`); } catch {}
+
 // ── One-time migration from db.json ──────────────────────────────────────────
 
 const migrationFlag = path.join(__dirname, 'db-migrated.flag');
@@ -250,6 +253,7 @@ export function rowToEvent(row) {
         ...row,
         location: row.location ? JSON.parse(row.location) : null,
         allowReentry: !!row.allowReentry,
+        allowPublicRegistration: !!row.allowPublicRegistration,
         reminderEnabled: !!row.reminderEnabled,
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
     };
@@ -287,6 +291,7 @@ export const stmt = {
         setReminder: db.prepare(`UPDATE events SET reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=? WHERE id=?`),
         setCustomFields: db.prepare(`UPDATE events SET customFields=? WHERE id=?`),
         setImageUrl: db.prepare(`UPDATE events SET imageUrl=? WHERE id=?`),
+        setPublicRegistration: db.prepare(`UPDATE events SET allowPublicRegistration=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM events WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM events WHERE userId=?`),
