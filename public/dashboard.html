@@ -1369,6 +1369,7 @@
                 <button class="settings-tab active" onclick="switchSettingsTab(this,'tab-fields')">Custom Fields</button>
                 <button class="settings-tab" onclick="switchSettingsTab(this,'tab-access')">Access & Sharing</button>
                 <button class="settings-tab" onclick="switchSettingsTab(this,'tab-notifications')">Notifications</button>
+                <button class="settings-tab" onclick="switchSettingsTab(this,'tab-registration')">Registration</button>
             </div>
             <div id="settingsContent">Loading…</div>
         </div>
@@ -2460,7 +2461,8 @@
                     document.getElementById('settingsContent').innerHTML =
                         `<div class="settings-section active" id="tab-fields">${cfHtml}</div>` +
                         `<div class="settings-section" id="tab-access">${note}</div>` +
-                        `<div class="settings-section" id="tab-notifications">${pushHtml}${reminderHtml}</div>`;
+                        `<div class="settings-section" id="tab-notifications">${pushHtml}${reminderHtml}</div>` +
+                        `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>`;
                     togglePushDeviceList();
                     return;
                 }
@@ -2528,7 +2530,8 @@
                 document.getElementById('settingsContent').innerHTML =
                     `<div class="settings-section active" id="tab-fields">${cfHtml}</div>` +
                     `<div class="settings-section" id="tab-access">${linkHtml}${accessHtml}</div>` +
-                    `<div class="settings-section" id="tab-notifications">${pushHtml}${reminderHtml}</div>`;
+                    `<div class="settings-section" id="tab-notifications">${pushHtml}${reminderHtml}</div>` +
+                    `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>`;
                 togglePushDeviceList();
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
@@ -2835,6 +2838,55 @@
         // Init autocomplete for both modals once DOM is ready
         initAddressAutocomplete('newEventAddress',    'newEventAddressAC', 'newEventLat',    'newEventLng');
         initAddressAutocomplete('editEventLocAddress','editEventAddressAC','editEventLat',   'editEventLng');
+
+        // ── Registration settings ───────────────────────────────────────────────
+        function renderRegistrationSection(eventId) {
+            const ev = events.find(e => e.id === eventId);
+            const enabled = !!ev?.allowPublicRegistration;
+            const regUrl = `${location.origin}/register.html?id=${eventId}`;
+            return `
+                <div style="font-size:12px;color:#888;margin-bottom:14px;">
+                    When enabled, anyone with the link can self-register and receive a free ticket by email.
+                </div>
+                <label style="display:flex;align-items:center;gap:12px;cursor:pointer;margin-bottom:16px;padding:12px;background:#f4f5f8;border-radius:10px;border:1px solid #dde3ed;">
+                    <input type="checkbox" id="publicRegToggle" ${enabled ? 'checked' : ''}
+                        onchange="setPublicRegistration('${eventId}', this.checked)"
+                        style="width:18px;height:18px;accent-color:#1a1f3c;cursor:pointer;flex-shrink:0;">
+                    <div>
+                        <div style="font-size:13px;font-weight:600;">Allow Public Registration</div>
+                        <div style="font-size:12px;color:#888;margin-top:2px;">Anyone with the link can register for free</div>
+                    </div>
+                </label>
+                <div id="publicRegLinkBox" style="${enabled ? '' : 'display:none;'}">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Shareable Registration Link</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <input type="text" readonly value="${esc(regUrl)}"
+                            onclick="this.select()"
+                            style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;color:#555;background:#f9f9f9;cursor:text;min-width:0;">
+                        <button onclick="copySettingsLink('${esc(regUrl)}')"
+                            style="flex-shrink:0;padding:8px 12px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function setPublicRegistration(eventId, enabled) {
+            try {
+                await fetch(`/api/event/${eventId}/public-registration`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.allowPublicRegistration = enabled;
+                const linkBox = document.getElementById('publicRegLinkBox');
+                if (linkBox) linkBox.style.display = enabled ? 'block' : 'none';
+            } catch {
+                alert('Failed to update registration settings.');
+            }
+        }
 
         // ── Settings tabs ───────────────────────────────────────────────────────
         function switchSettingsTab(btn, tabId) {
