@@ -45,6 +45,24 @@
         }
         .btn-outline:hover { background: #e8ecf4; }
 
+        .price-badge {
+            display: inline-block;
+            background: #1a1f3c; color: #fff;
+            font-size: 15px; font-weight: 700;
+            padding: 4px 12px; border-radius: 20px;
+            margin-top: 8px;
+        }
+
+        .processing-box {
+            text-align: center; padding: 40px 20px;
+        }
+        .processing-spinner {
+            width: 40px; height: 40px; margin: 0 auto 16px;
+            border: 3px solid #dde3ed; border-top-color: #1a1f3c;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
         @media (max-width: 480px) {
             .container { padding: 16px 12px 32px; }
         }
@@ -57,6 +75,7 @@
                 <div class="event-header">
                     <div class="event-name" id="eventTitle">Loading…</div>
                     <div class="event-meta" id="eventDesc"></div>
+                    <div id="priceBadge" style="display:none;" class="price-badge"></div>
                     <div id="ticketsLeft" style="display:none;margin-top:10px;padding:7px 12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;font-size:13px;font-weight:600;color:#92400e;"></div>
                 </div>
                 <form id="registerForm" style="margin-top:24px;">
@@ -72,17 +91,25 @@
                 </form>
             </div>
 
+            <div id="processingView" style="display:none;">
+                <div class="processing-box">
+                    <div class="processing-spinner"></div>
+                    <div style="font-size:16px;font-weight:700;color:#1a1f3c;margin-bottom:6px;">Processing your ticket…</div>
+                    <div style="font-size:14px;color:#64748b;">This will only take a moment.</div>
+                </div>
+            </div>
+
             <div id="successView" style="display:none;">
                 <div class="success-box">
                     <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
-                    <div class="success-title">You're registered!</div>
+                    <div class="success-title" id="successTitle">You're registered!</div>
                     <div class="success-sub">A confirmation email has been sent to you with your QR code.</div>
                     <img id="qrImage" class="qr-img" src="" alt="QR Code">
                     <div class="ticket-token" id="ticketToken"></div>
                     <a id="appleWalletLink" href="#" class="wallet-link">
                         <img src="/apple-wallet-badge.png" alt="Add to Apple Wallet">
                     </a>
-                    <button class="btn-outline" onclick="window.location.reload()">Register Another Person</button>
+                    <button class="btn-outline" onclick="window.location.href = window.location.pathname + '?id=' + eventId">Register Another Person</button>
                 </div>
             </div>
         </div>
@@ -96,7 +123,10 @@
     <script>
         const params  = new URLSearchParams(window.location.search);
         const eventId = params.get('id');
+        const sessionId = params.get('session');
         if (!eventId) { alert('No Event ID provided.'); window.location.href = '/'; }
+
+        let eventTicketPrice = 0;
 
         async function loadEvent() {
             try {
@@ -107,6 +137,15 @@
                 document.getElementById('eventDesc').textContent  =
                     `${event.location?.name || ''} · ${new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
                 document.title = `Register — ${event.name}`;
+
+                eventTicketPrice = event.ticketPrice || 0;
+                if (eventTicketPrice > 0) {
+                    const price = (eventTicketPrice / 100).toFixed(2);
+                    document.getElementById('priceBadge').textContent = `$${price}`;
+                    document.getElementById('priceBadge').style.display = 'inline-block';
+                    document.getElementById('submitBtn').textContent = `Buy Ticket — $${price}`;
+                }
+
                 if (event.capacity && event.ticketsRemaining != null) {
                     const left = event.ticketsRemaining;
                     const lowCount = left < 20;
@@ -128,30 +167,79 @@
                 window.location.href = '/';
             }
         }
-        loadEvent();
+
+        function showSuccess(ticket, qr) {
+            document.getElementById('formView').style.display      = 'none';
+            document.getElementById('processingView').style.display = 'none';
+            document.getElementById('successView').style.display   = 'block';
+            document.getElementById('qrImage').src                 = qr;
+            document.getElementById('ticketToken').textContent     = ticket.token;
+            document.getElementById('appleWalletLink').href        = `/api/pass/${ticket.token}.pkpass`;
+        }
+
+        async function pollSession(sid) {
+            document.getElementById('formView').style.display       = 'none';
+            document.getElementById('processingView').style.display = 'block';
+            for (let i = 0; i < 30; i++) {
+                await new Promise(r => setTimeout(r, 2000));
+                try {
+                    const res  = await fetch(`/api/stripe/session/${sid}`);
+                    const data = await res.json();
+                    if (data.status === 'fulfilled' && data.ticket) {
+                        document.getElementById('successTitle').textContent = 'Payment complete!';
+                        showSuccess(data.ticket, data.qr);
+                        return;
+                    }
+                    if (data.status === 'expired') {
+                        alert('This session has expired. Please try again.');
+                        window.location.href = window.location.pathname + '?id=' + eventId;
+                        return;
+                    }
+                } catch {}
+            }
+            alert('Ticket processing is taking longer than expected. Check your email — it will arrive shortly.');
+        }
+
+        if (sessionId) {
+            loadEvent().then(() => pollSession(sessionId));
+        } else {
+            loadEvent();
+        }
 
         document.getElementById('registerForm').onsubmit = async e => {
             e.preventDefault();
-            const btn = document.getElementById('submitBtn');
+            const btn  = document.getElementById('submitBtn');
+            const name  = document.getElementById('name').value;
+            const email = document.getElementById('email').value;
             btn.disabled = true; btn.textContent = 'Processing…';
             try {
-                const res  = await fetch('/api/register', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: document.getElementById('name').value, email: document.getElementById('email').value, eventId })
-                });
-                const data = await res.json();
-                if (data.success) {
-                    document.getElementById('formView').style.display    = 'none';
-                    document.getElementById('successView').style.display = 'block';
-                    document.getElementById('qrImage').src               = data.qr;
-                    document.getElementById('ticketToken').textContent   = data.ticket.token;
-                    document.getElementById('appleWalletLink').href      = `/api/pass/${data.ticket.token}.pkpass`;
+                if (eventTicketPrice > 0) {
+                    const res  = await fetch(`/api/checkout/${eventId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, email })
+                    });
+                    const data = await res.json();
+                    if (data.url) {
+                        window.location.href = data.url;
+                        return;
+                    }
+                    alert('Error: ' + (data.error || 'Could not create checkout session.'));
                 } else {
-                    alert('Error: ' + data.error);
+                    const res  = await fetch('/api/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, email, eventId })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        showSuccess(data.ticket, data.qr);
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
                 }
             } catch { alert('Connection error. Please try again.'); }
-            finally  { btn.disabled = false; btn.textContent = 'Get My Ticket'; }
+            finally  { btn.disabled = false; btn.textContent = eventTicketPrice > 0 ? `Buy Ticket — $${(eventTicketPrice/100).toFixed(2)}` : 'Get My Ticket'; }
         };
     </script>
 </body>
