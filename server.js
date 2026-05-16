@@ -31,13 +31,17 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
+const stripeMode = (process.env.STRIPE_MODE || 'live').toUpperCase();
+const stripeSecretKey = process.env[`STRIPE_SECRET_KEY_${stripeMode}`];
+const stripeWebhookSecret = process.env[`STRIPE_WEBHOOK_SECRET_${stripeMode}`];
 let stripe = null;
-if (process.env.STRIPE_SECRET_KEY) {
+if (stripeSecretKey) {
     const _require = createRequire(import.meta.url);
     try {
         _require.resolve('stripe');
         const { default: Stripe } = await import('stripe');
-        stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
+        stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' });
+        console.log(`[stripe] Mode: ${stripeMode.toLowerCase()} (${stripeSecretKey.startsWith('sk_test') ? 'sandbox' : 'live charges'})`);
     } catch { console.warn('[stripe] Package not installed — Stripe features disabled.'); }
 }
 
@@ -1059,7 +1063,7 @@ app.post('/api/stripe/webhook', async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let stripeEvent;
     try {
-        stripeEvent = stripe.webhooks.constructEvent(req.rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
+        stripeEvent = stripe.webhooks.constructEvent(req.rawBody, sig, stripeWebhookSecret);
     } catch (err) {
         log('stripe', `[webhook] Bad signature: ${err.message}`);
         return res.status(400).send(`Webhook error: ${err.message}`);
