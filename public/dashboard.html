@@ -1787,6 +1787,7 @@
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/></svg>
                         Open Scanner
                     </a>
+                    ${event.atDoorEnabled ? `<a href="/at-door.html?id=${event.id}" target="_blank" class="btn-settings" style="text-decoration:none;">🎫 At Door</a>` : ''}
                     <button class="btn-settings" onclick="openMetricsModal('${event.id}')">📊 Metrics</button>
                     <button class="btn-settings" onclick="openBulkEmailModal('${event.id}', ${grouped.length})">✉️ Email All</button>
                     <div class="dropdown-wrap">

@@ -991,7 +991,7 @@ const OVERLAY_COLORS = {
     valid:         '#128740',
     reentry_enter: '#128740',
     reentry_exit:  '#bf5e0f',
-    checkout_done: '#bf5e0f',
+    checkout_done: '#2563eb',
     used:          '#bf5e0f',
     invalid:       '#b81e1e',
     error:         '#b81e1e',
@@ -1001,10 +1001,11 @@ const svgCheck = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.
 const svgExclam = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>';
 const svgXmark = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></svg>';
 const svgDoor = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>';
-const STATUS_ICONS   = { valid:svgCheck, reentry_enter:svgCheck, reentry_exit:svgDoor, checkout_done:svgCheck, used:svgExclam, invalid:svgXmark, error:svgXmark, info:svgCheck };
+const svgUturnLeft = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4 11h-5.59l2.29 2.29-1.41 1.42L7 12l4.29-4.71 1.41 1.42L10.41 11H16v2z"/></svg>';
+const STATUS_ICONS   = { valid:svgCheck, reentry_enter:svgCheck, reentry_exit:svgDoor, checkout_done:svgUturnLeft, used:svgExclam, invalid:svgXmark, error:svgXmark, info:svgCheck };
 const STATUS_TITLES  = { valid:'Checked In!', reentry_enter:'Checked Back In!', reentry_exit:'Confirm Check-Out', checkout_done:'Checked Out', used:'Already Checked In', invalid:'Invalid QR', error:'Error', info:'Admin Message' };
-const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', checkout_done:'shi-dot-orange', invalid:'shi-dot-red', error:'shi-dot-red', info:'shi-dot-green' };
-const STATUS_COLORS  = { valid:'#4ade80', reentry_enter:'#4ade80', reentry_exit:'#fbbf24', checkout_done:'#fbbf24', used:'#fbbf24', invalid:'#f87171', error:'#f87171', info:'#818cf8' };
+const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', checkout_done:'shi-dot-blue', invalid:'shi-dot-red', error:'shi-dot-red', info:'shi-dot-green' };
+const STATUS_COLORS  = { valid:'#4ade80', reentry_enter:'#4ade80', reentry_exit:'#fbbf24', checkout_done:'#60a5fa', used:'#fbbf24', invalid:'#f87171', error:'#f87171', info:'#818cf8' };
 
 let recentScansList = [];
 let flashTimer = null;
