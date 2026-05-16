@@ -24,51 +24,67 @@ struct SettingsView: View {
             List {
                 // MARK: - Account
                 Section("Account") {
-                    HStack(spacing: 14) {
-                        Image(systemName: "person.circle.fill")
-                            .font(.system(size: 38))
-                            .foregroundStyle(.blue)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(api.currentUser?.email ?? "—")
-                                .font(.system(size: 15, weight: .medium))
-                            Text(api.currentUser?.isAdmin == true ? "Admin" : "Signed in")
-                                .font(.caption)
+                    if api.isAuthenticated, let user = api.currentUser {
+                        HStack(spacing: 14) {
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 38))
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(user.email)
+                                    .font(.system(size: 15, weight: .medium))
+                                Text(user.isAdmin == true ? "Admin" : "Signed in")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+
+                        if let error = actionError {
+                            Text(error)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+
+                        Button(role: .destructive) {
+                            signOut()
+                        } label: {
+                            HStack {
+                                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                                if isSigningOut {
+                                    Spacer()
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(isSigningOut || isDeleting)
+
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            HStack {
+                                Label("Delete Account", systemImage: "person.crop.circle.badge.minus")
+                                if isDeleting {
+                                    Spacer()
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(isSigningOut || isDeleting)
+                    } else {
+                        HStack(spacing: 14) {
+                            Image(systemName: "person.crop.circle.badge.questionmark")
+                                .font(.system(size: 38))
                                 .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-
-                    if let error = actionError {
-                        Text(error)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-
-                    Button(role: .destructive) {
-                        signOut()
-                    } label: {
-                        HStack {
-                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                            if isSigningOut {
-                                Spacer()
-                                ProgressView()
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Not signed in")
+                                    .font(.system(size: 15, weight: .medium))
+                                Text("Sign in on the Events tab")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
+                        .padding(.vertical, 4)
                     }
-                    .disabled(isSigningOut || isDeleting)
-
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        HStack {
-                            Label("Delete Account", systemImage: "person.crop.circle.badge.minus")
-                            if isDeleting {
-                                Spacer()
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(isSigningOut || isDeleting)
                 }
 
                 // MARK: - Notifications
