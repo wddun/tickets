@@ -20,6 +20,7 @@ struct AtDoorView: View {
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var successName: String?
+    @State private var showShareSheet = false
 
     private var isPaid: Bool { (event.ticketPrice ?? 0) > 0 }
     private var priceLabel: String {
@@ -112,13 +113,18 @@ struct AtDoorView: View {
                         .foregroundStyle(Color.accentColor)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                ShareLink(item: URL(string: registrationURL)!) {
+                Button {
+                    showShareSheet = true
+                } label: {
                     Label("Share", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(Color.accentColor.opacity(0.15))
                         .foregroundStyle(Color.accentColor)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .sheet(isPresented: $showShareSheet) {
+                    ShareSheet(items: [URL(string: registrationURL) ?? registrationURL as Any])
                 }
             }
 
@@ -223,6 +229,16 @@ struct AtDoorView: View {
         successName = nil
         errorMessage = nil
     }
+}
+
+// MARK: - Share sheet wrapper (iOS 15-compatible)
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - QR helper
