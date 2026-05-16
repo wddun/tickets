@@ -147,6 +147,10 @@ CREATE INDEX IF NOT EXISTS idx_orders_eventId ON orders(eventId);
 // ── Column migrations ─────────────────────────────────────────────────────────
 try { db.exec(`ALTER TABLE events ADD COLUMN allowPublicRegistration INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE events ADD COLUMN ticketPrice INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN atDoorEnabled INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN paymentIntentId TEXT`); } catch {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN channel TEXT DEFAULT 'online'`); } catch {}
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_paymentIntentId ON orders(paymentIntentId)`); } catch {}
 
 // ── One-time migration from db.json ──────────────────────────────────────────
 
@@ -272,6 +276,7 @@ export function rowToEvent(row) {
         allowReentry: !!row.allowReentry,
         allowPublicRegistration: !!row.allowPublicRegistration,
         ticketPrice: row.ticketPrice || 0,
+        atDoorEnabled: !!row.atDoorEnabled,
         reminderEnabled: !!row.reminderEnabled,
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
     };
@@ -311,6 +316,7 @@ export const stmt = {
         setImageUrl: db.prepare(`UPDATE events SET imageUrl=? WHERE id=?`),
         setPublicRegistration: db.prepare(`UPDATE events SET allowPublicRegistration=? WHERE id=?`),
         setTicketPrice: db.prepare(`UPDATE events SET ticketPrice=? WHERE id=?`),
+        setAtDoorEnabled: db.prepare(`UPDATE events SET atDoorEnabled=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM events WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM events WHERE userId=?`),
@@ -388,9 +394,12 @@ export const stmt = {
     },
     orders: {
         bySessionId: db.prepare('SELECT * FROM orders WHERE sessionId=?'),
+        byPaymentIntentId: db.prepare('SELECT * FROM orders WHERE paymentIntentId=?'),
         byEventId: db.prepare('SELECT * FROM orders WHERE eventId=? ORDER BY createdAt DESC'),
         insert: db.prepare(`INSERT INTO orders (id, sessionId, eventId, registrationId, buyerName, buyerEmail, amount, currency, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`),
+        insertTerminal: db.prepare(`INSERT INTO orders (id, sessionId, paymentIntentId, channel, eventId, registrationId, buyerName, buyerEmail, amount, currency, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`),
         fulfill: db.prepare(`UPDATE orders SET status='fulfilled', registrationId=?, fulfilledAt=? WHERE sessionId=?`),
+        fulfillByIntent: db.prepare(`UPDATE orders SET status='fulfilled', registrationId=?, fulfilledAt=? WHERE paymentIntentId=?`),
     },
 };
 

@@ -421,8 +421,12 @@ struct AttendeesView: View {
     @State private var pushEnabled: Bool = false
     @State private var pushLoading = true
     @State private var pushError: String? = nil
+    @State private var selectedTab: AttendeesTab = .attendees
+
+    enum AttendeesTab: Hashable { case attendees, atDoor }
 
     private var canUndo: Bool { api.currentUser?.isAdmin == true }
+    private var atDoorEnabled: Bool { event.atDoorEnabled == true }
 
     var groups: [AttendeeGroup] {
         var dict: [String: AttendeeGroup] = [:]
@@ -456,49 +460,21 @@ struct AttendeesView: View {
     }
 
     var body: some View {
-        Group {
-            if isLoading {
-                ProgressView("Loading attendees…")
-            } else if let error = errorMessage {
-                if #available(iOS 17, *) {
-                    ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
-                } else {
-                    VStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle").font(.largeTitle)
-                        Text("Error").font(.headline)
-                        Text(error).font(.subheadline).foregroundStyle(.secondary)
-                    }
+        VStack(spacing: 0) {
+            if atDoorEnabled {
+                Picker("", selection: $selectedTab) {
+                    Text("Attendees").tag(AttendeesTab.attendees)
+                    Text("At Door").tag(AttendeesTab.atDoor)
                 }
-            } else if tickets.isEmpty {
-                if #available(iOS 17, *) {
-                    ContentUnavailableView("No Attendees", systemImage: "person.slash", description: Text("No tickets found for this event."))
-                } else {
-                    VStack(spacing: 8) {
-                        Image(systemName: "person.slash").font(.largeTitle)
-                        Text("No Attendees").font(.headline)
-                        Text("No tickets found for this event.").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top, 8)
+            }
+
+            if selectedTab == .atDoor && atDoorEnabled {
+                AtDoorView(event: event)
             } else {
-                List(filteredGroups) { group in
-                    AttendeeGroupRow(
-                        group: group,
-                        isProcessing: checkingIn.contains(group.registrationId),
-                        canUndo: canUndo,
-                        onCheckInOne: { pickerGroup = group },
-                        onCheckInAll: { checkInAll(group: group) },
-                        onUndo: { undoGroup(group: group) }
-                    )
-                }
-                .animation(.none, value: searchText)
-                .searchable(text: $searchText, prompt: "Search by name or email")
-                .refreshable { await loadTickets() }
-                .sheet(item: $pickerGroup) { group in
-                    TicketPickerSheet(group: group) { selectedIds in
-                        pickerGroup = nil
-                        checkInSelected(group: group, ticketIds: selectedIds)
-                    }
-                }
+                attendeesContent
             }
         }
         .navigationTitle(event.name)
@@ -546,6 +522,54 @@ struct AttendeesView: View {
                     Task { await togglePush(newValue) }
                 }
             )
+        }
+    }
+
+    @ViewBuilder
+    private var attendeesContent: some View {
+        if isLoading {
+            ProgressView("Loading attendees…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = errorMessage {
+            if #available(iOS 17, *) {
+                ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle").font(.largeTitle)
+                    Text("Error").font(.headline)
+                    Text(error).font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        } else if tickets.isEmpty {
+            if #available(iOS 17, *) {
+                ContentUnavailableView("No Attendees", systemImage: "person.slash", description: Text("No tickets found for this event."))
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "person.slash").font(.largeTitle)
+                    Text("No Attendees").font(.headline)
+                    Text("No tickets found for this event.").font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            List(filteredGroups) { group in
+                AttendeeGroupRow(
+                    group: group,
+                    isProcessing: checkingIn.contains(group.registrationId),
+                    canUndo: canUndo,
+                    onCheckInOne: { pickerGroup = group },
+                    onCheckInAll: { checkInAll(group: group) },
+                    onUndo: { undoGroup(group: group) }
+                )
+            }
+            .animation(.none, value: searchText)
+            .searchable(text: $searchText, prompt: "Search by name or email")
+            .refreshable { await loadTickets() }
+            .sheet(item: $pickerGroup) { group in
+                TicketPickerSheet(group: group) { selectedIds in
+                    pickerGroup = nil
+                    checkInSelected(group: group, ticketIds: selectedIds)
+                }
+            }
         }
     }
 

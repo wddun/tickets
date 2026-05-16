@@ -2852,6 +2852,7 @@
         function renderRegistrationSection(eventId) {
             const ev = events.find(e => e.id === eventId);
             const enabled = !!ev?.allowPublicRegistration;
+            const atDoor  = !!ev?.atDoorEnabled;
             const regUrl = `${location.origin}/register.html?id=${eventId}`;
             return `
                 <div style="font-size:12px;color:#888;margin-bottom:14px;">
@@ -2878,6 +2879,16 @@
                         </button>
                     </div>
                 </div>
+
+                <label style="display:flex;align-items:center;gap:12px;cursor:pointer;margin-top:18px;padding:12px;background:#f4f5f8;border-radius:10px;border:1px solid #dde3ed;">
+                    <input type="checkbox" id="atDoorToggle" ${atDoor ? 'checked' : ''}
+                        onchange="setAtDoorEnabled('${eventId}', this.checked)"
+                        style="width:18px;height:18px;accent-color:#1a1f3c;cursor:pointer;flex-shrink:0;">
+                    <div>
+                        <div style="font-size:13px;font-weight:600;">Enable At-Door Ticket Sales</div>
+                        <div style="font-size:12px;color:#888;margin-top:2px;">Adds an "At Door" tab to this event in the iOS app for tap-to-pay sales</div>
+                    </div>
+                </label>
             `;
         }
 
@@ -2894,6 +2905,20 @@
                 if (linkBox) linkBox.style.display = enabled ? 'block' : 'none';
             } catch {
                 alert('Failed to update registration settings.');
+            }
+        }
+
+        async function setAtDoorEnabled(eventId, enabled) {
+            try {
+                await fetch(`/api/event/${eventId}/at-door`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.atDoorEnabled = enabled;
+            } catch {
+                alert('Failed to update at-door settings.');
             }
         }
 
