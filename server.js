@@ -1120,44 +1120,15 @@ app.post('/api/stripe/webhook', async (req, res) => {
         log('stripe', `[webhook] Ticket issued — name: ${buyerName}  event: ${issued.dbEvent.name}  session: ${session.id}`);
     }
 
-    if (stripeEvent.type === 'payment_intent.succeeded') {
-        const intent = stripeEvent.data.object;
-        const { eventId, buyerName, buyerEmail, source } = intent.metadata || {};
-        if (source !== 'terminal' || !eventId || !buyerName) return res.json({ received: true });
-
-        const existing = stmt.orders.byPaymentIntentId.get(intent.id);
-        if (existing?.status === 'fulfilled') return res.json({ received: true });
-
-        const issued = issueTicketForPayment({ eventId, buyerName, buyerEmail: buyerEmail || null });
-        if (!issued) return res.json({ received: true });
-
-        stmt.orders.fulfillByIntent.run(issued.registrationId, new Date().toISOString(), intent.id);
-        log('stripe', `[webhook] Terminal ticket issued — name: ${buyerName}  event: ${issued.dbEvent.name}  intent: ${intent.id}`);
-    }
-
     res.json({ received: true });
 });
 
-// ── Stripe Terminal (Tap to Pay on iPhone — in-app at-door sales) ─────────────
+// ── At-Door (in-app) ──────────────────────────────────────────────────────────
 
-// Cache the shared Terminal location id so we don't recreate it on every request
-let terminalLocationId = null;
-
-async function ensureTerminalLocation() {
-    if (terminalLocationId) return terminalLocationId;
-    if (!stripe) throw new Error('Stripe not configured');
-    const locations = await stripe.terminal.locations.list({ limit: 100 });
-    const existing = locations.data.find(l => l.display_name === 'WTS Tickets');
-    if (existing) { terminalLocationId = existing.id; return existing.id; }
-    const created = await stripe.terminal.locations.create({
-        display_name: 'WTS Tickets',
-        address: { country: 'US', line1: 'At-door', city: 'Mobile', state: 'NA', postal_code: '00000' },
-    });
-    terminalLocationId = created.id;
-    return created.id;
-}
-
-// Toggle at-door ticket sales on/off for an event (owner or admin)
+// Toggle at-door ticket sales on/off for an event (owner or admin).
+// When enabled, the iOS app shows an "At Door" tab — free events get an in-app
+// register form; paid events get a QR code linking to the public registration
+// page so the customer pays on their own phone via Stripe Checkout.
 app.put('/api/event/:id/at-door', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -1171,105 +1142,12 @@ app.put('/api/event/:id/at-door', requireAuth, (req, res) => {
     res.json({ success: true, atDoorEnabled: enabled });
 });
 
-// Issue a connection token — Stripe Terminal SDK needs this to talk to Stripe
-app.post('/api/terminal/connection-token', requireAuth, async (req, res) => {
-    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
-    try {
-        const token = await stripe.terminal.connectionTokens.create();
-        res.json({ secret: token.secret });
-    } catch (err) {
-        log('stripe', `[terminal] connection-token error: ${err.message}`);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Return the shared Terminal location id (creating it once if needed)
-app.get('/api/terminal/location', requireAuth, async (req, res) => {
-    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
-    try {
-        const id = await ensureTerminalLocation();
-        res.json({ locationId: id });
-    } catch (err) {
-        log('stripe', `[terminal] location error: ${err.message}`);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Create a PaymentIntent for an in-person at-door sale (returns client_secret + id)
-app.post('/api/terminal/payment-intent/:eventId', requireAuth, async (req, res) => {
-    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+// Issue a free ticket at the door for a FREE event — staff fills the form in the iOS app.
+app.post('/api/event/:eventId/at-door-register', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.atDoorEnabled) return res.status(403).json({ error: 'At-door sales are not enabled for this event' });
-    if (!event.ticketPrice) return res.status(400).json({ error: 'This event is free — use /api/terminal/issue-free' });
-
-    if (event.capacity) {
-        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
-        if (registered >= event.capacity) return res.status(400).json({ error: 'This event is sold out' });
-    }
-
-    const { name, email } = req.body;
-    if (!name) return res.status(400).json({ error: 'Name required' });
-    const cleanName = name.trim();
-    const cleanEmail = email ? email.trim().toLowerCase() : null;
-
-    try {
-        const intent = await stripe.paymentIntents.create({
-            amount: event.ticketPrice,
-            currency: 'usd',
-            payment_method_types: ['card_present'],
-            capture_method: 'automatic',
-            metadata: { source: 'terminal', eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail || '' },
-        });
-        stmt.orders.insertTerminal.run(
-            nanoid(8), intent.id, intent.id, 'terminal',
-            event.id, null, cleanName, cleanEmail, event.ticketPrice, 'usd', 'pending', new Date().toISOString()
-        );
-        log('stripe', `[terminal] PaymentIntent created — name: ${cleanName}  event: ${event.name}  amount: ${event.ticketPrice}`);
-        res.json({ clientSecret: intent.client_secret, paymentIntentId: intent.id });
-    } catch (err) {
-        log('stripe', `[terminal] payment-intent error: ${err.message}`);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Finalize a terminal payment immediately after SDK collected it
-// (also covered by the webhook — this gives the app a synchronous answer)
-app.post('/api/terminal/finalize/:paymentIntentId', requireAuth, async (req, res) => {
-    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
-    try {
-        const intent = await stripe.paymentIntents.retrieve(req.params.paymentIntentId);
-        if (intent.status !== 'succeeded') {
-            return res.status(400).json({ error: `Payment not succeeded (status: ${intent.status})` });
-        }
-
-        const existing = stmt.orders.byPaymentIntentId.get(intent.id);
-        if (existing?.status === 'fulfilled' && existing.registrationId) {
-            const ticket = stmt.tickets.byRegistrationId.all(existing.registrationId).map(rowToTicket)[0];
-            return res.json({ alreadyIssued: true, ticket, name: existing.buyerName });
-        }
-
-        const { eventId, buyerName, buyerEmail } = intent.metadata || {};
-        if (!eventId || !buyerName) return res.status(400).json({ error: 'PaymentIntent missing metadata' });
-
-        const issued = issueTicketForPayment({ eventId, buyerName, buyerEmail: buyerEmail || null });
-        if (!issued) return res.status(404).json({ error: 'Event not found' });
-
-        stmt.orders.fulfillByIntent.run(issued.registrationId, new Date().toISOString(), intent.id);
-        log('stripe', `[terminal] Ticket issued — name: ${buyerName}  event: ${issued.dbEvent.name}  intent: ${intent.id}`);
-        res.json({ alreadyIssued: false, ticket: issued.ticket, name: buyerName });
-    } catch (err) {
-        log('stripe', `[terminal] finalize error: ${err.message}`);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Issue a ticket at the door for a FREE event (no payment) — auth required
-app.post('/api/terminal/issue-free/:eventId', requireAuth, async (req, res) => {
-    const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
-    if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!event.atDoorEnabled) return res.status(403).json({ error: 'At-door sales are not enabled for this event' });
-    if (event.ticketPrice) return res.status(400).json({ error: 'This event is paid — use /api/terminal/payment-intent' });
+    if (event.ticketPrice) return res.status(400).json({ error: 'This event is paid — share the registration QR code instead' });
 
     if (event.capacity) {
         const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;

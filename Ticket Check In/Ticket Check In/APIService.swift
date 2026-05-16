@@ -303,78 +303,16 @@ class APIService: ObservableObject {
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
 
-    // MARK: - Stripe Terminal (at-door sales)
+    // MARK: - At-Door (in-app)
 
-    /// Fetches a fresh Stripe connection token. Called by the Terminal SDK's
-    /// `ConnectionTokenProvider` whenever it needs to authenticate with Stripe.
-    func fetchTerminalConnectionToken() async throws -> String {
-        guard let url = URL(string: "\(baseURL)/api/terminal/connection-token") else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
-        if http.statusCode == 401 { throw APIError.unauthorized }
-        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
-        struct R: Codable { let secret: String }
-        guard let obj = try? JSONDecoder().decode(R.self, from: data) else { throw APIError.decodingError }
-        return obj.secret
-    }
-
-    /// Returns the Stripe Terminal location id (shared "WTS Tickets" location).
-    func fetchTerminalLocationId() async throws -> String {
-        guard let url = URL(string: "\(baseURL)/api/terminal/location") else { throw APIError.invalidURL }
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
-        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
-        struct R: Codable { let locationId: String }
-        guard let obj = try? JSONDecoder().decode(R.self, from: data) else { throw APIError.decodingError }
-        return obj.locationId
-    }
-
-    struct TerminalPaymentIntent: Codable {
-        let clientSecret: String
-        let paymentIntentId: String
-    }
-
-    /// Creates a PaymentIntent on the server for an in-person at-door sale.
-    func createTerminalPaymentIntent(eventId: String, name: String, email: String?) async throws -> TerminalPaymentIntent {
-        guard let url = URL(string: "\(baseURL)/api/terminal/payment-intent/\(eventId)") else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var body: [String: String] = ["name": name]
-        if let e = email, !e.isEmpty { body["email"] = e }
-        request.httpBody = try JSONEncoder().encode(body)
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
-        if http.statusCode == 401 { throw APIError.unauthorized }
-        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
-        guard let obj = try? JSONDecoder().decode(TerminalPaymentIntent.self, from: data) else { throw APIError.decodingError }
-        return obj
-    }
-
-    struct TerminalFinalizeResponse: Codable {
-        let alreadyIssued: Bool
+    struct AtDoorRegisterResponse: Codable {
         let ticket: Ticket?
         let name: String?
     }
 
-    /// Finalizes a Terminal payment after SDK collection — server confirms with Stripe and issues a ticket.
-    func finalizeTerminalPayment(paymentIntentId: String) async throws -> TerminalFinalizeResponse {
-        guard let url = URL(string: "\(baseURL)/api/terminal/finalize/\(paymentIntentId)") else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
-        if http.statusCode == 401 { throw APIError.unauthorized }
-        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
-        guard let obj = try? JSONDecoder().decode(TerminalFinalizeResponse.self, from: data) else { throw APIError.decodingError }
-        return obj
-    }
-
-    /// Issues a free ticket at the door (no payment) — used when the event is free but at-door is enabled.
-    func issueFreeAtDoor(eventId: String, name: String, email: String?) async throws -> TerminalFinalizeResponse {
-        guard let url = URL(string: "\(baseURL)/api/terminal/issue-free/\(eventId)") else { throw APIError.invalidURL }
+    /// Issues a free ticket at the door — staff fills in name/email in the iOS app.
+    func registerAtDoor(eventId: String, name: String, email: String?) async throws -> AtDoorRegisterResponse {
+        guard let url = URL(string: "\(baseURL)/api/event/\(eventId)/at-door-register") else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -385,7 +323,7 @@ class APIService: ObservableObject {
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         if http.statusCode == 401 { throw APIError.unauthorized }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
-        guard let obj = try? JSONDecoder().decode(TerminalFinalizeResponse.self, from: data) else { throw APIError.decodingError }
+        guard let obj = try? JSONDecoder().decode(AtDoorRegisterResponse.self, from: data) else { throw APIError.decodingError }
         return obj
     }
 
