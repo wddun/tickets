@@ -564,6 +564,7 @@ struct ScanResultOverlay: View {
     var overlayColor: Color {
         switch result.status {
         case .success, .reentryEnter: return .green
+        case .checkedOut: return Color(red: 0.15, green: 0.39, blue: 0.92)
         case .alreadyUsed, .reentryExitPrompt: return Color(red: 0.9, green: 0.5, blue: 0.1)
         case .error: return .red
         }
@@ -573,6 +574,7 @@ struct ScanResultOverlay: View {
         switch result.status {
         case .success: return "checkmark.circle.fill"
         case .reentryEnter: return "arrow.right.circle.fill"
+        case .checkedOut: return "arrow.uturn.left.circle.fill"
         case .alreadyUsed: return "exclamationmark.circle.fill"
         case .reentryExitPrompt: return "door.left.hand.open"
         case .error: return "xmark.circle.fill"
