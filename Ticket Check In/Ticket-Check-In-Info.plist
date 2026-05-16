@@ -4,7 +4,5 @@
 <dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Used to pair with a nearby display screen to show scan results.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Required by Stripe to verify the location of in-person card payments at the door.</string>
 </dict>
 </plist>

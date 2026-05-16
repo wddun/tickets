@@ -2,16 +2,19 @@
 //  AtDoorView.swift
 //  Ticket Check In
 //
-//  In-app "At Door" tab — collects buyer info, runs Tap to Pay on iPhone
-//  (paid events) or issues a free ticket (free events), then resets for the next.
+//  In-app "At Door" tab. Free events: staff fills in a quick form and the
+//  ticket is emailed. Paid events: shows a QR code linking to the public
+//  registration page so the customer pays on their own phone via the
+//  existing Stripe Checkout flow.
 //
 
 import SwiftUI
+import CoreImage.CIFilterBuiltins
+import UIKit
 
 struct AtDoorView: View {
     let event: Event
 
-    @StateObject private var terminal = TerminalService.shared
     @State private var name = ""
     @State private var email = ""
     @State private var isSubmitting = false
@@ -21,8 +24,10 @@ struct AtDoorView: View {
     private var isPaid: Bool { (event.ticketPrice ?? 0) > 0 }
     private var priceLabel: String {
         let cents = event.ticketPrice ?? 0
-        let dollars = Double(cents) / 100.0
-        return String(format: "$%.2f", dollars)
+        return String(format: "$%.2f", Double(cents) / 100.0)
+    }
+    private var registrationURL: String {
+        "\(baseURL)/register.html?id=\(event.id)"
     }
 
     var body: some View {
@@ -30,7 +35,9 @@ struct AtDoorView: View {
             VStack(spacing: 18) {
                 header
 
-                if let success = successName {
+                if isPaid {
+                    paidQRBlock
+                } else if let success = successName {
                     successCard(success)
                 } else {
                     inputCard
@@ -44,8 +51,6 @@ struct AtDoorView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
-
-                statusBlock
             }
             .padding()
         }
@@ -55,31 +60,88 @@ struct AtDoorView: View {
 
     private var header: some View {
         VStack(spacing: 4) {
-            Text(event.name)
-                .font(.headline)
+            Text(event.name).font(.headline)
             if isPaid {
-                Text("Tap-to-pay sale  •  \(priceLabel)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text("Paid event  •  \(priceLabel)")
+                    .font(.subheadline).foregroundStyle(.secondary)
             } else {
-                Text("Free ticket  •  no card needed")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text("Free event  •  no card needed")
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
     }
 
+    // MARK: - Paid: QR code
+
+    private var paidQRBlock: some View {
+        VStack(spacing: 14) {
+            if let img = QRCode.image(from: registrationURL) {
+                Image(uiImage: img)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 280)
+                    .padding(12)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+            } else {
+                Text("Failed to generate QR")
+                    .foregroundStyle(.red)
+            }
+
+            VStack(spacing: 4) {
+                Text("Customer scans to buy")
+                    .font(.headline)
+                Text("They'll pay \(priceLabel) on their own phone via Stripe.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    UIPasteboard.general.string = registrationURL
+                } label: {
+                    Label("Copy link", systemImage: "doc.on.doc")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.accentColor.opacity(0.15))
+                        .foregroundStyle(Color.accentColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                ShareLink(item: URL(string: registrationURL)!) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.accentColor.opacity(0.15))
+                        .foregroundStyle(Color.accentColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            }
+
+            Text(registrationURL)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .padding(.top, 4)
+        }
+    }
+
+    // MARK: - Free: form
+
     private var inputCard: some View {
         VStack(spacing: 12) {
-            TextField("Buyer name", text: $name)
+            TextField("Attendee name", text: $name)
                 .textContentType(.name)
                 .textInputAutocapitalization(.words)
                 .padding(12)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
 
-            TextField("Email (optional but recommended)", text: $email)
+            TextField("Email (optional)", text: $email)
                 .textContentType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
@@ -93,8 +155,7 @@ struct AtDoorView: View {
         Button(action: submit) {
             HStack {
                 if isSubmitting { ProgressView().tint(.white) }
-                Text(isPaid ? "Tap to Pay  \(priceLabel)" : "Issue Free Ticket")
-                    .fontWeight(.semibold)
+                Text("Issue Free Ticket").fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
@@ -110,19 +171,17 @@ struct AtDoorView: View {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.green)
-            Text("Ticket issued")
-                .font(.title3.weight(.semibold))
-            Text(buyerName)
-                .font(.headline)
+            Text("Ticket issued").font(.title3.weight(.semibold))
+            Text(buyerName).font(.headline)
             if !email.isEmpty {
-                Text("Confirmation sent to \(email)")
+                Text("Sent to \(email)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
             Button {
                 resetForNext()
             } label: {
-                Text("Sell another ticket")
+                Text("Register another")
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -137,43 +196,6 @@ struct AtDoorView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private var statusBlock: some View {
-        Group {
-            switch terminal.status {
-            case .idle, .ready:
-                EmptyView()
-            case .initializing:
-                statusLine("Initializing Tap to Pay…")
-            case .discoveringReader:
-                statusLine("Preparing the iPhone reader…")
-            case .connectingReader:
-                statusLine("Connecting to reader…")
-            case .creatingPayment:
-                statusLine("Setting up the charge…")
-            case .waitingForTap:
-                statusLine("Hold the card near the top of the iPhone")
-            case .processingPayment:
-                statusLine("Processing payment…")
-            case .success:
-                EmptyView()
-            case .failed(let msg):
-                statusLine(msg, isError: true)
-            }
-        }
-    }
-
-    private func statusLine(_ msg: String, isError: Bool = false) -> some View {
-        HStack(spacing: 8) {
-            if !isError { ProgressView() }
-            Text(msg)
-                .font(.subheadline)
-                .foregroundStyle(isError ? .red : .secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
-    }
-
     // MARK: - Actions
 
     private func submit() {
@@ -184,17 +206,10 @@ struct AtDoorView: View {
 
         Task {
             do {
-                if isPaid {
-                    let buyer = try await TerminalService.shared.chargeAndIssueTicket(
-                        eventId: event.id, name: n, email: e.isEmpty ? nil : e
-                    )
-                    successName = buyer
-                } else {
-                    let resp = try await APIService.shared.issueFreeAtDoor(
-                        eventId: event.id, name: n, email: e.isEmpty ? nil : e
-                    )
-                    successName = resp.name ?? n
-                }
+                let resp = try await APIService.shared.registerAtDoor(
+                    eventId: event.id, name: n, email: e.isEmpty ? nil : e
+                )
+                successName = resp.name ?? n
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -207,6 +222,21 @@ struct AtDoorView: View {
         email = ""
         successName = nil
         errorMessage = nil
-        terminal.reset()
+    }
+}
+
+// MARK: - QR helper
+
+private enum QRCode {
+    static func image(from string: String) -> UIImage? {
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(string.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else { return nil }
+        let transform = CGAffineTransform(scaleX: 10, y: 10)
+        let scaled = output.transformed(by: transform)
+        guard let cg = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cg)
     }
 }

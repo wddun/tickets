@@ -394,12 +394,9 @@ export const stmt = {
     },
     orders: {
         bySessionId: db.prepare('SELECT * FROM orders WHERE sessionId=?'),
-        byPaymentIntentId: db.prepare('SELECT * FROM orders WHERE paymentIntentId=?'),
         byEventId: db.prepare('SELECT * FROM orders WHERE eventId=? ORDER BY createdAt DESC'),
         insert: db.prepare(`INSERT INTO orders (id, sessionId, eventId, registrationId, buyerName, buyerEmail, amount, currency, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`),
-        insertTerminal: db.prepare(`INSERT INTO orders (id, sessionId, paymentIntentId, channel, eventId, registrationId, buyerName, buyerEmail, amount, currency, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`),
         fulfill: db.prepare(`UPDATE orders SET status='fulfilled', registrationId=?, fulfilledAt=? WHERE sessionId=?`),
-        fulfillByIntent: db.prepare(`UPDATE orders SET status='fulfilled', registrationId=?, fulfilledAt=? WHERE paymentIntentId=?`),
     },
 };
 
