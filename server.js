@@ -992,6 +992,42 @@ app.put('/api/event/:id/public-registration', requireAuth, (req, res) => {
 
 // ── Stripe ────────────────────────────────────────────────────────────────────
 
+// Shared helper: issue a ticket + send confirmation email after a confirmed payment.
+// Returns { ticket, dbEvent, firstName, registrationId } or null if event missing.
+function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
+    const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
+    if (!dbEvent) return null;
+
+    const nameParts = (buyerName || '').split(/\s+/);
+    const firstName = nameParts[0] || buyerName || '';
+    const lastName  = nameParts.slice(1).join(' ') || null;
+    const token = nanoid(12);
+    const ticketId = nanoid(8);
+    const registrationId = nanoid(10);
+    const now = new Date().toISOString();
+
+    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, buyerName, firstName, lastName, buyerEmail, null, null, null, null, null, now, null, null);
+    const ticket = rowToTicket(stmt.tickets.byToken.get(token));
+
+    if (buyerEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        sendEmail({
+            to: buyerEmail,
+            fromName: `Tickets - ${dbEvent.name}`,
+            replyTo: rowToUser(stmt.users.byId.get(dbEvent.userId))?.email,
+            subject: `Your ticket for ${dbEvent.name}`,
+            html: buildTicketEmailHtml({
+                firstName,
+                intro: `You&rsquo;re all set for <strong>${dbEvent.name}</strong>! We&rsquo;ll see you there.`,
+                event: dbEvent,
+                tickets: [ticket],
+            }),
+            registrationId,
+        }).catch(() => {});
+    }
+
+    return { ticket, dbEvent, firstName, registrationId };
+}
+
 // Create a Checkout Session for a paid ticket
 app.post('/api/checkout/:eventId', async (req, res) => {
     if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
@@ -1074,46 +1110,182 @@ app.post('/api/stripe/webhook', async (req, res) => {
         const { eventId, buyerName, buyerEmail } = session.metadata || {};
         if (!eventId || !buyerName || !buyerEmail) return res.json({ received: true });
 
-        // Idempotency — skip if already fulfilled
         const existing = stmt.orders.bySessionId.get(session.id);
         if (existing?.status === 'fulfilled') return res.json({ received: true });
 
-        const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
-        if (!dbEvent) return res.json({ received: true });
+        const issued = issueTicketForPayment({ eventId, buyerName, buyerEmail });
+        if (!issued) return res.json({ received: true });
 
-        const nameParts = buyerName.split(/\s+/);
-        const firstName = nameParts[0];
-        const lastName  = nameParts.slice(1).join(' ') || null;
-        const token = nanoid(12);
-        const ticketId = nanoid(8);
-        const registrationId = nanoid(10);
-        const now = new Date().toISOString();
+        stmt.orders.fulfill.run(issued.registrationId, new Date().toISOString(), session.id);
+        log('stripe', `[webhook] Ticket issued — name: ${buyerName}  event: ${issued.dbEvent.name}  session: ${session.id}`);
+    }
 
-        stmt.tickets.insert.run(ticketId, eventId, token, registrationId, buyerName, firstName, lastName, buyerEmail, null, null, null, null, null, now, null, null);
-        stmt.orders.fulfill.run(registrationId, now, session.id);
+    if (stripeEvent.type === 'payment_intent.succeeded') {
+        const intent = stripeEvent.data.object;
+        const { eventId, buyerName, buyerEmail, source } = intent.metadata || {};
+        if (source !== 'terminal' || !eventId || !buyerName) return res.json({ received: true });
 
-        const ticket = rowToTicket(stmt.tickets.byToken.get(token));
+        const existing = stmt.orders.byPaymentIntentId.get(intent.id);
+        if (existing?.status === 'fulfilled') return res.json({ received: true });
 
-        if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
-            sendEmail({
-                to: buyerEmail,
-                fromName: `Tickets - ${dbEvent.name}`,
-                replyTo: rowToUser(stmt.users.byId.get(dbEvent.userId))?.email,
-                subject: `Your ticket for ${dbEvent.name}`,
-                html: buildTicketEmailHtml({
-                    firstName,
-                    intro: `You&rsquo;re all set for <strong>${dbEvent.name}</strong>! We&rsquo;ll see you there.`,
-                    event: dbEvent,
-                    tickets: [ticket],
-                }),
-                registrationId,
-            }).catch(() => {});
-        }
+        const issued = issueTicketForPayment({ eventId, buyerName, buyerEmail: buyerEmail || null });
+        if (!issued) return res.json({ received: true });
 
-        log('stripe', `[webhook] Ticket issued — name: ${buyerName}  event: ${dbEvent.name}  session: ${session.id}`);
+        stmt.orders.fulfillByIntent.run(issued.registrationId, new Date().toISOString(), intent.id);
+        log('stripe', `[webhook] Terminal ticket issued — name: ${buyerName}  event: ${issued.dbEvent.name}  intent: ${intent.id}`);
     }
 
     res.json({ received: true });
+});
+
+// ── Stripe Terminal (Tap to Pay on iPhone — in-app at-door sales) ─────────────
+
+// Cache the shared Terminal location id so we don't recreate it on every request
+let terminalLocationId = null;
+
+async function ensureTerminalLocation() {
+    if (terminalLocationId) return terminalLocationId;
+    if (!stripe) throw new Error('Stripe not configured');
+    const locations = await stripe.terminal.locations.list({ limit: 100 });
+    const existing = locations.data.find(l => l.display_name === 'WTS Tickets');
+    if (existing) { terminalLocationId = existing.id; return existing.id; }
+    const created = await stripe.terminal.locations.create({
+        display_name: 'WTS Tickets',
+        address: { country: 'US', line1: 'At-door', city: 'Mobile', state: 'NA', postal_code: '00000' },
+    });
+    terminalLocationId = created.id;
+    return created.id;
+}
+
+// Toggle at-door ticket sales on/off for an event (owner or admin)
+app.put('/api/event/:id/at-door', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const isOwner = event.userId === req.session.userId;
+    const isAdmin = req.session.userEmail === process.env.ADMIN_EMAIL;
+    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
+
+    const enabled = req.body.enabled === true || req.body.enabled === 'true';
+    stmt.events.setAtDoorEnabled.run(enabled ? 1 : 0, req.params.id);
+    log('event-settings', `[edit] At-door sales ${enabled ? 'enabled' : 'disabled'} — event: ${event.name}  by: ${req.session.userId}`);
+    res.json({ success: true, atDoorEnabled: enabled });
+});
+
+// Issue a connection token — Stripe Terminal SDK needs this to talk to Stripe
+app.post('/api/terminal/connection-token', requireAuth, async (req, res) => {
+    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+    try {
+        const token = await stripe.terminal.connectionTokens.create();
+        res.json({ secret: token.secret });
+    } catch (err) {
+        log('stripe', `[terminal] connection-token error: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Return the shared Terminal location id (creating it once if needed)
+app.get('/api/terminal/location', requireAuth, async (req, res) => {
+    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+    try {
+        const id = await ensureTerminalLocation();
+        res.json({ locationId: id });
+    } catch (err) {
+        log('stripe', `[terminal] location error: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Create a PaymentIntent for an in-person at-door sale (returns client_secret + id)
+app.post('/api/terminal/payment-intent/:eventId', requireAuth, async (req, res) => {
+    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+    const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!event.atDoorEnabled) return res.status(403).json({ error: 'At-door sales are not enabled for this event' });
+    if (!event.ticketPrice) return res.status(400).json({ error: 'This event is free — use /api/terminal/issue-free' });
+
+    if (event.capacity) {
+        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
+        if (registered >= event.capacity) return res.status(400).json({ error: 'This event is sold out' });
+    }
+
+    const { name, email } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
+    const cleanName = name.trim();
+    const cleanEmail = email ? email.trim().toLowerCase() : null;
+
+    try {
+        const intent = await stripe.paymentIntents.create({
+            amount: event.ticketPrice,
+            currency: 'usd',
+            payment_method_types: ['card_present'],
+            capture_method: 'automatic',
+            metadata: { source: 'terminal', eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail || '' },
+        });
+        stmt.orders.insertTerminal.run(
+            nanoid(8), intent.id, intent.id, 'terminal',
+            event.id, null, cleanName, cleanEmail, event.ticketPrice, 'usd', 'pending', new Date().toISOString()
+        );
+        log('stripe', `[terminal] PaymentIntent created — name: ${cleanName}  event: ${event.name}  amount: ${event.ticketPrice}`);
+        res.json({ clientSecret: intent.client_secret, paymentIntentId: intent.id });
+    } catch (err) {
+        log('stripe', `[terminal] payment-intent error: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Finalize a terminal payment immediately after SDK collected it
+// (also covered by the webhook — this gives the app a synchronous answer)
+app.post('/api/terminal/finalize/:paymentIntentId', requireAuth, async (req, res) => {
+    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+    try {
+        const intent = await stripe.paymentIntents.retrieve(req.params.paymentIntentId);
+        if (intent.status !== 'succeeded') {
+            return res.status(400).json({ error: `Payment not succeeded (status: ${intent.status})` });
+        }
+
+        const existing = stmt.orders.byPaymentIntentId.get(intent.id);
+        if (existing?.status === 'fulfilled' && existing.registrationId) {
+            const ticket = stmt.tickets.byRegistrationId.all(existing.registrationId).map(rowToTicket)[0];
+            return res.json({ alreadyIssued: true, ticket, name: existing.buyerName });
+        }
+
+        const { eventId, buyerName, buyerEmail } = intent.metadata || {};
+        if (!eventId || !buyerName) return res.status(400).json({ error: 'PaymentIntent missing metadata' });
+
+        const issued = issueTicketForPayment({ eventId, buyerName, buyerEmail: buyerEmail || null });
+        if (!issued) return res.status(404).json({ error: 'Event not found' });
+
+        stmt.orders.fulfillByIntent.run(issued.registrationId, new Date().toISOString(), intent.id);
+        log('stripe', `[terminal] Ticket issued — name: ${buyerName}  event: ${issued.dbEvent.name}  intent: ${intent.id}`);
+        res.json({ alreadyIssued: false, ticket: issued.ticket, name: buyerName });
+    } catch (err) {
+        log('stripe', `[terminal] finalize error: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Issue a ticket at the door for a FREE event (no payment) — auth required
+app.post('/api/terminal/issue-free/:eventId', requireAuth, async (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!event.atDoorEnabled) return res.status(403).json({ error: 'At-door sales are not enabled for this event' });
+    if (event.ticketPrice) return res.status(400).json({ error: 'This event is paid — use /api/terminal/payment-intent' });
+
+    if (event.capacity) {
+        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
+        if (registered >= event.capacity) return res.status(400).json({ error: 'This event is sold out' });
+    }
+
+    const { name, email } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
+    const issued = issueTicketForPayment({
+        eventId: event.id,
+        buyerName: name.trim(),
+        buyerEmail: email ? email.trim().toLowerCase() : null,
+    });
+    if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
+    log('at-door', `[free] Ticket issued — name: ${name}  event: ${event.name}  by: ${req.session.userId}`);
+    res.json({ ticket: issued.ticket, name });
 });
 
 // API: Bulk Register Tickets (for Google Sheets integration)

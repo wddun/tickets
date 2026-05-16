@@ -45,7 +45,9 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3002/api/events)",
       "Bash(curl -s -X POST https://tickets.willstechsupport.com/api/stripe/webhook -H \"Content-Type: application/json\" -d '{}')",
       "Bash(pm2 env *)",
-      "Bash(pm2 show *)"
+      "Bash(pm2 show *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST https://tickets.willstechsupport.com/api/terminal/connection-token)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X PUT https://tickets.willstechsupport.com/api/event/test/at-door -H \"Content-Type: application/json\" -d '{\"enabled\":true}')"
     ]
   }
 }

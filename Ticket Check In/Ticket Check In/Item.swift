@@ -15,6 +15,8 @@ struct Event: Codable, Identifiable, Hashable {
     let scannerPin: String?
     let location: EventLocation?
     let allowReentry: Bool?
+    let atDoorEnabled: Bool?
+    let ticketPrice: Int?   // cents; 0 or nil = free event
 
     struct EventLocation: Codable, Hashable {
         let name: String?
