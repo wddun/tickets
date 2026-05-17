@@ -50,7 +50,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X PUT https://tickets.willstechsupport.com/api/event/test/at-door -H \"Content-Type: application/json\" -d '{\"enabled\":true}')",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST https://tickets.willstechsupport.com/api/event/test/at-door-register -H \"Content-Type: application/json\" -d '{\"name\":\"x\"}')",
       "Bash(node --input-type=module -e ' *)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://tickets.willstechsupport.com/at-door.html)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://tickets.willstechsupport.com/at-door.html)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://tickets.willstechsupport.com/kiosk.html)"
     ]
   }
 }
