@@ -1,6 +1,8 @@
 .env
 db.json
 certs/
+tickets.db*
+AuthKey_*.p8
 Certificates.p12
 pass.cer
 wwdr.cer
