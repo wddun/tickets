@@ -3636,6 +3636,7 @@
             const resMsg = document.getElementById('importResultMsg');
 
             let successCount = 0;
+            const errors = [];
             for (let i = 0; i < validData.length; i++) {
                 resMsg.textContent = `Importing ${i + 1} of ${validData.length}…`;
                 try {
@@ -3644,8 +3645,26 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ ...validData[i], noEmail })
                     });
-                    if (r.ok) successCount++;
-                } catch (e) { }
+                    if (r.ok) {
+                        successCount++;
+                    } else {
+                        const data = await r.json().catch(() => ({}));
+                        errors.push(`${validData[i].name}: ${data.error || 'Failed to register'}`);
+                    }
+                } catch (e) {
+                    errors.push(`${validData[i].name}: Connection error`);
+                }
+            }
+
+            if (errors.length) {
+                const summary = successCount
+                    ? `Added ${successCount} of ${validData.length} registrations. ${errors.length} failed:`
+                    : `No registrations were added:`;
+                resMsg.innerHTML = `<span style="color:var(--danger);font-weight:600;">${summary}</span>` +
+                    `<ul style="margin:6px 0 0;padding-left:18px;color:var(--danger);font-size:13px;">${errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>`;
+                btn.disabled = false;
+                if (successCount) loadEvents();
+                return;
             }
 
             resMsg.innerHTML = `<span style="color:#059669;font-weight:600;">✓ Successfully added ${successCount} registrations.</span>`;
