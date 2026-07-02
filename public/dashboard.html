@@ -1472,6 +1472,13 @@
 
         let dashboardSSE = null;
 
+        function setUrlState(params) {
+            const url = new URL(location.href);
+            url.search = '';
+            Object.entries(params).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
+            history.replaceState(null, '', url);
+        }
+
         async function init() {
             const r = await fetch('/api/auth/me');
             if (!r.ok) return location.href = '/login.html';
@@ -1485,6 +1492,15 @@
             await loadEvents();
             setInterval(loadEvents, 30000);
             startDashboardSSE();
+
+            const params = new URLSearchParams(location.search);
+            const eventParam = params.get('event');
+            const viewParam = params.get('view');
+            if (eventParam && events.find(e => e.id === eventParam)) {
+                selectEvent(eventParam);
+            } else if (viewParam === 'admin-overview' && currentUser.isAdmin) {
+                openAdminOverview();
+            }
         }
 
         function startDashboardSSE() {
@@ -1714,6 +1730,7 @@
             if (r.ok) {
                 if (checkedEventIds.has(selectedId)) {
                     selectedId = null;
+                    setUrlState({});
                     clearInterval(refreshTimer);
                     document.getElementById('eventDetail').style.display = 'none';
                     document.getElementById('emptyState').style.display = 'flex';
@@ -1728,6 +1745,7 @@
 
         async function selectEvent(id) {
             selectedId = id;
+            setUrlState({ event: id });
             checkedRegIds.clear();
             clearInterval(refreshTimer);
             renderSidebar();
@@ -2299,6 +2317,7 @@
             const r = await fetch(`/api/event/${id}`, { method: 'DELETE' });
             if (r.ok) {
                 selectedId = null;
+                setUrlState({});
                 clearInterval(refreshTimer);
                 document.getElementById('eventDetail').style.display = 'none';
                 document.getElementById('emptyState').style.display = 'flex';
@@ -3092,6 +3111,7 @@
 
         async function openAdminOverview() {
             selectedId = null;
+            setUrlState({ view: 'admin-overview' });
             document.getElementById('emptyState').style.display = 'none';
             document.getElementById('eventDetail').style.display = 'block';
             document.getElementById('eventDetail').innerHTML = '<div style="padding:32px;color:#bbb;text-align:center;">Loading overview…</div>';
