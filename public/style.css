@@ -22,6 +22,29 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
+a, button, .btn, input, select, textarea {
+    transition: background-color .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease, transform .1s ease;
+}
+
+button:active, .btn:active {
+    transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+}
+
+.wts-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 18px 0 8px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
 body {
     background-color: var(--bg);
     color: var(--text);
