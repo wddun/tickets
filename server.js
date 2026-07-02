@@ -577,7 +577,7 @@ app.post('/api/auth/signup', loginLimiter, async (req, res) => {
 });
 
 // One-time admin setup — only works if no admin account exists yet
-app.post('/api/auth/setup-admin', async (req, res) => {
+app.post('/api/auth/setup-admin', loginLimiter, async (req, res) => {
     const { password } = req.body;
     const adminEmail = process.env.ADMIN_EMAIL;
     log('setup-admin', `[setup] Attempt — ip: ${getIP(req)}`);

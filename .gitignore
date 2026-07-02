@@ -12,3 +12,6 @@ sessions/
 node_modules/
 public/uploads/
 .env.example
+db-migrated.flag
+.claude/worktrees/
+screenshot.png
