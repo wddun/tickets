@@ -420,7 +420,18 @@
             background: #fff;
             border: 1px solid #e8e8e8;
             border-radius: 12px;
-            overflow: hidden;
+            /* No overflow:hidden here — that would establish its own clipping
+               scrollport and sever the header row's position:sticky from
+               .main's actual scroll, so it would never stick. Corners are
+               rounded on the first/last row instead. */
+        }
+
+        .attendee-row:first-child {
+            border-radius: 12px 12px 0 0;
+        }
+
+        .attendee-row:last-child {
+            border-radius: 0 0 12px 12px;
         }
 
         .attendee-row {
@@ -444,6 +455,9 @@
             color: #888;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            position: sticky;
+            top: 0;
+            z-index: 5;
         }
 
         .sort-btn {
@@ -2076,13 +2090,13 @@
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
                 <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
-                    <button class="btn btn-secondary btn-sm" onclick="bulkCheckIn('${event.id}')">Check In</button>
-                    <button class="btn btn-secondary btn-sm" onclick="undoCheckInSelected('${event.id}')">Undo Check-In</button>
-                    <button class="btn btn-secondary btn-sm" onclick="resendSelectedTickets('${event.id}')">Resend Tickets</button>
+                    <button class="btn btn-secondary btn-sm" onclick="bulkCheckIn('${event.id}', this)">Check In</button>
+                    <button class="btn btn-secondary btn-sm" onclick="undoCheckInSelected('${event.id}', this)">Undo Check-In</button>
+                    <button class="btn btn-secondary btn-sm" onclick="resendSelectedTickets('${event.id}', this)">Resend Tickets</button>
                     <button class="btn btn-secondary btn-sm" onclick="openBulkEmailModal('${event.id}', 0, true)">Email Selected</button>
                     <button class="btn btn-secondary btn-sm" onclick="exportSelectedCSV()">Export CSV</button>
                     <button class="btn btn-secondary btn-sm" onclick="printSelectedTickets()">Print Selected</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteSelectedTickets('${event.id}')">Delete Selected</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteSelectedTickets('${event.id}', this)">Delete Selected</button>
                 </span>
                 <span class="refresh-hint"><span class="live-dot"></span>auto-refreshing</span>
             </div>
@@ -2270,72 +2284,104 @@
             window.location.href = '/api/tickets/export-csv?regIds=' + encodeURIComponent(ids);
         }
 
-        async function bulkCheckIn(eventId) {
+        async function bulkCheckIn(eventId, btn) {
             if (!checkedRegIds.size) return;
-            const r = await fetch('/api/checkin/bulk', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ registrationIds: [...checkedRegIds] })
-            });
-            if (r.ok) {
-                const d = await r.json();
-                checkedRegIds.clear();
-                const event = events.find(e => e.id === eventId);
-                if (event) await fetchAndRender(event);
-                if (d.checkedIn === 0) showToast('All selected attendees were already checked in.');
-            } else {
-                showToast('Check-in failed.');
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const r = await fetch('/api/checkin/bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+                });
+                if (r.ok) {
+                    const d = await r.json();
+                    checkedRegIds.clear();
+                    const event = events.find(e => e.id === eventId);
+                    if (event) await fetchAndRender(event);
+                    if (d.checkedIn === 0) showToast('All selected attendees were already checked in.');
+                } else {
+                    showToast('Check-in failed.');
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
             }
         }
 
-        async function undoCheckInSelected(eventId) {
+        async function undoCheckInSelected(eventId, btn) {
             if (!checkedRegIds.size) return;
             if (!await confirmDialog(`Undo check-in for ${checkedRegIds.size} registration(s)?`)) return;
-            const r = await fetch('/api/checkin/bulk', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ registrationIds: [...checkedRegIds] })
-            });
-            if (r.ok) {
-                checkedRegIds.clear();
-                const event = events.find(e => e.id === eventId);
-                if (event) await fetchAndRender(event);
-            } else {
-                showToast('Undo check-in failed.');
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const r = await fetch('/api/checkin/bulk', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+                });
+                if (r.ok) {
+                    checkedRegIds.clear();
+                    const event = events.find(e => e.id === eventId);
+                    if (event) await fetchAndRender(event);
+                } else {
+                    showToast('Undo check-in failed.');
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
             }
         }
 
-        async function resendSelectedTickets(eventId) {
+        async function resendSelectedTickets(eventId, btn) {
             if (!checkedRegIds.size) return;
             if (!await confirmDialog(`Resend ticket emails to ${checkedRegIds.size} registration(s)?`)) return;
-            const r = await fetch('/api/registrations/bulk-resend', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ registrationIds: [...checkedRegIds] })
-            });
-            if (r.ok) {
-                const d = await r.json();
-                showToast(`Sent to ${d.sent} registration${d.sent !== 1 ? 's' : ''}${d.failed > 0 ? ` (${d.failed} failed)` : ''}.`);
-            } else {
-                const d = await r.json().catch(() => ({}));
-                showToast(d.error || 'Failed to resend emails.');
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const r = await fetch('/api/registrations/bulk-resend', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+                });
+                if (r.ok) {
+                    const d = await r.json();
+                    showToast(`Sent to ${d.sent} registration${d.sent !== 1 ? 's' : ''}${d.failed > 0 ? ` (${d.failed} failed)` : ''}.`);
+                } else {
+                    const d = await r.json().catch(() => ({}));
+                    showToast(d.error || 'Failed to resend emails.');
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
             }
         }
 
-        async function deleteSelectedTickets(eventId) {
+        async function deleteSelectedTickets(eventId, btn) {
             if (!checkedRegIds.size) return;
             if (!await confirmDialog(`Delete ${checkedRegIds.size} registration(s) and all their tickets?`)) return;
-            const r = await fetch('/api/registrations/bulk', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ registrationIds: [...checkedRegIds] })
-            });
-            if (r.ok) {
-                checkedRegIds.clear();
-                const event = events.find(e => e.id === eventId);
-                if (event) await fetchAndRender(event);
-            } else {
-                showToast('Could not delete registrations.');
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const r = await fetch('/api/registrations/bulk', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+                });
+                if (r.ok) {
+                    checkedRegIds.clear();
+                    const event = events.find(e => e.id === eventId);
+                    if (event) await fetchAndRender(event);
+                } else {
+                    showToast('Could not delete registrations.');
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
             }
         }
 
