@@ -1133,10 +1133,119 @@
         .settings-tab:hover:not(.active) { color: #555; }
         .settings-section { display: none; }
         .settings-section.active { display: block; }
+        /* More tabs than fit comfortably at flex:1 once Payments/Discounts/
+           Waitlist were added — wrap instead of squeezing every label. */
+        .settings-tab-bar { flex-wrap: wrap; }
+        .settings-tab { flex: 1 1 110px; }
+
+        /* ── Toast notifications ── */
+        /* Replaces the disruptive native alert() dialog for confirmations/errors —
+           self-dismissing, stackable, non-blocking. */
+        #toastStack {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column-reverse;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .toast {
+            min-width: 240px;
+            max-width: 380px;
+            background: #1a1f3c;
+            color: #fff;
+            padding: 13px 16px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1.4;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            pointer-events: auto;
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+        .toast.visible { opacity: 1; transform: translateY(0); }
+        .toast.toast-error { background: #7f1d1d; }
+        .toast.toast-success { background: #065f46; }
+        .toast-icon { flex-shrink: 0; margin-top: 1px; }
+        .toast-close {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.6);
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 0 0 0 8px;
+            flex-shrink: 0;
+        }
+        .toast-close:hover { color: #fff; }
+
+        /* ── Loading spinner (buttons mid-async-action) ── */
+        .btn-spinner {
+            display: inline-block;
+            width: 13px;
+            height: 13px;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: btn-spin 0.6s linear infinite;
+        }
+        @keyframes btn-spin { to { transform: rotate(360deg); } }
+
+        /* ── Payments / Discounts / Waitlist / Audit tables ── */
+        .mini-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .mini-table th {
+            text-align: left;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #999;
+            font-weight: 600;
+            padding: 6px 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .mini-table td { padding: 9px 10px; border-bottom: 1px solid #f4f4f4; vertical-align: middle; }
+        .mini-table tr:last-child td { border-bottom: none; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-pending { background: #fef3c7; color: #92400e; }
+        .badge-fulfilled { background: #d1fae5; color: #065f46; }
+        .badge-refunded { background: #fee2e2; color: #991b1b; }
+        .badge-waiting { background: #e0e7ff; color: #3730a3; }
+        .badge-notified { background: #fef3c7; color: #92400e; }
+        .badge-converted { background: #d1fae5; color: #065f46; }
+        .badge-active { background: #d1fae5; color: #065f46; }
+        .badge-inactive { background: #f1f5f9; color: #64748b; }
+        .beta-pill {
+            display: inline-block;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            padding: 2px 7px;
+            border-radius: 20px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
     </style>
 </head>
 
 <body>
+
+    <div id="toastStack"></div>
 
     <div class="topbar">
         <a href="/" class="topbar-logo"><img src="/logo-nav.svg" alt="WTS Tickets"></a>
@@ -1367,6 +1476,9 @@
                 <button class="settings-tab" onclick="switchSettingsTab(this,'tab-access')">Access & Sharing</button>
                 <button class="settings-tab" onclick="switchSettingsTab(this,'tab-notifications')">Notifications</button>
                 <button class="settings-tab" onclick="switchSettingsTab(this,'tab-registration')">Registration</button>
+                <button class="settings-tab" onclick="switchSettingsTab(this,'tab-waitlist')">Waitlist</button>
+                <button class="settings-tab" onclick="switchSettingsTab(this,'tab-discounts')">Discounts</button>
+                <button class="settings-tab" onclick="switchSettingsTab(this,'tab-payments')">Payments<span class="beta-pill">BETA</span></button>
             </div>
             <div id="settingsContent">Loading…</div>
         </div>
@@ -1471,6 +1583,34 @@
         let logsInterval = null;
 
         let dashboardSSE = null;
+
+        // Replaces the native alert() dialog with a non-blocking, self-dismissing
+        // toast. Type auto-detects from the message text when not given
+        // explicitly, since every call site used to just be a bare alert(message)
+        // — this keeps roughly correct error/success coloring after swapping the
+        // function name without auditing every call site by hand.
+        function showToast(message, type) {
+            if (!type) {
+                const lower = String(message || '').toLowerCase();
+                type = /fail|error|could not|cannot|denied|not authorized|required/.test(lower) ? 'error' : 'success';
+            }
+            const stack = document.getElementById('toastStack');
+            if (!stack) { console.warn('[toast]', message); return; }
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            const icon = type === 'error'
+                ? '<svg class="toast-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+                : '<svg class="toast-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
+            toast.innerHTML = `${icon}<span>${esc(String(message))}</span><button class="toast-close" aria-label="Dismiss">&times;</button>`;
+            stack.appendChild(toast);
+            requestAnimationFrame(() => toast.classList.add('visible'));
+            const dismiss = () => {
+                toast.classList.remove('visible');
+                setTimeout(() => toast.remove(), 200);
+            };
+            toast.querySelector('.toast-close').onclick = dismiss;
+            setTimeout(dismiss, 5000);
+        }
 
         function setUrlState(params) {
             const url = new URL(location.href);
@@ -1739,7 +1879,7 @@
                 document.getElementById('selectAllEvents').checked = false;
                 await loadEvents();
             } else {
-                alert('Could not delete events.');
+                showToast('Could not delete events.');
             }
         }
 
@@ -2064,9 +2204,9 @@
                 checkedRegIds.clear();
                 const event = events.find(e => e.id === eventId);
                 if (event) await fetchAndRender(event);
-                if (d.checkedIn === 0) alert('All selected attendees were already checked in.');
+                if (d.checkedIn === 0) showToast('All selected attendees were already checked in.');
             } else {
-                alert('Check-in failed.');
+                showToast('Check-in failed.');
             }
         }
 
@@ -2083,7 +2223,7 @@
                 const event = events.find(e => e.id === eventId);
                 if (event) await fetchAndRender(event);
             } else {
-                alert('Undo check-in failed.');
+                showToast('Undo check-in failed.');
             }
         }
 
@@ -2097,10 +2237,10 @@
             });
             if (r.ok) {
                 const d = await r.json();
-                alert(`Sent to ${d.sent} registration${d.sent !== 1 ? 's' : ''}${d.failed > 0 ? ` (${d.failed} failed)` : ''}.`);
+                showToast(`Sent to ${d.sent} registration${d.sent !== 1 ? 's' : ''}${d.failed > 0 ? ` (${d.failed} failed)` : ''}.`);
             } else {
                 const d = await r.json().catch(() => ({}));
-                alert(d.error || 'Failed to resend emails.');
+                showToast(d.error || 'Failed to resend emails.');
             }
         }
 
@@ -2117,7 +2257,7 @@
                 const event = events.find(e => e.id === eventId);
                 if (event) await fetchAndRender(event);
             } else {
-                alert('Could not delete registrations.');
+                showToast('Could not delete registrations.');
             }
         }
 
@@ -2167,7 +2307,7 @@
                 const event = events.find(e => e.id === selectedId);
                 if (event) await fetchAndRender(event, true);
             } else {
-                alert('Check-in failed.');
+                showToast('Check-in failed.');
             }
         }
 
@@ -2177,7 +2317,7 @@
                 const event = events.find(e => e.id === selectedId);
                 if (event) await fetchAndRender(event, true);
             } else {
-                alert('Undo failed.');
+                showToast('Undo failed.');
             }
         }
 
@@ -2261,7 +2401,7 @@
             const lng = document.getElementById('editEventLng').value;
             const imageFile = document.getElementById('editEventImage').files[0];
 
-            if (!name) return alert('Event name is required.');
+            if (!name) return showToast('Event name is required.');
 
             // Convert hex to rgb() to match existing format
             const r = parseInt(colorHex.slice(1, 3), 16);
@@ -2308,7 +2448,7 @@
                 renderSidebar();
             } else {
                 const d = await r2.json();
-                alert(d.error || 'Failed to save event.');
+                showToast(d.error || 'Failed to save event.');
             }
         }
 
@@ -2323,7 +2463,7 @@
                 document.getElementById('emptyState').style.display = 'flex';
                 loadEvents();
             } else {
-                alert('Could not delete event.');
+                showToast('Could not delete event.');
             }
         }
 
@@ -2345,7 +2485,7 @@
                 btn.textContent = 'Copied!';
                 setTimeout(() => btn.textContent = orig, 2000);
             } catch (err) {
-                alert('Could not copy link');
+                showToast('Could not copy link');
             }
         }
 
@@ -2398,7 +2538,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ customFields: keys })
             });
-            if (!r.ok) { alert('Failed to save custom fields.'); return; }
+            if (!r.ok) { showToast('Failed to save custom fields.'); return; }
             // Update local events cache so ticket modals immediately reflect changes
             const ev = events.find(e => e.id === eventId);
             if (ev) ev.customFields = keys;
@@ -2467,7 +2607,7 @@
                 const btn = document.querySelector('#settingsContent .btn-primary');
                 if (btn) { btn.textContent = '✓ Saved'; setTimeout(() => btn.textContent = 'Save', 1500); }
             } else {
-                alert('Failed to save reminder settings.');
+                showToast('Failed to save reminder settings.');
             }
         }
 
@@ -2487,11 +2627,15 @@
                         ? '<div class="settings-empty" style="padding:10px 0;text-align:left;">Push settings unavailable.</div>'
                         : renderPushSection(eventId, devices);
                     const reminderHtml = await loadReminderSection(eventId);
+                    const auditHtml = await renderAuditLogSection(eventId);
                     document.getElementById('settingsContent').innerHTML =
                         `<div class="settings-section active" id="tab-fields">${cfHtml}</div>` +
-                        `<div class="settings-section" id="tab-access">${note}</div>` +
+                        `<div class="settings-section" id="tab-access">${note}${auditHtml}</div>` +
                         `<div class="settings-section" id="tab-notifications">${pushHtml}${reminderHtml}</div>` +
-                        `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>`;
+                        `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>` +
+                        `<div class="settings-section" id="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
+                        `<div class="settings-section" id="tab-discounts">${await renderDiscountsSection(eventId)}</div>` +
+                        `<div class="settings-section" id="tab-payments">${await renderPaymentsSection(eventId)}</div>`;
                     togglePushDeviceList();
                     return;
                 }
@@ -2556,11 +2700,15 @@
                     ? '<div class="settings-empty" style="padding:10px 0;text-align:left;">Push settings unavailable.</div>'
                     : renderPushSection(eventId, devices);
                 const reminderHtml = await loadReminderSection(eventId);
+                const auditHtml = await renderAuditLogSection(eventId);
                 document.getElementById('settingsContent').innerHTML =
                     `<div class="settings-section active" id="tab-fields">${cfHtml}</div>` +
-                    `<div class="settings-section" id="tab-access">${linkHtml}${accessHtml}</div>` +
+                    `<div class="settings-section" id="tab-access">${linkHtml}${accessHtml}${auditHtml}</div>` +
                     `<div class="settings-section" id="tab-notifications">${pushHtml}${reminderHtml}</div>` +
-                    `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>`;
+                    `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>` +
+                    `<div class="settings-section" id="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
+                    `<div class="settings-section" id="tab-discounts">${await renderDiscountsSection(eventId)}</div>` +
+                    `<div class="settings-section" id="tab-payments">${await renderPaymentsSection(eventId)}</div>`;
                 togglePushDeviceList();
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
@@ -2631,7 +2779,7 @@
             let tokens = [];
             if (target === 'devices') {
                 tokens = [...document.querySelectorAll('.push-device-cb:checked')].map(cb => cb.value);
-                if (!tokens.length) return alert('Select at least one device.');
+                if (!tokens.length) return showToast('Select at least one device.');
             }
             if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
             try {
@@ -2647,7 +2795,7 @@
                 if (btn) btn.textContent = '✓ Sent';
                 setTimeout(() => { if (btn) { btn.textContent = 'Send Push'; btn.disabled = false; } }, 1200);
             } catch (err) {
-                alert(err.message || 'Failed to send push.');
+                showToast(err.message || 'Failed to send push.');
                 if (btn) { btn.textContent = 'Send Push'; btn.disabled = false; }
             }
         }
@@ -2660,10 +2808,10 @@
                     await loadAccessData(eventId); // Recalculate
                 } else {
                     const data = await res.json();
-                    alert(data.error || 'Failed to revoke access.');
+                    showToast(data.error || 'Failed to revoke access.');
                 }
             } catch (err) {
-                alert('Network error while revoking access.');
+                showToast('Network error while revoking access.');
             }
         }
 
@@ -2924,7 +3072,7 @@
                 const linkBox = document.getElementById('publicRegLinkBox');
                 if (linkBox) linkBox.style.display = enabled ? 'block' : 'none';
             } catch {
-                alert('Failed to update registration settings.');
+                showToast('Failed to update registration settings.');
             }
         }
 
@@ -2938,8 +3086,254 @@
                 const ev = events.find(e => e.id === eventId);
                 if (ev) ev.atDoorEnabled = enabled;
             } catch {
-                alert('Failed to update at-door settings.');
+                showToast('Failed to update at-door settings.');
             }
+        }
+
+        // ── Waitlist ────────────────────────────────────────────────────────────
+        async function renderWaitlistSection(eventId) {
+            const ev = events.find(e => e.id === eventId);
+            const enabled = !!ev?.waitlistEnabled;
+            let rows = '<div class="settings-empty">No one is on the waitlist.</div>';
+            try {
+                const r = await fetch(`/api/event/${eventId}/waitlist`);
+                if (r.ok) {
+                    const entries = await r.json();
+                    if (entries.length) {
+                        rows = `<table class="mini-table"><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Joined</th><th></th></tr></thead><tbody>` +
+                            entries.map(w => `
+                                <tr>
+                                    <td>${esc(w.name || '')}</td>
+                                    <td>${esc(w.email)}</td>
+                                    <td><span class="badge badge-${w.status}">${w.status}</span></td>
+                                    <td>${fmtDate(w.createdAt)}</td>
+                                    <td style="text-align:right;white-space:nowrap;">
+                                        ${w.status === 'waiting' ? `<button class="btn btn-primary btn-sm" onclick="promoteWaitlistEntry('${w.id}','${eventId}')">Promote</button>` : ''}
+                                        <button class="btn btn-danger btn-sm" onclick="removeWaitlistEntry('${w.id}','${eventId}')">Remove</button>
+                                    </td>
+                                </tr>`).join('') + '</tbody></table>';
+                    }
+                }
+            } catch {}
+            return `
+                <div class="modal-section-title">Waitlist</div>
+                <div style="font-size:12px;color:#888;margin-bottom:14px;">
+                    When an event is full, people can join a waitlist instead of being turned away. Promote an entry to issue them a ticket (free events) or send them a claim link (paid events).
+                </div>
+                <label style="display:flex;align-items:center;gap:12px;cursor:pointer;margin-bottom:18px;padding:12px;background:#f4f5f8;border-radius:10px;border:1px solid #dde3ed;">
+                    <input type="checkbox" id="waitlistToggle" ${enabled ? 'checked' : ''}
+                        onchange="setWaitlistEnabled('${eventId}', this.checked)"
+                        style="width:18px;height:18px;accent-color:#1a1f3c;cursor:pointer;flex-shrink:0;">
+                    <div>
+                        <div style="font-size:13px;font-weight:600;">Enable Waitlist</div>
+                        <div style="font-size:12px;color:#888;margin-top:2px;">Requires a capacity limit set on this event</div>
+                    </div>
+                </label>
+                <div id="waitlistRows">${rows}</div>
+            `;
+        }
+
+        async function setWaitlistEnabled(eventId, enabled) {
+            try {
+                const r = await fetch(`/api/event/${eventId}/waitlist-enabled`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!r.ok) throw new Error();
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.waitlistEnabled = enabled;
+            } catch {
+                showToast('Failed to update waitlist settings.');
+            }
+        }
+
+        async function promoteWaitlistEntry(entryId, eventId) {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const r = await fetch(`/api/waitlist/${entryId}/promote`, { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) { showToast(d.error || 'Failed to promote from waitlist.'); return; }
+                showToast(d.notified ? 'Notified — they have a claim link to complete checkout.' : 'Ticket issued from waitlist.');
+                const section = document.getElementById('tab-waitlist');
+                if (section) section.innerHTML = await renderWaitlistSection(eventId);
+                loadEvents();
+            } catch {
+                showToast('Failed to promote from waitlist.');
+            }
+        }
+
+        async function removeWaitlistEntry(entryId, eventId) {
+            if (!confirm('Remove this person from the waitlist?')) return;
+            try {
+                await fetch(`/api/waitlist/${entryId}`, { method: 'DELETE' });
+                const section = document.getElementById('tab-waitlist');
+                if (section) section.innerHTML = await renderWaitlistSection(eventId);
+            } catch {
+                showToast('Failed to remove waitlist entry.');
+            }
+        }
+
+        // ── Discount Codes ──────────────────────────────────────────────────────
+        async function renderDiscountsSection(eventId) {
+            let rows = '<div class="settings-empty">No discount codes yet.</div>';
+            try {
+                const r = await fetch(`/api/event/${eventId}/discount-codes`);
+                if (r.ok) {
+                    const codes = await r.json();
+                    if (codes.length) {
+                        rows = `<table class="mini-table"><thead><tr><th>Code</th><th>Discount</th><th>Used</th><th>Status</th><th></th></tr></thead><tbody>` +
+                            codes.map(c => `
+                                <tr>
+                                    <td><strong>${esc(c.code)}</strong></td>
+                                    <td>${c.type === 'percent' ? c.value + '% off' : '$' + (c.value / 100).toFixed(2) + ' off'}</td>
+                                    <td>${c.usedCount}${c.maxUses != null ? ' / ' + c.maxUses : ''}</td>
+                                    <td><span class="badge badge-${c.active ? 'active' : 'inactive'}">${c.active ? 'Active' : 'Inactive'}</span></td>
+                                    <td style="text-align:right;white-space:nowrap;">
+                                        <button class="btn btn-secondary btn-sm" onclick="toggleDiscountCodeActive('${c.id}','${eventId}',${!c.active})">${c.active ? 'Deactivate' : 'Activate'}</button>
+                                        <button class="btn btn-danger btn-sm" onclick="deleteDiscountCode('${c.id}','${eventId}')">Delete</button>
+                                    </td>
+                                </tr>`).join('') + '</tbody></table>';
+                    }
+                }
+            } catch {}
+            return `
+                <div class="modal-section-title">Discount Codes</div>
+                <div style="font-size:12px;color:#888;margin-bottom:14px;">
+                    Percentage or fixed-amount codes applied at checkout for paid events. A 100%-off code issues the ticket immediately.
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;padding:12px;background:#f4f5f8;border-radius:10px;border:1px solid #dde3ed;">
+                    <input type="text" id="newCodeText" placeholder="CODE" maxlength="24" style="width:110px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;text-transform:uppercase;">
+                    <select id="newCodeType" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                        <option value="percent">% off</option>
+                        <option value="fixed">$ off</option>
+                    </select>
+                    <input type="number" id="newCodeValue" placeholder="Value" min="1" style="width:80px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                    <input type="number" id="newCodeMaxUses" placeholder="Max uses (optional)" min="1" style="width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                    <button class="btn btn-primary btn-sm" onclick="createDiscountCode('${eventId}')">Add Code</button>
+                </div>
+                <div id="discountRows">${rows}</div>
+            `;
+        }
+
+        async function createDiscountCode(eventId) {
+            const code = document.getElementById('newCodeText').value.trim();
+            const type = document.getElementById('newCodeType').value;
+            const value = parseInt(document.getElementById('newCodeValue').value, 10);
+            const maxUsesRaw = document.getElementById('newCodeMaxUses').value.trim();
+            if (!code || !value) { showToast('Code and value are required.'); return; }
+            try {
+                const r = await fetch(`/api/event/${eventId}/discount-codes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, type, value, maxUses: maxUsesRaw || null })
+                });
+                const d = await r.json();
+                if (!r.ok) { showToast(d.error || 'Failed to create discount code.'); return; }
+                showToast(`Code ${code.toUpperCase()} created.`);
+                const section = document.getElementById('tab-discounts');
+                if (section) section.innerHTML = await renderDiscountsSection(eventId);
+            } catch {
+                showToast('Failed to create discount code.');
+            }
+        }
+
+        async function toggleDiscountCodeActive(codeId, eventId, active) {
+            try {
+                await fetch(`/api/discount-codes/${codeId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active })
+                });
+                const section = document.getElementById('tab-discounts');
+                if (section) section.innerHTML = await renderDiscountsSection(eventId);
+            } catch {
+                showToast('Failed to update discount code.');
+            }
+        }
+
+        async function deleteDiscountCode(codeId, eventId) {
+            if (!confirm('Delete this discount code? This cannot be undone.')) return;
+            try {
+                await fetch(`/api/discount-codes/${codeId}`, { method: 'DELETE' });
+                const section = document.getElementById('tab-discounts');
+                if (section) section.innerHTML = await renderDiscountsSection(eventId);
+            } catch {
+                showToast('Failed to delete discount code.');
+            }
+        }
+
+        // ── Payments (Beta) ─────────────────────────────────────────────────────
+        async function renderPaymentsSection(eventId) {
+            let rows = '<div class="settings-empty">No orders yet for this event.</div>';
+            try {
+                const r = await fetch(`/api/event/${eventId}/orders`);
+                if (r.ok) {
+                    const orders = await r.json();
+                    if (orders.length) {
+                        rows = `<table class="mini-table"><thead><tr><th>Buyer</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>` +
+                            orders.map(o => `
+                                <tr>
+                                    <td>${esc(o.buyerName || '')}<br><span style="color:#999;font-size:11px;">${esc(o.buyerEmail || '')}</span></td>
+                                    <td>$${(o.amount / 100).toFixed(2)}${o.discountAmount ? `<br><span style="color:#999;font-size:11px;">$${(o.discountAmount / 100).toFixed(2)} off</span>` : ''}</td>
+                                    <td><span class="badge badge-${o.status}">${o.status}</span></td>
+                                    <td>${fmtDate(o.createdAt)}</td>
+                                    <td style="text-align:right;">
+                                        ${o.status === 'fulfilled' && o.paymentIntentId ? `<button class="btn btn-danger btn-sm" onclick="refundOrder('${o.id}','${eventId}')">Refund</button>` : ''}
+                                    </td>
+                                </tr>`).join('') + '</tbody></table>';
+                    }
+                }
+            } catch {}
+            return `
+                <div class="modal-section-title">Payments<span class="beta-pill">BETA</span></div>
+                <div style="font-size:12px;color:#888;margin-bottom:14px;">
+                    Orders placed for this event through Stripe Checkout. Refunds go back to the original payment method.
+                </div>
+                <div id="paymentsRows">${rows}</div>
+            `;
+        }
+
+        async function refundOrder(orderId, eventId) {
+            if (!confirm('Issue a full refund for this order? This charges back to the original payment method and cannot be undone.')) return;
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const r = await fetch(`/api/orders/${orderId}/refund`, { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) { showToast(d.error || 'Refund failed.'); btn.disabled = false; btn.textContent = 'Refund'; return; }
+                showToast(`Refunded $${(d.refundAmount / 100).toFixed(2)}.`);
+                const section = document.getElementById('tab-payments');
+                if (section) section.innerHTML = await renderPaymentsSection(eventId);
+            } catch {
+                showToast('Refund failed.');
+            }
+        }
+
+        // ── Audit Log (appended to Access & Sharing tab) ────────────────────────
+        async function renderAuditLogSection(eventId) {
+            try {
+                const r = await fetch(`/api/event/${eventId}/audit-log?limit=25`);
+                if (!r.ok) return '';
+                const { entries } = await r.json();
+                if (!entries.length) return `<div class="modal-section-title" style="margin-top:20px;">Activity Log</div><div class="settings-empty">No activity recorded yet.</div>`;
+                const rows = entries.map(e => `
+                    <tr>
+                        <td>${esc(e.userEmail || 'system')}</td>
+                        <td>${esc(e.action.replace(/[._]/g, ' '))}</td>
+                        <td style="color:#999;font-size:11px;">${fmtDate(e.createdAt)}</td>
+                    </tr>`).join('');
+                return `
+                    <div class="modal-section-title" style="margin-top:20px;">Activity Log</div>
+                    <div style="font-size:12px;color:#888;margin-bottom:10px;">Who did what to this event, most recent first.</div>
+                    <div style="max-height:220px;overflow-y:auto;">
+                        <table class="mini-table"><thead><tr><th>Who</th><th>Action</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>
+                    </div>
+                `;
+            } catch { return ''; }
         }
 
         // ── Settings tabs ───────────────────────────────────────────────────────
@@ -3178,7 +3572,7 @@
             if (res.ok) {
                 location.href = '/login.html';
             } else {
-                alert('Failed to delete account. Please try again.');
+                showToast('Failed to delete account. Please try again.');
             }
         }
 
@@ -3441,10 +3835,10 @@
             });
             const data = await r.json();
             if (r.ok) {
-                alert('Access granted!');
+                showToast('Access granted!');
                 loadAccessData(eventId);
             } else {
-                alert(data.error || 'Failed to share room');
+                showToast(data.error || 'Failed to share room');
             }
         }
 
@@ -3812,7 +4206,7 @@
                 const event = events.find(e => e.id === selectedId);
                 if (event) await fetchAndRender(event, true);
             } else {
-                alert('Could not delete registration.');
+                showToast('Could not delete registration.');
             }
         }
 
@@ -3836,10 +4230,10 @@
             btn.textContent = 'Resend Only';
             if (r.ok) {
                 const d = await r.json();
-                alert(`Email resent (${d.count} ticket${d.count > 1 ? 's' : ''}).`);
+                showToast(`Email resent (${d.count} ticket${d.count > 1 ? 's' : ''}).`);
             } else {
                 const d = await r.json();
-                alert(d.error || 'Failed to resend email');
+                showToast(d.error || 'Failed to resend email');
             }
         }
 
@@ -3899,7 +4293,7 @@
             const eventId = modal.dataset.eventId;
             const subject = document.getElementById('bulkEmailSubject').value.trim();
             const message = document.getElementById('bulkEmailBody').value.trim();
-            if (!subject || !message) return alert('Subject and message are required.');
+            if (!subject || !message) return showToast('Subject and message are required.');
             const selectedIds = modal.dataset.selectedIds ? JSON.parse(modal.dataset.selectedIds) : null;
             btn.disabled = true;
             btn.textContent = 'Sending…';
@@ -3915,10 +4309,10 @@
             if (r.ok) {
                 const d = await r.json();
                 closeBulkEmailModal();
-                alert(`Sent to ${d.sent} registration${d.sent !== 1 ? 's' : ''}${d.failed > 0 ? ` (${d.failed} failed)` : ''}.`);
+                showToast(`Sent to ${d.sent} registration${d.sent !== 1 ? 's' : ''}${d.failed > 0 ? ` (${d.failed} failed)` : ''}.`);
             } else {
                 const d = await r.json();
-                alert(d.error || 'Failed to send emails.');
+                showToast(d.error || 'Failed to send emails.');
             }
         }
 
@@ -3941,7 +4335,7 @@
             const id = document.getElementById('directEmailModal').dataset.ticketId;
             const subject = document.getElementById('directEmailSubject').value.trim();
             const message = document.getElementById('directEmailBody').value.trim();
-            if (!subject || !message) return alert('Subject and message are required.');
+            if (!subject || !message) return showToast('Subject and message are required.');
             btn.disabled = true;
             btn.textContent = 'Sending…';
             const r = await fetch('/api/ticket/' + id + '/direct-email', {
@@ -3953,10 +4347,10 @@
             btn.textContent = 'Send';
             if (r.ok) {
                 closeDirectEmailModal();
-                alert('Email sent.');
+                showToast('Email sent.');
             } else {
                 const d = await r.json();
-                alert(d.error || 'Failed to send email.');
+                showToast(d.error || 'Failed to send email.');
             }
         }
 
@@ -3970,7 +4364,7 @@
             const email = document.getElementById('editTicketEmail').value;
             const customFields = getCustomFieldsValues('editTicketCustomFields');
 
-            if (!name || !email) return alert('Name and email required');
+            if (!name || !email) return showToast('Name and email required');
             const r = await fetch('/api/ticket/' + id, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -3981,9 +4375,9 @@
                 closeEditTicketModal();
                 const event = events.find(e => e.id === selectedId);
                 fetchAndRender(event, true);
-                alert(noEmail ? 'Tickets updated.' : 'Tickets updated and email sent.');
+                showToast(noEmail ? 'Tickets updated.' : 'Tickets updated and email sent.');
             } else {
-                alert(data.error || 'Failed to edit ticket');
+                showToast(data.error || 'Failed to edit ticket');
             }
         }
     </script>
