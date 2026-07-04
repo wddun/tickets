@@ -307,6 +307,15 @@
             color: #dc2626;
         }
 
+        /* Referenced from several places (bulk-action row, confirm dialogs) but
+           had no rule at all — fell back to unstyled (transparent bg, default
+           text color), looking broken next to the styled primary/danger buttons. */
+        .btn-secondary {
+            background: #f1f2f5;
+            color: #333;
+            border: 1px solid #e0e1e6;
+        }
+
         .btn-sm {
             padding: 6px 12px;
             font-size: 12px;
@@ -1612,12 +1621,81 @@
             setTimeout(dismiss, 5000);
         }
 
+        // Replaces the native confirm() dialog, which looks jarring (browser
+        // chrome, no styling control) next to everything else in this app.
+        // Promise-based so call sites just change confirm(msg) to
+        // await confirmDialog(msg) — same boolean return, no other rewiring.
+        function confirmDialog(message, { title = 'Are you sure?', confirmText = 'Confirm', danger = true } = {}) {
+            return new Promise(resolve => {
+                const overlay = document.createElement('div');
+                overlay.className = 'modal-overlay';
+                overlay.style.zIndex = '1500';
+                overlay.innerHTML = `
+                    <div class="modal" style="max-width:400px;">
+                        <div class="modal-header"><h2>${esc(title)}</h2></div>
+                        <div style="font-size:14px;color:#444;line-height:1.5;margin-bottom:22px;">${esc(message)}</div>
+                        <div style="display:flex;gap:10px;justify-content:flex-end;">
+                            <button class="btn btn-secondary" id="confirmDialogCancel">Cancel</button>
+                            <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="confirmDialogOk">${esc(confirmText)}</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+
+                const finish = (result) => {
+                    document.removeEventListener('keydown', onKeydown);
+                    overlay.remove();
+                    resolve(result);
+                };
+                const onKeydown = (e) => {
+                    if (e.key === 'Escape') finish(false);
+                    if (e.key === 'Enter') finish(true);
+                };
+                document.addEventListener('keydown', onKeydown);
+                overlay.addEventListener('click', (e) => { if (e.target === overlay) finish(false); });
+                overlay.querySelector('#confirmDialogCancel').onclick = () => finish(false);
+                overlay.querySelector('#confirmDialogOk').onclick = () => finish(true);
+                overlay.querySelector('#confirmDialogOk').focus();
+            });
+        }
+
         function setUrlState(params) {
             const url = new URL(location.href);
             url.search = '';
             Object.entries(params).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
             history.replaceState(null, '', url);
         }
+
+        // Esc closes whichever modal is currently open. Close functions are
+        // looked up by name from window at keydown time (not resolved into
+        // this array up front) — several of them are declared in the second
+        // <script> block further down the page, which hasn't run yet while
+        // this first block is still executing, so referencing them directly
+        // here would throw a ReferenceError before the page even finishes
+        // loading. confirmDialog manages its own Esc handler directly since
+        // it's created/destroyed dynamically rather than toggled, so it isn't
+        // in this list.
+        const MODAL_CLOSE_FN_NAMES = [
+            ['ticketPickerModal', 'closeTicketPicker'],
+            ['bulkImportModal', 'closeBulkImportModal'],
+            ['bulkEmailModal', 'closeBulkEmailModal'],
+            ['directEmailModal', 'closeDirectEmailModal'],
+            ['metricsModal', 'closeMetricsModal'],
+            ['newEventModal', 'closeNewEventModal'],
+            ['editTicketModal', 'closeEditTicketModal'],
+            ['editEventModal', 'closeEditEventModal'],
+            ['settingsModal', 'closeSettings'],
+        ];
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            for (const [id, fnName] of MODAL_CLOSE_FN_NAMES) {
+                const el = document.getElementById(id);
+                if (el && el.style.display !== 'none' && typeof window[fnName] === 'function') {
+                    window[fnName]();
+                    return;
+                }
+            }
+        });
 
         async function init() {
             const r = await fetch('/api/auth/me');
@@ -1861,7 +1939,7 @@
 
         async function deleteSelectedEvents() {
             if (!checkedEventIds.size) return;
-            if (!confirm(`Delete ${checkedEventIds.size} event(s) and all their tickets? This cannot be undone.`)) return;
+            if (!await confirmDialog(`Delete ${checkedEventIds.size} event(s) and all their tickets? This cannot be undone.`)) return;
             const r = await fetch('/api/events/bulk', {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
@@ -2212,7 +2290,7 @@
 
         async function undoCheckInSelected(eventId) {
             if (!checkedRegIds.size) return;
-            if (!confirm(`Undo check-in for ${checkedRegIds.size} registration(s)?`)) return;
+            if (!await confirmDialog(`Undo check-in for ${checkedRegIds.size} registration(s)?`)) return;
             const r = await fetch('/api/checkin/bulk', {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
@@ -2229,7 +2307,7 @@
 
         async function resendSelectedTickets(eventId) {
             if (!checkedRegIds.size) return;
-            if (!confirm(`Resend ticket emails to ${checkedRegIds.size} registration(s)?`)) return;
+            if (!await confirmDialog(`Resend ticket emails to ${checkedRegIds.size} registration(s)?`)) return;
             const r = await fetch('/api/registrations/bulk-resend', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2246,7 +2324,7 @@
 
         async function deleteSelectedTickets(eventId) {
             if (!checkedRegIds.size) return;
-            if (!confirm(`Delete ${checkedRegIds.size} registration(s) and all their tickets?`)) return;
+            if (!await confirmDialog(`Delete ${checkedRegIds.size} registration(s) and all their tickets?`)) return;
             const r = await fetch('/api/registrations/bulk', {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
@@ -2453,7 +2531,7 @@
         }
 
         async function deleteEvent(id) {
-            if (!confirm('Delete this event and all its tickets? This cannot be undone.')) return;
+            if (!await confirmDialog('Delete this event and all its tickets? This cannot be undone.')) return;
             const r = await fetch(`/api/event/${id}`, { method: 'DELETE' });
             if (r.ok) {
                 selectedId = null;
@@ -2801,7 +2879,7 @@
         }
 
         async function revokeAccess(accessId, eventId) {
-            if (!confirm('Revoke access for this user?')) return;
+            if (!await confirmDialog('Revoke access for this user?')) return;
             try {
                 const res = await fetch(`/api/sheet/access/${accessId}`, { method: 'DELETE' });
                 if (res.ok) {
@@ -3108,7 +3186,7 @@
                                     <td><span class="badge badge-${w.status}">${w.status}</span></td>
                                     <td>${fmtDate(w.createdAt)}</td>
                                     <td style="text-align:right;white-space:nowrap;">
-                                        ${w.status === 'waiting' ? `<button class="btn btn-primary btn-sm" onclick="promoteWaitlistEntry('${w.id}','${eventId}')">Promote</button>` : ''}
+                                        ${w.status === 'waiting' ? `<button class="btn btn-primary btn-sm" onclick="promoteWaitlistEntry('${w.id}','${eventId}',this)">Promote</button>` : ''}
                                         <button class="btn btn-danger btn-sm" onclick="removeWaitlistEntry('${w.id}','${eventId}')">Remove</button>
                                     </td>
                                 </tr>`).join('') + '</tbody></table>';
@@ -3148,8 +3226,7 @@
             }
         }
 
-        async function promoteWaitlistEntry(entryId, eventId) {
-            const btn = event.target;
+        async function promoteWaitlistEntry(entryId, eventId, btn) {
             btn.disabled = true;
             btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
@@ -3166,7 +3243,7 @@
         }
 
         async function removeWaitlistEntry(entryId, eventId) {
-            if (!confirm('Remove this person from the waitlist?')) return;
+            if (!await confirmDialog('Remove this person from the waitlist?')) return;
             try {
                 await fetch(`/api/waitlist/${entryId}`, { method: 'DELETE' });
                 const section = document.getElementById('tab-waitlist');
@@ -3255,7 +3332,7 @@
         }
 
         async function deleteDiscountCode(codeId, eventId) {
-            if (!confirm('Delete this discount code? This cannot be undone.')) return;
+            if (!await confirmDialog('Delete this discount code? This cannot be undone.')) return;
             try {
                 await fetch(`/api/discount-codes/${codeId}`, { method: 'DELETE' });
                 const section = document.getElementById('tab-discounts');
@@ -3281,7 +3358,7 @@
                                     <td><span class="badge badge-${o.status}">${o.status}</span></td>
                                     <td>${fmtDate(o.createdAt)}</td>
                                     <td style="text-align:right;">
-                                        ${o.status === 'fulfilled' && o.paymentIntentId ? `<button class="btn btn-danger btn-sm" onclick="refundOrder('${o.id}','${eventId}')">Refund</button>` : ''}
+                                        ${o.status === 'fulfilled' && o.paymentIntentId ? `<button class="btn btn-danger btn-sm" onclick="refundOrder('${o.id}','${eventId}',this)">Refund</button>` : ''}
                                     </td>
                                 </tr>`).join('') + '</tbody></table>';
                     }
@@ -3296,9 +3373,11 @@
             `;
         }
 
-        async function refundOrder(orderId, eventId) {
-            if (!confirm('Issue a full refund for this order? This charges back to the original payment method and cannot be undone.')) return;
-            const btn = event.target;
+        async function refundOrder(orderId, eventId, btn) {
+            // btn is passed explicitly (not read from the global `event`) —
+            // confirmDialog is async, so by the time it resolves, window.event
+            // would be the confirm dialog's own OK-button click, not this one.
+            if (!await confirmDialog('Issue a full refund for this order? This charges back to the original payment method and cannot be undone.')) return;
             btn.disabled = true;
             btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
@@ -3567,7 +3646,7 @@
         }
 
         async function confirmDeleteAccount() {
-            if (!confirm('Are you sure you want to delete your account? This will permanently delete all your events and tickets and cannot be undone.')) return;
+            if (!await confirmDialog('Are you sure you want to delete your account? This will permanently delete all your events and tickets and cannot be undone.')) return;
             const res = await fetch('/api/auth/account', { method: 'DELETE' });
             if (res.ok) {
                 location.href = '/login.html';
@@ -4195,7 +4274,7 @@
 
         async function deleteRegistrationFromModal() {
             const regId = document.getElementById('editRegId').value;
-            if (!confirm('Delete this registration and all its tickets? This cannot be undone.')) return;
+            if (!await confirmDialog('Delete this registration and all its tickets? This cannot be undone.')) return;
             const r = await fetch('/api/registrations/bulk', {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
@@ -4220,7 +4299,7 @@
 
         async function resendTicketEmail(btn) {
             if (hasUnsavedChanges()) {
-                if (!confirm('You have unsaved changes. "Resend Only" will send the current saved data — your edits will NOT be included. Continue?')) return;
+                if (!await confirmDialog('You have unsaved changes. "Resend Only" will send the current saved data — your edits will NOT be included. Continue?')) return;
             }
             const id = document.getElementById('editTicketId').value;
             btn.disabled = true;
