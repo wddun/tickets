@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## House style
+
+- **No emojis in code, UI text, comments, commit messages, or files unless the user explicitly asks or there's no alternative that fits.** Prefer inline SVG icons (the codebase already uses them widely — see scanner.html, checkin.html, dashboard.html) or plain text labels. When editing existing UI that already contains emojis, do not add more — leave the existing ones in place unless asked to clean them up.
+
 ## Running the server
 
 ```bash
@@ -23,6 +27,10 @@ No build step. The server is a single `server.js` file; `public/` is served as s
 - **Sessions**: `express-session` + `session-file-store` (files in `sessions/`). Cookies are the only auth mechanism; no JWT.
 - **Email**: AWS SES via `@aws-sdk/client-ses`. All sends go through the serialised `emailChain` queue in `server.js` to respect the SES rate limit (`SES_MIN_INTERVAL_MS`). Never call `ses.send()` directly — use `sendEmail()`.
 - **Apple Wallet**: `passkit-generator` with certs in `certs/` (never committed). Pass template is `pass-assets.pass/`. Generated `.pkpass` files are cached in `pass-cache/`.
+- **Audit log**: `auditLog` table (persistent — separate from the in-memory `logBuffer` ring buffer, which is lost on restart). Written via `logAudit(req, { eventId, action, details })`, called from consequential admin actions (event/registration CRUD, check-in/undo, bulk email, access sharing, refunds, discount codes, waitlist). `GET /api/event/:id/audit-log` (view access) and `GET /api/admin/audit-log` (admin only), both paginated.
+- **Discount codes**: `discountCodes` table, percent or fixed-amount, per-event, optional `maxUses`/`expiresAt`. Applied in `POST /api/checkout/:eventId` via `discountCode` in the body; validated with `validateDiscountCode()`. A 100%-off code issues the ticket directly (bypasses Stripe — Checkout doesn't support $0 payment-mode sessions). `usedCount` only increments on confirmed payment (webhook), not at checkout creation, so abandoned carts don't burn a redemption.
+- **Waitlist**: `waitlist` table + `events.waitlistEnabled`. Registering (free `/api/register` or paid `/api/checkout/:eventId`) for a full event with the waitlist enabled returns `{waitlisted: true}` instead of erroring. `POST /api/waitlist/:id/promote` issues a free ticket directly for free events, or emails a claim link for paid events (money still only changes hands through Stripe).
+- **Payments (Beta)**: `GET /api/event/:id/orders` lists orders; `POST /api/orders/:id/refund` issues a real Stripe refund and updates the order. Requires `orders.paymentIntentId`, which is set when the webhook fulfills a session — a 100%-discount order has none (nothing was ever charged) and can't be refunded through this route. The webhook also listens for `charge.refunded` so refunds issued directly from the Stripe dashboard stay in sync.
 
 ### Real-time / SSE
 
