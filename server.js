@@ -1,5 +1,5 @@
 import express from 'express';
-import { db, stmt, rowToTicket, rowToEvent, rowToUser, getWalletDevicesBySerials, getTicketsByTokens } from './db-sqlite.js';
+import { db, stmt, rowToTicket, rowToEvent, rowToUser, rowToDiscountCode, rowToWaitlistEntry, getWalletDevicesBySerials, getTicketsByTokens } from './db-sqlite.js';
 import { nanoid } from 'nanoid';
 import QRCode from 'qrcode';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
@@ -55,6 +55,29 @@ function log(tag, msg) {
 }
 function getIP(req) {
     return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+}
+
+// Persistent audit trail (separate from the in-memory `log()` ring buffer
+// above, which is lost on every restart and isn't meant for accountability —
+// this is for "who did what, when" on consequential actions: event/ticket
+// mutations, check-ins, refunds, discount codes, access changes.
+function logAudit(req, { eventId = null, action, details = null }) {
+    try {
+        const userId = req.session?.userId || null;
+        const user = userId ? rowToUser(stmt.users.byId.get(userId)) : null;
+        stmt.auditLog.insert.run(
+            nanoid(10),
+            userId,
+            user?.email || null,
+            eventId,
+            action,
+            details ? JSON.stringify(details) : null,
+            getIP(req),
+            new Date().toISOString()
+        );
+    } catch (err) {
+        log('audit', `[ERROR] Failed to write audit entry — action: ${action}  error: ${err.message}`);
+    }
 }
 
 const ses = new SESClient({
@@ -775,6 +798,23 @@ app.get('/api/admin/logs', requireAuth, (req, res) => {
     res.json(logBuffer);
 });
 
+// Persistent, per-event audit trail (view-level access — anyone who can see
+// the event's dashboard can see who did what to it).
+app.get('/api/event/:id/audit-log', requireAuth, (req, res) => {
+    const eventId = req.params.id;
+    if (!userHasEventAccess(req.session.userId, eventId)) {
+        return res.status(403).json({ error: 'You do not have access to this event' });
+    }
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    const entries = stmt.auditLog.byEventId.all(eventId, limit, offset).map(row => ({
+        ...row,
+        details: row.details ? JSON.parse(row.details) : null,
+    }));
+    const total = stmt.auditLog.countByEventId.get(eventId)?.cnt ?? 0;
+    res.json({ entries, total });
+});
+
 // Register device for app push notifications
 app.post('/api/push/register', requireAuth, async (req, res) => {
     const token = String(req.body?.token || '').trim();
@@ -801,6 +841,18 @@ const requireAdmin = (req, res, next) => {
     }
     next();
 };
+
+// System-wide audit trail (admin only).
+app.get('/api/admin/audit-log', requireAdmin, (req, res) => {
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    const entries = stmt.auditLog.all.all(limit, offset).map(row => ({
+        ...row,
+        details: row.details ? JSON.parse(row.details) : null,
+    }));
+    const total = stmt.auditLog.countAll.get()?.cnt ?? 0;
+    res.json({ entries, total });
+});
 
 function userHasEventAccess(userId, eventId) {
     const user = rowToUser(stmt.users.byId.get(userId));
@@ -939,6 +991,14 @@ app.post('/api/register', async (req, res) => {
     if (event.capacity) {
         const count = stmt.tickets.byEventId.all(eventId).length;
         if (count >= event.capacity) {
+            if (event.waitlistEnabled) {
+                const cleanEmail = email.trim().toLowerCase();
+                const existing = stmt.waitlist.byEventAndEmail.get(eventId, cleanEmail);
+                if (existing) return res.json({ waitlisted: true, alreadyOnList: true });
+                stmt.waitlist.insert.run(nanoid(10), eventId, name.trim(), cleanEmail, null, 'waiting', new Date().toISOString());
+                log('waitlist', `[join] Added to waitlist — name: ${name}  email: ${cleanEmail}  event: ${event.name}`);
+                return res.json({ waitlisted: true });
+            }
             return res.status(400).json({ error: 'This event is sold out' });
         }
     }
@@ -994,6 +1054,29 @@ app.put('/api/event/:id/public-registration', requireAuth, (req, res) => {
 
 // Shared helper: issue a ticket + send confirmation email after a confirmed payment.
 // Returns { ticket, dbEvent, firstName, registrationId } or null if event missing.
+// Returns { discountCode, discountAmount, finalAmount } on success, or { error }.
+// baseAmount is in cents. Does NOT increment usedCount — that only happens
+// once a payment is actually confirmed (webhook), so abandoned checkouts
+// don't burn a redemption.
+function validateDiscountCode(eventId, rawCode, baseAmount) {
+    const code = String(rawCode || '').trim().toUpperCase();
+    if (!code) return { error: 'No code provided' };
+    const row = stmt.discountCodes.byEventAndCode.get(eventId, code);
+    if (!row) return { error: 'Invalid discount code' };
+    const discountCode = rowToDiscountCode(row);
+    if (!discountCode.active) return { error: 'This discount code is no longer active' };
+    if (discountCode.expiresAt && new Date(discountCode.expiresAt) < new Date()) {
+        return { error: 'This discount code has expired' };
+    }
+    if (discountCode.maxUses != null && discountCode.usedCount >= discountCode.maxUses) {
+        return { error: 'This discount code has reached its usage limit' };
+    }
+    const discountAmount = discountCode.type === 'percent'
+        ? Math.round(baseAmount * discountCode.value / 100)
+        : Math.min(baseAmount, discountCode.value);
+    return { discountCode, discountAmount, finalAmount: Math.max(0, baseAmount - discountAmount) };
+}
+
 function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
     const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
     if (!dbEvent) return null;
@@ -1031,7 +1114,7 @@ function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
 // Create a Checkout Session for a paid ticket
 app.post('/api/checkout/:eventId', async (req, res) => {
     if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
-    const { name, email } = req.body;
+    const { name, email, discountCode } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
 
     const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
@@ -1039,14 +1122,48 @@ app.post('/api/checkout/:eventId', async (req, res) => {
     if (!event.allowPublicRegistration) return res.status(403).json({ error: 'Registration is not open for this event' });
     if (!event.ticketPrice) return res.status(400).json({ error: 'This event is free — use /api/register' });
 
-    if (event.capacity) {
-        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
-        if (registered >= event.capacity) return res.status(400).json({ error: 'This event is sold out' });
-    }
-
     const cleanEmail = email.trim().toLowerCase();
     const cleanName  = name.trim();
+
+    if (event.capacity) {
+        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
+        if (registered >= event.capacity) {
+            if (event.waitlistEnabled) {
+                const existing = stmt.waitlist.byEventAndEmail.get(event.id, cleanEmail);
+                if (existing) return res.json({ waitlisted: true, alreadyOnList: true });
+                stmt.waitlist.insert.run(nanoid(10), event.id, cleanName, cleanEmail, null, 'waiting', new Date().toISOString());
+                log('waitlist', `[join] Added to waitlist — name: ${cleanName}  email: ${cleanEmail}  event: ${event.name}`);
+                return res.json({ waitlisted: true });
+            }
+            return res.status(400).json({ error: 'This event is sold out' });
+        }
+    }
+
+    let finalAmount = event.ticketPrice;
+    let discountCodeId = null;
+    let discountAmount = 0;
+    if (discountCode) {
+        const result = validateDiscountCode(event.id, discountCode, event.ticketPrice);
+        if (result.error) return res.status(400).json({ error: result.error });
+        discountCodeId = result.discountCode.id;
+        discountAmount = result.discountAmount;
+        finalAmount = result.finalAmount;
+    }
+
     const dateLabel  = (() => { try { return new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); } catch { return ''; } })();
+
+    // A 100%-off code means nothing to actually charge — Stripe Checkout
+    // doesn't support $0 payment-mode sessions, so issue the ticket directly
+    // instead of round-tripping through Stripe for no reason.
+    if (finalAmount <= 0) {
+        const issued = issueTicketForPayment({ eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail });
+        if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
+        if (discountCodeId) stmt.discountCodes.incrementUse.run(discountCodeId);
+        stmt.orders.insert.run(nanoid(8), nanoid(16), event.id, issued.registrationId, cleanName, cleanEmail, 0, 'usd', 'fulfilled', new Date().toISOString(), discountCodeId, discountAmount);
+        const qrDataUrl = await QRCode.toDataURL(`ticket:${issued.ticket.token}`);
+        log('stripe', `[checkout] 100% discount — ticket issued directly — name: ${cleanName}  event: ${event.name}  code: ${discountCode}`);
+        return res.json({ success: true, ticket: { token: issued.ticket.token, registrationId: issued.registrationId }, qr: qrDataUrl });
+    }
 
     const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
@@ -1058,19 +1175,19 @@ app.post('/api/checkout/:eventId', async (req, res) => {
                     description: [event.location?.name, dateLabel].filter(Boolean).join(' · ') || undefined,
                     images: event.imageUrl ? [`${BASE_URL}${event.imageUrl}`] : [],
                 },
-                unit_amount: event.ticketPrice,
+                unit_amount: finalAmount,
             },
             quantity: 1,
         }],
         mode: 'payment',
         customer_email: cleanEmail,
-        metadata: { eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail },
+        metadata: { eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail, discountCodeId: discountCodeId || '' },
         success_url: `${BASE_URL}/register.html?session={CHECKOUT_SESSION_ID}&id=${event.id}`,
         cancel_url: `${BASE_URL}/register.html?id=${event.id}`,
     });
 
-    stmt.orders.insert.run(nanoid(8), session.id, event.id, null, cleanName, cleanEmail, event.ticketPrice, 'usd', 'pending', new Date().toISOString());
-    log('stripe', `[checkout] Session created — name: ${cleanName}  event: ${event.name}  amount: ${event.ticketPrice}`);
+    stmt.orders.insert.run(nanoid(8), session.id, event.id, null, cleanName, cleanEmail, finalAmount, 'usd', 'pending', new Date().toISOString(), discountCodeId, discountAmount);
+    log('stripe', `[checkout] Session created — name: ${cleanName}  event: ${event.name}  amount: ${finalAmount}${discountCodeId ? ` (discount: ${discountAmount})` : ''}`);
     res.json({ url: session.url });
 });
 
@@ -1107,7 +1224,7 @@ app.post('/api/stripe/webhook', async (req, res) => {
 
     if (stripeEvent.type === 'checkout.session.completed') {
         const session = stripeEvent.data.object;
-        const { eventId, buyerName, buyerEmail } = session.metadata || {};
+        const { eventId, buyerName, buyerEmail, discountCodeId } = session.metadata || {};
         if (!eventId || !buyerName || !buyerEmail) return res.json({ received: true });
 
         const existing = stmt.orders.bySessionId.get(session.id);
@@ -1116,8 +1233,21 @@ app.post('/api/stripe/webhook', async (req, res) => {
         const issued = issueTicketForPayment({ eventId, buyerName, buyerEmail });
         if (!issued) return res.json({ received: true });
 
-        stmt.orders.fulfill.run(issued.registrationId, new Date().toISOString(), session.id);
+        stmt.orders.fulfill.run(issued.registrationId, new Date().toISOString(), session.payment_intent || null, session.id);
+        // Only counts toward the code's usage limit once payment is actually
+        // confirmed — an abandoned checkout never gets here.
+        if (discountCodeId) stmt.discountCodes.incrementUse.run(discountCodeId);
         log('stripe', `[webhook] Ticket issued — name: ${buyerName}  event: ${issued.dbEvent.name}  session: ${session.id}`);
+    } else if (stripeEvent.type === 'charge.refunded') {
+        // Catches refunds issued directly from the Stripe dashboard, not just
+        // ones initiated through our own refund endpoint below — keeps our
+        // order status in sync either way.
+        const charge = stripeEvent.data.object;
+        const order = charge.payment_intent ? stmt.orders.byPaymentIntentId.get(charge.payment_intent) : null;
+        if (order && order.status !== 'refunded') {
+            stmt.orders.refund.run(new Date().toISOString(), charge.amount_refunded, order.id);
+            log('stripe', `[webhook] Refund recorded — order: ${order.id}  amount: ${charge.amount_refunded}`);
+        }
     }
 
     res.json({ received: true });
@@ -1164,6 +1294,191 @@ app.post('/api/event/:eventId/at-door-register', requireAuth, async (req, res) =
     if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
     log('at-door', `[free] Ticket issued — name: ${name}  event: ${event.name}  by: ${req.session.userId}`);
     res.json({ ticket: issued.ticket, name });
+});
+
+// ── Discount / Promo Codes ─────────────────────────────────────────────────────
+
+app.get('/api/event/:id/discount-codes', requireAuth, (req, res) => {
+    const eventId = req.params.id;
+    if (!userHasEventAccess(req.session.userId, eventId)) {
+        return res.status(403).json({ error: 'You do not have access to this event' });
+    }
+    res.json(stmt.discountCodes.byEventId.all(eventId).map(rowToDiscountCode));
+});
+
+app.post('/api/event/:id/discount-codes', requireAuth, (req, res) => {
+    const eventId = req.params.id;
+    if (!userHasEventFullAccess(req.session.userId, eventId)) {
+        return res.status(403).json({ error: 'Only the event owner can manage discount codes' });
+    }
+    const event = rowToEvent(stmt.events.byId.get(eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const code = String(req.body.code || '').trim().toUpperCase();
+    const type = req.body.type === 'fixed' ? 'fixed' : 'percent';
+    const value = parseInt(req.body.value, 10);
+    if (!code) return res.status(400).json({ error: 'Code is required' });
+    if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: 'Value must be a positive number' });
+    if (type === 'percent' && value > 100) return res.status(400).json({ error: 'Percent discount cannot exceed 100' });
+    if (stmt.discountCodes.byEventAndCode.get(eventId, code)) {
+        return res.status(409).json({ error: 'A code with that name already exists for this event' });
+    }
+    const maxUses = req.body.maxUses != null && req.body.maxUses !== '' ? parseInt(req.body.maxUses, 10) : null;
+    const expiresAt = req.body.expiresAt ? new Date(req.body.expiresAt).toISOString() : null;
+
+    const id = nanoid(10);
+    stmt.discountCodes.insert.run(id, eventId, code, type, value, maxUses, expiresAt, 1, new Date().toISOString());
+    logAudit(req, { eventId, action: 'discount_code.created', details: { code, type, value } });
+    res.json({ success: true, discountCode: rowToDiscountCode(stmt.discountCodes.byId.get(id)) });
+});
+
+app.patch('/api/discount-codes/:id', requireAuth, (req, res) => {
+    const discountCode = rowToDiscountCode(stmt.discountCodes.byId.get(req.params.id));
+    if (!discountCode) return res.status(404).json({ error: 'Discount code not found' });
+    if (!userHasEventFullAccess(req.session.userId, discountCode.eventId)) {
+        return res.status(403).json({ error: 'Only the event owner can manage discount codes' });
+    }
+    const active = req.body.active === true || req.body.active === 'true';
+    stmt.discountCodes.setActive.run(active ? 1 : 0, req.params.id);
+    logAudit(req, { eventId: discountCode.eventId, action: active ? 'discount_code.activated' : 'discount_code.deactivated', details: { code: discountCode.code } });
+    res.json({ success: true });
+});
+
+app.delete('/api/discount-codes/:id', requireAuth, (req, res) => {
+    const discountCode = rowToDiscountCode(stmt.discountCodes.byId.get(req.params.id));
+    if (!discountCode) return res.status(404).json({ error: 'Discount code not found' });
+    if (!userHasEventFullAccess(req.session.userId, discountCode.eventId)) {
+        return res.status(403).json({ error: 'Only the event owner can manage discount codes' });
+    }
+    stmt.discountCodes.deleteById.run(req.params.id);
+    logAudit(req, { eventId: discountCode.eventId, action: 'discount_code.deleted', details: { code: discountCode.code } });
+    res.json({ success: true });
+});
+
+// Public — lets the registration page preview a discount before checkout,
+// without exposing the full code list.
+app.get('/api/event/:id/discount-codes/preview', (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const result = validateDiscountCode(req.params.id, req.query.code, event.ticketPrice);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json({ valid: true, discountAmount: result.discountAmount, finalAmount: result.finalAmount });
+});
+
+// ── Waitlist ────────────────────────────────────────────────────────────────────
+
+app.put('/api/event/:id/waitlist-enabled', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    const enabled = req.body.enabled === true || req.body.enabled === 'true';
+    stmt.events.setWaitlistEnabled.run(enabled ? 1 : 0, req.params.id);
+    logAudit(req, { eventId: event.id, action: enabled ? 'waitlist.enabled' : 'waitlist.disabled' });
+    res.json({ success: true, waitlistEnabled: enabled });
+});
+
+app.get('/api/event/:id/waitlist', requireAuth, (req, res) => {
+    const eventId = req.params.id;
+    if (!userHasEventAccess(req.session.userId, eventId)) {
+        return res.status(403).json({ error: 'You do not have access to this event' });
+    }
+    res.json(stmt.waitlist.byEventId.all(eventId).map(rowToWaitlistEntry));
+});
+
+// Join the waitlist directly (shown by register.html when an event is full).
+app.post('/api/event/:id/waitlist', async (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!event.waitlistEnabled) return res.status(403).json({ error: 'This event does not have a waitlist' });
+    const { name, email } = req.body;
+    if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = stmt.waitlist.byEventAndEmail.get(event.id, cleanEmail);
+    if (existing) return res.json({ waitlisted: true, alreadyOnList: true });
+    stmt.waitlist.insert.run(nanoid(10), event.id, name.trim(), cleanEmail, null, 'waiting', new Date().toISOString());
+    log('waitlist', `[join] Added to waitlist — name: ${name}  email: ${cleanEmail}  event: ${event.name}`);
+    res.json({ waitlisted: true });
+});
+
+// Promote someone off the waitlist: issues them a free ticket directly (for
+// paid events, promoting sends them a personal note to complete checkout —
+// keeps Stripe as the one place money actually changes hands) and marks the
+// waitlist entry as converted. Doesn't auto-check capacity — the organizer is
+// explicitly choosing to seat this person, e.g. after a cancellation.
+app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
+    const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
+    if (!entry) return res.status(404).json({ error: 'Waitlist entry not found' });
+    if (!userHasEventFullAccess(req.session.userId, entry.eventId)) {
+        return res.status(403).json({ error: 'Only the event owner can manage the waitlist' });
+    }
+    const event = rowToEvent(stmt.events.byId.get(entry.eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    if (event.ticketPrice > 0) {
+        stmt.waitlist.setNotified.run(new Date().toISOString(), entry.id);
+        if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+            sendEmail({
+                to: entry.email,
+                fromName: `Tickets - ${event.name}`,
+                replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
+                subject: `A spot opened up for ${event.name}!`,
+                html: `<div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px;"><p>Good news — a ticket for <strong>${event.name}</strong> just became available. <a href="${BASE_URL}/register.html?id=${event.id}">Complete your registration</a> to claim it before it's gone.</p></div>`,
+            }).catch(() => {});
+        }
+        logAudit(req, { eventId: event.id, action: 'waitlist.notified', details: { email: entry.email } });
+        return res.json({ success: true, notified: true });
+    }
+
+    const issued = issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email });
+    if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
+    stmt.waitlist.setStatus.run('converted', entry.id);
+    logAudit(req, { eventId: event.id, action: 'waitlist.promoted', details: { email: entry.email } });
+    res.json({ success: true, ticket: issued.ticket });
+});
+
+app.delete('/api/waitlist/:id', requireAuth, (req, res) => {
+    const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
+    if (!entry) return res.status(404).json({ error: 'Waitlist entry not found' });
+    if (!userHasEventFullAccess(req.session.userId, entry.eventId)) {
+        return res.status(403).json({ error: 'Only the event owner can manage the waitlist' });
+    }
+    stmt.waitlist.deleteById.run(req.params.id);
+    logAudit(req, { eventId: entry.eventId, action: 'waitlist.removed', details: { email: entry.email } });
+    res.json({ success: true });
+});
+
+// ── Payments (Beta) — orders & refunds ─────────────────────────────────────────
+
+app.get('/api/event/:id/orders', requireAuth, (req, res) => {
+    const eventId = req.params.id;
+    if (!userHasEventAccess(req.session.userId, eventId)) {
+        return res.status(403).json({ error: 'You do not have access to this event' });
+    }
+    res.json(stmt.orders.byEventId.all(eventId));
+});
+
+app.post('/api/orders/:id/refund', requireAuth, async (req, res) => {
+    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+    const order = stmt.orders.byId.get(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (!userHasEventFullAccess(req.session.userId, order.eventId)) {
+        return res.status(403).json({ error: 'Only the event owner can issue refunds' });
+    }
+    if (order.status === 'refunded') return res.status(400).json({ error: 'Already refunded' });
+    if (order.status !== 'fulfilled') return res.status(400).json({ error: 'Only fulfilled orders can be refunded' });
+    if (!order.paymentIntentId) return res.status(400).json({ error: 'No payment on file for this order (was it a 100%-discount ticket?)' });
+
+    try {
+        const refund = await stripe.refunds.create({ payment_intent: order.paymentIntentId });
+        stmt.orders.refund.run(new Date().toISOString(), refund.amount, order.id);
+        const event = rowToEvent(stmt.events.byId.get(order.eventId));
+        logAudit(req, { eventId: order.eventId, action: 'order.refunded', details: { buyerEmail: order.buyerEmail, amount: refund.amount } });
+        log('stripe', `[refund] Issued — order: ${order.id}  event: ${event?.name}  amount: ${refund.amount}  by: ${req.session.userId}`);
+        res.json({ success: true, refundAmount: refund.amount });
+    } catch (err) {
+        log('stripe', `[refund] FAILED — order: ${order.id}  error: ${err.message}`);
+        res.status(500).json({ error: err.message || 'Refund failed' });
+    }
 });
 
 // API: Bulk Register Tickets (for Google Sheets integration)
@@ -1526,6 +1841,7 @@ app.post('/api/events', requireAuth, async (req, res) => {
     };
 
     stmt.events.insert.run(newEvent.id, newEvent.userId, newEvent.name, newEvent.time, newEvent.endTime, newEvent.color, newEvent.imageUrl, newEvent.scannerPin, JSON.stringify(newEvent.location), 0, null, null, 0, null, 24, null, null, new Date().toISOString());
+    logAudit(req, { eventId: newEvent.id, action: 'event.created', details: { name: newEvent.name } });
     res.json({ success: true, eventId: newEvent.id, event: newEvent });
 });
 
@@ -1564,42 +1880,6 @@ app.get('/api/event/:id', (req, res) => {
         event.ticketsRemaining = Math.max(0, event.capacity - registered);
     }
     res.json(event);
-});
-
-app.post('/api/events', requireAuth, upload.single('image'), async (req, res) => {
-    const { name, time, endTime, color, locationName, lat, lng } = req.body;
-    let imageUrl = null;
-
-    if (req.file) {
-        if (req.file.mimetype === 'image/jpeg') {
-            const pngName = req.file.filename.replace(/.[^.]+$/, '.png');
-            const pngPath = path.join(uploadsDir, pngName);
-            await sharp(req.file.path).png().toFile(pngPath);
-            await fs.promises.unlink(req.file.path);
-            imageUrl = `/uploads/${pngName}`;
-        } else {
-            imageUrl = `/uploads/${req.file.filename}`;
-        }
-    }
-
-    const newEvent = {
-        id: nanoid(10),
-        userId: req.session.userId,
-        name,
-        time,
-        endTime: endTime || null,
-        color,
-        imageUrl,
-        capacity: parseInt(req.body.capacity) || null,
-        scannerPin: Math.floor(100000 + Math.random() * 900000).toString(), // 6-digit PIN
-        location: {
-            name: locationName || 'Venue',
-            lat: parseFloat(lat) || 37.33182,
-            lng: parseFloat(lng) || -122.03118
-        }
-    };
-    stmt.events.insert.run(newEvent.id, newEvent.userId, newEvent.name, newEvent.time, newEvent.endTime, newEvent.color, newEvent.imageUrl, newEvent.scannerPin, JSON.stringify(newEvent.location), 0, newEvent.capacity || null, null, 0, null, 24, null, null, new Date().toISOString());
-    res.json(newEvent);
 });
 
 // Edit event details
@@ -1711,6 +1991,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.events.deleteById.run(req.params.id);
     });
     deleteEvent();
+    logAudit(req, { eventId: event.id, action: 'event.deleted', details: { name: event.name } });
     res.json({ success: true });
 });
 
@@ -1732,6 +2013,9 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
         }
     });
     bulkDelete();
+    for (const eventId of allowed) {
+        logAudit(req, { eventId, action: 'event.deleted', details: { bulk: true } });
+    }
     res.json({ success: true, deleted: allowed.size });
 });
 
@@ -1763,14 +2047,21 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
     }
 
     let deleted = 0;
+    const deletedEventIds = new Set();
     const bulkDel = db.transaction(() => {
         for (const regId of allowedRegistrationIds) {
             const tickets = stmt.tickets.byRegistrationId.all(regId);
             deleted += tickets.length;
-            for (const t of tickets) stmt.tickets.deleteById.run(t.id);
+            for (const t of tickets) {
+                deletedEventIds.add(t.eventId);
+                stmt.tickets.deleteById.run(t.id);
+            }
         }
     });
     bulkDel();
+    for (const eventId of deletedEventIds) {
+        logAudit(req, { eventId, action: 'registrations.deleted', details: { count: allowedRegistrationIds.size } });
+    }
     res.json({ success: true, deleted });
 });
 
@@ -2063,6 +2354,7 @@ app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
     }
 
     log('bulk-email', `[email] Bulk email sent — event: ${event.name} (${event.id})  sent: ${sent}  failed: ${errors.length}  by: ${req.session.userId}`);
+    logAudit(req, { eventId: event.id, action: 'email.bulk_sent', details: { subject, sent, failed: errors.length } });
     res.json({ success: true, sent, failed: errors.length });
 });
 
@@ -2273,6 +2565,7 @@ app.post('/api/checkin/bulk', requireAuth, async (req, res) => {
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const now = new Date().toISOString();
     let checkedIn = 0;
+    const touchedEventIds = new Map();
 
     for (const regId of registrationIds) {
         const tickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
@@ -2283,10 +2576,12 @@ app.post('/api/checkin/bulk', requireAuth, async (req, res) => {
         const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
         if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission === 'view')) continue;
 
+        let eventCheckedIn = 0;
         db.transaction(() => {
             for (const t of tickets) {
                 if (!t.used_at) {
                     checkedIn++;
+                    eventCheckedIn++;
                     if (event.allowReentry) {
                         stmt.tickets.checkInReentry.run(now, now, t.id);
                     } else {
@@ -2295,11 +2590,15 @@ app.post('/api/checkin/bulk', requireAuth, async (req, res) => {
                 }
             }
         })();
+        if (eventCheckedIn > 0) touchedEventIds.set(event.id, (touchedEventIds.get(event.id) || 0) + eventCheckedIn);
         pushWalletIfChanged(tickets, event).catch(() => {});
     }
 
     ticketStatusCache.clear();
     log('checkin', `[bulk] Checked in ${checkedIn} ticket(s) across ${registrationIds.length} registration(s)  by: ${req.session.userId}`);
+    for (const [eventId, count] of touchedEventIds) {
+        logAudit(req, { eventId, action: 'checkin.bulk', details: { count } });
+    }
     res.json({ success: true, checkedIn });
 });
 
@@ -2312,6 +2611,7 @@ app.delete('/api/checkin/bulk', requireAuth, async (req, res) => {
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const now = new Date().toISOString();
     let cleared = 0;
+    const touchedEventIds = new Map();
 
     for (const regId of registrationIds) {
         const tickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
@@ -2320,17 +2620,22 @@ app.delete('/api/checkin/bulk', requireAuth, async (req, res) => {
         if (!event) continue;
         if (!isAdmin && event.userId !== req.session.userId) continue;
 
+        let eventCleared = 0;
         db.transaction(() => {
             for (const t of tickets) {
-                if (t.used_at) cleared++;
+                if (t.used_at) { cleared++; eventCleared++; }
                 stmt.tickets.undoCheckIn.run(now, t.id);
             }
         })();
+        if (eventCleared > 0) touchedEventIds.set(event.id, (touchedEventIds.get(event.id) || 0) + eventCleared);
         pushWalletIfChanged(tickets, event).catch(() => {});
     }
 
     ticketStatusCache.clear();
     log('uncheckin', `[bulk] Cleared ${cleared} ticket(s) across ${registrationIds.length} registration(s)  by: ${req.session.userId}`);
+    for (const [eventId, count] of touchedEventIds) {
+        logAudit(req, { eventId, action: 'checkin.bulk_undo', details: { count } });
+    }
     res.json({ success: true, cleared });
 });
 
@@ -2476,6 +2781,9 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     }
 
     ticketStatusCache.clear();
+    if (checkedInCount > 0) {
+        logAudit(req, { eventId: checkinEvent?.id, action: 'checkin.manual', details: { registrationId, name: tickets[0]?.name, count: checkedInCount } });
+    }
     res.json({ success: true });
     pushWalletIfChanged(tickets, checkinEvent).catch(() => { });
 });
@@ -2512,6 +2820,9 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     doUndo();
 
     log('uncheckin', `[undo] Cleared ${clearedCount} ticket(s) — regId: ${registrationId}  name: ${tickets[0]?.name}  event: ${event?.name}  by: ${req.session.userId}`);
+    if (clearedCount > 0) {
+        logAudit(req, { eventId: event?.id, action: 'checkin.undo', details: { registrationId, name: tickets[0]?.name, count: clearedCount } });
+    }
     ticketStatusCache.clear();
 
     if (event?.displayToken) {
@@ -3336,6 +3647,7 @@ app.post('/api/sheet/share', requireAuth, async (req, res) => {
     } else {
         stmt.sheetAccess.insert.run(nanoid(10), targetUser.id, link.id, new Date().toISOString(), permission);
     }
+    logAudit(req, { eventId: event.id, action: 'access.granted', details: { email: targetUser.email, permission } });
     res.json({ success: true, message: 'Access granted' });
 });
 
@@ -3358,6 +3670,8 @@ app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
     }
 
     stmt.sheetAccess.deleteById.run(req.params.id);
+    const revokedUser = rowToUser(stmt.users.byId.get(access.userId));
+    logAudit(req, { eventId: event?.id, action: 'access.revoked', details: { email: revokedUser?.email } });
     res.json({ success: true });
 });
 

@@ -142,6 +142,47 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 CREATE INDEX IF NOT EXISTS idx_orders_sessionId ON orders(sessionId);
 CREATE INDEX IF NOT EXISTS idx_orders_eventId ON orders(eventId);
+
+CREATE TABLE IF NOT EXISTS auditLog (
+    id TEXT PRIMARY KEY,
+    userId TEXT,
+    userEmail TEXT,
+    eventId TEXT,
+    action TEXT NOT NULL,
+    details TEXT,
+    ip TEXT,
+    createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auditLog_eventId ON auditLog(eventId);
+CREATE INDEX IF NOT EXISTS idx_auditLog_userId ON auditLog(userId);
+CREATE INDEX IF NOT EXISTS idx_auditLog_createdAt ON auditLog(createdAt);
+
+CREATE TABLE IF NOT EXISTS discountCodes (
+    id TEXT PRIMARY KEY,
+    eventId TEXT NOT NULL,
+    code TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'percent',
+    value INTEGER NOT NULL,
+    maxUses INTEGER,
+    usedCount INTEGER DEFAULT 0,
+    expiresAt TEXT,
+    active INTEGER DEFAULT 1,
+    createdAt TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_discountCodes_event_code ON discountCodes(eventId, code);
+
+CREATE TABLE IF NOT EXISTS waitlist (
+    id TEXT PRIMARY KEY,
+    eventId TEXT NOT NULL,
+    name TEXT,
+    email TEXT NOT NULL,
+    customFields TEXT,
+    status TEXT NOT NULL DEFAULT 'waiting',
+    createdAt TEXT NOT NULL,
+    notifiedAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_waitlist_eventId ON waitlist(eventId);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_waitlist_event_email ON waitlist(eventId, email);
 `);
 
 // ── Column migrations ─────────────────────────────────────────────────────────
@@ -151,6 +192,11 @@ try { db.exec(`ALTER TABLE events ADD COLUMN atDoorEnabled INTEGER DEFAULT 0`); 
 try { db.exec(`ALTER TABLE orders ADD COLUMN paymentIntentId TEXT`); } catch {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN channel TEXT DEFAULT 'online'`); } catch {}
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_paymentIntentId ON orders(paymentIntentId)`); } catch {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN discountCodeId TEXT`); } catch {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN discountAmount INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN refundedAt TEXT`); } catch {}
+try { db.exec(`ALTER TABLE orders ADD COLUMN refundAmount INTEGER`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN waitlistEnabled INTEGER DEFAULT 0`); } catch {}
 
 // ── One-time migration from db.json ──────────────────────────────────────────
 
@@ -278,6 +324,7 @@ export function rowToEvent(row) {
         ticketPrice: row.ticketPrice || 0,
         atDoorEnabled: !!row.atDoorEnabled,
         reminderEnabled: !!row.reminderEnabled,
+        waitlistEnabled: !!row.waitlistEnabled,
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
     };
 }
@@ -285,6 +332,19 @@ export function rowToEvent(row) {
 export function rowToUser(row) {
     if (!row) return null;
     return { ...row, emailVerified: !!row.emailVerified };
+}
+
+export function rowToDiscountCode(row) {
+    if (!row) return null;
+    return { ...row, active: !!row.active };
+}
+
+export function rowToWaitlistEntry(row) {
+    if (!row) return null;
+    return {
+        ...row,
+        customFields: row.customFields ? JSON.parse(row.customFields) : {},
+    };
 }
 
 // ── Prepared statements ────────────────────────────────────────────────────────
@@ -317,6 +377,7 @@ export const stmt = {
         setPublicRegistration: db.prepare(`UPDATE events SET allowPublicRegistration=? WHERE id=?`),
         setTicketPrice: db.prepare(`UPDATE events SET ticketPrice=? WHERE id=?`),
         setAtDoorEnabled: db.prepare(`UPDATE events SET atDoorEnabled=? WHERE id=?`),
+        setWaitlistEnabled: db.prepare(`UPDATE events SET waitlistEnabled=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM events WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM events WHERE userId=?`),
@@ -393,10 +454,41 @@ export const stmt = {
         deleteByTokenHash: db.prepare(`DELETE FROM passwordResetTokens WHERE tokenHash=?`),
     },
     orders: {
+        byId: db.prepare('SELECT * FROM orders WHERE id=?'),
         bySessionId: db.prepare('SELECT * FROM orders WHERE sessionId=?'),
+        byPaymentIntentId: db.prepare('SELECT * FROM orders WHERE paymentIntentId=?'),
         byEventId: db.prepare('SELECT * FROM orders WHERE eventId=? ORDER BY createdAt DESC'),
-        insert: db.prepare(`INSERT INTO orders (id, sessionId, eventId, registrationId, buyerName, buyerEmail, amount, currency, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`),
-        fulfill: db.prepare(`UPDATE orders SET status='fulfilled', registrationId=?, fulfilledAt=? WHERE sessionId=?`),
+        insert: db.prepare(`INSERT INTO orders (id, sessionId, eventId, registrationId, buyerName, buyerEmail, amount, currency, status, createdAt, discountCodeId, discountAmount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`),
+        fulfill: db.prepare(`UPDATE orders SET status='fulfilled', registrationId=?, fulfilledAt=?, paymentIntentId=? WHERE sessionId=?`),
+        refund: db.prepare(`UPDATE orders SET status='refunded', refundedAt=?, refundAmount=? WHERE id=?`),
+    },
+    auditLog: {
+        insert: db.prepare(`INSERT INTO auditLog (id, userId, userEmail, eventId, action, details, ip, createdAt) VALUES (?,?,?,?,?,?,?,?)`),
+        byEventId: db.prepare('SELECT * FROM auditLog WHERE eventId=? ORDER BY createdAt DESC LIMIT ? OFFSET ?'),
+        countByEventId: db.prepare('SELECT COUNT(*) as cnt FROM auditLog WHERE eventId=?'),
+        all: db.prepare('SELECT * FROM auditLog ORDER BY createdAt DESC LIMIT ? OFFSET ?'),
+        countAll: db.prepare('SELECT COUNT(*) as cnt FROM auditLog'),
+    },
+    discountCodes: {
+        byId: db.prepare('SELECT * FROM discountCodes WHERE id=?'),
+        byEventId: db.prepare('SELECT * FROM discountCodes WHERE eventId=? ORDER BY createdAt DESC'),
+        byEventAndCode: db.prepare('SELECT * FROM discountCodes WHERE eventId=? AND code=?'),
+        insert: db.prepare(`INSERT INTO discountCodes (id, eventId, code, type, value, maxUses, expiresAt, active, createdAt) VALUES (?,?,?,?,?,?,?,?,?)`),
+        incrementUse: db.prepare(`UPDATE discountCodes SET usedCount = usedCount + 1 WHERE id=?`),
+        setActive: db.prepare(`UPDATE discountCodes SET active=? WHERE id=?`),
+        deleteById: db.prepare(`DELETE FROM discountCodes WHERE id=?`),
+        deleteByEventId: db.prepare(`DELETE FROM discountCodes WHERE eventId=?`),
+    },
+    waitlist: {
+        byId: db.prepare('SELECT * FROM waitlist WHERE id=?'),
+        byEventId: db.prepare('SELECT * FROM waitlist WHERE eventId=? ORDER BY createdAt ASC'),
+        byEventAndEmail: db.prepare('SELECT * FROM waitlist WHERE eventId=? AND email=?'),
+        countWaitingByEventId: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='waiting'`),
+        insert: db.prepare(`INSERT INTO waitlist (id, eventId, name, email, customFields, status, createdAt) VALUES (?,?,?,?,?,?,?)`),
+        setStatus: db.prepare(`UPDATE waitlist SET status=? WHERE id=?`),
+        setNotified: db.prepare(`UPDATE waitlist SET status='notified', notifiedAt=? WHERE id=?`),
+        deleteById: db.prepare(`DELETE FROM waitlist WHERE id=?`),
+        deleteByEventId: db.prepare(`DELETE FROM waitlist WHERE eventId=?`),
     },
 };
 
