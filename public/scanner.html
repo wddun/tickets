@@ -228,6 +228,64 @@
         .slb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
         .slb-name { font-size: 13px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+        /* ── Not-logged-in gate ── */
+        #anonGate {
+            position: fixed;
+            inset: 0;
+            z-index: 90;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+        #anonGate.show { display: flex; }
+        .ag-panel {
+            width: 100%;
+            max-width: 340px;
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            text-align: center;
+        }
+        .ag-icon {
+            width: 56px; height: 56px;
+            border-radius: 16px;
+            background: rgba(255,255,255,0.08);
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 6px;
+        }
+        .ag-icon svg { width: 26px; height: 26px; }
+        .ag-title { font-size: 20px; font-weight: 800; color: #fff; }
+        .ag-sub { font-size: 14px; color: rgba(255,255,255,0.55); line-height: 1.4; margin-bottom: 10px; }
+        .ag-btn {
+            width: 100%;
+            padding: 13px;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 700;
+            text-align: center;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            box-sizing: border-box;
+        }
+        .ag-btn-primary { background: #c4294a; color: #fff; }
+        .ag-btn-secondary { background: rgba(255,255,255,0.1); color: #fff; margin-top: 2px; }
+        .ag-input {
+            width: 100%;
+            padding: 13px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.06);
+            color: #fff;
+            font-size: 15px;
+            box-sizing: border-box;
+        }
+        .ag-input::placeholder { color: rgba(255,255,255,0.35); }
+        .ag-error { font-size: 13px; color: #ff6b6b; min-height: 16px; }
+
         /* ── Full-screen result overlay — reentry exit confirm only ── */
         #resultOverlay {
             position: fixed;
@@ -550,6 +608,26 @@
     </div>
 </div>
 
+<!-- Not-logged-in gate: forces a choice before the camera ever starts —
+     sign in and pick from your events, or enter a scan code locked to one -->
+<div id="anonGate">
+    <div class="ag-panel" id="anonGateChoice">
+        <div class="ag-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3M21 14v.01M14 21v-.01M18 18h.01M21 21v-.01"/></svg></div>
+        <div class="ag-title">Scanner</div>
+        <div class="ag-sub">Sign in to see your events, or enter a scan code to scan for one event only.</div>
+        <a class="ag-btn ag-btn-primary" href="/login.html?next=/scanner.html">Sign In</a>
+        <button class="ag-btn ag-btn-secondary" onclick="showAnonGateCodeEntry()">Enter Scan Code</button>
+    </div>
+    <div class="ag-panel" id="anonGateCodeEntry" style="display:none;">
+        <div class="ag-title">Enter Scan Code</div>
+        <div class="ag-sub">Paste the scan link (or code) an organizer sent you.</div>
+        <input id="anonGateCodeInput" class="ag-input" type="text" placeholder="Scan link or code" autocapitalize="off" autocorrect="off">
+        <div class="ag-error" id="anonGateCodeError"></div>
+        <button class="ag-btn ag-btn-primary" id="anonGateCodeSubmit" onclick="submitAnonGateCode()">Continue</button>
+        <button class="ag-btn ag-btn-secondary" onclick="anonGateBack()">Back</button>
+    </div>
+</div>
+
 <!-- In-app notification banners -->
 <div id="inAppNotifContainer"></div>
 
@@ -778,28 +856,76 @@ let lockedScanLink = null; // { eventId, eventName, color, allowReentry } when o
         document.getElementById('tabBar').style.display   = 'flex';
         document.body.classList.add('has-tab-bar');
         await loadEvents();
+        startCamera();
+        initScannerChannel();
+        requestNotificationPermission();
+        startSessionWatcher();
+        if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
     } else {
-        document.getElementById('signInBtn').style.display = 'block';
+        // Not logged in and no scan-link token in the URL — don't start the
+        // camera blind with no event selected. Force a choice: sign in (and
+        // pick from your events) or enter a scan code (locked to one event).
+        document.getElementById('anonGate').classList.add('show');
     }
-    startCamera();
-    initScannerChannel();
-    requestNotificationPermission();
-    if (isLoggedIn) startSessionWatcher();
-    if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
 })();
 
+function showAnonGateCodeEntry() {
+    document.getElementById('anonGateChoice').style.display = 'none';
+    document.getElementById('anonGateCodeEntry').style.display = 'flex';
+    document.getElementById('anonGateCodeInput').focus();
+}
+
+function anonGateBack() {
+    document.getElementById('anonGateCodeEntry').style.display = 'none';
+    document.getElementById('anonGateChoice').style.display = 'flex';
+    document.getElementById('anonGateCodeError').textContent = '';
+}
+
+function extractScanTokenFromInput(raw) {
+    const trimmed = (raw || '').trim();
+    try {
+        const u = new URL(trimmed);
+        const qp = u.searchParams.get('scanToken');
+        if (qp) return qp;
+        const parts = u.pathname.split('/').filter(Boolean);
+        const idx = parts.indexOf('scan');
+        if (idx !== -1 && parts[idx + 1]) return parts[idx + 1];
+    } catch (_) { /* not a URL — treat input as a raw token */ }
+    return trimmed;
+}
+
+async function submitAnonGateCode() {
+    const input = document.getElementById('anonGateCodeInput');
+    const errorEl = document.getElementById('anonGateCodeError');
+    const btn = document.getElementById('anonGateCodeSubmit');
+    const token = extractScanTokenFromInput(input.value);
+    if (!token) return;
+    errorEl.textContent = '';
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    const ok = await initScanLinkMode(token, {
+        onError: () => { errorEl.textContent = 'Invalid or revoked scan link.'; }
+    });
+    if (!ok) {
+        btn.disabled = false;
+        btn.textContent = 'Continue';
+    }
+}
+
 // ── Scan-link mode: no login, locked to one event ──────────
-async function initScanLinkMode(scanToken) {
+async function initScanLinkMode(scanToken, opts = {}) {
     let link;
     try {
         const r = await fetch(`/api/scanner-links/${encodeURIComponent(scanToken)}`);
         if (!r.ok) throw new Error();
         link = await r.json();
     } catch (_) {
+        if (opts.onError) { opts.onError(); return false; }
         document.getElementById('scanLinkErrorOverlay').classList.add('show');
-        return;
+        return false;
     }
 
+    document.getElementById('anonGate').classList.remove('show');
     lockedScanLink = link;
     const color = link.color || '#c4294a';
 
@@ -822,6 +948,7 @@ async function initScanLinkMode(scanToken) {
         setTimeout(() => enterOverlay.remove(), 400);
         document.getElementById('scanLinkBanner').classList.add('show');
     }, 1000);
+    return true;
 }
 
 // ── Session expiry watcher ────────────────────────────────
