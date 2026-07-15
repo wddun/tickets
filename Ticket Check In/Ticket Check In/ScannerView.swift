@@ -23,6 +23,7 @@ struct ScannerView: View {
     @AppStorage("scanLinkEventData")       private var scanLinkEventData: Data = Data()
     @AppStorage("scanLinkJustEntered")     private var scanLinkJustEntered = false
     @State private var showScanLinkEnter = false
+    @State private var showEventPicker = false
     // How long the full-screen scan result stays up — a per-device
     // preference, set from Settings > Scanner.
     @AppStorage("resultDisplayDuration")   private var resultDisplayDuration: Double = 1.2
@@ -91,11 +92,7 @@ struct ScannerView: View {
             startNotifListener()
             if scanLinkJustEntered, scanLinkEvent != nil {
                 scanLinkJustEntered = false
-                showScanLinkEnter = true
-                Task {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    await MainActor.run { withAnimation(.easeInOut(duration: 0.35)) { showScanLinkEnter = false } }
-                }
+                showEnteringAnimation()
             }
         }
         .onDisappear {
@@ -118,6 +115,12 @@ struct ScannerView: View {
             if let result = selectedScan ?? recentScans.first {
                 TicketDetailSheet(result: result)
             }
+        }
+        .sheet(isPresented: $showEventPicker) {
+            EventPickerSheet(
+                onSelectEvent: { event in switchToOwnEvent(event) },
+                onScanLink: { info in applyScanLink(info) }
+            )
         }
     }
 
@@ -161,7 +164,7 @@ struct ScannerView: View {
                         .padding(.horizontal, 2)
                     }
                 }
-                if scanLinkEvent == nil {
+                if !(currentEventInfo?.isLink ?? false) {
                     Button(action: switchToManual) {
                         Label("Manual Check-in", systemImage: "person.text.rectangle")
                             .font(.system(size: 16, weight: .semibold))
@@ -228,6 +231,23 @@ struct ScannerView: View {
         lastScannedToken = token
         lastScanTime = now
         // Camera keeps running — no isScanning = false
+
+        // Scan-link QR — grant access to that event immediately, whether
+        // this device is signed into its own account or not.
+        if let scanToken = extractScanLinkToken(from: token) {
+            Task {
+                do {
+                    let info = try await APIService.shared.resolveScannerLink(token: scanToken)
+                    await MainActor.run { applyScanLink(info) }
+                } catch {
+                    await MainActor.run {
+                        showBanner(ScanResult(status: .error, title: "Invalid Scan Link", name: ""))
+                        CheckInFeedback.shared.error()
+                    }
+                }
+            }
+            return
+        }
 
         Task {
             do {
@@ -382,16 +402,63 @@ struct ScannerView: View {
         return try? JSONDecoder().decode(ScannerLinkInfo.self, from: scanLinkEventData)
     }
 
+    private var selectedOwnEvent: Event? {
+        guard !lastSelectedEventData.isEmpty else { return nil }
+        return try? JSONDecoder().decode(Event.self, from: lastSelectedEventData)
+    }
+
+    // Whatever event this scanner is currently locked to — a no-login scan
+    // link (revocable via the banner's X) or the signed-in user's own choice
+    // (only changed via the banner's Switch Event affordance).
+    private var currentEventInfo: (name: String, color: String?, isLink: Bool)? {
+        if let link = scanLinkEvent { return (link.eventName, link.color, true) }
+        if let event = selectedOwnEvent { return (event.name, event.color, false) }
+        return nil
+    }
+
     private func selectedEventId() -> String? {
         if let scanLinkEvent { return scanLinkEvent.eventId }
-        guard !lastSelectedEventData.isEmpty,
-              let event = try? JSONDecoder().decode(Event.self, from: lastSelectedEventData)
-        else { return nil }
-        return event.id
+        return selectedOwnEvent?.id
+    }
+
+    // Recognizes only an actual scan-link URL (/scan/TOKEN or ?scanToken=) —
+    // never falls back to treating arbitrary scanned text as a token, so a
+    // normal ticket QR is never misread as a scan link.
+    private func extractScanLinkToken(from raw: String) -> String? {
+        guard let url = URL(string: raw),
+              let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        if let qp = comps.queryItems?.first(where: { $0.name == "scanToken" })?.value, !qp.isEmpty { return qp }
+        let segments = comps.path.split(separator: "/")
+        if comps.path.contains("/scan/"), let last = segments.last { return String(last) }
+        return nil
+    }
+
+    private func applyScanLink(_ info: ScannerLinkInfo) {
+        scanLinkEventData = (try? JSONEncoder().encode(info)) ?? Data()
+        showEnteringAnimation()
+    }
+
+    private func switchToOwnEvent(_ event: Event) {
+        scanLinkEventData = Data() // leaving link mode, if any
+        lastSelectedEventData = (try? JSONEncoder().encode(event)) ?? Data()
+        showEnteringAnimation()
+    }
+
+    private func showEnteringAnimation() {
+        showScanLinkEnter = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            await MainActor.run { withAnimation(.easeInOut(duration: 0.35)) { showScanLinkEnter = false } }
+        }
     }
 
     private func exitScanLinkMode() {
         scanLinkEventData = Data()
+        if selectedOwnEvent == nil {
+            // No account event to fall back to — don't leave the camera
+            // scanning with nothing selected; go back to Events/Sign In.
+            switchToManual()
+        }
     }
 
     private func colorFromHex(_ hex: String?) -> Color? {
@@ -406,13 +473,13 @@ struct ScannerView: View {
     }
 
     @ViewBuilder private var scanLinkEnterOverlay: some View {
-        if showScanLinkEnter, let link = scanLinkEvent {
+        if showScanLinkEnter, let info = currentEventInfo {
             ZStack {
                 Color(red: 0.043, green: 0.051, blue: 0.078).ignoresSafeArea()
                 VStack(spacing: 14) {
                     ZStack {
                         Circle()
-                            .fill(colorFromHex(link.color) ?? Color.accentColor)
+                            .fill(colorFromHex(info.color) ?? Color.accentColor)
                             .frame(width: 64, height: 64)
                         Image(systemName: "checkmark")
                             .font(.system(size: 26, weight: .bold))
@@ -422,7 +489,7 @@ struct ScannerView: View {
                         .font(.system(size: 13, weight: .bold))
                         .tracking(1.2)
                         .foregroundStyle(.white.opacity(0.5))
-                    Text(link.eventName)
+                    Text(info.name)
                         .font(.system(size: 24, weight: .heavy))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
@@ -434,22 +501,42 @@ struct ScannerView: View {
         }
     }
 
+    // Persistent pill naming whichever event this scanner is locked to — a
+    // scan link gets an X to exit; a signed-in user's own event gets a
+    // switch affordance instead (full-screen picker, matching web).
     @ViewBuilder private var scanLinkBanner: some View {
-        if let link = scanLinkEvent, !showScanLinkEnter {
+        if let info = currentEventInfo, !showScanLinkEnter {
             VStack {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(colorFromHex(link.color) ?? Color.accentColor)
-                        .frame(width: 8, height: 8)
-                    Text(link.eventName)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Button(action: exitScanLinkMode) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.6))
+                Group {
+                    if info.isLink {
+                        HStack(spacing: 8) {
+                            Circle().fill(colorFromHex(info.color) ?? Color.accentColor).frame(width: 8, height: 8)
+                            Text(info.name)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Button(action: exitScanLinkMode) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                        }
+                    } else {
+                        Button(action: { showEventPicker = true }) {
+                            HStack(spacing: 8) {
+                                Circle().fill(colorFromHex(info.color) ?? Color.accentColor).frame(width: 8, height: 8)
+                                Text(info.name)
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -540,6 +627,143 @@ struct ScannerView: View {
                 }
                 if !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 5_000_000_000) // retry after 5s
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Event Picker Sheet (Switch Event)
+
+/// Full-screen-ish switcher reachable from the scanner banner — lists the
+/// signed-in user's own events, and also accepts a pasted scan link/code so
+/// switching to someone else's event doesn't require signing out first.
+struct EventPickerSheet: View {
+    var onSelectEvent: (Event) -> Void
+    var onScanLink: (ScannerLinkInfo) -> Void
+
+    @ObservedObject private var api = APIService.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var events: [Event] = []
+    @State private var isLoading = false
+    @State private var codeInput = ""
+    @State private var codeError: String?
+    @State private var codeLoading = false
+
+    var body: some View {
+        if #available(iOS 16, *) {
+            NavigationStack { sheetContent }
+        } else {
+            NavigationView { sheetContent }
+        }
+    }
+
+    @ViewBuilder
+    private var sheetContent: some View {
+        List {
+            if api.isAuthenticated {
+                Section("Your Events") {
+                    if isLoading && events.isEmpty {
+                        ProgressView()
+                    } else if events.isEmpty {
+                        Text("No events yet.").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(events) { event in
+                            Button {
+                                onSelectEvent(event)
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Circle()
+                                        .fill(colorFromHex(event.color) ?? Color.accentColor)
+                                        .frame(width: 9, height: 9)
+                                    Text(event.name)
+                                        .foregroundStyle(.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Enter a Scan Code") {
+                TextField("Scan link or code", text: $codeInput)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                if let codeError {
+                    Text(codeError).foregroundStyle(.red).font(.footnote)
+                }
+                Button {
+                    submitCode()
+                } label: {
+                    if codeLoading {
+                        ProgressView()
+                    } else {
+                        Text("Continue")
+                    }
+                }
+                .disabled(codeLoading || codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .navigationTitle("Switch Event")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+        }
+        .task {
+            guard api.isAuthenticated else { return }
+            isLoading = true
+            events = (try? await api.getEvents()) ?? []
+            isLoading = false
+        }
+    }
+
+    private func colorFromHex(_ hex: String?) -> Color? {
+        guard var s = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let value = UInt32(s, radix: 16) else { return nil }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+
+    private func extractToken(from raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return trimmed
+        }
+        if let queryToken = comps.queryItems?.first(where: { $0.name == "scanToken" })?.value, !queryToken.isEmpty {
+            return queryToken
+        }
+        let segments = comps.path.split(separator: "/")
+        if comps.path.contains("/scan/"), let last = segments.last {
+            return String(last)
+        }
+        return trimmed
+    }
+
+    private func submitCode() {
+        let token = extractToken(from: codeInput)
+        guard !token.isEmpty else { return }
+        codeError = nil
+        codeLoading = true
+        Task {
+            do {
+                let info = try await APIService.shared.resolveScannerLink(token: token)
+                await MainActor.run {
+                    codeLoading = false
+                    onScanLink(info)
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    codeLoading = false
+                    codeError = "Invalid or revoked scan link."
                 }
             }
         }

@@ -1490,11 +1490,38 @@ async function confirmCheckout() {
     showFlash({ status: 'checkout_done', firstName: name });
 }
 
+// Only matches an actual scan-link URL (/scan/TOKEN or ?scanToken=TOKEN) —
+// never falls back to treating arbitrary scanned text as a token, so a
+// normal ticket QR is never misread as a scan link.
+function extractScanTokenFromQR(raw) {
+    try {
+        const u = new URL(raw);
+        const qp = u.searchParams.get('scanToken');
+        if (qp) return qp;
+        const parts = u.pathname.split('/').filter(Boolean);
+        const idx = parts.indexOf('scan');
+        if (idx !== -1 && parts[idx + 1]) return parts[idx + 1];
+    } catch (_) {}
+    return null;
+}
+
 // ── Scan handler ──────────────────────────────────────────
 function onScanSuccess(decodedText) {
     // Display QR code — navigate straight to the display page
     if (decodedText.includes('/display.html') && decodedText.includes('token=')) {
         window.location.href = decodedText;
+        return;
+    }
+
+    // Scan-link QR — switch this scanner to that event immediately, whether
+    // it's currently logged in, locked to a different event, or anonymous.
+    const scanLinkToken = extractScanTokenFromQR(decodedText);
+    if (scanLinkToken) {
+        const now = Date.now();
+        if (scanLinkToken === lastScannedToken && (now - lastScanTs) < SCAN_DEBOUNCE_MS) return;
+        lastScannedToken = scanLinkToken;
+        lastScanTs = now;
+        initScanLinkMode(scanLinkToken);
         return;
     }
 
