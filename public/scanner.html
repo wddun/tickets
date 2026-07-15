@@ -144,33 +144,13 @@
         }
         #roomSelect option { background: #1c1c1e; color: #fff; }
 
-        /* ── Recent scans history strip — horizontally scrollable, most
-           recent first, so staff can review more than just the last scan ── */
+        /* ── Recent scans history strip ── */
         #recentScans {
             position: fixed;
             bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
             left: 0; right: 0;
             z-index: 20;
             pointer-events: auto;
-            display: flex;
-            gap: 10px;
-            padding: 0 14px;
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
-        }
-        #recentScans::-webkit-scrollbar { display: none; }
-        .scan-hist-card {
-            flex: 0 0 auto;
-            display: flex; align-items: center; gap: 12px;
-            background: rgba(22,22,24,0.96);
-            backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-            border: 1px solid rgba(255,255,255,0.09);
-            border-left: 3px solid #818cf8;
-            border-radius: 14px; padding: 12px 16px;
-            min-width: 190px; max-width: 240px;
-            cursor: pointer;
-            animation: slideUp 0.38s cubic-bezier(0.34,1.56,0.64,1);
         }
         @keyframes slideUp {
             from { transform: translateY(18px) scale(0.97); opacity: 0; }
@@ -560,20 +540,6 @@
             <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
         </button>
 
-        <div class="settings-section-label" style="margin-top:4px;">Scanner</div>
-        <div class="settings-card">
-            <div class="settings-card-row" style="flex-direction:column;align-items:stretch;gap:8px;">
-                <div style="display:flex;justify-content:space-between;">
-                    <span class="settings-card-label">Result display time</span>
-                    <span id="scanDurationLabel" style="color:#fff;font-size:13px;font-weight:600;">0.8s</span>
-                </div>
-                <input type="range" id="scanDurationSlider" min="300" max="5000" step="100" value="800"
-                    oninput="onScanDurationInput(this.value)"
-                    style="width:100%;">
-                <div style="font-size:12px;color:rgba(255,255,255,0.4);">How long a scan result stays full-screen on this device</div>
-            </div>
-        </div>
-
         <div class="settings-section-label" style="margin-top:4px;">Door Display</div>
         <div class="dp-event-name" id="dpEventName"></div>
 
@@ -725,16 +691,7 @@ let pendingCheckoutToken = null;
     requestNotificationPermission();
     if (isLoggedIn) startSessionWatcher();
     if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
-
-    const durationMs = getScanResultDuration();
-    document.getElementById('scanDurationSlider').value = durationMs;
-    document.getElementById('scanDurationLabel').textContent = (durationMs / 1000).toFixed(1) + 's';
 })();
-
-function onScanDurationInput(ms) {
-    localStorage.setItem('scanResultDuration', ms);
-    document.getElementById('scanDurationLabel').textContent = (ms / 1000).toFixed(1) + 's';
-}
 
 // ── Session expiry watcher ────────────────────────────────
 let sessionExpiredShown = false;
@@ -928,9 +885,11 @@ function selectedEvent() {
 }
 
 // ── Scan detail sheet ─────────────────────────────────────
-function openDetail(record) {
-    if (!record) return;
-    const d      = record;
+let lastScanData = null;
+
+function openDetail() {
+    if (!lastScanData) return;
+    const d      = lastScanData;
     const status = d.status || 'error';
     const bg     = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
     const icon   = STATUS_ICONS[status]   || '!';
@@ -1026,11 +985,11 @@ const STATUS_TITLES  = { valid:'Checked In!', reentry_enter:'Checked Back In!', 
 const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', checkout_done:'shi-dot-blue', invalid:'shi-dot-red', error:'shi-dot-red', info:'shi-dot-green' };
 const STATUS_COLORS  = { valid:'var(--success)', reentry_enter:'var(--success)', reentry_exit:'var(--warning)', checkout_done:'#60a5fa', used:'var(--warning)', invalid:'var(--danger-soft)', error:'var(--danger-soft)', info:'#818cf8' };
 
-let scanHistory = []; // most recent first — a real review log, not just the last scan
-const MAX_SCAN_HISTORY = 20;
+let recentScansList = [];
 let flashTimer = null;
 let exitConfirmTimer = null;
 let scanCardTimer = null;
+let scanFadeTimer = null;
 
 // Full-screen colored flash — auto-dismisses after 1.2s, tap also dismisses
 function showFlash(data) {
@@ -1042,9 +1001,9 @@ function showFlash(data) {
     document.getElementById('roName').textContent   = data.firstName || data.name || '';
     document.getElementById('roEmail').style.display = 'none';
     document.getElementById('roEvent').style.display = 'none';
-    document.getElementById('roFields').innerHTML = renderCustomFields(data.customFields);
+    document.getElementById('roFields').innerHTML = '';
     document.getElementById('roBottom').innerHTML = '';
-
+    
     if (overlay.classList.contains('show')) {
         // Quick pulse/blink if already showing
         overlay.style.transform = 'scale(0.95)';
@@ -1062,61 +1021,38 @@ function showFlash(data) {
     }
     
     clearTimeout(flashTimer);
-    flashTimer = setTimeout(closeResult, getScanResultDuration());
+    flashTimer = setTimeout(closeResult, 800);
     addToHistory(data, status);
-}
-
-// Custom fields (e.g. T-Shirt Size) entered for this ticket — shown on the
-// full-screen result and, compactly, on the recent-scans history card below.
-function renderCustomFields(customFields) {
-    if (!customFields) return '';
-    const entries = Object.entries(customFields).filter(([, v]) => v);
-    if (!entries.length) return '';
-    return entries.map(([k, v]) =>
-        `<div class="ro-field"><span class="ro-field-label">${escHtml(k)}</span><span class="ro-field-value">${escHtml(v)}</span></div>`
-    ).join('');
-}
-
-function customFieldsSummary(customFields) {
-    if (!customFields) return '';
-    return Object.values(customFields).filter(Boolean).join(' · ');
-}
-
-// Result display duration is a per-device preference (Settings > Scanner).
-const DEFAULT_SCAN_RESULT_DURATION_MS = 800;
-function getScanResultDuration() {
-    const stored = parseInt(localStorage.getItem('scanResultDuration'), 10);
-    return (stored >= 300 && stored <= 5000) ? stored : DEFAULT_SCAN_RESULT_DURATION_MS;
 }
 
 // Alias kept for notification fallback
 function showBanner(data) { showFlash(data); }
 
 function addToHistory(data, status) {
-    scanHistory.unshift({ ...data, status });
-    if (scanHistory.length > MAX_SCAN_HISTORY) scanHistory.length = MAX_SCAN_HISTORY;
+    lastScanData = { ...data, status };
     clearTimeout(scanCardTimer);
-    renderScanHistory();
-}
+    clearTimeout(scanFadeTimer);
 
-function renderScanHistory() {
+    const accent = STATUS_COLORS[status] || '#818cf8';
+    const name   = escHtml(data.firstName || data.name || 'Unknown');
+    const label  = escHtml(STATUS_TITLES[status] || 'Unknown');
+
     const container = document.getElementById('recentScans');
-    container.innerHTML = scanHistory.map((entry, idx) => {
-        const accent  = STATUS_COLORS[entry.status] || '#818cf8';
-        const name    = escHtml(entry.firstName || entry.name || 'Unknown');
-        const label   = escHtml(STATUS_TITLES[entry.status] || 'Unknown');
-        const summary = customFieldsSummary(entry.customFields);
-        return `
-        <div class="scan-hist-card" data-idx="${idx}" onclick="openDetail(scanHistory[${idx}])"
-             style="border-left-color:${accent};">
+    container.innerHTML = `
+        <div id="scanHistCard" onclick="openDetail()"
+             style="display:flex;align-items:center;gap:12px;
+                    background:rgba(22,22,24,0.96);
+                    backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+                    border:1px solid rgba(255,255,255,0.09);
+                    border-left:3px solid ${accent};
+                    border-radius:14px;padding:12px 16px;margin:0 14px;
+                    cursor:pointer;pointer-events:none;
+                    animation:slideUp 0.38s cubic-bezier(0.34,1.56,0.64,1);">
             <div style="flex:1;min-width:0;">
                 <div style="font-size:15px;font-weight:700;color:#fff;
                             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
                             margin-bottom:2px;">${name}</div>
-                <div style="font-size:12px;font-weight:600;color:${accent};
-                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                    ${label}${summary ? ' · ' + escHtml(summary) : ''}
-                </div>
+                <div style="font-size:12px;font-weight:600;color:${accent};">${label}</div>
             </div>
             <svg width="7" height="12" viewBox="0 0 7 12" fill="none"
                  stroke="rgba(255,255,255,0.22)" stroke-width="2"
@@ -1124,16 +1060,23 @@ function renderScanHistory() {
                 <polyline points="1 1 6 6 1 11"/>
             </svg>
         </div>`;
-    }).join('');
 
-    // Block taps on the newest card for 1.5s — prevents accidentally reopening
-    // the sheet while the finger is still moving after dismissing the
-    // full-screen overlay by tap. Older cards stay tappable immediately.
-    const newest = container.querySelector('.scan-hist-card[data-idx="0"]');
-    if (newest) {
-        newest.style.pointerEvents = 'none';
-        scanCardTimer = setTimeout(() => { newest.style.pointerEvents = 'auto'; }, 1500);
-    }
+    // Block taps for 1.5 s — prevents accidentally opening the sheet while
+    // the finger is still moving after dismissing the scan result overlay
+    scanCardTimer = setTimeout(() => {
+        const c = document.getElementById('scanHistCard');
+        if (c) c.style.pointerEvents = 'auto';
+    }, 1500);
+
+    // Auto-fade after 8 s
+    scanFadeTimer = setTimeout(() => {
+        const c = document.getElementById('scanHistCard');
+        if (c) {
+            c.style.transition = 'opacity 0.5s ease';
+            c.style.opacity = '0';
+            setTimeout(() => { container.innerHTML = ''; }, 500);
+        }
+    }, 8000);
 }
 
 let pendingCheckoutName = null;
