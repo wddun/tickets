@@ -124,7 +124,7 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .font(.subheadline)
                     }
-                    Slider(value: $resultDisplayDuration, in: 1...10, step: 0.5)
+                    Slider(value: $resultDisplayDuration, in: 0.3...3.0, step: 0.1)
 
                     Text("How long a scan result stays full-screen on this device.")
                         .font(.caption)
