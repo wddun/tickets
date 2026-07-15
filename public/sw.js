@@ -10,7 +10,7 @@
 // + clients.claim already make that happen without the user needing to do
 // anything) — this __only__ needs bumping again if the caching *strategy*
 // changes, not for every deploy.
-const CACHE = 'wts-v13';
+const CACHE = 'wts-v14';
 
 // Only pages that genuinely need to work with no/spotty connectivity.
 const PRECACHE = [

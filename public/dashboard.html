@@ -402,6 +402,45 @@
             font-size: 12px;
         }
 
+        /* ── Start Scanning card ── */
+        .scan-access-card {
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 12px;
+            padding: 18px 20px;
+            margin-bottom: 24px;
+        }
+        .scan-access-main {
+            display: flex;
+            gap: 18px;
+            align-items: center;
+        }
+        .scan-access-qr {
+            width: 100px;
+            height: 100px;
+            border-radius: 10px;
+            border: 1px solid #e8e8e8;
+            flex-shrink: 0;
+        }
+        .scan-access-info { flex: 1; min-width: 0; }
+        .scan-access-title { font-size: 16px; font-weight: 800; margin-bottom: 4px; }
+        .scan-access-sub { font-size: 13px; color: #666; line-height: 1.5; }
+        .scan-access-toggle {
+            background: none;
+            border: none;
+            color: #1a1f3c;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            padding: 10px 0 0;
+            text-decoration: underline;
+        }
+        .scan-access-skeleton {
+            padding: 20px;
+            color: #999;
+            font-size: 13px;
+        }
+
         /* ── Stats ── */
         .stats-row {
             display: grid;
@@ -1640,6 +1679,7 @@
         let selectedId = null;
         let refreshTimer = null;
         let allTickets = [];
+        let scanAccessCache = {}; // eventId -> rendered "Start Scanning" card HTML, so the 15s auto-refresh doesn't re-fetch the QR
         let checkedEventIds = new Set();
         let checkedRegIds = new Set();
         let activeStatFilter = 'all'; // 'all' | 'checked' | 'pending'
@@ -2110,6 +2150,8 @@
             </div>
         </div>
 
+        <div id="scanAccessCard">${scanAccessCache[event.id] || '<div class="scan-access-card scan-access-skeleton">Loading scan link…</div>'}</div>
+
         <div class="stats-row">
             <div class="stat-box${activeStatFilter === 'all' ? ' stat-active' : ''}" onclick="setStatFilter('all')">
                 <div class="stat-num">${total}${event.capacity ? `<span style="font-size:13px;font-weight:500;color:#94a3b8;"> / ${event.capacity}</span>` : ''}</div>
@@ -2152,6 +2194,7 @@
             ${renderAttendeeRows(grouped)}
         </div>
     `;
+            if (!scanAccessCache[event.id]) loadScanAccessCard(event.id);
         }
 
         function groupTickets(tickets) {
@@ -2744,7 +2787,6 @@
                         <button class="settings-nav-item active" id="navfor-tab-general" onclick="switchSettingsTab(this,'tab-general')">General</button>
                         <button class="settings-nav-item" id="navfor-tab-fields" onclick="switchSettingsTab(this,'tab-fields')">Custom Fields</button>
                         <button class="settings-nav-item" id="navfor-tab-access" onclick="switchSettingsTab(this,'tab-access')">Access & Sharing</button>
-                        <button class="settings-nav-item" id="navfor-tab-scanlinks" onclick="switchSettingsTab(this,'tab-scanlinks')">Scan Links</button>
                         <button class="settings-nav-item" id="navfor-tab-notifications" onclick="switchSettingsTab(this,'tab-notifications')">Notifications</button>
                         <button class="settings-nav-item" id="navfor-tab-registration" onclick="switchSettingsTab(this,'tab-registration')">Registration</button>
                         <button class="settings-nav-item" id="navfor-tab-waitlist" onclick="switchSettingsTab(this,'tab-waitlist')">Waitlist</button>
@@ -2921,7 +2963,6 @@
                         `<div class="settings-section" id="tab-general">${renderGeneralSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-fields">${cfHtml}</div>` +
                         `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div>${note}${auditHtml}</div>` +
-                        `<div class="settings-section" id="tab-scanlinks">${await renderScannerLinksSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-notifications"><div class="modal-section-title">Notifications</div>${pushHtml}${reminderHtml}</div>` +
                         `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
@@ -2996,7 +3037,6 @@
                     `<div class="settings-section" id="tab-general">${renderGeneralSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-fields">${cfHtml}</div>` +
                     `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div>${linkHtml}${accessHtml}${auditHtml}</div>` +
-                    `<div class="settings-section" id="tab-scanlinks">${await renderScannerLinksSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-notifications"><div class="modal-section-title">Notifications</div>${pushHtml}${reminderHtml}</div>` +
                     `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
@@ -3460,38 +3500,61 @@
             }
         }
 
-        // ── Scan Links (no-login scanner access) ──────────────────────────────
-        async function renderScannerLinksSection(eventId) {
-            let rows = '<div class="settings-empty">No scan links yet.</div>';
+        // ── Start Scanning card (no-login scanner access) ──────────────────────
+        async function loadScanAccessCard(eventId) {
+            const html = await buildScanAccessCardHtml(eventId);
+            scanAccessCache[eventId] = html;
+            const el = document.getElementById('scanAccessCard');
+            if (el) el.innerHTML = html;
+        }
+
+        async function buildScanAccessCardHtml(eventId) {
+            let links = [];
             try {
                 const r = await fetch(`/api/event/${eventId}/scanner-links`);
-                if (r.ok) {
-                    const links = await r.json();
-                    if (links.length) {
-                        rows = links.map(l => `
-                            <div class="link-box" style="margin-bottom:10px;">
-                                <label>${esc(l.label || 'Untitled link')}${l.lastUsedAt ? ` <span style="font-weight:400;color:#888;font-size:11px;">last used ${fmtDate(l.lastUsedAt)}</span>` : ''}</label>
+                if (r.ok) links = await r.json();
+            } catch {}
+            if (!links.length) {
+                return `<div class="scan-access-card"><div class="settings-empty">Could not load scan link.</div></div>`;
+            }
+            const primary = links[0];
+            return `
+                <div class="scan-access-card">
+                    <div class="scan-access-main">
+                        <img class="scan-access-qr" src="/api/scanner-links/${primary.id}/qr" alt="Scan code" width="100" height="100">
+                        <div class="scan-access-info">
+                            <div class="scan-access-title">Start Scanning</div>
+                            <div class="scan-access-sub">Scan this code with any camera app, or share the link — it opens straight into the scanner for this event only, no login needed.</div>
+                            <div style="display:flex;gap:8px;margin-top:10px;">
+                                <input type="text" value="${esc(primary.url)}" readonly onclick="this.select()" style="flex:1;min-width:0;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:12px;">
+                                <button class="btn btn-primary btn-sm" onclick="copySettingsLink('${esc(primary.url)}')">Copy</button>
+                            </div>
+                            <button class="scan-access-toggle" onclick="toggleScanAccessManage()">Manage scan links (${links.length})</button>
+                        </div>
+                    </div>
+                    <div id="scanAccessManage" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #eee;">
+                        <div style="display:flex;gap:8px;margin-bottom:12px;">
+                            <input type="text" id="newScanLinkLabel" placeholder="Label (e.g. Front gate iPad)" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                            <button class="btn btn-secondary btn-sm" onclick="generateScannerLink('${eventId}')">+ New Link</button>
+                        </div>
+                        ${links.map(l => `
+                            <div class="link-box" style="margin-bottom:8px;">
+                                <label>${esc(l.label || 'Default')}${l.lastUsedAt ? ` <span style="font-weight:400;color:#888;font-size:11px;">last used ${fmtDate(l.lastUsedAt)}</span>` : ''}</label>
                                 <div style="display:flex;gap:8px;">
                                     <input type="text" value="${esc(l.url)}" readonly onclick="this.select()">
-                                    <button class="btn btn-primary btn-sm" onclick="copySettingsLink('${esc(l.url)}')">Copy</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="copySettingsLink('${esc(l.url)}')">Copy</button>
                                     <button class="btn btn-danger btn-sm" onclick="revokeScannerLink('${l.id}','${eventId}')">Revoke</button>
                                 </div>
                             </div>
-                        `).join('');
-                    }
-                }
-            } catch {}
-            return `
-                <div class="modal-section-title">Scan Links</div>
-                <div class="settings-hint">
-                    Anyone with a scan link can open the scanner for this event only — no account needed. No dashboard access, can't edit the event, can't see other events. Scans and re-entry check-outs work exactly like the logged-in scanner. Create one per staffer or device so they can be revoked independently.
+                        `).join('')}
+                    </div>
                 </div>
-                <div style="display:flex;gap:8px;margin-bottom:20px;">
-                    <input type="text" id="newScanLinkLabel" placeholder="Label (e.g. Front gate iPad)" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
-                    <button class="btn btn-primary" onclick="generateScannerLink('${eventId}')">Generate Link</button>
-                </div>
-                <div id="scanLinksRows">${rows}</div>
             `;
+        }
+
+        function toggleScanAccessManage() {
+            const el = document.getElementById('scanAccessManage');
+            if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
         }
 
         async function generateScannerLink(eventId) {
@@ -3504,8 +3567,10 @@
                     body: JSON.stringify({ label })
                 });
                 if (!r.ok) throw new Error();
-                const section = document.getElementById('tab-scanlinks');
-                if (section) section.innerHTML = await renderScannerLinksSection(eventId);
+                delete scanAccessCache[eventId];
+                await loadScanAccessCard(eventId);
+                const manage = document.getElementById('scanAccessManage');
+                if (manage) manage.style.display = 'block'; // keep it open after adding
             } catch {
                 showToast('Failed to generate scan link.');
             }
@@ -3515,8 +3580,10 @@
             if (!await confirmDialog('Revoke this scan link? Anyone using it will lose scanner access immediately.')) return;
             try {
                 await fetch(`/api/scanner-links/${linkId}`, { method: 'DELETE' });
-                const section = document.getElementById('tab-scanlinks');
-                if (section) section.innerHTML = await renderScannerLinksSection(eventId);
+                delete scanAccessCache[eventId];
+                await loadScanAccessCard(eventId);
+                const manage = document.getElementById('scanAccessManage');
+                if (manage) manage.style.display = 'block';
             } catch {
                 showToast('Failed to revoke scan link.');
             }

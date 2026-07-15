@@ -3070,12 +3070,32 @@ app.post('/api/event/:id/scanner-links', requireAuth, (req, res) => {
     res.json({ success: true, link: { ...link, url: `${BASE_URL}/scan/${link.token}` } });
 });
 
+// Auto-creates a first link so a brand-new event always has something to
+// show on the dashboard immediately — same lazy-init pattern as displayToken.
 app.get('/api/event/:id/scanner-links', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!userHasEventAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    if (!stmt.scannerLinks.byEventId.all(event.id).length) {
+        const link = { id: nanoid(10), eventId: event.id, token: nanoid(24), label: '', createdBy: req.session.userId, createdAt: new Date().toISOString() };
+        stmt.scannerLinks.insert.run(link.id, link.eventId, link.token, link.label, link.createdBy, link.createdAt);
+    }
     const links = stmt.scannerLinks.byEventId.all(event.id).map(l => ({ ...l, url: `${BASE_URL}/scan/${l.token}` }));
     res.json(links);
+});
+
+// QR code PNG for a scan link — lets any phone's regular camera app open it
+app.get('/api/scanner-links/:id/qr', requireAuth, async (req, res) => {
+    const link = stmt.scannerLinks.byId.get(req.params.id);
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+    if (!userHasEventAccess(req.session.userId, link.eventId)) return res.status(403).json({ error: 'Forbidden' });
+    const url = `${BASE_URL}/scan/${link.token}`;
+    try {
+        const png = await QRCode.toBuffer(url, { width: 400, margin: 2 });
+        res.set('Content-Type', 'image/png').set('Cache-Control', 'no-cache').send(png);
+    } catch (err) {
+        res.status(500).json({ error: 'QR generation failed' });
+    }
 });
 
 app.delete('/api/scanner-links/:id', requireAuth, (req, res) => {
