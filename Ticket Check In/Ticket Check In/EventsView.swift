@@ -175,6 +175,7 @@ struct ScanLinkEntrySheet: View {
     @State private var input = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var showQRScan = false
 
     var body: some View {
         if #available(iOS 16, *) {
@@ -214,7 +215,7 @@ struct ScanLinkEntrySheet: View {
                     .font(.footnote)
             }
 
-            Button(action: resolve) {
+            Button(action: { resolve(input) }) {
                 Group {
                     if isLoading {
                         ProgressView().tint(.white)
@@ -231,6 +232,13 @@ struct ScanLinkEntrySheet: View {
             .disabled(isLoading || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .padding(.horizontal)
 
+            Button {
+                showQRScan = true
+            } label: {
+                Label("Scan QR Instead", systemImage: "qrcode.viewfinder")
+                    .font(.subheadline.weight(.semibold))
+            }
+
             Spacer()
         }
         .padding(.top, 16)
@@ -240,6 +248,9 @@ struct ScanLinkEntrySheet: View {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
             }
+        }
+        .sheet(isPresented: $showQRScan) {
+            QuickScanSheet { scanned in resolve(scanned) }
         }
     }
 
@@ -259,8 +270,8 @@ struct ScanLinkEntrySheet: View {
         return trimmed
     }
 
-    private func resolve() {
-        let token = extractToken(from: input)
+    private func resolve(_ raw: String) {
+        let token = extractToken(from: raw)
         guard !token.isEmpty else { return }
         isLoading = true
         errorMessage = nil

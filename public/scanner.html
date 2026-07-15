@@ -301,6 +301,15 @@
         }
         .ag-input::placeholder { color: rgba(255,255,255,0.35); }
         .ag-error { font-size: 13px; color: #ff6b6b; min-height: 16px; }
+        #gateScanCancelWrap {
+            position: fixed;
+            bottom: calc(env(safe-area-inset-bottom, 0px) + 40px);
+            left: 24px;
+            right: 24px;
+            z-index: 96;
+            text-align: center;
+        }
+        #gateScanCancelWrap .ag-btn { width: auto; display: inline-block; padding: 12px 28px; }
 
         /* ── Full-screen result overlay — reentry exit confirm only ── */
         #resultOverlay {
@@ -632,6 +641,17 @@
         <div class="ag-title">Choose an Event</div>
         <div class="ag-sub">You'll scan for this event only. Switch it any time from Settings.</div>
         <div id="eventPickerList" class="event-picker-list"></div>
+
+        <div style="width:100%;border-top:1px solid rgba(255,255,255,0.1);margin:6px 0 14px;padding-top:14px;">
+            <div class="ag-sub" style="margin-bottom:10px;">Or enter a scan code for someone else's event:</div>
+            <input id="eventPickerCodeInput" class="ag-input" type="text" placeholder="Scan link or code" autocapitalize="off" autocorrect="off">
+            <div class="ag-error" id="eventPickerCodeError"></div>
+            <button class="ag-btn ag-btn-primary" id="eventPickerCodeSubmit" onclick="submitEventPickerCode()">Continue</button>
+            <button class="ag-btn ag-btn-secondary" onclick="startPickerQRScan()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-3px;margin-right:6px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3M21 14v.01M14 21v-.01M18 18h.01M21 21v-.01"/></svg>Scan QR Instead
+            </button>
+        </div>
+
         <button class="ag-btn ag-btn-secondary" id="eventPickerCancelBtn" style="display:none;" onclick="closeEventPicker()">Cancel</button>
     </div>
 </div>
@@ -652,8 +672,16 @@
         <input id="anonGateCodeInput" class="ag-input" type="text" placeholder="Scan link or code" autocapitalize="off" autocorrect="off">
         <div class="ag-error" id="anonGateCodeError"></div>
         <button class="ag-btn ag-btn-primary" id="anonGateCodeSubmit" onclick="submitAnonGateCode()">Continue</button>
+        <button class="ag-btn ag-btn-secondary" onclick="startGateQRScan()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-3px;margin-right:6px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3M21 14v.01M14 21v-.01M18 18h.01M21 21v-.01"/></svg>Scan QR Instead
+        </button>
         <button class="ag-btn ag-btn-secondary" onclick="anonGateBack()">Back</button>
     </div>
+</div>
+
+<!-- Shown while scanning a QR from the gate (camera runs behind it) -->
+<div id="gateScanCancelWrap" style="display:none;">
+    <button class="ag-btn ag-btn-secondary" onclick="cancelGateScan()">Cancel</button>
 </div>
 
 <!-- In-app notification banners -->
@@ -986,6 +1014,28 @@ function extractScanTokenFromInput(raw) {
     return trimmed;
 }
 
+// Camera runs behind whichever gate/picker is open — onScanSuccess already
+// routes any scan-link QR to initScanLinkMode, so scanning just needs the
+// camera running and the overlay out of the way; a Cancel pill returns to
+// wherever the scan was started from (the anon gate or the event picker).
+let qrScanReturnTo = null;
+
+function startQuickQRScan(returnToId) {
+    qrScanReturnTo = returnToId;
+    document.getElementById(returnToId).classList.remove('show');
+    document.getElementById('gateScanCancelWrap').style.display = 'block';
+    ensureCameraRunning();
+}
+
+function startGateQRScan() { startQuickQRScan('anonGate'); }
+function startPickerQRScan() { startQuickQRScan('eventPicker'); }
+
+function cancelGateScan() {
+    document.getElementById('gateScanCancelWrap').style.display = 'none';
+    if (qrScanReturnTo) document.getElementById(qrScanReturnTo).classList.add('show');
+    qrScanReturnTo = null;
+}
+
 async function submitAnonGateCode() {
     const input = document.getElementById('anonGateCodeInput');
     const errorEl = document.getElementById('anonGateCodeError');
@@ -1018,6 +1068,9 @@ async function initScanLinkMode(scanToken, opts = {}) {
     }
 
     document.getElementById('anonGate').classList.remove('show');
+    document.getElementById('eventPicker').classList.remove('show');
+    document.getElementById('gateScanCancelWrap').style.display = 'none';
+    qrScanReturnTo = null;
     currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, source: 'link' };
     playEnteringAnimation(currentEvent, { showExitButton: true });
     ensureCameraRunning();
@@ -1218,6 +1271,24 @@ function pickEvent(id) {
 
 function closeEventPicker() {
     if (currentEvent) document.getElementById('eventPicker').classList.remove('show');
+}
+
+async function submitEventPickerCode() {
+    const input = document.getElementById('eventPickerCodeInput');
+    const errorEl = document.getElementById('eventPickerCodeError');
+    const btn = document.getElementById('eventPickerCodeSubmit');
+    const token = extractScanTokenFromInput(input.value);
+    if (!token) return;
+    errorEl.textContent = '';
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    const ok = await initScanLinkMode(token, {
+        onError: () => { errorEl.textContent = 'Invalid or revoked scan link.'; }
+    });
+    if (!ok) {
+        btn.disabled = false;
+        btn.textContent = 'Continue';
+    }
 }
 
 // ── Scan detail sheet ─────────────────────────────────────

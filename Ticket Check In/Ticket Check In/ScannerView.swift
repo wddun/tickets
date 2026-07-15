@@ -649,6 +649,7 @@ struct EventPickerSheet: View {
     @State private var codeInput = ""
     @State private var codeError: String?
     @State private var codeLoading = false
+    @State private var showQRScan = false
 
     var body: some View {
         if #available(iOS 16, *) {
@@ -694,7 +695,7 @@ struct EventPickerSheet: View {
                     Text(codeError).foregroundStyle(.red).font(.footnote)
                 }
                 Button {
-                    submitCode()
+                    submitCode(codeInput)
                 } label: {
                     if codeLoading {
                         ProgressView()
@@ -703,6 +704,12 @@ struct EventPickerSheet: View {
                     }
                 }
                 .disabled(codeLoading || codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button {
+                    showQRScan = true
+                } label: {
+                    Label("Scan QR Instead", systemImage: "qrcode.viewfinder")
+                }
             }
         }
         .navigationTitle("Switch Event")
@@ -717,6 +724,9 @@ struct EventPickerSheet: View {
             isLoading = true
             events = (try? await api.getEvents()) ?? []
             isLoading = false
+        }
+        .sheet(isPresented: $showQRScan) {
+            QuickScanSheet { scanned in submitCode(scanned) }
         }
     }
 
@@ -747,8 +757,8 @@ struct EventPickerSheet: View {
         return trimmed
     }
 
-    private func submitCode() {
-        let token = extractToken(from: codeInput)
+    private func submitCode(_ raw: String) {
+        let token = extractToken(from: raw)
         guard !token.isEmpty else { return }
         codeError = nil
         codeLoading = true
@@ -765,6 +775,53 @@ struct EventPickerSheet: View {
                     codeLoading = false
                     codeError = "Invalid or revoked scan link."
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Quick QR Scan Sheet
+
+/// A minimal one-shot camera scanner used only to read a scan-link QR code
+/// as an alternative to typing it in — not the main ticket scanner loop.
+struct QuickScanSheet: View {
+    var onCode: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var isScanning = true
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            CameraPreviewView(isScanning: $isScanning) { code in
+                guard isScanning else { return }
+                isScanning = false
+                onCode(code)
+                dismiss()
+            }
+            .ignoresSafeArea()
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.white, .black.opacity(0.4))
+                    }
+                    .padding()
+                }
+                Spacer()
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.white.opacity(0.7), lineWidth: 3)
+                    .frame(width: 240, height: 240)
+                Spacer()
+                Text("Point the camera at the scan code")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.bottom, 40)
             }
         }
     }
