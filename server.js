@@ -126,7 +126,24 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo 
 }
 
 // Shared HTML email template used by all ticket confirmation emails
-function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '' }) {
+// Cached in memory (read once, reused for every email) so we're not doing
+// disk I/O per send — this is a small static asset that never changes.
+let _walletBadgeDataUri = null;
+function getWalletBadgeDataUri() {
+    if (!_walletBadgeDataUri) {
+        const buf = fs.readFileSync(path.join(__dirname, 'public', 'apple-wallet-badge.png'));
+        _walletBadgeDataUri = `data:image/png;base64,${buf.toString('base64')}`;
+    }
+    return _walletBadgeDataUri;
+}
+
+// Ticket emails embed the QR (and the wallet badge) as inline base64 data URIs
+// rather than linking to /qr/:token or the static badge file. Some mail apps
+// (Gmail's app has been reported doing this) fail to load remote images when
+// reopening an email on weak/no connectivity — embedding the image bytes
+// directly in the message means nothing needs to be fetched again once the
+// email itself has synced to the device.
+async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '' }) {
     const dateStr = (() => {
         try {
             const start = new Date(event.time).toLocaleString('en-US', {
@@ -164,24 +181,28 @@ function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = 
         : rawColor;
 
     const n = tickets.length;
-    const qrBlocksHtml = tickets.map((t, i) => `
+    const walletBadgeDataUri = getWalletBadgeDataUri();
+    const qrBlocksHtml = (await Promise.all(tickets.map(async (t, i) => {
+        const qrDataUri = await QRCode.toDataURL(`ticket:${t.token}`);
+        return `
 <div style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:16px;background:#fff;">
   ${n > 1 ? `<div style="background:${accentHex};padding:7px 16px;"><p style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.9);text-transform:uppercase;letter-spacing:1px;margin:0;">Ticket ${i + 1} of ${n}</p></div>` : ''}
   <div style="padding:24px;text-align:center;">
     <p style="font-size:15px;font-weight:600;color:#111;margin:0 0 16px;">${t.name}</p>
-    <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" style="width:200px;height:200px;display:block;margin:0 auto 12px;border:1px solid #f3f4f6;border-radius:8px;background:#fff;padding:8px;">
+    <img src="${qrDataUri}" alt="QR Code" style="width:200px;height:200px;display:block;margin:0 auto 12px;border:1px solid #f3f4f6;border-radius:8px;background:#fff;padding:8px;">
     <p style="font-size:10px;color:#9ca3af;font-family:monospace;margin:0 0 16px;word-break:break-all;">${t.token}</p>
     <a href="${BASE_URL}/api/pass/${t.token}.pkpass" style="display:inline-block;text-decoration:none;">
-      <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:44px;width:auto;display:block;margin:0 auto;">
+      <img src="${walletBadgeDataUri}" alt="Add to Apple Wallet" style="height:44px;width:auto;display:block;margin:0 auto;">
     </a>
   </div>
-</div>`).join('');
+</div>`;
+    }))).join('');
 
     const addAllHtml = n > 1 ? `
 <div style="text-align:center;margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;">
   <p style="font-size:13px;font-weight:600;color:#555;margin:0 0 10px;">Add all ${n} tickets to Apple Wallet at once:</p>
   <a href="${BASE_URL}/api/passes/bundle/${tickets[0].registrationId}" style="display:inline-block;text-decoration:none;">
-    <img src="${BASE_URL}/apple-wallet-badge.png" alt="Add All to Apple Wallet" style="height:44px;width:auto;display:block;margin:0 auto;">
+    <img src="${walletBadgeDataUri}" alt="Add All to Apple Wallet" style="height:44px;width:auto;display:block;margin:0 auto;">
   </a>
 </div>` : '';
 
@@ -1022,7 +1043,7 @@ app.post('/api/register', async (req, res) => {
             fromName: `Tickets - ${event.name}`,
             replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
             subject: `Your ticket for ${event.name}`,
-            html: buildTicketEmailHtml({
+            html: await buildTicketEmailHtml({
                 firstName,
                 intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
                 event,
@@ -1041,7 +1062,8 @@ app.put('/api/event/:id/public-registration', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     const isOwner = event.userId === req.session.userId;
-    const isAdmin = req.session.userEmail === process.env.ADMIN_EMAIL;
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
 
     const enabled = req.body.enabled === true || req.body.enabled === 'true';
@@ -1077,7 +1099,7 @@ function validateDiscountCode(eventId, rawCode, baseAmount) {
     return { discountCode, discountAmount, finalAmount: Math.max(0, baseAmount - discountAmount) };
 }
 
-function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
+async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
     const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
     if (!dbEvent) return null;
 
@@ -1098,7 +1120,7 @@ function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
             fromName: `Tickets - ${dbEvent.name}`,
             replyTo: rowToUser(stmt.users.byId.get(dbEvent.userId))?.email,
             subject: `Your ticket for ${dbEvent.name}`,
-            html: buildTicketEmailHtml({
+            html: await buildTicketEmailHtml({
                 firstName,
                 intro: `You&rsquo;re all set for <strong>${dbEvent.name}</strong>! We&rsquo;ll see you there.`,
                 event: dbEvent,
@@ -1156,7 +1178,7 @@ app.post('/api/checkout/:eventId', async (req, res) => {
     // doesn't support $0 payment-mode sessions, so issue the ticket directly
     // instead of round-tripping through Stripe for no reason.
     if (finalAmount <= 0) {
-        const issued = issueTicketForPayment({ eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail });
+        const issued = await issueTicketForPayment({ eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail });
         if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
         if (discountCodeId) stmt.discountCodes.incrementUse.run(discountCodeId);
         stmt.orders.insert.run(nanoid(8), nanoid(16), event.id, issued.registrationId, cleanName, cleanEmail, 0, 'usd', 'fulfilled', new Date().toISOString(), discountCodeId, discountAmount);
@@ -1230,7 +1252,7 @@ app.post('/api/stripe/webhook', async (req, res) => {
         const existing = stmt.orders.bySessionId.get(session.id);
         if (existing?.status === 'fulfilled') return res.json({ received: true });
 
-        const issued = issueTicketForPayment({ eventId, buyerName, buyerEmail });
+        const issued = await issueTicketForPayment({ eventId, buyerName, buyerEmail });
         if (!issued) return res.json({ received: true });
 
         stmt.orders.fulfill.run(issued.registrationId, new Date().toISOString(), session.payment_intent || null, session.id);
@@ -1263,7 +1285,8 @@ app.put('/api/event/:id/at-door', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     const isOwner = event.userId === req.session.userId;
-    const isAdmin = req.session.userEmail === process.env.ADMIN_EMAIL;
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
 
     const enabled = req.body.enabled === true || req.body.enabled === 'true';
@@ -1286,7 +1309,7 @@ app.post('/api/event/:eventId/at-door-register', requireAuth, async (req, res) =
 
     const { name, email } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
-    const issued = issueTicketForPayment({
+    const issued = await issueTicketForPayment({
         eventId: event.id,
         buyerName: name.trim(),
         buyerEmail: email ? email.trim().toLowerCase() : null,
@@ -1377,6 +1400,18 @@ app.put('/api/event/:id/waitlist-enabled', requireAuth, (req, res) => {
     res.json({ success: true, waitlistEnabled: enabled });
 });
 
+// See the shuttleLinkEnabled comment in db-sqlite.js — only for events whose
+// tickets are exclusively used for shuttle boarding, never a door.
+app.put('/api/event/:id/shuttle-link-enabled', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    const enabled = req.body.enabled === true || req.body.enabled === 'true';
+    stmt.events.setShuttleLinkEnabled.run(enabled ? 1 : 0, req.params.id);
+    logAudit(req, { eventId: event.id, action: enabled ? 'shuttlelink.enabled' : 'shuttlelink.disabled' });
+    res.json({ success: true, shuttleLinkEnabled: enabled });
+});
+
 app.get('/api/event/:id/waitlist', requireAuth, (req, res) => {
     const eventId = req.params.id;
     if (!userHasEventAccess(req.session.userId, eventId)) {
@@ -1429,7 +1464,7 @@ app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
         return res.json({ success: true, notified: true });
     }
 
-    const issued = issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email });
+    const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email });
     if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
     stmt.waitlist.setStatus.run('converted', entry.id);
     logAudit(req, { eventId: event.id, action: 'waitlist.promoted', details: { email: entry.email } });
@@ -1481,10 +1516,22 @@ app.post('/api/orders/:id/refund', requireAuth, async (req, res) => {
     }
 });
 
+// Every sheet-integration call below (except create-event, which mints the key)
+// must present the apiKey that was returned when the room's event was created.
+function requireSheetApiKey(eventId, apiKey) {
+    if (!apiKey) return false;
+    const link = stmt.sheetLinks.byEventId.get(eventId);
+    return !!(link && link.apiKey && link.apiKey === apiKey);
+}
+
 // API: Bulk Register Tickets (for Google Sheets integration)
 app.post('/api/register-bulk', async (req, res) => {
-    const { firstName, lastName, email, eventId, ticketCount } = req.body;
+    const { firstName, lastName, email, eventId, ticketCount, apiKey } = req.body;
     const isResend = req.body.resend === true;
+
+    if (!requireSheetApiKey(eventId, apiKey)) {
+        return res.status(401).json({ error: 'Invalid or missing apiKey for this room' });
+    }
 
     if (!firstName || !lastName || !email || !eventId || !ticketCount) {
         return res.status(400).json({ error: 'firstName, lastName, email, eventId, and ticketCount are required' });
@@ -1652,7 +1699,7 @@ app.post('/api/register-bulk', async (req, res) => {
                 fromName: `Tickets - ${event.name}`,
                 replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
                 subject: isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`,
-                html: buildTicketEmailHtml({
+                html: await buildTicketEmailHtml({
                     firstName,
                     intro: isUpdate
                         ? `Your registration for <strong>${event.name}</strong> has been updated.`
@@ -1697,9 +1744,12 @@ async function fetchAndSaveImage(driveFileId) {
 
 // API: Update Event from Google Sheet
 app.post('/api/sheet/update-event', async (req, res) => {
-    const { eventId, name, time, endTime, color, locationName, address, lat, lng, driveFileId } = req.body;
+    const { eventId, name, time, endTime, color, locationName, address, lat, lng, driveFileId, apiKey } = req.body;
 
     if (!eventId) return res.status(400).json({ error: 'eventId is required' });
+    if (!requireSheetApiKey(eventId, apiKey)) {
+        return res.status(401).json({ error: 'Invalid or missing apiKey for this room' });
+    }
 
     const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -1722,6 +1772,10 @@ app.post('/api/sheet/update-event', async (req, res) => {
 
         stmt.events.setSheetFields.run(event.name, event.time, event.endTime, event.color, JSON.stringify(event.location), event.id);
         if (driveFileId) stmt.events.setImageUrl.run(event.imageUrl, event.id);
+
+        const eventTickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
+        pushWalletIfChanged(eventTickets, event).catch(() => {});
+
         res.json({ success: true, event });
     } catch (error) {
         console.error('Update event error:', error);
@@ -1729,15 +1783,24 @@ app.post('/api/sheet/update-event', async (req, res) => {
     }
 });
 
-// API: Create Event from Google Sheet (no auth required — keep your server URL private)
+// API: Create Event from Google Sheet.
+// Mints the room's identity: creates (or reuses) the sheetLinks row for this
+// spreadsheetId and returns its apiKey — every other sheet-integration call
+// below must present that key. This is what makes "one sheet per room" safe
+// for many independent organizers sharing one server.
 app.post('/api/sheet/create-event', async (req, res) => {
-    const { name, time, endTime, color, locationName, address, lat, lng, driveFileId } = req.body;
+    const { name, time, endTime, color, locationName, address, lat, lng, driveFileId, spreadsheetId, sheetName } = req.body;
 
     if (!name || !time) {
         return res.status(400).json({ error: 'name and time are required' });
     }
+    if (!spreadsheetId) {
+        return res.status(400).json({ error: 'spreadsheetId is required' });
+    }
 
-    // Find the owner account so events appear in the dashboard
+    // Fallback owner until the organizer claims the sheet to their own account
+    // (see /api/sheet/claim) — events created this way still show up somewhere
+    // in the meantime rather than being orphaned.
     const ownerEmail = process.env.SHEET_USER_EMAIL;
     const owner = ownerEmail ? rowToUser(stmt.users.byEmail.get(ownerEmail)) : null;
     const userId = owner ? owner.id : 'sheet';
@@ -1767,7 +1830,25 @@ app.post('/api/sheet/create-event', async (req, res) => {
 
     stmt.events.insert.run(newEvent.id, newEvent.userId, newEvent.name, newEvent.time, newEvent.endTime, newEvent.color, newEvent.imageUrl, newEvent.scannerPin, JSON.stringify(newEvent.location), 0, null, null, 0, null, 24, null, null, new Date().toISOString());
 
-    res.json({ success: true, eventId: newEvent.id, event: newEvent });
+    let link = stmt.sheetLinks.bySpreadsheetId.get(spreadsheetId);
+    if (link) {
+        stmt.sheetLinks.update.run(newEvent.id, sheetName || link.sheetName, link.id);
+        if (!link.apiKey) stmt.sheetLinks.setApiKey.run(nanoid(24), link.id);
+        link = stmt.sheetLinks.byId.get(link.id);
+    } else {
+        link = {
+            id: nanoid(10),
+            token: nanoid(20),
+            spreadsheetId,
+            sheetName: sheetName || name,
+            eventId: newEvent.id,
+            createdAt: new Date().toISOString(),
+            apiKey: nanoid(24),
+        };
+        stmt.sheetLinks.insert.run(link.id, link.token, link.spreadsheetId, link.sheetName, link.eventId, link.createdAt, link.apiKey);
+    }
+
+    res.json({ success: true, eventId: newEvent.id, event: newEvent, apiKey: link.apiKey });
 });
 
 // API: Batch ticket scan status (for Google Sheet)
@@ -1776,9 +1857,13 @@ const ticketStatusCache = new Map(); // key -> { result, expiresAt }
 const TICKET_STATUS_TTL = 60_000;
 
 app.post('/api/ticket-status', (req, res) => {
-    const { tokens } = req.body;
+    const { tokens, spreadsheetId, apiKey } = req.body;
     if (!tokens || !Array.isArray(tokens)) {
         return res.status(400).json({ error: 'tokens array required' });
+    }
+    const link = spreadsheetId ? stmt.sheetLinks.bySpreadsheetId.get(spreadsheetId) : null;
+    if (!link || !link.apiKey || link.apiKey !== apiKey) {
+        return res.status(401).json({ error: 'Invalid or missing apiKey for this room' });
     }
 
     const trimmed = tokens.map(t => t.trim()).filter(Boolean);
@@ -1931,6 +2016,10 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
 
     const updated = rowToEvent(stmt.events.byId.get(req.params.id));
     log('event-edit', `[edit] Updated event — name: ${updated.name}  id: ${updated.id}  by: ${req.session.userId}`);
+
+    const eventTickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
+    pushWalletIfChanged(eventTickets, updated).catch(() => {});
+
     res.json(updated);
 });
 
@@ -2136,7 +2225,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
             fromName: `Tickets - ${event.name}`,
             replyTo: eventOwner?.email,
             subject: `Your ${ticketLabel} for ${event.name}`,
-            html: buildTicketEmailHtml({
+            html: await buildTicketEmailHtml({
                 firstName: newTickets[0].firstName,
                 intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
                 event,
@@ -2190,7 +2279,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
             fromName: `Tickets - ${event.name}`,
             replyTo: eventOwner?.email,
             subject: `Updated registration for ${event.name}`,
-            html: buildTicketEmailHtml({
+            html: await buildTicketEmailHtml({
                 firstName: updatedTickets[0].firstName,
                 intro: `Your registration details for <strong>${event.name}</strong> have been updated.`,
                 event,
@@ -2240,19 +2329,19 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
         fromName: `Tickets - ${event.name}`,
         replyTo: eventOwner?.email,
         subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
-        html: buildTicketEmailHtml({
+        html: await buildTicketEmailHtml({
             firstName: groupTickets[0].firstName,
             intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
             event,
             tickets: groupTickets,
         }),
         registrationId: ticket.registrationId
+    }).then(() => {
+        res.json({ success: true, count: actualCount });
     }).catch(err => {
         log('resend-email', `[ERR] Send failed — email: ${ticket.email}  err: ${err.message}`);
-        return res.status(500).json({ error: 'Failed to send email' });
+        res.status(500).json({ error: 'Failed to send email' });
     });
-
-    res.json({ success: true, count: actualCount });
 });
 
 // Send a direct custom email to a ticket holder
@@ -2670,7 +2759,7 @@ app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
                 fromName: `Tickets - ${event.name}`,
                 replyTo: eventOwner?.email,
                 subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
-                html: buildTicketEmailHtml({
+                html: await buildTicketEmailHtml({
                     firstName: ticket.firstName,
                     intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
                     event,
@@ -2861,6 +2950,18 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
         return res.json({ status: 'invalid', message: 'Invalid ticket' });
     }
 
+    // Security: a ticket is only ever valid for the event it was actually
+    // issued for. Scanning clients pass the eventId the door staff selected
+    // on their device — if it doesn't match the ticket's real event, reject
+    // it as invalid rather than letting a ticket from event A validate at
+    // event B. (Older, not-yet-updated scanner clients that don't send
+    // eventId yet still fall through to the normal check below — this only
+    // enforces once a caller actually tells us which event it's scanning for.)
+    if (req.body.eventId && req.body.eventId !== ticket.eventId) {
+        log('validate', `[ERR] WRONG EVENT — ticket: ${ticket.id}  ticketEvent: ${ticket.eventId}  scannedFor: ${req.body.eventId}  ip: ${getIP(req)}`);
+        return res.json({ status: 'invalid', message: 'This ticket is not valid for this event' });
+    }
+
     const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     const ticketFields = {
         name: ticket.name, firstName: ticket.firstName ?? null, lastName: ticket.lastName ?? null,
@@ -2913,6 +3014,43 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
     res.json({ status: 'valid', message: `Welcome to ${event ? event.name : 'the event'} !`, ...ticketFields });
     if (event) { const _t = stmt.tickets.byEventId.all(event.id); recordScan(req.body.pairToken, event, 'valid', ticket, _t); }
     pushWalletIfChanged([ticket], event).catch(() => { });
+});
+
+// Read-only ticket check — for external systems linked to a specific event
+// (e.g. a shuttle app checking riders onto a bus with the same ticket they
+// already have for the event). Never sets used_at and never gates on it —
+// a ticket can be checked as many times as the rider boards. Only usable for
+// events the organizer has explicitly opted in via shuttleLinkEnabled, and
+// only within the linked event (the caller's eventId must match). This is
+// deliberately a separate endpoint from /api/validate rather than a mode on
+// it, so door check-in logic is never at risk from this feature.
+app.post('/api/ticket-check', validateLimiter, (req, res) => {
+    const { token, eventId } = req.body;
+    if (!token || !eventId) return res.status(400).json({ error: 'token and eventId are required' });
+
+    const event = rowToEvent(stmt.events.byId.get(eventId));
+    if (!event || !event.shuttleLinkEnabled) {
+        return res.status(403).json({ error: 'This event is not enabled for external ticket checks' });
+    }
+
+    const cleanToken = (token.startsWith('ticket:') ? token.split(':')[1] : token).trim();
+    const ticket = rowToTicket(stmt.tickets.byToken.get(cleanToken));
+
+    if (!ticket || ticket.eventId !== eventId) {
+        log('ticket-check', `[ERR] INVALID/WRONG EVENT — token: ${cleanToken}  eventId: ${eventId}  ip: ${getIP(req)}`);
+        return res.json({ valid: false });
+    }
+
+    // Informational log only — never gates future checks
+    try { stmt.ticketScans.insert.run(nanoid(), ticket.id, ticket.eventId, new Date().toISOString(), req.body.source || null); } catch {}
+
+    log('ticket-check', `[OK] ticket: ${ticket.id}  name: ${ticket.name}  event: ${event.name}  ip: ${getIP(req)}`);
+    res.json({
+        valid: true,
+        name: ticket.name, firstName: ticket.firstName ?? null,
+        ticketId: ticket.id, registrationId: ticket.registrationId,
+        eventId: ticket.eventId, eventName: event.name,
+    });
 });
 
 // Confirm reentry check-out (no auth required — scanner uses PIN, not session)
@@ -3477,16 +3615,22 @@ app.post('/api/wallet/v1/log', (req, res) => {
 
 // Generate a sharing link for a Google Sheet (called from Apps Script)
 app.post('/api/sheet/generate-link', async (req, res) => {
-    const { spreadsheetId, sheetName, eventId } = req.body;
+    const { spreadsheetId, sheetName, eventId, apiKey } = req.body;
     if (!spreadsheetId) return res.status(400).json({ error: 'spreadsheetId is required' });
 
     let link = stmt.sheetLinks.bySpreadsheetId.get(spreadsheetId);
     if (link) {
+        // Links created before the apiKey migration have none yet — allow this
+        // one bootstrap call through, then require the key on every call after.
+        if (link.apiKey && link.apiKey !== apiKey) {
+            return res.status(401).json({ error: 'Invalid or missing apiKey for this room' });
+        }
+        if (!link.apiKey) stmt.sheetLinks.setApiKey.run(nanoid(24), link.id);
         if (eventId || sheetName) {
             stmt.sheetLinks.update.run(eventId || link.eventId, sheetName || link.sheetName, link.id);
-            link = stmt.sheetLinks.byId.get(link.id);
         }
-        return res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token });
+        link = stmt.sheetLinks.byId.get(link.id);
+        return res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token, apiKey: link.apiKey });
     }
 
     link = {
@@ -3495,15 +3639,16 @@ app.post('/api/sheet/generate-link', async (req, res) => {
         spreadsheetId,
         sheetName: sheetName || 'Untitled Sheet',
         eventId: eventId || null,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        apiKey: nanoid(24),
     };
-    stmt.sheetLinks.insert.run(link.id, link.token, link.spreadsheetId, link.sheetName, link.eventId, link.createdAt);
-    res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token });
+    stmt.sheetLinks.insert.run(link.id, link.token, link.spreadsheetId, link.sheetName, link.eventId, link.createdAt, link.apiKey);
+    res.json({ success: true, linkUrl: `${BASE_URL}/link/${link.token}`, token: link.token, apiKey: link.apiKey });
 });
 
 // Redirect /link/:token → link.html?token=...
 app.get('/link/:token', (req, res) => {
-    res.redirect(`/ link.html ? token = ${req.params.token} `);
+    res.redirect(`/link.html?token=${req.params.token}`);
 });
 
 // Get info about a link token (public)
@@ -3537,6 +3682,22 @@ app.post('/api/sheet/claim', requireAuth, async (req, res) => {
 
     const existing = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
     if (existing) return res.json({ success: true, message: 'Already linked' });
+
+    // If the room's event still belongs to the shared fallback account (nobody
+    // has claimed it yet), transfer real ownership to the claiming user instead
+    // of only granting view access — this is what makes "different people,
+    // their own rooms" true per-account isolation rather than everyone's sheet
+    // events secretly belonging to one shared account.
+    const fallbackEmail = process.env.SHEET_USER_EMAIL;
+    const fallbackOwner = fallbackEmail ? rowToUser(stmt.users.byEmail.get(fallbackEmail)) : null;
+    const fallbackUserId = fallbackOwner ? fallbackOwner.id : 'sheet';
+
+    const event = link.eventId ? rowToEvent(stmt.events.byId.get(link.eventId)) : null;
+    if (event && event.userId === fallbackUserId && event.userId !== req.session.userId) {
+        stmt.events.setOwner.run(req.session.userId, event.id);
+        log('sheet-claim', `[claim] Ownership transferred — event: ${event.name}  to: ${req.session.userId}`);
+        return res.json({ success: true, message: 'Room claimed — it now belongs to your account!', ownershipTransferred: true });
+    }
 
     stmt.sheetAccess.insert.run(nanoid(10), req.session.userId, link.id, new Date().toISOString(), 'view');
     res.json({ success: true, message: 'Sheet linked to your account!' });
@@ -3627,8 +3788,8 @@ app.post('/api/sheet/share', requireAuth, async (req, res) => {
 
     let link = stmt.sheetLinks.byEventId.get(eventId);
     if (!link) {
-        const newLink = { id: nanoid(10), token: nanoid(20), spreadsheetId: 'manual', sheetName: event.name, eventId: event.id, createdAt: new Date().toISOString() };
-        stmt.sheetLinks.insert.run(newLink.id, newLink.token, newLink.spreadsheetId, newLink.sheetName, newLink.eventId, newLink.createdAt);
+        const newLink = { id: nanoid(10), token: nanoid(20), spreadsheetId: 'manual', sheetName: event.name, eventId: event.id, createdAt: new Date().toISOString(), apiKey: nanoid(24) };
+        stmt.sheetLinks.insert.run(newLink.id, newLink.token, newLink.spreadsheetId, newLink.sheetName, newLink.eventId, newLink.createdAt, newLink.apiKey);
         link = newLink;
     }
 

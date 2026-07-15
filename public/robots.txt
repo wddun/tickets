@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /sessions/
+
+Sitemap: https://tickets.willstechsupport.com/sitemap.xml

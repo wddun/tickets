@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Kiosk · WTS Tickets</title>
+<link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+<style>
+:root {
+    --bg-1:   #0f1429;
+    --bg-2:   #1a1f3c;
+    --card:   #ffffff;
+    --text:   #1a1f3c;
+    --muted:  #6b7280;
+    --accent: #4f46e5;
+    --border: #e5e7eb;
+    --green:  #10b981;
+    --red:    #dc2626;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(160deg, var(--bg-2) 0%, var(--bg-1) 100%);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    -webkit-tap-highlight-color: transparent;
+}
+.shell {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    width: 100%;
+}
+.event-name {
+    color: white;
+    font-size: 28px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 6px;
+}
+.event-sub {
+    color: rgba(255,255,255,.65);
+    font-size: 16px;
+    text-align: center;
+    margin-bottom: 28px;
+}
+.card {
+    background: var(--card);
+    border-radius: 22px;
+    padding: 36px 32px;
+    width: 100%;
+    max-width: 560px;
+    box-shadow: 0 16px 40px rgba(0,0,0,.25);
+}
+.card h2 {
+    margin: 0 0 24px;
+    font-size: 24px;
+    text-align: center;
+}
+
+label.lbl {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-bottom: 8px;
+    margin-top: 16px;
+}
+input[type=text], input[type=email] {
+    width: 100%;
+    padding: 18px 18px;
+    font-size: 20px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #f9fafb;
+    color: var(--text);
+    transition: border .15s, background .15s;
+}
+input[type=text]:focus, input[type=email]:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: white;
+}
+button.primary {
+    width: 100%;
+    padding: 20px;
+    font-size: 20px;
+    font-weight: 700;
+    color: white;
+    background: var(--accent);
+    border: 0;
+    border-radius: 14px;
+    cursor: pointer;
+    margin-top: 24px;
+    transition: opacity .15s, transform .1s;
+}
+button.primary:active { transform: scale(0.99); }
+button.primary:disabled { opacity: .5; cursor: not-allowed; }
+
+.success-screen {
+    text-align: center;
+}
+.success-screen .check {
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 18px;
+    border-radius: 50%;
+    background: var(--green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.success-screen .check svg { width: 56px; height: 56px; color: white; }
+.success-screen .title {
+    font-size: 26px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+.success-screen .sub {
+    font-size: 17px;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+.success-screen .resetting {
+    margin-top: 22px;
+    font-size: 14px;
+    color: var(--muted);
+}
+
+.error-banner {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    padding: 14px;
+    border-radius: 10px;
+    margin-top: 14px;
+    font-size: 15px;
+    display: none;
+}
+.error-banner.show { display: block; }
+
+.loading-screen, .blocked-screen {
+    color: rgba(255,255,255,.85);
+    text-align: center;
+    padding: 60px 24px;
+    max-width: 520px;
+    margin: 0 auto;
+}
+.blocked-screen h2 { color: white; font-size: 24px; margin-bottom: 10px; }
+.blocked-screen p  { color: rgba(255,255,255,.7); font-size: 15px; }
+
+.spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 3px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+    vertical-align: -4px;
+    margin-right: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.qr-shell {
+    background: white;
+    padding: 22px;
+    border-radius: 20px;
+    width: 100%;
+    max-width: 480px;
+    text-align: center;
+}
+.qr-shell canvas {
+    width: 100%;
+    max-width: 380px;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+    image-rendering: pixelated;
+}
+.qr-shell .qr-headline {
+    margin-top: 16px;
+    font-size: 22px;
+    font-weight: 700;
+}
+.qr-shell .qr-sub {
+    margin-top: 6px;
+    font-size: 15px;
+    color: var(--muted);
+}
+
+footer {
+    text-align: center;
+    padding: 14px;
+    color: rgba(255,255,255,.4);
+    font-size: 12px;
+}
+</style>
+</head>
+<body>
+
+<div class="shell" id="shell">
+    <div class="loading-screen">
+        <span class="spinner"></span> Loading event…
+    </div>
+</div>
+
+<footer id="footer">WTS Tickets · Self-Service Kiosk</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script>
+const RESET_AFTER_SUCCESS_MS = 6000;
+const IDLE_RESET_MS          = 60000;
+
+const params  = new URLSearchParams(location.search);
+const eventId = params.get('id');
+const shell   = document.getElementById('shell');
+
+let event       = null;
+let idleTimer   = null;
+let successTimer = null;
+
+if (!eventId) {
+    blocked('Missing ?id= in URL.');
+} else {
+    loadEvent();
+}
+
+async function loadEvent() {
+    try {
+        const res = await fetch(`/api/event/${encodeURIComponent(eventId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        event = await res.json();
+
+        const isPaid = (event.ticketPrice || 0) > 0;
+        if (isPaid) {
+            renderPaid();
+        } else if (!event.allowPublicRegistration) {
+            blocked(
+                'Kiosk mode needs public registration enabled.',
+                'Open this event in the dashboard and turn on "Allow Public Registration" to use it as a self-service kiosk.'
+            );
+        } else {
+            renderForm();
+        }
+    } catch (err) {
+        blocked('Failed to load event.', err.message);
+    }
+}
+
+function blocked(title, detail) {
+    shell.innerHTML = `
+        <div class="blocked-screen">
+            <h2>${escape(title)}</h2>
+            ${detail ? `<p>${escape(detail)}</p>` : ''}
+        </div>
+    `;
+}
+
+function renderPaid() {
+    const url = `${location.origin}/register.html?id=${encodeURIComponent(event.id)}`;
+    const price = `$${(event.ticketPrice / 100).toFixed(2)}`;
+    shell.innerHTML = `
+        <div class="event-name">${escape(event.name)}</div>
+        <div class="event-sub">${price}</div>
+        <div class="qr-shell">
+            <canvas id="qrCanvas"></canvas>
+            <div class="qr-headline">Scan to buy your ticket</div>
+            <div class="qr-sub">Open your camera, point it at the code, then pay on your phone.</div>
+        </div>
+    `;
+    QRCode.toCanvas(document.getElementById('qrCanvas'), url, { width: 380, margin: 2, errorCorrectionLevel: 'M' });
+}
+
+function renderForm() {
+    shell.innerHTML = `
+        <div class="event-name">${escape(event.name)}</div>
+        <div class="event-sub">Enter your info to get a free ticket emailed to you</div>
+        <div class="card">
+            <h2>Free Ticket</h2>
+            <form id="kioskForm" autocomplete="off">
+                <label class="lbl" for="kName">Full name</label>
+                <input type="text" id="kName" autocomplete="off" autocapitalize="words" required>
+
+                <label class="lbl" for="kEmail">Email</label>
+                <input type="email" id="kEmail" autocomplete="off" autocapitalize="off" required>
+
+                <button class="primary" type="submit" id="kSubmit">Get My Ticket</button>
+                <div class="error-banner" id="kError"></div>
+            </form>
+        </div>
+    `;
+    document.getElementById('kioskForm').addEventListener('submit', submitForm);
+    document.getElementById('kName').focus();
+    armIdleReset();
+}
+
+function armIdleReset() {
+    clearTimeout(idleTimer);
+    const reset = () => renderForm();
+    idleTimer = setTimeout(reset, IDLE_RESET_MS);
+    // Bump idle timer on any interaction
+    ['input', 'keydown', 'touchstart', 'mousedown'].forEach(evt => {
+        shell.addEventListener(evt, bumpIdle, { passive: true, once: false });
+    });
+}
+
+function bumpIdle() {
+    if (!idleTimer) return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => renderForm(), IDLE_RESET_MS);
+}
+
+async function submitForm(e) {
+    e.preventDefault();
+    const name  = document.getElementById('kName').value.trim();
+    const email = document.getElementById('kEmail').value.trim();
+    const btn   = document.getElementById('kSubmit');
+    const errBox = document.getElementById('kError');
+    errBox.classList.remove('show');
+
+    if (!name || !email) return;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Sending…';
+
+    try {
+        const res = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email, eventId: event.id }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        showSuccess(name, email);
+    } catch (err) {
+        errBox.textContent = err.message || 'Failed to register';
+        errBox.classList.add('show');
+        btn.disabled = false;
+        btn.textContent = 'Get My Ticket';
+    }
+}
+
+function showSuccess(name, email) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    shell.innerHTML = `
+        <div class="event-name">${escape(event.name)}</div>
+        <div class="card success-screen">
+            <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <div class="title">You're in, ${escape(name.split(/\s+/)[0])}!</div>
+            <div class="sub">We just emailed your ticket to</div>
+            <div class="sub" style="color:var(--text);font-weight:600;">${escape(email)}</div>
+            <div class="resetting"><span id="countdown">${RESET_AFTER_SUCCESS_MS / 1000}</span>s until the next ticket…</div>
+        </div>
+    `;
+    let remaining = RESET_AFTER_SUCCESS_MS / 1000;
+    const cdEl = document.getElementById('countdown');
+    successTimer = setInterval(() => {
+        remaining--;
+        if (cdEl) cdEl.textContent = remaining;
+        if (remaining <= 0) {
+            clearInterval(successTimer);
+            renderForm();
+        }
+    }, 1000);
+}
+
+function escape(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
+}
+</script>
+</body>
+</html>

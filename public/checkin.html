@@ -7,6 +7,7 @@
     <meta name="theme-color" content="#000000">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="stylesheet" href="kiosk.css">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -81,6 +82,30 @@
             cursor: pointer;
         }
         select#eventSelect option { background: #1c1c1e; }
+
+        /* At-door action row (under event picker) */
+        .at-door-actions {
+            display: none;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .at-door-actions.show { display: flex; }
+        .at-door-actions a {
+            flex: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            text-decoration: none;
+            color: #fff;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.15);
+            padding: 9px 12px;
+            border-radius: 9px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .at-door-actions a:active { background: rgba(255,255,255,0.2); }
 
         /* ── Search bar ── */
         .search-bar {
@@ -163,8 +188,8 @@
             letter-spacing: -0.5px;
         }
         .av-pending { background: rgba(255,255,255,0.1);  color: rgba(255,255,255,0.6); }
-        .av-partial { background: rgba(251,191,36,0.18);  color: #fbbf24; }
-        .av-done    { background: rgba(74,222,128,0.18);  color: #4ade80; }
+        .av-partial { background: rgba(251,191,36,0.18);  color: var(--warning); }
+        .av-done    { background: rgba(16,185,129,0.18);  color: var(--success); }
 
         .person-info { flex: 1; min-width: 0; }
         .person-name {
@@ -180,8 +205,8 @@
             width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
         }
         .sd-pending { background: rgba(255,255,255,0.3); }
-        .sd-partial { background: #fbbf24; }
-        .sd-done    { background: #4ade80; }
+        .sd-partial { background: var(--warning); }
+        .sd-done    { background: var(--success); }
 
         .row-checkin-btn {
             background: #fff;
@@ -195,7 +220,7 @@
         .row-checkin-btn:active { opacity: 0.65; }
         .row-done-label {
             font-size: 13px; font-weight: 600;
-            color: #4ade80; flex-shrink: 0;
+            color: var(--success); flex-shrink: 0;
         }
         .row-multi-hint {
             font-size: 11px; color: rgba(255,255,255,0.25);
@@ -248,7 +273,7 @@
         }
         .sheet-ticket-row:last-child { border-bottom: none; }
         .sheet-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-        .sheet-dot-used    { background: #4ade80; }
+        .sheet-dot-used    { background: var(--success); }
         .sheet-dot-pending { background: rgba(255,255,255,0.2); }
         .sheet-ticket-info { flex: 1; min-width: 0; }
         .sheet-ticket-num { font-size: 15px; font-weight: 600; }
@@ -261,7 +286,7 @@
             -webkit-tap-highlight-color: transparent;
         }
         .sheet-ticket-btn:active { opacity: 0.7; }
-        .sheet-ticket-done { font-size: 13px; font-weight: 700; color: #4ade80; }
+        .sheet-ticket-done { font-size: 13px; font-weight: 700; color: var(--success); }
         .sheet-footer {
             padding: 12px 16px;
             border-top: 1px solid rgba(255,255,255,0.08);
@@ -286,39 +311,6 @@
         }
 
         /* ── Tab bar ── */
-        .tab-bar {
-            flex-shrink: 0;
-            background: rgba(10,10,10,0.88);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-top: 1px solid rgba(255,255,255,0.1);
-        }
-        .tab-bar-inner {
-            display: flex;
-            height: 49px;
-        }
-        .tab-bar-safe {
-            height: env(safe-area-inset-bottom, 0px);
-        }
-        .tab-btn {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 3px;
-            background: none;
-            border: none;
-            color: rgba(255,255,255,0.4);
-            font-size: 10px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: color 0.15s;
-            padding: 0;
-            -webkit-tap-highlight-color: transparent;
-        }
-        .tab-btn.active { color: #fff; }
-        .tab-btn svg { width: 22px; height: 22px; }
     </style>
 </head>
 <body>
@@ -332,6 +324,16 @@
         <select id="eventSelect" onchange="onEventChange()">
             <option value="">Loading…</option>
         </select>
+    </div>
+    <div class="at-door-actions" id="atDoorActions">
+        <a href="#" id="btnAtDoor" target="_blank">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v4a1 1 0 0 0 1 1 2 2 0 1 1 0 4 1 1 0 0 0-1 1v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4a1 1 0 0 0-1-1 2 2 0 1 1 0-4 1 1 0 0 0 1-1V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/></svg>
+            At Door
+        </a>
+        <a href="#" id="btnKiosk" target="_blank">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            Kiosk
+        </a>
     </div>
 </div>
 
@@ -407,6 +409,7 @@ let sheetRegId = null;
             // Restore from scanner selection
             const saved = localStorage.getItem('selectedEventId');
             if (saved && events.find(e => e.id === saved)) sel.value = saved;
+            updateAtDoorActions(sel.value);
             await loadAttendees(sel.value);
         }
     } catch (_) {
@@ -420,7 +423,20 @@ async function onEventChange() {
     document.getElementById('searchInput').value = '';
     allAttendees = [];
     filteredAttendees = [];
+    updateAtDoorActions(sel.value);
     if (sel.value) await loadAttendees(sel.value);
+}
+
+function updateAtDoorActions(eventId) {
+    const row = document.getElementById('atDoorActions');
+    const ev = events.find(e => e.id === eventId);
+    if (ev && ev.atDoorEnabled) {
+        document.getElementById('btnAtDoor').href = `/at-door.html?id=${encodeURIComponent(ev.id)}`;
+        document.getElementById('btnKiosk').href  = `/kiosk.html?id=${encodeURIComponent(ev.id)}`;
+        row.classList.add('show');
+    } else {
+        row.classList.remove('show');
+    }
 }
 
 // ── Data ──────────────────────────────────────────────────

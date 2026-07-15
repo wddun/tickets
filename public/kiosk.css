@@ -1,0 +1,62 @@
+/* Shared "dark/kiosk" theme — used by scanner.html, checkin.html, settings.html,
+   and (partially) display.html. See DESIGN.md for the full token rationale;
+   this file just holds the tokens and the pieces that were previously
+   copy-pasted identically across those pages (the tab bar). */
+
+:root {
+    --dark-bg:            #000000;
+    --dark-bg-alt:        #080810;
+    --dark-surface:       #1c1c1e;
+    --dark-surface-hover: #3a3a3c;
+    --dark-overlay-low:   rgba(255,255,255,0.06);
+    --dark-overlay-mid:   rgba(255,255,255,0.1);
+    --dark-text:          #ffffff;
+    --dark-text-muted:    rgba(255,255,255,0.4);
+    --dark-border:        rgba(255,255,255,0.1);
+
+    /* Canonical status colors — same meaning as the light theme (public/style.css).
+       --warning is a brighter variant for direct use on dark/translucent surfaces,
+       since the light theme's --warning-text (#92400e) is a dark-on-light pairing
+       and isn't legible on black. */
+    --success:      #10b981;
+    --danger:       #dc2626;
+    --danger-soft:  #f87171;
+    --warning:      #fbbf24;
+    --warning-bg:   #fef3c7;
+    --warning-text: #92400e;
+}
+
+/* ── Tab bar (bottom nav) — shared by scanner/checkin/settings ── */
+.tab-bar {
+    flex-shrink: 0;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255,255,255,0.1);
+}
+.tab-bar-inner {
+    display: flex;
+    height: 49px;
+}
+.tab-bar-safe {
+    height: env(safe-area-inset-bottom, 0px);
+}
+.tab-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.4);
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+.tab-btn.active { color: #fff; }
+.tab-btn svg { width: 22px; height: 22px; }

@@ -14,6 +14,9 @@ struct SettingsView: View {
     @State private var isDeleting = false
     @State private var actionError: String?
     @State private var notifStatus: UNAuthorizationStatus = .notDetermined
+    // How long the full-screen scan result stays up — a per-device
+    // preference read directly by ScannerView via the same AppStorage key.
+    @AppStorage("resultDisplayDuration") private var resultDisplayDuration: Double = 1.2
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
@@ -108,6 +111,22 @@ struct SettingsView: View {
                     }
 
                     Text("Per-event notification preferences are managed from the bell icon inside each event's attendee list.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // MARK: - Scanner
+                Section("Scanner") {
+                    HStack {
+                        Label("Result display time", systemImage: "timer")
+                        Spacer()
+                        Text(String(format: "%.1fs", resultDisplayDuration))
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                    }
+                    Slider(value: $resultDisplayDuration, in: 1...10, step: 0.5)
+
+                    Text("How long a scan result stays full-screen on this device.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

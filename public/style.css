@@ -6,6 +6,11 @@
     --red-dark:    #a02039;
     --success:     #10b981;
     --danger:      #dc2626;
+    --warning-bg:  #fef3c7;
+    --warning-text:#92400e;
+    --danger-soft-bg:     #fef2f2;
+    --danger-soft-border: #fca5a5;
+    --danger-soft-text:   #991b1b;
     --bg:          #f4f5f8;
     --card:        #ffffff;
     --text:        #1e293b;

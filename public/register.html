@@ -7,23 +7,22 @@
     <meta name="theme-color" content="#1a1f3c">
     <link rel="stylesheet" href="style.css">
     <style>
-        body { background: #f4f5f8; }
         .container { max-width: 480px; padding: 24px 16px 40px; }
 
         .event-header {
             text-align: center; margin-bottom: 6px;
         }
-        .event-name { font-size: 22px; font-weight: 800; color: #1a1f3c; margin-bottom: 4px; }
-        .event-meta { font-size: 14px; color: #64748b; }
+        .event-name { font-size: 22px; font-weight: 800; color: var(--navy); margin-bottom: 4px; }
+        .event-meta { font-size: 14px; color: var(--text-muted); }
 
         .success-box {
-            background: #fff; border: 1px solid #dde3ed;
+            background: #fff; border: 1px solid var(--border);
             border-radius: 14px; padding: 28px 20px;
             text-align: center;
         }
         .success-icon { width: 52px; height: 52px; margin: 0 auto 12px; display: block; }
-        .success-title { font-size: 20px; font-weight: 800; color: #1a1f3c; margin-bottom: 6px; }
-        .success-sub   { font-size: 14px; color: #64748b; margin-bottom: 22px; }
+        .success-title { font-size: 20px; font-weight: 800; color: var(--navy); margin-bottom: 6px; }
+        .success-sub   { font-size: 14px; color: var(--text-muted); margin-bottom: 22px; }
 
         .qr-img {
             width: min(180px, 70vw); height: min(180px, 70vw);
@@ -39,15 +38,15 @@
         .wallet-link img { height: 44px; width: auto; display: block; }
 
         .btn-outline {
-            background: #f4f5f8; color: #1a1f3c;
-            border: 1.5px solid #dde3ed;
+            background: var(--bg); color: var(--navy);
+            border: 1.5px solid var(--border);
             font-size: 15px;
         }
         .btn-outline:hover { background: #e8ecf4; }
 
         .price-badge {
             display: inline-block;
-            background: #1a1f3c; color: #fff;
+            background: var(--navy); color: #fff;
             font-size: 15px; font-weight: 700;
             padding: 4px 12px; border-radius: 20px;
             margin-top: 8px;
@@ -58,7 +57,7 @@
         }
         .processing-spinner {
             width: 40px; height: 40px; margin: 0 auto 16px;
-            border: 3px solid #dde3ed; border-top-color: #1a1f3c;
+            border: 3px solid var(--border); border-top-color: var(--navy);
             border-radius: 50%; animation: spin 0.8s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -76,7 +75,7 @@
                     <div class="event-name" id="eventTitle">Loading…</div>
                     <div class="event-meta" id="eventDesc"></div>
                     <div id="priceBadge" style="display:none;" class="price-badge"></div>
-                    <div id="ticketsLeft" style="display:none;margin-top:10px;padding:7px 12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;font-size:13px;font-weight:600;color:#92400e;"></div>
+                    <div id="ticketsLeft" style="display:none;margin-top:10px;padding:7px 12px;background:var(--warning-bg);border:1px solid #fcd34d;border-radius:8px;font-size:13px;font-weight:600;color:var(--warning-text);"></div>
                 </div>
                 <form id="registerForm" style="margin-top:24px;">
                     <div class="form-group">
@@ -94,14 +93,14 @@
             <div id="processingView" style="display:none;">
                 <div class="processing-box">
                     <div class="processing-spinner"></div>
-                    <div style="font-size:16px;font-weight:700;color:#1a1f3c;margin-bottom:6px;">Processing your ticket…</div>
-                    <div style="font-size:14px;color:#64748b;">This will only take a moment.</div>
+                    <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:6px;">Processing your ticket…</div>
+                    <div style="font-size:14px;color:var(--text-muted);">This will only take a moment.</div>
                 </div>
             </div>
 
             <div id="successView" style="display:none;">
                 <div class="success-box">
-                    <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
+                    <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
                     <div class="success-title" id="successTitle">You're registered!</div>
                     <div class="success-sub">A confirmation email has been sent to you with your QR code.</div>
                     <img id="qrImage" class="qr-img" src="" alt="QR Code">
@@ -156,9 +155,9 @@
                         el.style.display = 'block';
                         if (left === 0) {
                             document.getElementById('submitBtn').disabled = true;
-                            el.style.background = '#fef2f2';
-                            el.style.borderColor = '#fca5a5';
-                            el.style.color = '#991b1b';
+                            el.style.background = 'var(--danger-soft-bg)';
+                            el.style.borderColor = 'var(--danger-soft-border)';
+                            el.style.color = 'var(--danger-soft-text)';
                         }
                     }
                 }

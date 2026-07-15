@@ -1,13 +1,30 @@
 // ============================================================
 //  Ticket System — Google Sheets Script
 //
-//  HOW TO SET UP (once per template copy):
-//  1. Extensions > Apps Script → paste this entire file → Save
-//  2. Reload the sheet — a "🎟️ Ticket System" menu appears
-//  3. Run: 🎟️ Ticket System > Initialize Sheet  (sets up tabs)
-//  4. Run: 🎟️ Ticket System > Setup Triggers    (enables auto-send)
-//  5. Fill in the yellow settings cells on the "Event" tab
-//  6. Click "Create Event" from the menu when ready
+//  ONE SHEET = ONE ROOM. Each event/room is its own copy of this
+//  spreadsheet template, with its own trigger and its own private
+//  API key — many different organizers can run their own copy
+//  against the same server safely.
+//
+//  HOW TO SET UP (once per new room):
+//  1. Open the sheet — the Event/Attendees tabs build themselves and
+//     a "Ticket System" menu appears. Nothing to click yet.
+//  2. Fill in the yellow Event Details cells (rows 5–11) on the Event tab.
+//  3. Run: Ticket System > Get Started
+//     Google will ask you to approve this script the first time —
+//     that one-time permission prompt is required by Google for any
+//     script that talks to a server, it isn't something we can skip.
+//     After that, Get Started creates the event, links the sheet to
+//     your account, and turns on auto-send — you're done.
+//
+//  Everything else (custom fields, resending a row, duplicating this
+//  sheet as a new room) lives in the menu; one-off setup helpers are
+//  tucked under Ticket System > Advanced.
+//
+//  SETTING UP A NEW ROOM FROM THIS ONE:
+//  Use Ticket System > Duplicate as New Room — don't just right-click
+//  "Make a copy" in Drive, since that carries over this room's Event ID
+//  and attendee data (Duplicate as New Room clears both automatically).
 //
 //  CUSTOM FIELDS:
 //  Add any column header between "# of Tickets" and "Status" on the
@@ -15,12 +32,18 @@
 //  Those fields automatically appear in the email and Apple Wallet pass.
 // ============================================================
 
+// ---- Server ----
+// Baked in so non-technical organizers never have to type/paste a URL.
+// The Event tab's Server URL cell (B2) is an optional override — leave it
+// blank to use this default.
+var DEFAULT_SERVER_URL = 'https://tickets.willstechsupport.com';
+
 // ---- Sheet tab names ----
 var EVENT_SHEET_NAME     = 'Event';
 var ATTENDEES_SHEET_NAME = 'Attendees';
 
 // ---- Event sheet cell addresses ----
-var EV_SERVER_URL  = 'B2';   // Server URL setting
+var EV_SERVER_URL  = 'B2';   // Server URL override (optional — see DEFAULT_SERVER_URL)
 var EV_NAME        = 'B5';
 var EV_DATE        = 'B6';
 var EV_TIME        = 'B7';
@@ -56,31 +79,113 @@ var COLOR_OPTIONS = [
 ];
 
 // ============================================================
-//  CUSTOM MENU (runs on open)
+//  CUSTOM MENU (runs on open) — also auto-builds the Event/Attendees
+//  tabs the very first time a fresh copy is opened. This is the one
+//  piece of setup that CAN happen with zero clicks: building the two
+//  tabs only touches this spreadsheet, which Google allows without
+//  the user granting any permissions. Everything past that (creating
+//  the event, linking the sheet) calls our server, and Google always
+//  requires an explicit one-time permission prompt before a script's
+//  first outside network call — that step can't be skipped or
+//  automated away, so "Get Started" is the one real click left.
 // ============================================================
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('🎟️ Ticket System')
-    .addItem('Initialize Sheet (first time setup)', 'initializeSheet')
-    .addItem('Setup Triggers (run once per copy)', 'setupTriggers')
-    .addSeparator()
-    .addItem('Create Event from Event tab', 'createEventFromSheet')
+  var ss = SpreadsheetApp.getActive();
+  var isFreshCopy = !ss.getSheetByName(EVENT_SHEET_NAME) || !ss.getSheetByName(ATTENDEES_SHEET_NAME);
+  if (isFreshCopy) initializeSheet(true /* skipAlert */);
+
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('Ticket System')
+    .addItem('Get Started', 'getStarted')
     .addSeparator()
     .addItem('Send Pending Emails', 'sendPendingEmails')
     .addItem('Resend Selected Row', 'resendSelectedRow')
-    .addSeparator()
     .addItem('Refresh Scan Status', 'refreshScanStatus')
     .addSeparator()
-    .addItem('Link Sheet to Account', 'linkSheetToAccount')
+    .addItem('Duplicate as New Room…', 'duplicateAsNewRoom')
     .addSeparator()
-    .addItem('Fix: Remove Duplicate Triggers', 'setupTriggers')
+    .addSubMenu(ui.createMenu('Advanced')
+      .addItem('Create Event from Event tab', 'createEventFromSheet')
+      .addItem('Link Sheet to Account', 'linkSheetToAccount')
+      .addItem('Test Connection', 'testConnection')
+      .addSeparator()
+      .addItem('Reset Sheet Tabs', 'initializeSheet')
+      .addItem('Fix: Remove Duplicate Triggers', 'setupTriggers'))
     .addToUi();
+
+  if (isFreshCopy) {
+    ui.alert(
+      'Welcome',
+      'Your Event and Attendees tabs are already set up.\n\n' +
+      'Fill in the yellow Event Details cells (rows 5–11) on the Event tab, then run Ticket System > Get Started.',
+      ui.ButtonSet.OK
+    );
+  }
+}
+
+// ============================================================
+//  GET STARTED — one guided flow through the whole setup, for
+//  organizers who don't want to hunt through the menu in order.
+// ============================================================
+function getStarted() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActive();
+
+  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
+  if (!evSheet || !ss.getSheetByName(ATTENDEES_SHEET_NAME)) {
+    initializeSheet(true /* skipAlert */);
+    evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
+  }
+
+  var already = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
+  if (!already) {
+    var name = evSheet.getRange(EV_NAME).getValue().toString().trim();
+    if (!name || name === 'My Awesome Event') {
+      ui.alert(
+        'Almost there',
+        'Fill in the yellow Event Details cells (rows 5–11) on the Event tab, then run Ticket System > Get Started again.',
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+    createEventFromSheet(true /* calledFromWizard */);
+    already = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
+    if (!already) return; // create-event already showed its own error
+  }
+
+  setupTriggers(true /* skipAlert */);
+  linkSheetToAccount();
+
+  ui.alert(
+    'All set',
+    'Your event is created and triggers are running. If you haven\'t already, click the link that just opened to connect this room to your account — then switch to the Attendees tab and start entering registrations.',
+    ui.ButtonSet.OK
+  );
+}
+
+// ============================================================
+//  SCRIPT PROPERTIES — secrets live here, never in a cell.
+//  A duplicated spreadsheet gets a brand-new bound script project
+//  (a fresh script ID), so these do NOT carry over on "Make a copy" —
+//  that's what makes a plain Drive duplicate at least safe from
+//  accidentally reusing another room's credentials.
+// ============================================================
+function getApiKey() {
+  return PropertiesService.getScriptProperties().getProperty('API_KEY') || '';
+}
+function setApiKey(key) {
+  if (key) PropertiesService.getScriptProperties().setProperty('API_KEY', key);
+}
+
+function getServerUrl(evSheet) {
+  var override = evSheet.getRange(EV_SERVER_URL).getValue().toString().trim();
+  return (override || DEFAULT_SERVER_URL).replace(/\/$/, '');
 }
 
 // ============================================================
 //  INITIALIZE SHEET — builds both tabs with formatting
 // ============================================================
-function initializeSheet() {
+function initializeSheet(skipAlert) {
   var ss = SpreadsheetApp.getActive();
 
   // ---- Event tab ----
@@ -89,12 +194,15 @@ function initializeSheet() {
   evSheet.clearFormats();
 
   // Title
-  evSheet.getRange('A1').setValue('🎟️ Event Setup').setFontSize(18).setFontWeight('bold');
+  evSheet.getRange('A1').setValue('Event Setup').setFontSize(18).setFontWeight('bold');
   evSheet.getRange('A1:D1').merge();
 
   // Settings section
-  styleLabel(evSheet.getRange('A2'), 'Server URL');
-  styleInput(evSheet.getRange('B2'), 'https://yourserver.com').setNote('Your ticket server URL — no trailing slash');
+  styleLabel(evSheet.getRange('A2'), 'Server URL (optional)');
+  styleInput(evSheet.getRange('B2'), '').setNote(
+    'Leave blank to use the default server (' + DEFAULT_SERVER_URL + ').\n' +
+    'Only fill this in if you were told to point at a different server.'
+  );
 
   // Divider
   evSheet.getRange('A3:D3').merge().setBackground('#4a4a8a');
@@ -188,32 +296,33 @@ function initializeSheet() {
   // Bring Event tab to front
   ss.setActiveSheet(evSheet);
 
-  SpreadsheetApp.getUi().alert(
-    '✅ Sheet initialized!\n\n' +
-    'Next steps:\n' +
-    '1. Fill in your Server URL (row 2)\n' +
-    '2. Fill in all Event Details (rows 5–11)\n' +
-    '3. Run "Setup Triggers" from this menu\n' +
-    '4. Run "Create Event from Event tab" when ready\n\n' +
-    'TIP: The green "T-Shirt Size" column is an example custom field.\n' +
-    'Rename it, delete it, or add more columns between "# of Tickets" and "Status".'
-  );
+  if (!skipAlert) {
+    SpreadsheetApp.getUi().alert(
+      'Sheet initialized!\n\n' +
+      'Next steps:\n' +
+      '1. Fill in Event Details (rows 5–11) — Server URL can stay blank\n' +
+      '2. Run Ticket System > Get Started\n\n' +
+      'TIP: The green "T-Shirt Size" column is an example custom field.\n' +
+      'Rename it, delete it, or add more columns between "# of Tickets" and "Status".'
+    );
+  }
 }
 
 // ============================================================
 //  CREATE EVENT — reads Event tab, geocodes, uploads image,
-//  calls /api/sheet/create-event, writes back the Event ID
+//  calls /api/sheet/create-event, writes back the Event ID + apiKey
 // ============================================================
-function createEventFromSheet() {
+function createEventFromSheet(calledFromWizard) {
   var ss        = SpreadsheetApp.getActive();
   var evSheet   = ss.getSheetByName(EVENT_SHEET_NAME);
+  var ui        = SpreadsheetApp.getUi();
 
   if (!evSheet) {
-    SpreadsheetApp.getUi().alert('Event tab not found. Run Initialize Sheet first.');
+    ui.alert('Event tab not found. Run Initialize Sheet first.');
     return;
   }
 
-  var serverUrl = evSheet.getRange(EV_SERVER_URL).getValue().toString().trim();
+  var serverUrl = getServerUrl(evSheet);
   var name      = evSheet.getRange(EV_NAME).getValue().toString().trim();
   var dateVal   = evSheet.getRange(EV_DATE).getValue();
   var timeVal   = evSheet.getRange(EV_TIME).getValue();
@@ -222,18 +331,8 @@ function createEventFromSheet() {
   var colorRaw  = evSheet.getRange(EV_COLOR).getValue().toString().trim();
   var imageRef  = evSheet.getRange(EV_IMAGE).getValue().toString().trim();
 
-  if (!serverUrl) {
-    SpreadsheetApp.getUi().alert('Please fill in your Server URL in cell B2 first.');
-    return;
-  }
-  if (!name) {
-    SpreadsheetApp.getUi().alert('Event Name (B5) is required.');
-    return;
-  }
-  if (!dateVal || !timeVal) {
-    SpreadsheetApp.getUi().alert('Date (B6) and Time (B7) are required.');
-    return;
-  }
+  if (!name) { ui.alert('Event Name (B5) is required.'); return; }
+  if (!dateVal || !timeVal) { ui.alert('Date (B6) and Time (B7) are required.'); return; }
 
   // Build ISO datetime from date + time cells
   var dateObj = new Date(dateVal);
@@ -265,23 +364,26 @@ function createEventFromSheet() {
   var driveFileId = imageRef ? parseDriveFileId(imageRef) : null;
 
   // Mark as in-progress
-  evSheet.getRange(EV_STATUS).setValue('⏳ Creating event...');
+  evSheet.getRange(EV_STATUS).setValue('Creating event...');
   SpreadsheetApp.flush();
 
-  // Build payload
+  // Build payload — spreadsheetId is what lets the server mint this room's
+  // private apiKey and tie it to this specific sheet.
   var payload = {
-    name:        name,
-    time:        isoTime,
-    color:       color,
-    locationName: location || address,
-    address:     address,
-    lat:         lat,
-    lng:         lng
+    name:          name,
+    time:          isoTime,
+    color:         color,
+    locationName:  location || address,
+    address:       address,
+    lat:           lat,
+    lng:           lng,
+    spreadsheetId: ss.getId(),
+    sheetName:     name
   };
   if (driveFileId) payload.driveFileId = driveFileId;
 
   try {
-    var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/sheet/create-event', {
+    var response = UrlFetchApp.fetch(serverUrl + '/api/sheet/create-event', {
       method:           'post',
       contentType:      'application/json',
       payload:          JSON.stringify(payload),
@@ -292,36 +394,105 @@ function createEventFromSheet() {
 
     if (result.success) {
       evSheet.getRange(EV_EVENT_ID).setValue(result.eventId);
-      evSheet.getRange(EV_STATUS).setValue('✅ Event created! Event ID is in B14.');
+      evSheet.getRange(EV_STATUS).setValue('Event created! Event ID is in B14.');
+      if (result.apiKey) setApiKey(result.apiKey);
 
-      // Store event ID in a named range so attendee trigger can read it
-      var attSheet = ss.getSheetByName(ATTENDEES_SHEET_NAME);
-      if (attSheet) {
-        try {
-          var existing = ss.getRangeByName('EVENT_ID');
-          if (existing) existing.setValue(result.eventId);
-        } catch(e) {}
+      if (!calledFromWizard) {
+        ui.alert(
+          'Event created!\n\n' +
+          'Event ID: ' + result.eventId + '\n\n' +
+          'Run Ticket System > Link Sheet to Account next, then switch to the Attendees tab and start entering registrations.'
+        );
       }
-
-      SpreadsheetApp.getUi().alert(
-        '✅ Event created!\n\n' +
-        'Event ID: ' + result.eventId + '\n\n' +
-        'Switch to the Attendees tab and start entering registrations. Emails will send automatically.'
-      );
     } else {
-      evSheet.getRange(EV_STATUS).setValue('❌ Error: ' + result.error);
-      SpreadsheetApp.getUi().alert('❌ Failed to create event:\n' + result.error);
+      evSheet.getRange(EV_STATUS).setValue('Error: ' + result.error);
+      ui.alert('Failed to create event:\n' + result.error);
     }
   } catch (err) {
-    evSheet.getRange(EV_STATUS).setValue('❌ Error: ' + err.message);
-    SpreadsheetApp.getUi().alert('❌ Request failed:\n' + err.message);
+    evSheet.getRange(EV_STATUS).setValue('Error: ' + err.message);
+    ui.alert('Request failed:\n' + err.message);
   }
+}
+
+// ============================================================
+//  TEST CONNECTION — pings the server with the stored apiKey before
+//  anyone starts entering real attendees, so setup mistakes surface
+//  immediately instead of failing silently on the first real row.
+// ============================================================
+function testConnection() {
+  var ui      = SpreadsheetApp.getUi();
+  var ss      = SpreadsheetApp.getActive();
+  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
+  if (!evSheet) { ui.alert('Event tab not found. Run Initialize Sheet first.'); return; }
+
+  var serverUrl = getServerUrl(evSheet);
+  var apiKey    = getApiKey();
+  var eventId   = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
+
+  if (!eventId) { ui.alert('Create the event first (Ticket System > Create Event from Event tab).'); return; }
+  if (!apiKey)  { ui.alert('No API key stored yet — run "Link Sheet to Account" or re-run "Create Event from Event tab".'); return; }
+
+  try {
+    var response = UrlFetchApp.fetch(serverUrl + '/api/ticket-status', {
+      method:             'post',
+      contentType:        'application/json',
+      payload:            JSON.stringify({ tokens: [], spreadsheetId: ss.getId(), apiKey: apiKey }),
+      muteHttpExceptions: true
+    });
+    if (response.getResponseCode() === 200) {
+      ui.alert('Connection OK — server URL and API key are both working.');
+    } else {
+      var result = safeParseJSON(response);
+      ui.alert('Server rejected the request:\n' + (result.error || ('HTTP ' + response.getResponseCode())));
+    }
+  } catch (err) {
+    ui.alert('Could not reach the server:\n' + err.message);
+  }
+}
+
+// ============================================================
+//  DUPLICATE AS NEW ROOM — makes a Drive copy and resets the
+//  copy's Event ID/Status/attendee data, since a plain spreadsheet
+//  copy duplicates cell values verbatim (script properties do NOT
+//  carry over — a copy gets a fresh bound script project).
+// ============================================================
+function duplicateAsNewRoom() {
+  var ui = SpreadsheetApp.getUi();
+  var resp = ui.prompt('Duplicate as New Room', 'Name for the new room\'s spreadsheet:', ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  var newName = resp.getResponseText().trim();
+  if (!newName) { ui.alert('A name is required.'); return; }
+
+  var ss  = SpreadsheetApp.getActive();
+  var copyFile = DriveApp.getFileById(ss.getId()).makeCopy(newName);
+  var copySs   = SpreadsheetApp.openById(copyFile.getId());
+
+  var evSheet  = copySs.getSheetByName(EVENT_SHEET_NAME);
+  var attSheet = copySs.getSheetByName(ATTENDEES_SHEET_NAME);
+  if (evSheet) {
+    evSheet.getRange(EV_EVENT_ID).setValue('');
+    evSheet.getRange(EV_STATUS).setValue('');
+  }
+  if (attSheet) {
+    var lastRow = attSheet.getLastRow();
+    if (lastRow >= ATT_DATA_START) {
+      attSheet.getRange(ATT_DATA_START, 1, lastRow - ATT_DATA_START + 1, attSheet.getLastColumn()).clearContent();
+    }
+  }
+
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family: sans-serif; padding: 10px;">' +
+    '<p style="font-size: 14px; margin-bottom: 12px;">New room created. Open it and run <strong>Ticket System &gt; Get Started</strong> there — this copy\'s Event ID and attendee rows have already been cleared for you.</p>' +
+    '<a href="' + copyFile.getUrl() + '" target="_blank" style="font-size:14px;">' + copyFile.getUrl() + '</a>' +
+    '</div>'
+  ).setWidth(480).setHeight(160);
+  ui.showModalDialog(html, 'New room ready');
 }
 
 // ============================================================
 //  SETUP TRIGGERS — installs installable onEdit trigger
 // ============================================================
-function setupTriggers() {
+function setupTriggers(skipAlert) {
   // Remove all old managed triggers
   ScriptApp.getProjectTriggers().forEach(function(t) {
     var fn = t.getHandlerFunction();
@@ -348,12 +519,14 @@ function setupTriggers() {
     .everyMinutes(10)
     .create();
 
-  SpreadsheetApp.getUi().alert(
-    '✅ Triggers installed!\n\n' +
-    '• Emails send automatically when attendee rows are filled in\n' +
-    '• Event details sync to server when you edit the Event tab\n' +
-    '• Scan status refreshes every 10 minutes (skips rows already checked in)'
-  );
+  if (!skipAlert) {
+    SpreadsheetApp.getUi().alert(
+      'Triggers installed!\n\n' +
+      '• Emails send automatically when attendee rows are filled in\n' +
+      '• Event details sync to server when you edit the Event tab\n' +
+      '• Scan status refreshes every 10 minutes (skips rows already checked in)'
+    );
+  }
 }
 
 // ============================================================
@@ -371,8 +544,10 @@ function onEventTabEdit(e) {
   var eventId = sheet.getRange(EV_EVENT_ID).getValue().toString().trim();
   if (!eventId) return; // event not created yet — nothing to sync
 
-  var serverUrl = sheet.getRange(EV_SERVER_URL).getValue().toString().trim();
-  if (!serverUrl) return;
+  var apiKey = getApiKey();
+  if (!apiKey) return; // no key yet — nothing safe to sync
+
+  var serverUrl = getServerUrl(sheet);
 
   // Debounce: store a flag and let a short sleep absorb rapid edits
   Utilities.sleep(800);
@@ -415,7 +590,7 @@ function onEventTabEdit(e) {
   // Just extract the Drive file ID if the image cell was edited — server fetches it directly
   var driveFileId = (row === 11 && imageRef) ? parseDriveFileId(imageRef) : null;
 
-  var payload = { eventId: eventId };
+  var payload = { eventId: eventId, apiKey: apiKey };
   if (name)         payload.name = name;
   if (isoTime)      payload.time = isoTime;
   if (color)        payload.color = color;
@@ -426,16 +601,16 @@ function onEventTabEdit(e) {
   if (driveFileId)  payload.driveFileId = driveFileId;
 
   try {
-    var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/sheet/update-event', {
+    var response = UrlFetchApp.fetch(serverUrl + '/api/sheet/update-event', {
       method:           'post',
       contentType:      'application/json',
       payload:          JSON.stringify(payload),
       muteHttpExceptions: true
     });
     var result = safeParseJSON(response);
-    sheet.getRange(EV_STATUS).setValue(result.success ? '✅ Synced' : '⚠️ Sync error: ' + result.error);
+    sheet.getRange(EV_STATUS).setValue(result.success ? 'OK: Synced' : 'Error: Sync failed - ' + result.error);
   } catch (err) {
-    sheet.getRange(EV_STATUS).setValue('⚠️ Sync error: ' + err.message.substring(0, 60));
+    sheet.getRange(EV_STATUS).setValue('Error: Sync failed - ' + err.message.substring(0, 60));
   }
 }
 
@@ -465,7 +640,8 @@ function onRowComplete(e) {
   var ss        = SpreadsheetApp.getActive();
   var evSheet   = ss.getSheetByName(EVENT_SHEET_NAME);
   var eventId   = evSheet ? evSheet.getRange(EV_EVENT_ID).getValue().toString().trim() : '';
-  var serverUrl = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
+  var serverUrl = evSheet ? getServerUrl(evSheet) : '';
+  var apiKey    = getApiKey();
 
   for (var row = firstRow; row <= lastRow; row++) {
     var firstName  = getCellValue(sheet, row, COL_FIRST);
@@ -479,7 +655,7 @@ function onRowComplete(e) {
     var ticketCount = parseTicketCount(ticketsRaw);
 
     // If the row was already sent and the edit was in a data column, auto-resend as an update
-    if (status.indexOf('✅') === 0) {
+    if (status.indexOf('OK:') === 0) {
       // Only resend if the edit touched a data column (not status/sentAt/tokens)
       var editedCol = e.range.getColumn();
       if (editedCol >= colMap.statusCol) continue; // edited a system column, skip
@@ -487,7 +663,8 @@ function onRowComplete(e) {
       // For single-cell edits, skip if the value didn't actually change
       if (e.range.getNumRows() === 1 && e.range.getNumColumns() === 1 && e.oldValue === e.value) continue;
 
-      if (!ticketCount || !eventId || !serverUrl) continue;
+      if (!ticketCount || !eventId || !serverUrl || !apiKey) continue;
+      if (!isValidEmail(email)) { sheet.getRange(row, colMap.statusCol).setValue('Skipped: invalid email address'); continue; }
 
       var existingTokensStr = getCellValue(sheet, row, colMap.tokensCol);
       var tokenList = existingTokensStr
@@ -499,19 +676,24 @@ function onRowComplete(e) {
       if (cache.get(cacheKey)) continue;
       cache.put(cacheKey, '1', 30);
 
-      sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, true, tokenList);
+      sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, apiKey, colMap, true, tokenList);
       continue;
     }
 
-    if (status !== '') continue; // errored or other non-✅ status, skip
+    if (status !== '') continue; // errored or other non-OK status, skip
+
+    if (!isValidEmail(email)) {
+      sheet.getRange(row, colMap.statusCol).setValue('Skipped: invalid email address');
+      continue;
+    }
 
     if (!ticketCount) {
-      sheet.getRange(row, colMap.statusCol).setValue('⚠️ Invalid ticket count');
+      sheet.getRange(row, colMap.statusCol).setValue('Skipped: invalid ticket count');
       continue;
     }
 
-    if (!eventId || !serverUrl) {
-      sheet.getRange(row, colMap.statusCol).setValue('⚠️ Create the event first (Event tab)');
+    if (!eventId || !serverUrl || !apiKey) {
+      sheet.getRange(row, colMap.statusCol).setValue('Skipped: create the event first (Event tab)');
       continue;
     }
 
@@ -519,7 +701,7 @@ function onRowComplete(e) {
     if (cache.get(cacheKey)) continue;
     cache.put(cacheKey, '1', 30);
 
-    sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
+    sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, apiKey, colMap);
   }
   } finally {
     lock.releaseLock();
@@ -530,8 +712,8 @@ function onRowComplete(e) {
 //  sendOneRow — sends one attendee and updates status columns
 //  colMap comes from getColumnMap() for dynamic column support
 // ============================================================
-function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, isResend, existingTokens) {
-  sheet.getRange(row, colMap.statusCol).setValue('⏳ Sending...');
+function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, apiKey, colMap, isResend, existingTokens) {
+  sheet.getRange(row, colMap.statusCol).setValue('Sending...');
   SpreadsheetApp.flush();
 
   // Collect any custom field values (columns between "# of Tickets" and "Status")
@@ -550,12 +732,12 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
   for (var attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       if (attempt > 1) {
-        sheet.getRange(row, colMap.statusCol).setValue('⏳ Retrying (' + attempt + '/' + maxAttempts + ')...');
+        sheet.getRange(row, colMap.statusCol).setValue('Retrying (' + attempt + '/' + maxAttempts + ')...');
         SpreadsheetApp.flush();
         Utilities.sleep(2000);
       }
 
-      var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/register-bulk', {
+      var response = UrlFetchApp.fetch(serverUrl + '/api/register-bulk', {
         method:           'post',
         contentType:      'application/json',
         payload:          JSON.stringify({
@@ -563,6 +745,7 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
           lastName:       lastName,
           email:          email,
           eventId:        eventId,
+          apiKey:         apiKey,
           ticketCount:    ticketCount,
           customFields:   customFields,
           resend:         isResend === true,
@@ -580,17 +763,17 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
   }
 
   if (lastErr) {
-    sheet.getRange(row, colMap.statusCol).setValue('❌ Error: ' + lastErr.message);
+    sheet.getRange(row, colMap.statusCol).setValue('Error: ' + lastErr.message);
   } else if (result.success) {
     var actualCount = result.tokens.length;
     var label = actualCount + ' ticket' + (actualCount > 1 ? 's' : '');
     var statusText;
     if (result.countChanged) {
-      statusText = '✅ Updated (' + result.countChanged.from + '→' + result.countChanged.to + ' tickets)';
+      statusText = 'OK: Updated (' + result.countChanged.from + '→' + result.countChanged.to + ' tickets)';
     } else if (isResend) {
-      statusText = '✅ Updated (' + label + ')';
+      statusText = 'OK: Updated (' + label + ')';
     } else {
-      statusText = '✅ Sent (' + label + ')';
+      statusText = 'OK: Sent (' + label + ')';
     }
     sheet.getRange(row, colMap.statusCol).setValue(statusText);
     sheet.getRange(row, colMap.sentAtCol).setValue(
@@ -598,7 +781,7 @@ function sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId
     );
     sheet.getRange(row, colMap.tokensCol).setValue(result.tokens.join(', '));
   } else {
-    sheet.getRange(row, colMap.statusCol).setValue('❌ Error: ' + result.error);
+    sheet.getRange(row, colMap.statusCol).setValue('Error: ' + result.error);
   }
 }
 
@@ -616,9 +799,10 @@ function sendPendingEmails() {
   }
 
   var eventId   = evSheet ? evSheet.getRange(EV_EVENT_ID).getValue().toString().trim() : '';
-  var serverUrl = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
+  var serverUrl = evSheet ? getServerUrl(evSheet) : '';
+  var apiKey    = getApiKey();
 
-  if (!eventId || !serverUrl) {
+  if (!eventId || !serverUrl || !apiKey) {
     SpreadsheetApp.getUi().alert('Please create the event first on the Event tab.');
     return;
   }
@@ -636,12 +820,18 @@ function sendPendingEmails() {
 
     if (!firstName || !lastName || !email || !ticketsRaw || status) continue;
 
+    if (!isValidEmail(email)) {
+      attSheet.getRange(row, colMap.statusCol).setValue('Skipped: invalid email address');
+      errors++;
+      continue;
+    }
+
     var ticketCount = parseTicketCount(ticketsRaw);
     if (!ticketCount) continue;
 
-    sendOneRow(attSheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap);
+    sendOneRow(attSheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, apiKey, colMap);
     var statusAfter = getCellValue(attSheet, row, colMap.statusCol);
-    if (statusAfter.indexOf('✅') === 0) sent++; else errors++;
+    if (statusAfter.indexOf('OK:') === 0) sent++; else errors++;
   }
 
   SpreadsheetApp.getUi().alert('Done!  Sent: ' + sent + '   Errors: ' + errors);
@@ -667,16 +857,18 @@ function resendSelectedRow() {
   var colMap     = getColumnMap(sheet);
   var evSheet    = ss.getSheetByName(EVENT_SHEET_NAME);
   var eventId    = evSheet ? evSheet.getRange(EV_EVENT_ID).getValue().toString().trim() : '';
-  var serverUrl  = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
+  var serverUrl  = evSheet ? getServerUrl(evSheet) : '';
+  var apiKey     = getApiKey();
   var firstName  = getCellValue(sheet, row, COL_FIRST);
   var lastName   = getCellValue(sheet, row, COL_LAST);
   var email      = getCellValue(sheet, row, COL_EMAIL);
   var ticketCount = parseTicketCount(getCellValue(sheet, row, COL_TICKETS));
 
-  if (!firstName || !lastName || !email || !ticketCount || !eventId || !serverUrl) {
-    SpreadsheetApp.getUi().alert('Row is missing data or Event tab is not set up.');
+  if (!firstName || !lastName || !email || !ticketCount || !eventId || !serverUrl || !apiKey) {
+    ui.alert('Row is missing data or Event tab is not set up.');
     return;
   }
+  if (!isValidEmail(email)) { ui.alert('That email address doesn\'t look valid.'); return; }
 
   // Read existing tokens before clearing (to pin the resend to the right registrationId)
   var existingTokensStr = getCellValue(sheet, row, colMap.tokensCol);
@@ -699,13 +891,13 @@ function resendSelectedRow() {
   sheet.getRange(row, colMap.sentAtCol).setValue('');
   sheet.getRange(row, colMap.tokensCol).setValue('');
 
-  sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, colMap, true, tokenList);
+  sendOneRow(sheet, row, firstName, lastName, email, ticketCount, eventId, serverUrl, apiKey, colMap, true, tokenList);
 
   var statusAfter = getCellValue(sheet, row, colMap.statusCol);
-  if (statusAfter.indexOf('✅') === 0) {
-    ui.alert('✅ Resent successfully!');
+  if (statusAfter.indexOf('OK:') === 0) {
+    ui.alert('Resent successfully!');
   } else {
-    ui.alert('❌ ' + statusAfter);
+    ui.alert(statusAfter);
   }
 }
 
@@ -722,9 +914,10 @@ function refreshScanStatus() {
     return;
   }
 
-  var serverUrl = evSheet ? evSheet.getRange(EV_SERVER_URL).getValue().toString().trim() : '';
-  if (!serverUrl) {
-    SpreadsheetApp.getUi().alert('Server URL not set in Event tab (B2).');
+  var serverUrl = evSheet ? getServerUrl(evSheet) : '';
+  var apiKey    = getApiKey();
+  if (!serverUrl || !apiKey) {
+    try { SpreadsheetApp.getUi().alert('Create the event first (Event tab) — no API key stored yet.'); } catch (e) {}
     return;
   }
 
@@ -759,13 +952,17 @@ function refreshScanStatus() {
   // --- Single request for all tokens ---
   var statusMap = {}; // token -> status object
   try {
-    var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/ticket-status', {
+    var response = UrlFetchApp.fetch(serverUrl + '/api/ticket-status', {
       method:             'post',
       contentType:        'application/json',
-      payload:            JSON.stringify({ tokens: allTokens }),
+      payload:            JSON.stringify({ tokens: allTokens, spreadsheetId: ss.getId(), apiKey: apiKey }),
       muteHttpExceptions: true
     });
     var statuses = safeParseJSON(response);
+    if (!Array.isArray(statuses)) {
+      try { SpreadsheetApp.getUi().alert('Server error: ' + (statuses.error || 'unexpected response')); } catch (e) {}
+      return;
+    }
     statuses.forEach(function(s) { statusMap[s.token] = s; });
   } catch (err) {
     try { SpreadsheetApp.getUi().alert('Server error: ' + err.message); } catch (e) {}
@@ -789,9 +986,9 @@ function refreshScanStatus() {
     });
 
     if (scannedCount === total && total > 0) {
-      cell.setValue('✅ Checked In (scanned)').setBackground('#e8f5e9');
+      cell.setValue('OK: Checked In (scanned)').setBackground('#e8f5e9');
     } else if (scannedCount > 0) {
-      cell.setValue('🟡 ' + scannedCount + '/' + total + ' checked in').setBackground('#fff9c4');
+      cell.setValue('Partial: ' + scannedCount + '/' + total + ' checked in').setBackground('#fff9c4');
     }
     updated++;
   }
@@ -846,6 +1043,13 @@ function getCellValue(sheet, row, col) {
   return sheet.getRange(row, col).getValue().toString().trim();
 }
 
+// Simple, deliberately permissive email shape check — good enough to catch
+// obvious typos ("bob@") without rejecting real addresses with unusual but
+// valid formats.
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 // Safe JSON parse — returns null and shows a readable error if the server
 // returned something other than JSON (e.g. a 502 proxy error page).
 function safeParseJSON(response) {
@@ -891,7 +1095,9 @@ function styleLabel(range, text) {
 // ============================================================
 //  LINK SHEET TO ACCOUNT — generates a link URL that lets
 //  anyone open it in a browser and connect this sheet's event
-//  to their website account.
+//  to their website account. If the room's event hasn't been
+//  claimed by a real account yet, claiming it transfers real
+//  ownership (not just view access) — see /api/sheet/claim.
 // ============================================================
 function linkSheetToAccount() {
   var ss      = SpreadsheetApp.getActive();
@@ -903,24 +1109,21 @@ function linkSheetToAccount() {
     return;
   }
 
-  var serverUrl = evSheet.getRange(EV_SERVER_URL).getValue().toString().trim();
-  if (!serverUrl) {
-    ui.alert('Please fill in your Server URL in cell B2 first.');
-    return;
-  }
-
+  var serverUrl = getServerUrl(evSheet);
   var eventId   = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
   var eventName = evSheet.getRange(EV_NAME).getValue().toString().trim();
   var spreadsheetId = ss.getId();
+  var apiKey = getApiKey();
 
   try {
-    var response = UrlFetchApp.fetch(serverUrl.replace(/\/$/, '') + '/api/sheet/generate-link', {
+    var response = UrlFetchApp.fetch(serverUrl + '/api/sheet/generate-link', {
       method:           'post',
       contentType:      'application/json',
       payload:          JSON.stringify({
         spreadsheetId: spreadsheetId,
         sheetName:     eventName || ss.getName(),
-        eventId:       eventId || null
+        eventId:       eventId || null,
+        apiKey:        apiKey
       }),
       muteHttpExceptions: true
     });
@@ -928,24 +1131,25 @@ function linkSheetToAccount() {
     var result = safeParseJSON(response);
 
     if (result.success) {
+      if (result.apiKey) setApiKey(result.apiKey);
       var linkUrl = result.linkUrl;
       var htmlOutput = HtmlService.createHtmlOutput(
         '<div style="font-family: sans-serif; padding: 10px;">' +
-        '<p style="font-size: 14px; margin-bottom: 12px;">Share this link with anyone who should have access to this event on the website:</p>' +
+        '<p style="font-size: 14px; margin-bottom: 12px;">Open this link and log in (or sign up) to connect this room to your account. If nobody has claimed it yet, this makes it fully yours — your own dashboard, your own settings.</p>' +
+        '<a href="' + linkUrl + '" target="_blank" style="display:block;text-align:center;padding:10px;background:#1a1f3c;color:#fff;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;margin-bottom:12px;">Open Claim Link</a>' +
         '<input type="text" value="' + linkUrl + '" ' +
-        'style="width: 100%; padding: 10px; font-size: 14px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 12px;" ' +
+        'style="width: 100%; padding: 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 8px;" ' +
         'onclick="this.select()" readonly>' +
-        '<p style="font-size: 12px; color: #888;">Anyone who opens this link can create an account and link this event to their dashboard.</p>' +
         '</div>'
       )
       .setWidth(450)
-      .setHeight(180);
-      ui.showModalDialog(htmlOutput, '🔗 Share Event Link');
+      .setHeight(220);
+      ui.showModalDialog(htmlOutput, 'Link This Room');
     } else {
-      ui.alert('❌ Failed to generate link:\n' + result.error);
+      ui.alert('Failed to generate link:\n' + result.error);
     }
   } catch (err) {
-    ui.alert('❌ Request failed:\n' + err.message);
+    ui.alert('Request failed:\n' + err.message);
   }
 }
 

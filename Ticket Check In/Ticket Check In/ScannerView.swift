@@ -18,6 +18,9 @@ struct ScannerView: View {
     @AppStorage("displayPreconnectURL")    private var displayPreconnectURL = ""
     @AppStorage("lastSelectedEventData")   private var lastSelectedEventData: Data = Data()
     @AppStorage("scannerMode")             private var scannerMode: String = "none"
+    // How long the full-screen scan result stays up — a per-device
+    // preference, set from Settings > Scanner.
+    @AppStorage("resultDisplayDuration")   private var resultDisplayDuration: Double = 1.2
 
     // Full-screen overlay state (reentry exit confirm only)
     @State private var scanResult: ScanResult?
@@ -26,6 +29,7 @@ struct ScannerView: View {
     @State private var isScanning = true
     @State private var lastRegistrationId: String?
     @State private var showingDetail = false
+    @State private var selectedScan: ScanResult?
     @State private var lastScannedToken: String?
     @State private var lastScanTime: Date?
     @State private var pendingCheckoutToken: String?
@@ -94,7 +98,7 @@ struct ScannerView: View {
             }
         }
         .sheet(isPresented: $showingDetail) {
-            if let result = recentScans.first {
+            if let result = selectedScan ?? recentScans.first {
                 TicketDetailSheet(result: result)
             }
         }
@@ -127,33 +131,17 @@ struct ScannerView: View {
     @ViewBuilder private var bottomBar: some View {
         VStack(spacing: 0) {
             Spacer()
-            VStack(spacing: 6) {
-                // Last scan — tappable card
-                if let last = recentScans.first {
-                    Button(action: { showingDetail = true }) {
-                        HStack(spacing: 12) {
-                            let isGreen = last.status == .success || last.status == .reentryEnter
-                            let isBlue  = last.status == .checkedOut
-                            Image(systemName: isGreen ? "checkmark.circle.fill" : isBlue ? "arrow.uturn.left.circle.fill" : "exclamationmark.circle.fill")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(isGreen ? .green : isBlue ? Color(red: 0.15, green: 0.39, blue: 0.92) : Color(red: 0.9, green: 0.5, blue: 0.1))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(last.firstName ?? last.name)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .lineLimit(1)
-                                Text(last.title)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.6))
+            VStack(spacing: 10) {
+                // Scan history — a real review log, not just the last scan.
+                // Tapping any card (not just the newest) opens its own detail.
+                if !recentScans.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(Array(recentScans.enumerated()), id: \.offset) { _, scan in
+                                scanHistoryCard(scan)
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.35))
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal, 2)
                     }
                 }
                 Button(action: switchToManual) {
@@ -167,6 +155,36 @@ struct ScannerView: View {
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 40)
+        }
+    }
+
+    @ViewBuilder
+    private func scanHistoryCard(_ scan: ScanResult) -> some View {
+        let isGreen = scan.status == .success || scan.status == .reentryEnter
+        let isBlue  = scan.status == .checkedOut
+        let accent: Color = isGreen ? .green : isBlue ? Color(red: 0.15, green: 0.39, blue: 0.92) : Color(red: 0.9, green: 0.5, blue: 0.1)
+        let summary = (scan.customFields?.values.filter { !$0.isEmpty } ?? []).joined(separator: " · ")
+
+        Button(action: { selectedScan = scan; showingDetail = true }) {
+            HStack(spacing: 10) {
+                Image(systemName: isGreen ? "checkmark.circle.fill" : isBlue ? "arrow.uturn.left.circle.fill" : "exclamationmark.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(scan.firstName ?? scan.name)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(summary.isEmpty ? scan.title : "\(scan.title) · \(summary)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(minWidth: 170, maxWidth: 230, alignment: .leading)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
         }
     }
 
@@ -195,7 +213,7 @@ struct ScannerView: View {
         Task {
             do {
                 if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
-                let response = try await APIService.shared.validateTicket(token: token, pairToken: scannerPairToken)
+                let response = try await APIService.shared.validateTicket(token: token, pairToken: scannerPairToken, eventId: selectedEventId())
                 await MainActor.run { showResult(for: response, token: token) }
             } catch {
                 await MainActor.run {
@@ -241,12 +259,14 @@ struct ScannerView: View {
         }
     }
 
+    private static let maxRecentScans = 20
+
     private func showBanner(_ result: ScanResult) {
         recentScans.insert(result, at: 0)
-        if recentScans.count > 1 { recentScans.removeLast() }
+        if recentScans.count > Self.maxRecentScans { recentScans.removeLast() }
         flashTask?.cancel()
         flashResult = result
-        
+
         if flashVisible {
             flashScale = 0.95
             flashOpacity = 0.7
@@ -259,9 +279,10 @@ struct ScannerView: View {
             flashOpacity = 1.0
             withAnimation(.easeInOut(duration: 0.15)) { flashVisible = true }
         }
-        
+
+        let durationNanos = UInt64(max(resultDisplayDuration, 0.3) * 1_000_000_000)
         flashTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            try? await Task.sleep(nanoseconds: durationNanos)
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.25)) { flashVisible = false }
         }
@@ -495,6 +516,29 @@ struct ScanFlashOverlay: View {
                 Text(result.title)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.8))
+
+                // Custom fields (e.g. T-Shirt Size) — same row style as
+                // ScanResultOverlay/TicketDetailSheet for a consistent look.
+                if let fields = result.customFields, !fields.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(fields.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                            HStack {
+                                Text(key)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                Spacer()
+                                Text(value)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 6)
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.top, 4)
+                }
             }
         }
     }

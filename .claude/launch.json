@@ -1,0 +1,65 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "moviepicker-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/will/Documents/moviepicker", "run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "inventorytracker-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8099", "--directory", "/Users/will/Documents/inventorytracker/public"],
+      "port": 8099
+    },
+    {
+      "name": "busstops-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8098", "--directory", "/Users/will/Documents/busstops/public"],
+      "port": 8098
+    },
+    {
+      "name": "bracket-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8097", "--directory", "/Users/will/Documents/bracket/public"],
+      "port": 8097
+    },
+    {
+      "name": "wts-monitor-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/will/Documents/wts-monitor && MONITOR_PASS=localtest1234 node server.js"],
+      "port": 3011
+    },
+    {
+      "name": "singlink-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/will/Documents/singlink && PORT=3020 JWT_SECRET=localtestsecret node server.js"],
+      "port": 3020
+    },
+    {
+      "name": "tickets-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/will/Documents/tickets && PORT=3030 SESSION_SECRET=localtestsecret ADMIN_EMAIL=admin@localtest.dev node server.js"],
+      "port": 3030
+    },
+    {
+      "name": "inventorytracker-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/will/Documents/inventorytracker && mv server-data server-data.real 2>/dev/null; PORT=3040 node server.js"],
+      "port": 3040
+    },
+    {
+      "name": "busttops-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/will/Documents/busstops && PORT=3050 SESSION_SECRET=localtestsecret node server.js"],
+      "port": 3050
+    },
+    {
+      "name": "obstimer-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/will/Documents/obstimer && PORT=3060 node server.js"],
+      "port": 3060
+    }
+  ]
+}

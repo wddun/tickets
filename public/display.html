@@ -7,6 +7,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Display | WTS Tickets</title>
     <style>
+        /* Muted variants of the canonical success/warning/danger hues — this
+           page fills the entire screen with the status color, so the full-
+           saturation tokens used elsewhere (kiosk.css) would be too vivid to
+           stare at from across a room; these are deliberately darker. */
+        :root {
+            --status-success-bg: rgb(16,127,60);
+            --status-warning-bg: rgb(185,85,15);
+            --status-danger-bg:  rgb(185,30,30);
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         html, body {
@@ -134,7 +143,7 @@
                 <div id="resultEvent"></div>
             </div>
             <div id="resultActions" style="display:none; margin-top:32px; gap:16px;">
-                <button id="btnCheckout" style="padding:16px 32px; border-radius:12px; border:none; background:rgba(255,255,255,0.9); color:rgb(185,85,15); font-weight:bold; font-size:18px; cursor:pointer;">Confirm Check-Out</button>
+                <button id="btnCheckout" style="padding:16px 32px; border-radius:12px; border:none; background:rgba(255,255,255,0.9); color:var(--status-warning-bg); font-weight:bold; font-size:18px; cursor:pointer;">Confirm Check-Out</button>
                 <button id="btnCancel" style="padding:16px 32px; border-radius:12px; border:none; background:transparent; color:rgba(255,255,255,0.7); font-weight:bold; font-size:16px; cursor:pointer; border: 2px solid rgba(255,255,255,0.3);">Cancel</button>
             </div>
         </div>
@@ -165,13 +174,15 @@
         let retryDelay = 2000;
         let es = null;
 
+        const rootStyle = getComputedStyle(document.documentElement);
+        const statusBg = name => rootStyle.getPropertyValue(name).trim();
         const STATUS = {
-            valid:         { bg: 'rgb(16,127,60)',   icon: '✓', text: 'Checked In' },
-            reentry_enter: { bg: 'rgb(16,127,60)',   icon: '✓', text: 'Welcome Back' },
-            reentry_exit:  { bg: 'rgb(185,85,15)',   icon: '🚪', text: 'Confirm Check-Out' },
-            used:          { bg: 'rgb(185,85,15)',   icon: '!', text: 'Already Checked In' },
-            invalid:       { bg: 'rgb(185,30,30)',   icon: '✕', text: 'Invalid Ticket' },
-            checked_out:   { bg: 'rgb(16,127,60)',   icon: '✓', text: 'Checked Out' },
+            valid:         { bg: statusBg('--status-success-bg'), icon: '✓', text: 'Checked In' },
+            reentry_enter: { bg: statusBg('--status-success-bg'), icon: '✓', text: 'Welcome Back' },
+            reentry_exit:  { bg: statusBg('--status-warning-bg'), icon: '🚪', text: 'Confirm Check-Out' },
+            used:          { bg: statusBg('--status-warning-bg'), icon: '!', text: 'Already Checked In' },
+            invalid:       { bg: statusBg('--status-danger-bg'),  icon: '✕', text: 'Invalid Ticket' },
+            checked_out:   { bg: statusBg('--status-success-bg'), icon: '✓', text: 'Checked Out' },
         };
 
         function setIdle() {

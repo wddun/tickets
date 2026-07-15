@@ -192,11 +192,32 @@ try { db.exec(`ALTER TABLE events ADD COLUMN atDoorEnabled INTEGER DEFAULT 0`); 
 try { db.exec(`ALTER TABLE orders ADD COLUMN paymentIntentId TEXT`); } catch {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN channel TEXT DEFAULT 'online'`); } catch {}
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_paymentIntentId ON orders(paymentIntentId)`); } catch {}
+try { db.exec(`ALTER TABLE sheetLinks ADD COLUMN apiKey TEXT`); } catch {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN discountCodeId TEXT`); } catch {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN discountAmount INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN refundedAt TEXT`); } catch {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN refundAmount INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE events ADD COLUMN waitlistEnabled INTEGER DEFAULT 0`); } catch {}
+// Shuttle linking: lets an external system (a linked shuttle/bus app room)
+// read-only check tickets for this event via /api/ticket-check, using the
+// same ticket the rider already has — without ever touching used_at. Only
+// meant for events whose tickets are exclusively for shuttle use; never
+// enable on an event whose tickets are also scanned at a door by /api/validate,
+// since "boarded the bus" and "entered the venue" need to stay independent.
+try { db.exec(`ALTER TABLE events ADD COLUMN shuttleLinkEnabled INTEGER DEFAULT 0`); } catch {}
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS ticketScans (
+            id TEXT PRIMARY KEY,
+            ticketId TEXT NOT NULL,
+            eventId TEXT NOT NULL,
+            scannedAt TEXT NOT NULL,
+            source TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticketScans_ticketId ON ticketScans(ticketId);
+        CREATE INDEX IF NOT EXISTS idx_ticketScans_eventId ON ticketScans(eventId);
+    `);
+} catch {}
 
 // ── One-time migration from db.json ──────────────────────────────────────────
 
@@ -325,6 +346,7 @@ export function rowToEvent(row) {
         atDoorEnabled: !!row.atDoorEnabled,
         reminderEnabled: !!row.reminderEnabled,
         waitlistEnabled: !!row.waitlistEnabled,
+        shuttleLinkEnabled: !!row.shuttleLinkEnabled,
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
     };
 }
@@ -378,7 +400,9 @@ export const stmt = {
         setTicketPrice: db.prepare(`UPDATE events SET ticketPrice=? WHERE id=?`),
         setAtDoorEnabled: db.prepare(`UPDATE events SET atDoorEnabled=? WHERE id=?`),
         setWaitlistEnabled: db.prepare(`UPDATE events SET waitlistEnabled=? WHERE id=?`),
+        setShuttleLinkEnabled: db.prepare(`UPDATE events SET shuttleLinkEnabled=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
+        setOwner: db.prepare(`UPDATE events SET userId=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM events WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM events WHERE userId=?`),
         reminderDue: db.prepare(`SELECT * FROM events WHERE reminderEnabled=1 AND reminderSentAt IS NULL`),
@@ -403,6 +427,12 @@ export const stmt = {
         setEmailOpened: db.prepare(`UPDATE tickets SET email_opened_at=? WHERE registrationId=? AND email_opened_at IS NULL`),
         deleteById: db.prepare(`DELETE FROM tickets WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM tickets WHERE eventId=?`),
+    },
+    ticketScans: {
+        insert: db.prepare(`INSERT INTO ticketScans (id, ticketId, eventId, scannedAt, source) VALUES (?,?,?,?,?)`),
+        countByTicket: db.prepare(`SELECT COUNT(*) as cnt FROM ticketScans WHERE ticketId=?`),
+        lastByTicket: db.prepare(`SELECT * FROM ticketScans WHERE ticketId=? ORDER BY scannedAt DESC LIMIT 1`),
+        byEventId: db.prepare(`SELECT * FROM ticketScans WHERE eventId=? ORDER BY scannedAt DESC`),
     },
     walletDevices: {
         byDeviceAndSerial: db.prepare(`SELECT * FROM walletDevices WHERE deviceId=? AND serialNumber=?`),
@@ -433,8 +463,9 @@ export const stmt = {
         byToken: db.prepare('SELECT * FROM sheetLinks WHERE token=?'),
         byEventId: db.prepare('SELECT * FROM sheetLinks WHERE eventId=?'),
         byId: db.prepare('SELECT * FROM sheetLinks WHERE id=?'),
-        insert: db.prepare(`INSERT INTO sheetLinks (id, token, spreadsheetId, sheetName, eventId, createdAt) VALUES (?,?,?,?,?,?)`),
+        insert: db.prepare(`INSERT INTO sheetLinks (id, token, spreadsheetId, sheetName, eventId, createdAt, apiKey) VALUES (?,?,?,?,?,?,?)`),
         update: db.prepare(`UPDATE sheetLinks SET eventId=?, sheetName=? WHERE id=?`),
+        setApiKey: db.prepare(`UPDATE sheetLinks SET apiKey=? WHERE id=?`),
     },
     sheetAccess: {
         byId: db.prepare('SELECT * FROM sheetAccess WHERE id=?'),

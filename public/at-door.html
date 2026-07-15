@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>At Door · WTS Tickets</title>
+<link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+<style>
+:root {
+    --bg:        #0f1429;
+    --card:      #ffffff;
+    --text:      #1a1f3c;
+    --muted:    #6b7280;
+    --accent:    #c4294a;
+    --accent-bg: #fff5f7;
+    --border:   #e5e7eb;
+    --green:     #10b981;
+    --red:       #dc2626;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(160deg, #1a1f3c 0%, #0f1429 100%);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+}
+.shell {
+    max-width: 540px;
+    width: 100%;
+}
+header {
+    color: white;
+    text-align: center;
+    margin-bottom: 18px;
+}
+header .back {
+    display: inline-block;
+    color: rgba(255,255,255,.7);
+    text-decoration: none;
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+header .back:hover { color: white; }
+header h1 {
+    margin: 0 0 4px;
+    font-size: 26px;
+    letter-spacing: -.02em;
+}
+header .sub {
+    color: rgba(255,255,255,.7);
+    font-size: 14px;
+}
+.card {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 22px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.18);
+}
+.event-name {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+.event-meta {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 22px;
+}
+.event-meta .price { color: var(--text); font-weight: 600; }
+
+label.lbl {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-bottom: 6px;
+    margin-top: 14px;
+}
+input[type=text], input[type=email] {
+    width: 100%;
+    padding: 13px 14px;
+    font-size: 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #f9fafb;
+    color: var(--text);
+    transition: border .15s, background .15s;
+}
+input[type=text]:focus, input[type=email]:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: white;
+}
+button.primary {
+    width: 100%;
+    padding: 15px;
+    font-size: 16px;
+    font-weight: 600;
+    color: white;
+    background: var(--accent);
+    border: 0;
+    border-radius: 12px;
+    cursor: pointer;
+    margin-top: 18px;
+    transition: opacity .15s;
+}
+button.primary:hover { opacity: .9; }
+button.primary:disabled { opacity: .5; cursor: not-allowed; }
+
+.qr-wrap {
+    background: white;
+    padding: 16px;
+    border-radius: 14px;
+    display: flex;
+    justify-content: center;
+    margin-bottom: 14px;
+}
+.qr-wrap img, .qr-wrap canvas {
+    width: 100%;
+    max-width: 280px;
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
+}
+.qr-cap {
+    text-align: center;
+    margin-bottom: 14px;
+}
+.qr-cap .big {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+.qr-cap .small {
+    color: var(--muted);
+    font-size: 13px;
+}
+.link-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+.link-row .url {
+    flex: 1;
+    padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    background: #f4f5f8;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.link-row button {
+    flex-shrink: 0;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.banner {
+    padding: 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-top: 14px;
+    display: none;
+}
+.banner.show { display: block; }
+.banner.success {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+}
+.banner.error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+.spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+    vertical-align: -2px;
+    margin-right: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-screen {
+    color: rgba(255,255,255,.7);
+    text-align: center;
+    padding: 60px 0;
+}
+</style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <a class="back" href="/dashboard.html">← Back to dashboard</a>
+        <h1>At Door</h1>
+        <div class="sub">In-person ticket sales</div>
+    </header>
+
+    <div id="content">
+        <div class="loading-screen">
+            <span class="spinner"></span> Loading event…
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script>
+const params = new URLSearchParams(location.search);
+const eventId = params.get('id');
+const content = document.getElementById('content');
+
+if (!eventId) {
+    content.innerHTML = '<div class="card" style="color:var(--red);">Missing ?id= in URL.</div>';
+} else {
+    loadEvent();
+}
+
+async function loadEvent() {
+    try {
+        const res = await fetch(`/api/event/${encodeURIComponent(eventId)}`, { credentials: 'include' });
+        if (res.status === 401) {
+            location.href = `/login.html?next=${encodeURIComponent(location.pathname + location.search)}`;
+            return;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const ev = await res.json();
+        if (!ev.atDoorEnabled) {
+            content.innerHTML = '<div class="card" style="color:var(--red);">At-door sales are not enabled for this event. Enable it in the event settings on the dashboard.</div>';
+            return;
+        }
+        render(ev);
+    } catch (err) {
+        content.innerHTML = `<div class="card" style="color:var(--red);">Failed to load event: ${err.message}</div>`;
+    }
+}
+
+function render(ev) {
+    const isPaid = (ev.ticketPrice || 0) > 0;
+    const priceLabel = isPaid ? `$${(ev.ticketPrice / 100).toFixed(2)}` : 'Free';
+    const meta = `<span class="price">${priceLabel}</span>${ev.location?.name ? ' · ' + escape(ev.location.name) : ''}`;
+
+    if (isPaid) {
+        renderPaid(ev, meta);
+    } else {
+        renderFree(ev, meta);
+    }
+}
+
+function renderFree(ev, meta) {
+    content.innerHTML = `
+        <div class="card">
+            <div class="event-name">${escape(ev.name)}</div>
+            <div class="event-meta">${meta}</div>
+
+            <form id="atDoorForm">
+                <label class="lbl" for="atName">Attendee name</label>
+                <input type="text" id="atName" required autocomplete="name" autocapitalize="words" autofocus>
+
+                <label class="lbl" for="atEmail">Email (optional)</label>
+                <input type="email" id="atEmail" autocomplete="email" autocapitalize="off">
+
+                <button class="primary" type="submit" id="atSubmit">Issue Free Ticket</button>
+                <div class="banner success" id="atSuccess"></div>
+                <div class="banner error" id="atError"></div>
+            </form>
+        </div>
+    `;
+    document.getElementById('atDoorForm').addEventListener('submit', submitFree);
+}
+
+async function submitFree(e) {
+    e.preventDefault();
+    const name = document.getElementById('atName').value.trim();
+    const email = document.getElementById('atEmail').value.trim();
+    const btn = document.getElementById('atSubmit');
+    const success = document.getElementById('atSuccess');
+    const error = document.getElementById('atError');
+    success.classList.remove('show');
+    error.classList.remove('show');
+
+    if (!name) return;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Issuing…';
+
+    try {
+        const res = await fetch(`/api/event/${encodeURIComponent(eventId)}/at-door-register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ name, email: email || undefined }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        success.textContent = `Ticket issued for ${data.name || name}${email ? ' — confirmation emailed' : ''}.`;
+        success.classList.add('show');
+        document.getElementById('atName').value = '';
+        document.getElementById('atEmail').value = '';
+        document.getElementById('atName').focus();
+    } catch (err) {
+        error.textContent = err.message || 'Failed to issue ticket';
+        error.classList.add('show');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Issue Free Ticket';
+    }
+}
+
+function renderPaid(ev, meta) {
+    const url = `${location.origin}/register.html?id=${encodeURIComponent(ev.id)}`;
+    content.innerHTML = `
+        <div class="card">
+            <div class="event-name">${escape(ev.name)}</div>
+            <div class="event-meta">${meta}</div>
+
+            <div class="qr-wrap"><canvas id="qrCanvas"></canvas></div>
+            <div class="qr-cap">
+                <div class="big">Customer scans to buy</div>
+                <div class="small">They'll pay $${(ev.ticketPrice / 100).toFixed(2)} on their own phone via Stripe.</div>
+            </div>
+            <div class="link-row">
+                <div class="url" id="atUrl">${escape(url)}</div>
+                <button id="atCopy" type="button">Copy</button>
+            </div>
+        </div>
+    `;
+    QRCode.toCanvas(document.getElementById('qrCanvas'), url, { width: 320, margin: 2, errorCorrectionLevel: 'M' });
+    document.getElementById('atCopy').addEventListener('click', () => {
+        navigator.clipboard.writeText(url).then(() => {
+            const btn = document.getElementById('atCopy');
+            const orig = btn.textContent;
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = orig; }, 1500);
+        });
+    });
+}
+
+function escape(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
+}
+</script>
+</body>
+</html>

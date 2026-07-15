@@ -11,6 +11,7 @@
     <meta name="apple-mobile-web-app-title" content="WTS Tickets">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <link rel="stylesheet" href="kiosk.css">
     <script src="/jsQR.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -143,13 +144,33 @@
         }
         #roomSelect option { background: #1c1c1e; color: #fff; }
 
-        /* ── Recent scans history strip ── */
+        /* ── Recent scans history strip — horizontally scrollable, most
+           recent first, so staff can review more than just the last scan ── */
         #recentScans {
             position: fixed;
             bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
             left: 0; right: 0;
             z-index: 20;
             pointer-events: auto;
+            display: flex;
+            gap: 10px;
+            padding: 0 14px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        #recentScans::-webkit-scrollbar { display: none; }
+        .scan-hist-card {
+            flex: 0 0 auto;
+            display: flex; align-items: center; gap: 12px;
+            background: rgba(22,22,24,0.96);
+            backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255,255,255,0.09);
+            border-left: 3px solid #818cf8;
+            border-radius: 14px; padding: 12px 16px;
+            min-width: 190px; max-width: 240px;
+            cursor: pointer;
+            animation: slideUp 0.38s cubic-bezier(0.34,1.56,0.64,1);
         }
         @keyframes slideUp {
             from { transform: translateY(18px) scale(0.97); opacity: 0; }
@@ -251,43 +272,16 @@
         }
 
         /* ── iOS-style tab bar ── */
+        /* Base .tab-bar/.tab-bar-inner/.tab-bar-safe/.tab-btn come from kiosk.css —
+           scanner's tab bar overlays the camera view, so it needs its own
+           position/visibility on top of the shared look. */
         .tab-bar {
             position: fixed;
             bottom: 0; left: 0; right: 0;
             z-index: 25;
             display: none;
             flex-direction: column;
-            background: rgba(10,10,10,0.88);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-top: 1px solid rgba(255,255,255,0.1);
         }
-        .tab-bar-inner {
-            display: flex;
-            height: 49px;
-        }
-        .tab-bar-safe {
-            height: env(safe-area-inset-bottom, 0px);
-        }
-        .tab-btn {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 3px;
-            background: none;
-            border: none;
-            color: rgba(255,255,255,0.4);
-            font-size: 10px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: color 0.15s;
-            padding: 0;
-            -webkit-tap-highlight-color: transparent;
-        }
-        .tab-btn.active { color: #fff; }
-        .tab-btn svg { width: 22px; height: 22px; }
 
         body.has-tab-bar #recentScans {
             bottom: calc(49px + env(safe-area-inset-bottom, 0px) + 16px);
@@ -566,6 +560,20 @@
             <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
         </button>
 
+        <div class="settings-section-label" style="margin-top:4px;">Scanner</div>
+        <div class="settings-card">
+            <div class="settings-card-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+                <div style="display:flex;justify-content:space-between;">
+                    <span class="settings-card-label">Result display time</span>
+                    <span id="scanDurationLabel" style="color:#fff;font-size:13px;font-weight:600;">0.8s</span>
+                </div>
+                <input type="range" id="scanDurationSlider" min="300" max="5000" step="100" value="800"
+                    oninput="onScanDurationInput(this.value)"
+                    style="width:100%;">
+                <div style="font-size:12px;color:rgba(255,255,255,0.4);">How long a scan result stays full-screen on this device</div>
+            </div>
+        </div>
+
         <div class="settings-section-label" style="margin-top:4px;">Door Display</div>
         <div class="dp-event-name" id="dpEventName"></div>
 
@@ -610,7 +618,7 @@
                 <span id="acctEmail" style="color:#fff;font-size:14px;text-align:right;word-break:break-all;">—</span>
             </div>
             <div class="settings-card-row" style="justify-content:center;">
-                <button onclick="signOutFromSettings()" style="background:none;border:none;font-family:inherit;font-size:15px;font-weight:600;color:#f87171;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;">Sign Out</button>
+                <button onclick="signOutFromSettings()" style="background:none;border:none;font-family:inherit;font-size:15px;font-weight:600;color:var(--danger-soft);cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;">Sign Out</button>
             </div>
         </div>
     </div>
@@ -717,7 +725,16 @@ let pendingCheckoutToken = null;
     requestNotificationPermission();
     if (isLoggedIn) startSessionWatcher();
     if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
+
+    const durationMs = getScanResultDuration();
+    document.getElementById('scanDurationSlider').value = durationMs;
+    document.getElementById('scanDurationLabel').textContent = (durationMs / 1000).toFixed(1) + 's';
 })();
+
+function onScanDurationInput(ms) {
+    localStorage.setItem('scanResultDuration', ms);
+    document.getElementById('scanDurationLabel').textContent = (ms / 1000).toFixed(1) + 's';
+}
 
 // ── Session expiry watcher ────────────────────────────────
 let sessionExpiredShown = false;
@@ -784,9 +801,13 @@ function getScannerDeviceName() {
     return 'Browser (Web)';
 }
 
-function sendHeartbeat() {
+function getSelectedEventId() {
     const sel = document.getElementById('roomSelect');
-    const eventId = (sel && sel.value) || localStorage.getItem('selectedEventId') || null;
+    return (sel && sel.value) || localStorage.getItem('selectedEventId') || null;
+}
+
+function sendHeartbeat() {
+    const eventId = getSelectedEventId();
     fetch('/api/scan/heartbeat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -907,11 +928,9 @@ function selectedEvent() {
 }
 
 // ── Scan detail sheet ─────────────────────────────────────
-let lastScanData = null;
-
-function openDetail() {
-    if (!lastScanData) return;
-    const d      = lastScanData;
+function openDetail(record) {
+    if (!record) return;
+    const d      = record;
     const status = d.status || 'error';
     const bg     = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
     const icon   = STATUS_ICONS[status]   || '!';
@@ -935,7 +954,7 @@ function openDetail() {
         undoBtnHtml = `
             <div style="padding: 16px 20px 24px; border-top: 1px solid rgba(255,255,255,0.07);">
                 <button onclick="undoCheckInWeb('${d.registrationId}')" 
-                        style="width:100%; padding: 14px; background: rgba(220,38,38,0.15); color: #f87171; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity 0.15s;"
+                        style="width:100%; padding: 14px; background: rgba(220,38,38,0.15); color: var(--danger-soft); border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity 0.15s;"
                         onactive="this.style.opacity=0.7">
                     Undo Check-In
                 </button>
@@ -991,7 +1010,7 @@ const OVERLAY_COLORS = {
     valid:         '#128740',
     reentry_enter: '#128740',
     reentry_exit:  '#bf5e0f',
-    checkout_done: '#bf5e0f',
+    checkout_done: '#2563eb',
     used:          '#bf5e0f',
     invalid:       '#b81e1e',
     error:         '#b81e1e',
@@ -1001,16 +1020,17 @@ const svgCheck = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.
 const svgExclam = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>';
 const svgXmark = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></svg>';
 const svgDoor = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>';
-const STATUS_ICONS   = { valid:svgCheck, reentry_enter:svgCheck, reentry_exit:svgDoor, checkout_done:svgCheck, used:svgExclam, invalid:svgXmark, error:svgXmark, info:svgCheck };
+const svgUturnLeft = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4 11h-5.59l2.29 2.29-1.41 1.42L7 12l4.29-4.71 1.41 1.42L10.41 11H16v2z"/></svg>';
+const STATUS_ICONS   = { valid:svgCheck, reentry_enter:svgCheck, reentry_exit:svgDoor, checkout_done:svgUturnLeft, used:svgExclam, invalid:svgXmark, error:svgXmark, info:svgCheck };
 const STATUS_TITLES  = { valid:'Checked In!', reentry_enter:'Checked Back In!', reentry_exit:'Confirm Check-Out', checkout_done:'Checked Out', used:'Already Checked In', invalid:'Invalid QR', error:'Error', info:'Admin Message' };
-const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', checkout_done:'shi-dot-orange', invalid:'shi-dot-red', error:'shi-dot-red', info:'shi-dot-green' };
-const STATUS_COLORS  = { valid:'#4ade80', reentry_enter:'#4ade80', reentry_exit:'#fbbf24', checkout_done:'#fbbf24', used:'#fbbf24', invalid:'#f87171', error:'#f87171', info:'#818cf8' };
+const STATUS_DOT_CLS = { valid:'shi-dot-green', reentry_enter:'shi-dot-green', used:'shi-dot-orange', reentry_exit:'shi-dot-orange', checkout_done:'shi-dot-blue', invalid:'shi-dot-red', error:'shi-dot-red', info:'shi-dot-green' };
+const STATUS_COLORS  = { valid:'var(--success)', reentry_enter:'var(--success)', reentry_exit:'var(--warning)', checkout_done:'#60a5fa', used:'var(--warning)', invalid:'var(--danger-soft)', error:'var(--danger-soft)', info:'#818cf8' };
 
-let recentScansList = [];
+let scanHistory = []; // most recent first — a real review log, not just the last scan
+const MAX_SCAN_HISTORY = 20;
 let flashTimer = null;
 let exitConfirmTimer = null;
 let scanCardTimer = null;
-let scanFadeTimer = null;
 
 // Full-screen colored flash — auto-dismisses after 1.2s, tap also dismisses
 function showFlash(data) {
@@ -1022,9 +1042,9 @@ function showFlash(data) {
     document.getElementById('roName').textContent   = data.firstName || data.name || '';
     document.getElementById('roEmail').style.display = 'none';
     document.getElementById('roEvent').style.display = 'none';
-    document.getElementById('roFields').innerHTML = '';
+    document.getElementById('roFields').innerHTML = renderCustomFields(data.customFields);
     document.getElementById('roBottom').innerHTML = '';
-    
+
     if (overlay.classList.contains('show')) {
         // Quick pulse/blink if already showing
         overlay.style.transform = 'scale(0.95)';
@@ -1042,38 +1062,61 @@ function showFlash(data) {
     }
     
     clearTimeout(flashTimer);
-    flashTimer = setTimeout(closeResult, 800);
+    flashTimer = setTimeout(closeResult, getScanResultDuration());
     addToHistory(data, status);
+}
+
+// Custom fields (e.g. T-Shirt Size) entered for this ticket — shown on the
+// full-screen result and, compactly, on the recent-scans history card below.
+function renderCustomFields(customFields) {
+    if (!customFields) return '';
+    const entries = Object.entries(customFields).filter(([, v]) => v);
+    if (!entries.length) return '';
+    return entries.map(([k, v]) =>
+        `<div class="ro-field"><span class="ro-field-label">${escHtml(k)}</span><span class="ro-field-value">${escHtml(v)}</span></div>`
+    ).join('');
+}
+
+function customFieldsSummary(customFields) {
+    if (!customFields) return '';
+    return Object.values(customFields).filter(Boolean).join(' · ');
+}
+
+// Result display duration is a per-device preference (Settings > Scanner).
+const DEFAULT_SCAN_RESULT_DURATION_MS = 800;
+function getScanResultDuration() {
+    const stored = parseInt(localStorage.getItem('scanResultDuration'), 10);
+    return (stored >= 300 && stored <= 5000) ? stored : DEFAULT_SCAN_RESULT_DURATION_MS;
 }
 
 // Alias kept for notification fallback
 function showBanner(data) { showFlash(data); }
 
 function addToHistory(data, status) {
-    lastScanData = { ...data, status };
+    scanHistory.unshift({ ...data, status });
+    if (scanHistory.length > MAX_SCAN_HISTORY) scanHistory.length = MAX_SCAN_HISTORY;
     clearTimeout(scanCardTimer);
-    clearTimeout(scanFadeTimer);
+    renderScanHistory();
+}
 
-    const accent = STATUS_COLORS[status] || '#818cf8';
-    const name   = escHtml(data.firstName || data.name || 'Unknown');
-    const label  = escHtml(STATUS_TITLES[status] || 'Unknown');
-
+function renderScanHistory() {
     const container = document.getElementById('recentScans');
-    container.innerHTML = `
-        <div id="scanHistCard" onclick="openDetail()"
-             style="display:flex;align-items:center;gap:12px;
-                    background:rgba(22,22,24,0.96);
-                    backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
-                    border:1px solid rgba(255,255,255,0.09);
-                    border-left:3px solid ${accent};
-                    border-radius:14px;padding:12px 16px;margin:0 14px;
-                    cursor:pointer;pointer-events:none;
-                    animation:slideUp 0.38s cubic-bezier(0.34,1.56,0.64,1);">
+    container.innerHTML = scanHistory.map((entry, idx) => {
+        const accent  = STATUS_COLORS[entry.status] || '#818cf8';
+        const name    = escHtml(entry.firstName || entry.name || 'Unknown');
+        const label   = escHtml(STATUS_TITLES[entry.status] || 'Unknown');
+        const summary = customFieldsSummary(entry.customFields);
+        return `
+        <div class="scan-hist-card" data-idx="${idx}" onclick="openDetail(scanHistory[${idx}])"
+             style="border-left-color:${accent};">
             <div style="flex:1;min-width:0;">
                 <div style="font-size:15px;font-weight:700;color:#fff;
                             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
                             margin-bottom:2px;">${name}</div>
-                <div style="font-size:12px;font-weight:600;color:${accent};">${label}</div>
+                <div style="font-size:12px;font-weight:600;color:${accent};
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    ${label}${summary ? ' · ' + escHtml(summary) : ''}
+                </div>
             </div>
             <svg width="7" height="12" viewBox="0 0 7 12" fill="none"
                  stroke="rgba(255,255,255,0.22)" stroke-width="2"
@@ -1081,23 +1124,16 @@ function addToHistory(data, status) {
                 <polyline points="1 1 6 6 1 11"/>
             </svg>
         </div>`;
+    }).join('');
 
-    // Block taps for 1.5 s — prevents accidentally opening the sheet while
-    // the finger is still moving after dismissing the scan result overlay
-    scanCardTimer = setTimeout(() => {
-        const c = document.getElementById('scanHistCard');
-        if (c) c.style.pointerEvents = 'auto';
-    }, 1500);
-
-    // Auto-fade after 8 s
-    scanFadeTimer = setTimeout(() => {
-        const c = document.getElementById('scanHistCard');
-        if (c) {
-            c.style.transition = 'opacity 0.5s ease';
-            c.style.opacity = '0';
-            setTimeout(() => { container.innerHTML = ''; }, 500);
-        }
-    }, 8000);
+    // Block taps on the newest card for 1.5s — prevents accidentally reopening
+    // the sheet while the finger is still moving after dismissing the
+    // full-screen overlay by tap. Older cards stay tappable immediately.
+    const newest = container.querySelector('.scan-hist-card[data-idx="0"]');
+    if (newest) {
+        newest.style.pointerEvents = 'none';
+        scanCardTimer = setTimeout(() => { newest.style.pointerEvents = 'auto'; }, 1500);
+    }
 }
 
 let pendingCheckoutName = null;
@@ -1197,7 +1233,9 @@ function onScanSuccess(decodedText) {
     fetch('/api/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, pairToken: SCANNER_PAIR_TOKEN })
+        // eventId lets the server reject a ticket that's valid for a
+        // *different* event than the one currently selected on this scanner.
+        body: JSON.stringify({ token, pairToken: SCANNER_PAIR_TOKEN, eventId: getSelectedEventId() })
     })
     .then(r => r.json())
     .then(data => {

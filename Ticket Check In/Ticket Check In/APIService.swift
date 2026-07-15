@@ -202,13 +202,17 @@ class APIService: ObservableObject {
         return tickets
     }
 
-    func validateTicket(token: String, pairToken: String? = nil) async throws -> ValidateResponse {
+    // eventId is the event currently selected on this scanner — the server
+    // rejects a ticket as invalid if it actually belongs to a different event,
+    // so one organizer's ticket can't be waved through at another's door.
+    func validateTicket(token: String, pairToken: String? = nil, eventId: String? = nil) async throws -> ValidateResponse {
         guard let url = URL(string: "\(baseURL)/api/validate") else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var body: [String: String] = ["token": token]
         if let pt = pairToken, !pt.isEmpty { body["pairToken"] = pt }
+        if let eventId, !eventId.isEmpty { body["eventId"] = eventId }
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)
