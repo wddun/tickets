@@ -18,6 +18,11 @@ struct ScannerView: View {
     @AppStorage("displayPreconnectURL")    private var displayPreconnectURL = ""
     @AppStorage("lastSelectedEventData")   private var lastSelectedEventData: Data = Data()
     @AppStorage("scannerMode")             private var scannerMode: String = "none"
+    // No-login scan-link lock (see ScanLinkEntrySheet in EventsView.swift) —
+    // when set, this scanner is pinned to exactly this event.
+    @AppStorage("scanLinkEventData")       private var scanLinkEventData: Data = Data()
+    @AppStorage("scanLinkJustEntered")     private var scanLinkJustEntered = false
+    @State private var showScanLinkEnter = false
     // How long the full-screen scan result stays up — a per-device
     // preference, set from Settings > Scanner.
     @AppStorage("resultDisplayDuration")   private var resultDisplayDuration: Double = 1.2
@@ -73,6 +78,10 @@ struct ScannerView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(200)
             }
+            // Persistent pill naming the locked event (scan-link mode only)
+            scanLinkBanner
+            // One-second full-screen "entering" animation, scan-link mode only
+            scanLinkEnterOverlay
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showNotifBanner)
         .task { await api.checkAuth() }
@@ -80,6 +89,14 @@ struct ScannerView: View {
             UIApplication.shared.isIdleTimerDisabled = true
             startHeartbeat()
             startNotifListener()
+            if scanLinkJustEntered, scanLinkEvent != nil {
+                scanLinkJustEntered = false
+                showScanLinkEnter = true
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    await MainActor.run { withAnimation(.easeInOut(duration: 0.35)) { showScanLinkEnter = false } }
+                }
+            }
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -144,13 +161,15 @@ struct ScannerView: View {
                         .padding(.horizontal, 2)
                     }
                 }
-                Button(action: switchToManual) {
-                    Label("Manual Check-in", systemImage: "person.text.rectangle")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
-                        .background(.ultraThinMaterial, in: Capsule())
+                if scanLinkEvent == nil {
+                    Button(action: switchToManual) {
+                        Label("Manual Check-in", systemImage: "person.text.rectangle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
                 }
             }
             .padding(.horizontal, 20)
@@ -358,11 +377,91 @@ struct ScannerView: View {
         BluetoothManager.shared.sendScanResult(ble)
     }
 
+    private var scanLinkEvent: ScannerLinkInfo? {
+        guard !scanLinkEventData.isEmpty else { return nil }
+        return try? JSONDecoder().decode(ScannerLinkInfo.self, from: scanLinkEventData)
+    }
+
     private func selectedEventId() -> String? {
+        if let scanLinkEvent { return scanLinkEvent.eventId }
         guard !lastSelectedEventData.isEmpty,
               let event = try? JSONDecoder().decode(Event.self, from: lastSelectedEventData)
         else { return nil }
         return event.id
+    }
+
+    private func exitScanLinkMode() {
+        scanLinkEventData = Data()
+    }
+
+    private func colorFromHex(_ hex: String?) -> Color? {
+        guard var s = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let value = UInt32(s, radix: 16) else { return nil }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+
+    @ViewBuilder private var scanLinkEnterOverlay: some View {
+        if showScanLinkEnter, let link = scanLinkEvent {
+            ZStack {
+                Color(red: 0.043, green: 0.051, blue: 0.078).ignoresSafeArea()
+                VStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(colorFromHex(link.color) ?? Color.accentColor)
+                            .frame(width: 64, height: 64)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    Text("ENTERING")
+                        .font(.system(size: 13, weight: .bold))
+                        .tracking(1.2)
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text(link.eventName)
+                        .font(.system(size: 24, weight: .heavy))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+            }
+            .transition(.opacity)
+            .zIndex(300)
+        }
+    }
+
+    @ViewBuilder private var scanLinkBanner: some View {
+        if let link = scanLinkEvent, !showScanLinkEnter {
+            VStack {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(colorFromHex(link.color) ?? Color.accentColor)
+                        .frame(width: 8, height: 8)
+                    Text(link.eventName)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Button(action: exitScanLinkMode) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                Spacer()
+            }
+            .transition(.opacity)
+            .zIndex(150)
+        }
     }
 
     private func startHeartbeat() {

@@ -49,6 +49,7 @@ struct LoginView: View {
     @State private var password = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var showScanLinkSheet = false
 
     var body: some View {
         if #available(iOS 16, *) {
@@ -117,6 +118,12 @@ struct LoginView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+                Button("Have a scan link?") {
+                    showScanLinkSheet = true
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
                 Text("© Will's Tech Support · support@willstechsupport.com")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -128,6 +135,12 @@ struct LoginView: View {
         }
         .navigationTitle("Sign In")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showScanLinkSheet) {
+            ScanLinkEntrySheet {
+                showScanLinkSheet = false
+                switchToScanner()
+            }
+        }
     }
 
     private func login() {
@@ -142,6 +155,126 @@ struct LoginView: View {
                 errorMessage = error.localizedDescription
             }
             isLoading = false
+        }
+    }
+}
+
+// MARK: - Scan Link Entry Sheet
+
+/// Lets a device get scanner access to one event with no account at all —
+/// paste the link (or just the token) an organizer shared, and it resolves
+/// via the public GET /api/scanner-links/:token endpoint. Storage is shared
+/// via @AppStorage so ScannerView picks up the locked event immediately.
+struct ScanLinkEntrySheet: View {
+    var onResolved: () -> Void = {}
+
+    @AppStorage("scanLinkEventData")  private var scanLinkEventData: Data = Data()
+    @AppStorage("scanLinkJustEntered") private var scanLinkJustEntered = false
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var input = ""
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        if #available(iOS 16, *) {
+            NavigationStack { sheetContent }
+        } else {
+            NavigationView { sheetContent }
+        }
+    }
+
+    @ViewBuilder
+    private var sheetContent: some View {
+        VStack(spacing: 20) {
+            Spacer().frame(height: 8)
+
+            Image(systemName: "qrcode.viewfinder")
+                .font(.system(size: 40))
+                .foregroundStyle(Color.accentColor)
+
+            Text("Paste the scan link an organizer sent you. This device will be able to scan tickets for that event only — no account needed.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            TextField("Scan link", text: $input)
+                .keyboardType(.URL)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .padding()
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+                    .font(.footnote)
+            }
+
+            Button(action: resolve) {
+                Group {
+                    if isLoading {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Continue").font(.headline)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.accentColor)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .disabled(isLoading || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .padding(.horizontal)
+
+            Spacer()
+        }
+        .padding(.top, 16)
+        .navigationTitle("Scan Link")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+        }
+    }
+
+    private func extractToken(from raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return trimmed
+        }
+        if let queryToken = comps.queryItems?.first(where: { $0.name == "scanToken" })?.value, !queryToken.isEmpty {
+            return queryToken
+        }
+        let segments = comps.path.split(separator: "/")
+        if comps.path.contains("/scan/"), let last = segments.last {
+            return String(last)
+        }
+        return trimmed
+    }
+
+    private func resolve() {
+        let token = extractToken(from: input)
+        guard !token.isEmpty else { return }
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                let link = try await APIService.shared.resolveScannerLink(token: token)
+                scanLinkEventData = (try? JSONEncoder().encode(link)) ?? Data()
+                scanLinkJustEntered = true
+                isLoading = false
+                onResolved()
+            } catch {
+                errorMessage = "Invalid or revoked scan link."
+                isLoading = false
+            }
         }
     }
 }

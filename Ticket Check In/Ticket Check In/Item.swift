@@ -69,3 +69,12 @@ struct AuthUserResponse: Codable {
 struct PushSubscriptionResponse: Codable {
     let enabled: Bool
 }
+
+// Resolved from a no-login scan link (GET /api/scanner-links/:token) — locks
+// the scanner to exactly one event, no account required.
+struct ScannerLinkInfo: Codable {
+    let eventId: String
+    let eventName: String
+    let color: String?
+    let allowReentry: Bool?
+}

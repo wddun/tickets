@@ -157,6 +157,77 @@
             to   { transform: translateY(0)    scale(1);    opacity: 1; }
         }
 
+        /* ── Scan-link entry (no-login, locked-to-one-event) ── */
+        #scanLinkEnterOverlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            text-align: center;
+            padding: 32px;
+            background: #0b0d14;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.35s ease;
+        }
+        #scanLinkEnterOverlay.show { opacity: 1; pointer-events: auto; }
+        #scanLinkEnterOverlay.fade-out { opacity: 0; }
+        .sle-icon {
+            width: 64px; height: 64px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            animation: slePop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .sle-icon svg { width: 30px; height: 30px; }
+        @keyframes slePop {
+            0%   { transform: scale(0.4); opacity: 0; }
+            60%  { transform: scale(1.08); opacity: 1; }
+            100% { transform: scale(1); }
+        }
+        .sle-title { font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255,255,255,0.5); }
+        .sle-event { font-size: 24px; font-weight: 800; color: #fff; max-width: 90vw; }
+        #scanLinkErrorOverlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            text-align: center;
+            padding: 32px;
+            background: #0b0d14;
+        }
+        #scanLinkErrorOverlay.show { display: flex; }
+        .sle-error-title { font-size: 18px; font-weight: 700; color: #fff; }
+        .sle-error-msg { font-size: 14px; color: rgba(255,255,255,0.6); max-width: 320px; }
+        #scanLinkBanner {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 20;
+            padding: calc(env(safe-area-inset-top, 0px) + 12px) 14px 12px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #scanLinkBanner.show { display: flex; }
+        .slb-pill {
+            display: flex; align-items: center; gap: 8px;
+            background: rgba(0,0,0,0.55);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 7px 16px 7px 12px;
+            max-width: 100%;
+        }
+        .slb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .slb-name { font-size: 13px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
         /* ── Full-screen result overlay — reentry exit confirm only ── */
         #resultOverlay {
             position: fixed;
@@ -462,6 +533,23 @@
 
 <div class="scan-guide"><div class="scan-box"><span></span></div></div>
 
+<!-- Scan-link (no-login) entry animation + persistent event banner -->
+<div id="scanLinkEnterOverlay">
+    <div class="sle-icon" id="sleIcon"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+    <div class="sle-title">Entering</div>
+    <div class="sle-event" id="sleEventName"></div>
+</div>
+<div id="scanLinkErrorOverlay">
+    <div class="sle-error-title" id="sleErrorTitle">Invalid scan link</div>
+    <div class="sle-error-msg" id="sleErrorMsg">This link may have been revoked. Ask the event organizer for a new one.</div>
+</div>
+<div id="scanLinkBanner">
+    <div class="slb-pill">
+        <span class="slb-dot" id="slbDot"></span>
+        <span class="slb-name" id="slbName"></span>
+    </div>
+</div>
+
 <!-- In-app notification banners -->
 <div id="inAppNotifContainer"></div>
 
@@ -666,9 +754,16 @@ let lastScannedToken  = null;
 let lastScanTs        = 0;
 const SCAN_DEBOUNCE_MS = 5000;
 let pendingCheckoutToken = null;
+let lockedScanLink = null; // { eventId, eventName, color, allowReentry } when opened via /scan/:token
 
 // ── Init ──────────────────────────────────────────────────
 (async () => {
+    const scanToken = new URLSearchParams(location.search).get('scanToken');
+    if (scanToken) {
+        await initScanLinkMode(scanToken);
+        return;
+    }
+
     try {
         const r = await fetch('/api/auth/me');
         if (r.ok) {
@@ -692,6 +787,42 @@ let pendingCheckoutToken = null;
     if (isLoggedIn) startSessionWatcher();
     if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
 })();
+
+// ── Scan-link mode: no login, locked to one event ──────────
+async function initScanLinkMode(scanToken) {
+    let link;
+    try {
+        const r = await fetch(`/api/scanner-links/${encodeURIComponent(scanToken)}`);
+        if (!r.ok) throw new Error();
+        link = await r.json();
+    } catch (_) {
+        document.getElementById('scanLinkErrorOverlay').classList.add('show');
+        return;
+    }
+
+    lockedScanLink = link;
+    const color = link.color || '#c4294a';
+
+    const icon = document.getElementById('sleIcon');
+    icon.style.background = color;
+    document.getElementById('sleEventName').textContent = link.eventName;
+    const enterOverlay = document.getElementById('scanLinkEnterOverlay');
+    enterOverlay.classList.add('show');
+
+    const dot = document.getElementById('slbDot');
+    dot.style.background = color;
+    document.getElementById('slbName').textContent = link.eventName;
+
+    startCamera();
+    initScannerChannel();
+    requestNotificationPermission();
+
+    setTimeout(() => {
+        enterOverlay.classList.add('fade-out');
+        setTimeout(() => enterOverlay.remove(), 400);
+        document.getElementById('scanLinkBanner').classList.add('show');
+    }, 1000);
+}
 
 // ── Session expiry watcher ────────────────────────────────
 let sessionExpiredShown = false;
@@ -759,6 +890,7 @@ function getScannerDeviceName() {
 }
 
 function getSelectedEventId() {
+    if (lockedScanLink) return lockedScanLink.eventId;
     const sel = document.getElementById('roomSelect');
     return (sel && sel.value) || localStorage.getItem('selectedEventId') || null;
 }
@@ -824,8 +956,7 @@ function initScannerChannel() {
 
     function openSSE() {
         if (scannerSSE) { try { scannerSSE.close(); } catch (_) {} }
-        const sel = document.getElementById('roomSelect');
-        const eventId = sel ? sel.value : '';
+        const eventId = getSelectedEventId() || '';
         const url = `/api/scan/stream/${encodeURIComponent(SCANNER_PAIR_TOKEN)}?platform=web&eventId=${encodeURIComponent(eventId)}`;
         scannerSSE = new EventSource(url);
         scannerSSE.onmessage = (e) => {

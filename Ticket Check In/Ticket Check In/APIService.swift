@@ -190,6 +190,17 @@ class APIService: ObservableObject {
         return events
     }
 
+    // MARK: - Scan Links (no-login scanner access)
+
+    func resolveScannerLink(token: String) async throws -> ScannerLinkInfo {
+        guard let url = URL(string: "\(baseURL)/api/scanner-links/\(token)") else { throw APIError.invalidURL }
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+        guard let info = try? JSONDecoder().decode(ScannerLinkInfo.self, from: data) else { throw APIError.decodingError }
+        return info
+    }
+
     // MARK: - Tickets
 
     func getTickets(eventId: String) async throws -> [Ticket] {

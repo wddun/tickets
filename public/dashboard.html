@@ -2744,6 +2744,7 @@
                         <button class="settings-nav-item active" id="navfor-tab-general" onclick="switchSettingsTab(this,'tab-general')">General</button>
                         <button class="settings-nav-item" id="navfor-tab-fields" onclick="switchSettingsTab(this,'tab-fields')">Custom Fields</button>
                         <button class="settings-nav-item" id="navfor-tab-access" onclick="switchSettingsTab(this,'tab-access')">Access & Sharing</button>
+                        <button class="settings-nav-item" id="navfor-tab-scanlinks" onclick="switchSettingsTab(this,'tab-scanlinks')">Scan Links</button>
                         <button class="settings-nav-item" id="navfor-tab-notifications" onclick="switchSettingsTab(this,'tab-notifications')">Notifications</button>
                         <button class="settings-nav-item" id="navfor-tab-registration" onclick="switchSettingsTab(this,'tab-registration')">Registration</button>
                         <button class="settings-nav-item" id="navfor-tab-waitlist" onclick="switchSettingsTab(this,'tab-waitlist')">Waitlist</button>
@@ -2920,6 +2921,7 @@
                         `<div class="settings-section" id="tab-general">${renderGeneralSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-fields">${cfHtml}</div>` +
                         `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div>${note}${auditHtml}</div>` +
+                        `<div class="settings-section" id="tab-scanlinks">${await renderScannerLinksSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-notifications"><div class="modal-section-title">Notifications</div>${pushHtml}${reminderHtml}</div>` +
                         `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
@@ -2994,6 +2996,7 @@
                     `<div class="settings-section" id="tab-general">${renderGeneralSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-fields">${cfHtml}</div>` +
                     `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div>${linkHtml}${accessHtml}${auditHtml}</div>` +
+                    `<div class="settings-section" id="tab-scanlinks">${await renderScannerLinksSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-notifications"><div class="modal-section-title">Notifications</div>${pushHtml}${reminderHtml}</div>` +
                     `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
@@ -3454,6 +3457,68 @@
                 if (ev) ev.shuttleLinkEnabled = enabled;
             } catch {
                 showToast('Failed to update shuttle linking.');
+            }
+        }
+
+        // ── Scan Links (no-login scanner access) ──────────────────────────────
+        async function renderScannerLinksSection(eventId) {
+            let rows = '<div class="settings-empty">No scan links yet.</div>';
+            try {
+                const r = await fetch(`/api/event/${eventId}/scanner-links`);
+                if (r.ok) {
+                    const links = await r.json();
+                    if (links.length) {
+                        rows = links.map(l => `
+                            <div class="link-box" style="margin-bottom:10px;">
+                                <label>${esc(l.label || 'Untitled link')}${l.lastUsedAt ? ` <span style="font-weight:400;color:#888;font-size:11px;">last used ${fmtDate(l.lastUsedAt)}</span>` : ''}</label>
+                                <div style="display:flex;gap:8px;">
+                                    <input type="text" value="${esc(l.url)}" readonly onclick="this.select()">
+                                    <button class="btn btn-primary btn-sm" onclick="copySettingsLink('${esc(l.url)}')">Copy</button>
+                                    <button class="btn btn-danger btn-sm" onclick="revokeScannerLink('${l.id}','${eventId}')">Revoke</button>
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                }
+            } catch {}
+            return `
+                <div class="modal-section-title">Scan Links</div>
+                <div class="settings-hint">
+                    Anyone with a scan link can open the scanner for this event only — no account needed. No dashboard access, can't edit the event, can't see other events. Scans and re-entry check-outs work exactly like the logged-in scanner. Create one per staffer or device so they can be revoked independently.
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:20px;">
+                    <input type="text" id="newScanLinkLabel" placeholder="Label (e.g. Front gate iPad)" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                    <button class="btn btn-primary" onclick="generateScannerLink('${eventId}')">Generate Link</button>
+                </div>
+                <div id="scanLinksRows">${rows}</div>
+            `;
+        }
+
+        async function generateScannerLink(eventId) {
+            const input = document.getElementById('newScanLinkLabel');
+            const label = input ? input.value.trim() : '';
+            try {
+                const r = await fetch(`/api/event/${eventId}/scanner-links`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ label })
+                });
+                if (!r.ok) throw new Error();
+                const section = document.getElementById('tab-scanlinks');
+                if (section) section.innerHTML = await renderScannerLinksSection(eventId);
+            } catch {
+                showToast('Failed to generate scan link.');
+            }
+        }
+
+        async function revokeScannerLink(linkId, eventId) {
+            if (!await confirmDialog('Revoke this scan link? Anyone using it will lose scanner access immediately.')) return;
+            try {
+                await fetch(`/api/scanner-links/${linkId}`, { method: 'DELETE' });
+                const section = document.getElementById('tab-scanlinks');
+                if (section) section.innerHTML = await renderScannerLinksSection(eventId);
+            } catch {
+                showToast('Failed to revoke scan link.');
             }
         }
 

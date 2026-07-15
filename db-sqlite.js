@@ -183,6 +183,22 @@ CREATE TABLE IF NOT EXISTS waitlist (
 );
 CREATE INDEX IF NOT EXISTS idx_waitlist_eventId ON waitlist(eventId);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_waitlist_event_email ON waitlist(eventId, email);
+
+-- No-login scanner access: anyone holding the token can scan/check in tickets
+-- for exactly this one event (nothing else — no dashboard, no other events).
+-- Multiple links per event so each staffer/device can be named and revoked
+-- independently, rather than everyone sharing one link/credential.
+CREATE TABLE IF NOT EXISTS scannerLinks (
+    id TEXT PRIMARY KEY,
+    eventId TEXT NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    createdBy TEXT,
+    createdAt TEXT NOT NULL,
+    lastUsedAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_scannerLinks_token ON scannerLinks(token);
+CREATE INDEX IF NOT EXISTS idx_scannerLinks_eventId ON scannerLinks(eventId);
 `);
 
 // ── Column migrations ─────────────────────────────────────────────────────────
@@ -466,6 +482,15 @@ export const stmt = {
         insert: db.prepare(`INSERT INTO sheetLinks (id, token, spreadsheetId, sheetName, eventId, createdAt, apiKey) VALUES (?,?,?,?,?,?,?)`),
         update: db.prepare(`UPDATE sheetLinks SET eventId=?, sheetName=? WHERE id=?`),
         setApiKey: db.prepare(`UPDATE sheetLinks SET apiKey=? WHERE id=?`),
+    },
+    scannerLinks: {
+        byToken: db.prepare('SELECT * FROM scannerLinks WHERE token=?'),
+        byId: db.prepare('SELECT * FROM scannerLinks WHERE id=?'),
+        byEventId: db.prepare('SELECT * FROM scannerLinks WHERE eventId=? ORDER BY createdAt DESC'),
+        insert: db.prepare(`INSERT INTO scannerLinks (id, eventId, token, label, createdBy, createdAt) VALUES (?,?,?,?,?,?)`),
+        touchLastUsed: db.prepare(`UPDATE scannerLinks SET lastUsedAt=? WHERE id=?`),
+        deleteById: db.prepare(`DELETE FROM scannerLinks WHERE id=?`),
+        deleteByEventId: db.prepare(`DELETE FROM scannerLinks WHERE eventId=?`),
     },
     sheetAccess: {
         byId: db.prepare('SELECT * FROM sheetAccess WHERE id=?'),

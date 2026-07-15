@@ -2077,6 +2077,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
     const deleteEvent = db.transaction(() => {
         stmt.tickets.deleteByEventId.run(req.params.id);
         stmt.pushSubscriptions.deleteByEventId.run(req.params.id);
+        stmt.scannerLinks.deleteByEventId.run(req.params.id);
         stmt.events.deleteById.run(req.params.id);
     });
     deleteEvent();
@@ -2098,6 +2099,7 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
         for (const eventId of allowed) {
             stmt.tickets.deleteByEventId.run(eventId);
             stmt.pushSubscriptions.deleteByEventId.run(eventId);
+            stmt.scannerLinks.deleteByEventId.run(eventId);
             stmt.events.deleteById.run(eventId);
         }
     });
@@ -3051,6 +3053,59 @@ app.post('/api/ticket-check', validateLimiter, (req, res) => {
         ticketId: ticket.id, registrationId: ticket.registrationId,
         eventId: ticket.eventId, eventName: event.name,
     });
+});
+
+// Create a no-login scanner link for one event. Anyone with the link can
+// scan/check in tickets for exactly this event (nothing else) — no account
+// needed. Multiple links per event so each staffer/device can be named and
+// revoked independently instead of everyone sharing one credential.
+app.post('/api/event/:id/scanner-links', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    const label = (req.body.label || '').trim();
+    const link = { id: nanoid(10), eventId: event.id, token: nanoid(24), label, createdBy: req.session.userId, createdAt: new Date().toISOString() };
+    stmt.scannerLinks.insert.run(link.id, link.eventId, link.token, link.label, link.createdBy, link.createdAt);
+    logAudit(req, { eventId: event.id, action: 'scannerlink.created', details: { label } });
+    res.json({ success: true, link: { ...link, url: `${BASE_URL}/scan/${link.token}` } });
+});
+
+app.get('/api/event/:id/scanner-links', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    const links = stmt.scannerLinks.byEventId.all(event.id).map(l => ({ ...l, url: `${BASE_URL}/scan/${l.token}` }));
+    res.json(links);
+});
+
+app.delete('/api/scanner-links/:id', requireAuth, (req, res) => {
+    const link = stmt.scannerLinks.byId.get(req.params.id);
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+    if (!userHasEventFullAccess(req.session.userId, link.eventId)) return res.status(403).json({ error: 'Forbidden' });
+    stmt.scannerLinks.deleteById.run(link.id);
+    logAudit(req, { eventId: link.eventId, action: 'scannerlink.revoked', details: { label: link.label } });
+    res.json({ success: true });
+});
+
+// PUBLIC: resolve a scan link to its event — no auth, this is the whole point.
+// Scanning itself (/api/validate, /api/checkout) already requires no session;
+// this endpoint's only job is telling a no-account device which event to lock to.
+app.get('/api/scanner-links/:token', (req, res) => {
+    const link = stmt.scannerLinks.byToken.get(req.params.token);
+    if (!link) return res.status(404).json({ error: 'Invalid or revoked scan link' });
+    const event = rowToEvent(stmt.events.byId.get(link.eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    stmt.scannerLinks.touchLastUsed.run(new Date().toISOString(), link.id);
+    res.json({
+        eventId: event.id,
+        eventName: event.name,
+        color: event.color,
+        allowReentry: event.allowReentry,
+    });
+});
+
+app.get('/scan/:token', (req, res) => {
+    res.redirect(`/scanner.html?scanToken=${encodeURIComponent(req.params.token)}`);
 });
 
 // Confirm reentry check-out (no auth required — scanner uses PIN, not session)
