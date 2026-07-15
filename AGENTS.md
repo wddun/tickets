@@ -7,6 +7,29 @@ The full project guidance lives in `CLAUDE.md`. This file mirrors the convention
 
 - **No emojis** in code, UI text, comments, commit messages, or generated files unless the user explicitly asks or there is genuinely no alternative. Prefer inline SVG icons (the codebase already uses them widely in `scanner.html`, `checkin.html`, `dashboard.html`, etc.) or plain text labels. When editing existing UI that already contains emojis, do not add more — leave the existing ones in place unless asked to clean them up.
 
+## Production is the same Ubuntu box as the user's other WTS apps
+
+Deployed via SSH + PM2 (process name `ticketcheckin`, path `/opt/tickets`), **not** a
+separate Windows/RDP machine — a memory file once claimed otherwise; it was wrong and has
+been deleted. Don't take a claim like that at face value if you have contradicting evidence
+in front of you (e.g. `pm2 list` showing the process right there) — verify against the
+live system, not the memory file, before it shapes what you tell the user you can/can't do.
+
+**Before editing anything server-side, or before any deploy, diff production against git
+first**, for every file you're about to touch:
+```
+diff <(ssh ubuntu "cat /opt/tickets/<file>") <file>
+```
+A clean `git status` locally proves nothing about what's actually running — production
+code here has repeatedly drifted ahead of this repo because changes get pushed live
+(hand-edited on the server, or scp'd from a different machine/session) without ever being
+committed back. This has cost real time more than once (see the 2026-07-02 entry below for
+a similar incident in a sibling app, and 2026-07-15 for this exact thing happening in two
+different files in this repo during the same deploy). If the diff shows production-only
+content you don't recognize, **do not blindly overwrite it** — pull the live file down,
+apply your change on top of *that*, and get the merged result into git right after
+deploying, so the repo stops drifting further from what's actually running.
+
 See `CLAUDE.md` for the rest of the project structure, build commands, and architectural notes.
 
 ---
