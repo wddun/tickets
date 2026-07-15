@@ -2179,7 +2179,7 @@
             <div style="display:flex;align-items:center;gap:8px;">
                 <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
                     <button class="btn btn-secondary btn-sm" onclick="bulkCheckIn('${event.id}', this)">Check In</button>
-                    <button class="btn btn-secondary btn-sm" onclick="undoCheckInSelected('${event.id}', this)">Undo Check-In</button>
+                    ${event.fullAccess ? `<button class="btn btn-secondary btn-sm" onclick="undoCheckInSelected('${event.id}', this)">Undo Check-In</button>` : ''}
                     <button class="btn btn-secondary btn-sm" onclick="resendSelectedTickets('${event.id}', this)">Resend Tickets</button>
                     <button class="btn btn-secondary btn-sm" onclick="openBulkEmailModal('${event.id}', 0, true)">Email Selected</button>
                     <button class="btn btn-secondary btn-sm" onclick="exportSelectedCSV()">Export CSV</button>
@@ -2274,6 +2274,7 @@
 
             const currentEvent = events.find(e => e.id === selectedId);
             const useReentry = !!currentEvent?.allowReentry;
+            const canUndo = !!currentEvent?.fullAccess;
 
             const rows = filtered.map(g => {
                 const total = g.tickets.length;
@@ -2301,7 +2302,7 @@
 
                 const allIn = scanned === total && total > 0;
                 const unchecked = total - scanned;
-                const undoBtn = scanned > 0 ? `<button class="btn btn-secondary btn-sm" onclick="undoCheckin('${g.registrationId}')">Undo</button>` : '';
+                const undoBtn = (scanned > 0 && canUndo) ? `<button class="btn btn-secondary btn-sm" onclick="undoCheckin('${g.registrationId}')">Undo</button>` : '';
                 const checkInBtns = allIn ? '' : `
                         ${unchecked > 1 ? `<button class="btn btn-secondary btn-sm" onclick="openTicketPicker(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Check In 1</button>` : ''}
                         <button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">${unchecked > 1 ? 'Check In All' : 'Check In'}</button>`;
@@ -4630,7 +4631,7 @@
                     ? `<div style="font-size:10px;font-weight:600;color:#6366f1;margin-top:3px;" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">Downloaded to Wallet</div>`
                     : `<div style="font-size:10px;color:#d1d5db;margin-top:3px;">No wallet download</div>`;
                 const toggleBtn = checkedIn
-                    ? `<button onclick="toggleTicketInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Undo Check-in</button>`
+                    ? (reentryEvent?.fullAccess ? `<button onclick="toggleTicketInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Undo Check-in</button>` : '')
                     : `<button onclick="toggleTicketInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#d1fae5;color:#065f46;border:none;border-radius:6px;cursor:pointer;">Mark Checked In</button>`;
                 const size = showLarge ? 120 : 80;
                 const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:4px;">Ticket ${i + 1}</div>` : '';

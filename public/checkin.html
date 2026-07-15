@@ -53,35 +53,6 @@
             white-space: nowrap;
         }
 
-        /* Event picker in nav */
-        .event-picker-wrap {
-            position: relative;
-        }
-        .event-picker-wrap::after {
-            content: '▾';
-            position: absolute;
-            right: 11px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 11px;
-            color: rgba(255,255,255,0.5);
-            pointer-events: none;
-        }
-        select#eventSelect {
-            width: 100%;
-            background: rgba(255,255,255,0.1);
-            border: none;
-            color: #fff;
-            font-family: inherit;
-            font-size: 14px;
-            font-weight: 600;
-            padding: 8px 28px 8px 12px;
-            border-radius: 10px;
-            appearance: none;
-            -webkit-appearance: none;
-            cursor: pointer;
-        }
-        select#eventSelect option { background: #1c1c1e; }
 
         /* At-door action row (under event picker) */
         .at-door-actions {
@@ -222,6 +193,16 @@
             font-size: 13px; font-weight: 600;
             color: var(--success); flex-shrink: 0;
         }
+        .row-undo-btn {
+            background: rgba(255,255,255,0.1);
+            border: none; color: rgba(255,255,255,0.75);
+            font-size: 12px; font-weight: 700;
+            padding: 8px 14px; border-radius: 20px;
+            cursor: pointer; white-space: nowrap;
+            -webkit-tap-highlight-color: transparent;
+            flex-shrink: 0;
+        }
+        .row-undo-btn:active { opacity: 0.65; }
         .row-multi-hint {
             font-size: 11px; color: rgba(255,255,255,0.25);
             flex-shrink: 0; margin-left: 2px;
@@ -320,11 +301,6 @@
         <div class="nav-title" id="navTitle">Check-In</div>
         <div class="nav-stats" id="navStats"></div>
     </div>
-    <div class="event-picker-wrap">
-        <select id="eventSelect" onchange="onEventChange()">
-            <option value="">Loading…</option>
-        </select>
-    </div>
     <div class="at-door-actions" id="atDoorActions">
         <a href="#" id="btnAtDoor" target="_blank">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v4a1 1 0 0 0 1 1 2 2 0 1 1 0 4 1 1 0 0 0-1 1v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4a1 1 0 0 0-1-1 2 2 0 1 1 0-4 1 1 0 0 0 1-1V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/></svg>
@@ -385,6 +361,12 @@ let events = [];
 let allAttendees = [];
 let filteredAttendees = [];
 let sheetRegId = null;
+let lockedEventId = null;
+
+function currentEventFullAccess() {
+    const ev = events.find(e => e.id === lockedEventId);
+    return !!(ev && ev.fullAccess);
+}
 
 // ── Init ──────────────────────────────────────────────────
 (async () => {
@@ -393,39 +375,27 @@ let sheetRegId = null;
         if (!r.ok) { window.location.href = '/'; return; }
     } catch (_) { window.location.href = '/'; return; }
 
+    // Manual check-in only ever operates on whatever event the Scanner tab
+    // is currently locked to — there's no picker here. Switching events
+    // happens exclusively from Scanner > Switch Event.
     try {
         const r = await fetch('/api/events');
-        if (r.ok) {
-            events = await r.json();
-            const sel = document.getElementById('eventSelect');
-            if (!events.length) {
-                sel.innerHTML = '<option value="">No events</option>';
-                document.getElementById('attendeeList').innerHTML = '<div class="list-empty">No events found</div>';
-                return;
-            }
-            sel.innerHTML = events.map(e =>
-                `<option value="${escAttr(e.id)}">${escHtml(e.name)}</option>`
-            ).join('');
-            // Restore from scanner selection
-            const saved = localStorage.getItem('selectedEventId');
-            if (saved && events.find(e => e.id === saved)) sel.value = saved;
-            updateAtDoorActions(sel.value);
-            await loadAttendees(sel.value);
-        }
-    } catch (_) {
-        document.getElementById('attendeeList').innerHTML = '<div class="list-empty">Failed to load events</div>';
-    }
-})();
+        if (r.ok) events = await r.json();
+    } catch (_) { /* handled below */ }
 
-async function onEventChange() {
-    const sel = document.getElementById('eventSelect');
-    localStorage.setItem('selectedEventId', sel.value);
-    document.getElementById('searchInput').value = '';
-    allAttendees = [];
-    filteredAttendees = [];
-    updateAtDoorActions(sel.value);
-    if (sel.value) await loadAttendees(sel.value);
-}
+    const eventId = localStorage.getItem('selectedEventId');
+    const ev = events.find(e => e.id === eventId);
+    if (!ev) {
+        document.getElementById('navTitle').textContent = 'Check-In';
+        document.getElementById('attendeeList').innerHTML =
+            '<div class="list-empty">No event selected — pick one from the Scanner tab.</div>';
+        return;
+    }
+
+    lockedEventId = ev.id;
+    updateAtDoorActions(ev.id);
+    await loadAttendees(ev.id);
+})();
 
 function updateAtDoorActions(eventId) {
     const row = document.getElementById('atDoorActions');
@@ -524,13 +494,19 @@ function buildPersonRow(a) {
         ? (total === 1 ? '1 ticket · Pending' : `${total} tickets · None checked in`)
         : `${scanned} of ${total} checked in`;
 
+    // Undo is only for full-access collaborators/owners/admins — a
+    // view-only check-in helper can check people in but can't reverse it.
+    const undoBtn = (!noDone && currentEventFullAccess())
+        ? `<button class="row-undo-btn" onclick="undoPerson(event,'${escAttr(a.registrationId)}')">Undo</button>`
+        : '';
+
     let actionHtml;
     if (allDone) {
-        actionHtml = `<div class="row-done-label">Done</div>`;
+        actionHtml = `${undoBtn}<div class="row-done-label">Done</div>`;
     } else if (total > 1) {
-        actionHtml = `<button class="row-checkin-btn" onclick="openTicketSheet(event,'${escAttr(a.registrationId)}')">Check In</button>`;
+        actionHtml = `${undoBtn}<button class="row-checkin-btn" onclick="openTicketSheet(event,'${escAttr(a.registrationId)}')">Check In</button>`;
     } else {
-        actionHtml = `<button class="row-checkin-btn" onclick="checkInPerson(event,'${escAttr(a.registrationId)}')">Check In</button>`;
+        actionHtml = `${undoBtn}<button class="row-checkin-btn" onclick="checkInPerson(event,'${escAttr(a.registrationId)}')">Check In</button>`;
     }
 
     const multiHint = total > 1 ? `<div class="row-multi-hint">${total} tickets</div>` : '';
@@ -569,6 +545,22 @@ async function checkInPerson(e, registrationId) {
             btn.textContent = 'Check In'; btn.disabled = false;
         }
     } catch (_) { btn.textContent = 'Check In'; btn.disabled = false; }
+}
+
+async function undoPerson(e, registrationId) {
+    e.stopPropagation();
+    const btn = e.target;
+    btn.textContent = '…'; btn.disabled = true;
+    try {
+        const r = await fetch(`/api/checkin/${registrationId}`, { method: 'DELETE' });
+        if (r.ok) {
+            const attendee = allAttendees.find(a => a.registrationId === registrationId);
+            if (attendee) attendee.tickets.forEach(t => { t.used_at = null; });
+            filterList();
+        } else {
+            btn.textContent = 'Undo'; btn.disabled = false;
+        }
+    } catch (_) { btn.textContent = 'Undo'; btn.disabled = false; }
 }
 
 // ── Ticket picker sheet ───────────────────────────────────

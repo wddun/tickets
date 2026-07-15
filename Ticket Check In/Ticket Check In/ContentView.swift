@@ -24,8 +24,8 @@ struct ContentView: View {
                 ScannerView(switchToManual: { selectedTab = 1 })
                     .tabItem { Label("Scanner", systemImage: "qrcode.viewfinder") }
                     .tag(0)
-                EventsView(switchToScanner: { selectedTab = 0 })
-                    .tabItem { Label("Events", systemImage: "calendar") }
+                ManualCheckInView(switchToScanner: { selectedTab = 0 })
+                    .tabItem { Label("Manual Check-In", systemImage: "person.text.rectangle") }
                     .tag(1)
                 SettingsView()
                     .tabItem { Label("Settings", systemImage: "gearshape.fill") }

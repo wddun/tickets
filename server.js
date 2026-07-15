@@ -1888,7 +1888,11 @@ app.post('/api/ticket-status', (req, res) => {
 app.get('/api/events', requireAuth, (req, res) => {
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (isAdmin) return res.json(stmt.events.all.all().map(rowToEvent));
+    // Tells clients (dashboard, iOS, checkin.html) whether this user can undo
+    // a check-in on this event — owner, admin, or a 'full' sheetAccess grant.
+    // View-only collaborators can check people in but not undo it.
+    const withAccess = (e) => ({ ...e, fullAccess: userHasEventFullAccess(req.session.userId, e.id) });
+    if (isAdmin) return res.json(stmt.events.all.all().map(rowToEvent).map(withAccess));
 
     const myAccess = stmt.sheetAccess.byUserId.all(req.session.userId);
     const linkedEventIds = new Set(
@@ -1900,7 +1904,7 @@ app.get('/api/events', requireAuth, (req, res) => {
     const userEvents = stmt.events.byUserId.all(req.session.userId).map(rowToEvent);
     const linkedEvents = [...linkedEventIds].map(id => rowToEvent(stmt.events.byId.get(id))).filter(Boolean);
     const seen = new Set(userEvents.map(e => e.id));
-    res.json([...userEvents, ...linkedEvents.filter(e => !seen.has(e.id))]);
+    res.json([...userEvents, ...linkedEvents.filter(e => !seen.has(e.id))].map(withAccess));
 });
 
 app.post('/api/events', requireAuth, async (req, res) => {
@@ -2698,8 +2702,6 @@ app.delete('/api/checkin/bulk', requireAuth, async (req, res) => {
     const { registrationIds } = req.body;
     if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const now = new Date().toISOString();
     let cleared = 0;
     const touchedEventIds = new Map();
@@ -2709,7 +2711,7 @@ app.delete('/api/checkin/bulk', requireAuth, async (req, res) => {
         if (!tickets.length) continue;
         const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
         if (!event) continue;
-        if (!isAdmin && event.userId !== req.session.userId) continue;
+        if (!userHasEventFullAccess(req.session.userId, event.id)) continue;
 
         let eventCleared = 0;
         db.transaction(() => {
@@ -2891,10 +2893,8 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     if (!tickets.length) return res.status(404).json({ error: 'Not found' });
 
     const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (!isAdmin && (!event || event.userId !== req.session.userId)) {
-        return res.status(403).json({ error: 'Only event owners or admins can undo check-ins' });
+    if (!event || !userHasEventFullAccess(req.session.userId, event.id)) {
+        return res.status(403).json({ error: 'Only full-access collaborators, owners, or admins can undo check-ins' });
     }
 
     const uncheckinNow = new Date().toISOString();

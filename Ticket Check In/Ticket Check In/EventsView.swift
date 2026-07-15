@@ -22,21 +22,58 @@ struct AttendeeGroup: Identifiable {
     var firstUncheckedTicket: Ticket? { tickets.first(where: { !$0.isCheckedIn }) }
 }
 
-// MARK: - EventsView
+// MARK: - Manual Check-In Tab
 
-struct EventsView: View {
+/// Shows the attendee list for whichever event the Scanner tab is currently
+/// locked to — no event browsing here, and no "back to all events" nav,
+/// since the scanner's own Switch Event picker is the only way to change
+/// that (see ScannerView's banner / EventPickerSheet).
+struct ManualCheckInView: View {
     var switchToScanner: () -> Void = {}
     @StateObject private var api = APIService.shared
+    @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
+
+    private var currentEvent: Event? {
+        guard !lastSelectedEventData.isEmpty else { return nil }
+        return try? JSONDecoder().decode(Event.self, from: lastSelectedEventData)
+    }
 
     var body: some View {
         Group {
-            if api.isAuthenticated {
-                EventsListView()
-            } else {
+            if !api.isAuthenticated {
                 LoginView(switchToScanner: switchToScanner)
+            } else if let event = currentEvent {
+                if #available(iOS 16, *) {
+                    NavigationStack { AttendeesView(event: event) }
+                } else {
+                    NavigationView { AttendeesView(event: event) }
+                }
+            } else {
+                noEventState
             }
         }
         .task { await api.checkAuth() }
+    }
+
+    @ViewBuilder
+    private var noEventState: some View {
+        if #available(iOS 17, *) {
+            ContentUnavailableView(
+                "No Event Selected",
+                systemImage: "qrcode.viewfinder",
+                description: Text("Pick an event from the Scanner tab to check people in here.")
+            )
+        } else {
+            VStack(spacing: 8) {
+                Image(systemName: "qrcode.viewfinder").font(.largeTitle)
+                Text("No Event Selected").font(.headline)
+                Text("Pick an event from the Scanner tab to check people in here.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+        }
     }
 }
 
@@ -290,265 +327,6 @@ struct ScanLinkEntrySheet: View {
     }
 }
 
-// MARK: - Events List
-
-struct EventsListView: View {
-    var body: some View {
-        if #available(iOS 16, *) {
-            EventsListViewModern()
-        } else {
-            EventsListViewLegacy()
-        }
-    }
-}
-
-// MARK: Events List – iOS 16+ (NavigationStack + path-based navigation)
-
-@available(iOS 16, *)
-struct EventsListViewModern: View {
-    @StateObject private var api = APIService.shared
-    @State private var events: [Event] = []
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-    @State private var navigationPath = NavigationPath()
-    @State private var hasAutoNavigated = false
-    @State private var showDeleteConfirm = false
-    @State private var showDisplaySetup = false
-    @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
-
-    private var lastSelectedEvent: Event? {
-        guard !lastSelectedEventData.isEmpty else { return nil }
-        return try? JSONDecoder().decode(Event.self, from: lastSelectedEventData)
-    }
-
-    var body: some View {
-        NavigationStack(path: $navigationPath) {
-            Group {
-                if isLoading && events.isEmpty {
-                    ProgressView("Loading events…")
-                } else if let error = errorMessage {
-                    if #available(iOS 17, *) {
-                        ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
-                    } else {
-                        VStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle").font(.largeTitle)
-                            Text("Error").font(.headline)
-                            Text(error).font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                } else if events.isEmpty {
-                    if #available(iOS 17, *) {
-                        ContentUnavailableView("No Events", systemImage: "calendar.badge.exclamationmark", description: Text("No events found."))
-                    } else {
-                        VStack(spacing: 8) {
-                            Image(systemName: "calendar.badge.exclamationmark").font(.largeTitle)
-                            Text("No Events").font(.headline)
-                            Text("No events found.").font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                } else {
-                    List(events) { event in
-                        Button {
-                            saveLastEvent(event)
-                            navigationPath.append(event)
-                        } label: {
-                            HStack {
-                                EventRow(event: event)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.primary)
-                    }
-                    .refreshable { await loadEvents() }
-                }
-            }
-            .navigationTitle("Events")
-            .navigationDestination(for: Event.self) { event in
-                AttendeesView(event: event)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            showDisplaySetup = true
-                        } label: {
-                            Label("Display Setup", systemImage: "tv")
-                        }
-                        Divider()
-                        Button("Sign Out", role: .destructive) {
-                            Task { try? await api.logout() }
-                        }
-                        Button("Delete Account", role: .destructive) {
-                            showDeleteConfirm = true
-                        }
-                    } label: {
-                        Image(systemName: "person.circle")
-                    }
-                }
-            }
-            .confirmationDialog(
-                "Delete Account",
-                isPresented: $showDeleteConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Delete Account", role: .destructive) {
-                    Task { try? await api.deleteAccount() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will permanently delete your account and all associated events and tickets. This cannot be undone.")
-            }
-            .sheet(isPresented: $showDisplaySetup) {
-                DisplaySetupView(bluetooth: BluetoothManager.shared)
-            }
-        }
-        .task {
-            if !hasAutoNavigated, let lastEvent = lastSelectedEvent {
-                hasAutoNavigated = true
-                navigationPath.append(lastEvent)
-            }
-            await loadEvents()
-        }
-    }
-
-    private func saveLastEvent(_ event: Event) {
-        lastSelectedEventData = (try? JSONEncoder().encode(event)) ?? Data()
-    }
-
-    private func loadEvents() async {
-        isLoading = true
-        errorMessage = nil
-        do {
-            events = try await api.getEvents()
-        } catch is CancellationError {
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        isLoading = false
-    }
-}
-
-// MARK: Events List – iOS 15 (NavigationView + NavigationLink)
-
-struct EventsListViewLegacy: View {
-    @StateObject private var api = APIService.shared
-    @State private var events: [Event] = []
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-    @State private var showDeleteConfirm = false
-    @State private var showDisplaySetup = false
-    @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
-
-    var body: some View {
-        NavigationView {
-            Group {
-                if isLoading && events.isEmpty {
-                    ProgressView("Loading events…")
-                } else if let error = errorMessage {
-                    VStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle").font(.largeTitle)
-                        Text("Error").font(.headline)
-                        Text(error).font(.subheadline).foregroundStyle(.secondary)
-                    }
-                } else if events.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "calendar.badge.exclamationmark").font(.largeTitle)
-                        Text("No Events").font(.headline)
-                        Text("No events found.").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                } else {
-                    List(events) { event in
-                        NavigationLink(destination: AttendeesView(event: event)) {
-                            EventRow(event: event)
-                        }
-                        .simultaneousGesture(TapGesture().onEnded { saveLastEvent(event) })
-                    }
-                    .refreshable { await loadEvents() }
-                }
-            }
-            .navigationTitle("Events")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            showDisplaySetup = true
-                        } label: {
-                            Label("Display Setup", systemImage: "tv")
-                        }
-                        Divider()
-                        Button("Sign Out", role: .destructive) {
-                            Task { try? await api.logout() }
-                        }
-                        Button("Delete Account", role: .destructive) {
-                            showDeleteConfirm = true
-                        }
-                    } label: {
-                        Image(systemName: "person.circle")
-                    }
-                }
-            }
-            .confirmationDialog(
-                "Delete Account",
-                isPresented: $showDeleteConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Delete Account", role: .destructive) {
-                    Task { try? await api.deleteAccount() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will permanently delete your account and all associated events and tickets. This cannot be undone.")
-            }
-            .sheet(isPresented: $showDisplaySetup) {
-                DisplaySetupView(bluetooth: BluetoothManager.shared)
-            }
-        }
-        .task { await loadEvents() }
-    }
-
-    private func saveLastEvent(_ event: Event) {
-        lastSelectedEventData = (try? JSONEncoder().encode(event)) ?? Data()
-    }
-
-    private func loadEvents() async {
-        isLoading = true
-        errorMessage = nil
-        do {
-            events = try await api.getEvents()
-        } catch is CancellationError {
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        isLoading = false
-    }
-}
-
-struct EventRow: View {
-    let event: Event
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(event.name)
-                .font(.headline)
-            if let locationName = event.location?.name {
-                Text(locationName)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            if let time = event.time, let date = ISO8601DateFormatter().date(from: time) {
-                Text(date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 // MARK: - Attendees List
 
 struct AttendeesView: View {
@@ -569,7 +347,10 @@ struct AttendeesView: View {
 
     enum AttendeesTab: Hashable { case attendees, atDoor }
 
-    private var canUndo: Bool { api.currentUser?.isAdmin == true }
+    // Owner, global admin, or a 'full' sheetAccess grant (computed
+    // server-side, see event.fullAccess in GET /api/events). View-only
+    // collaborators can check people in but can't undo it.
+    private var canUndo: Bool { event.fullAccess == true || api.currentUser?.isAdmin == true }
     private var atDoorEnabled: Bool { event.atDoorEnabled == true }
 
     var groups: [AttendeeGroup] {

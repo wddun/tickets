@@ -17,6 +17,11 @@ struct Event: Codable, Identifiable, Hashable {
     let allowReentry: Bool?
     let atDoorEnabled: Bool?
     let ticketPrice: Int?   // cents; 0 or nil = free event
+    let userId: String?     // owner's user id
+    // Owner, admin, or a 'full' sheetAccess grant — computed server-side per
+    // caller in GET /api/events. View-only collaborators can check people in
+    // but can't undo it.
+    let fullAccess: Bool?
 
     struct EventLocation: Codable, Hashable {
         let name: String?
