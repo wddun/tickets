@@ -31,6 +31,14 @@ a, button, .btn, input, select, textarea {
     transition: background-color .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease, transform .1s ease;
 }
 
+/* iOS Safari auto-zooms the page on focus for any text field whose computed
+   font-size is under 16px — the !important is required to beat the several
+   inline style="font-size:1{2,3,4}px" attributes on inputs/selects/textareas
+   throughout these pages, which otherwise outrank a plain external rule. */
+input, select, textarea {
+    font-size: 16px !important;
+}
+
 button:active, .btn:active {
     transform: scale(0.97);
 }

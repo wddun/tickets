@@ -26,6 +26,13 @@
     --warning-text: #92400e;
 }
 
+/* iOS Safari auto-zooms the page on focus for any text field whose computed
+   font-size is under 16px — the !important is required to beat the inline
+   style="font-size:..." attributes some inputs/selects carry elsewhere. */
+input, select, textarea {
+    font-size: 16px !important;
+}
+
 /* ── Tab bar (bottom nav) — shared by scanner/checkin/settings ── */
 .tab-bar {
     flex-shrink: 0;
