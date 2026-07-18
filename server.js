@@ -548,6 +548,27 @@ function generateBackupCodes(count = 8, length = 10) {
     return codes;
 }
 
+// Checks a submitted backup code against the account's stored bcrypt hashes.
+// A match is consumed immediately (removed from storage) so it can never be
+// replayed — backup codes are one-time by design, unlike a TOTP code which
+// is naturally single-use only within its 30s window.
+async function consumeBackupCode(user, submittedCode) {
+    const clean = String(submittedCode || '').toUpperCase().replace(/[\s-]/g, '');
+    if (!clean || !user.backupCodes) return false;
+    let hashedCodes;
+    try { hashedCodes = JSON.parse(user.backupCodes); } catch { return false; }
+    if (!Array.isArray(hashedCodes) || !hashedCodes.length) return false;
+
+    for (let i = 0; i < hashedCodes.length; i++) {
+        if (await bcrypt.compare(clean, hashedCodes[i])) {
+            const remaining = hashedCodes.filter((_, idx) => idx !== i);
+            stmt.users.setBackupCodes.run(JSON.stringify(remaining), user.id);
+            return true;
+        }
+    }
+    return false;
+}
+
 function deviceLabelFromUserAgent(ua) {
     if (!ua) return 'Unknown device';
     const os = /iPhone|iPad|iPod/.test(ua) ? 'iOS'
@@ -950,9 +971,14 @@ app.post('/api/auth/login/totp-verify', loginLimiter, async (req, res) => {
     }
 
     const codeStr = String(code || '').trim();
+    let usedBackupCode = false;
     if (!verifyTotp(user.totpSecret, codeStr)) {
-        log('login', `[2fa] [ERR] Wrong code — email: ${user.email}  id: ${user.id}  ip: ${getIP(req)}`);
-        return res.status(401).json({ error: 'Invalid code' });
+        usedBackupCode = await consumeBackupCode(user, codeStr);
+        if (!usedBackupCode) {
+            log('login', `[2fa] [ERR] Wrong code — email: ${user.email}  id: ${user.id}  ip: ${getIP(req)}`);
+            return res.status(401).json({ error: 'Invalid code' });
+        }
+        log('login', `[2fa] [OK] Backup code used — email: ${user.email}  id: ${user.id}  ip: ${getIP(req)}`);
     }
 
     req.session.userId = user.id;
@@ -978,7 +1004,7 @@ app.post('/api/auth/login/totp-verify', loginLimiter, async (req, res) => {
 
     const isAdmin = user.email === process.env.ADMIN_EMAIL;
     log('login', `[OK] TOTP verified — email: ${user.email}  id: ${user.id}  role: ${isAdmin ? 'admin' : 'staff'}  ip: ${getIP(req)}`);
-    res.json({ success: true, user: { id: user.id, email: user.email } });
+    res.json({ success: true, user: { id: user.id, email: user.email }, usedBackupCode });
 });
 
 app.get('/api/auth/verify/:token', async (req, res) => {
@@ -1185,7 +1211,31 @@ app.post('/api/account/2fa/disable', requireAuth, async (req, res) => {
 app.get('/api/account/2fa/status', requireAuth, (req, res) => {
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
-    res.json({ enabled: !!user.totpEnabled });
+    let backupCodesRemaining = 0;
+    if (user.backupCodes) {
+        try { backupCodesRemaining = JSON.parse(user.backupCodes).length; } catch {}
+    }
+    res.json({ enabled: !!user.totpEnabled, backupCodesRemaining });
+});
+
+// Invalidates all existing backup codes and issues a fresh set of 8 — same
+// one-time-display UX as at initial enable. Password-gated like disable,
+// since this silently invalidates codes the user may still be holding onto.
+app.post('/api/account/2fa/backup-codes/regenerate', requireAuth, async (req, res) => {
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user || !user.totpEnabled) return res.status(400).json({ error: 'Two-factor authentication is not enabled' });
+
+    const match = user.password ? await bcrypt.compare(String(req.body?.password || ''), user.password) : false;
+    if (!match) {
+        log('2fa', `[backup-codes] [ERR] Wrong password — email: ${user.email}  id: ${user.id}`);
+        return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    const backupCodes = generateBackupCodes();
+    const hashedCodes = await Promise.all(backupCodes.map(c => bcrypt.hash(c, 10)));
+    stmt.users.setBackupCodes.run(JSON.stringify(hashedCodes), user.id);
+    log('2fa', `[backup-codes] [OK] Regenerated — email: ${user.email}  id: ${user.id}`);
+    res.json({ success: true, backupCodes });
 });
 
 app.get('/api/account/2fa/devices', requireAuth, (req, res) => {

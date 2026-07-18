@@ -453,6 +453,7 @@ export const stmt = {
         setTotpPendingSecret: db.prepare(`UPDATE users SET totpPendingSecret=? WHERE id=?`),
         enableTotp: db.prepare(`UPDATE users SET totpSecret=?, totpEnabled=1, totpPendingSecret=NULL, backupCodes=? WHERE id=?`),
         disableTotp: db.prepare(`UPDATE users SET totpSecret=NULL, totpEnabled=0, totpPendingSecret=NULL, backupCodes=NULL WHERE id=?`),
+        setBackupCodes: db.prepare(`UPDATE users SET backupCodes=? WHERE id=?`),
     },
     events: {
         byId: db.prepare('SELECT * FROM events WHERE id = ?'),

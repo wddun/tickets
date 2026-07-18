@@ -94,6 +94,30 @@
                 </button>
             </div>
 
+            <!-- Two-factor code state (after password succeeds on a 2FA-enabled account) -->
+            <div id="totpState" style="display:none;">
+                <div style="font-size:14px; color:#64748b; text-align:center; margin-bottom:20px;" id="totpPrompt">
+                    Enter the 6-digit code from your authenticator app.
+                </div>
+                <div class="form-group">
+                    <label for="totpCode" id="totpCodeLabel">Authentication Code</label>
+                    <input type="text" id="totpCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();submitTotp();}"
+                        style="letter-spacing:3px; text-align:center; font-size:18px;">
+                </div>
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#64748b; margin-bottom:18px; cursor:pointer;">
+                    <input type="checkbox" id="totpRemember" style="width:auto;">
+                    Remember this device for 30 days
+                </label>
+                <button type="button" id="totpSubmitBtn" onclick="submitTotp()" style="width:100%;">Verify</button>
+                <button type="button" id="totpModeToggle" onclick="toggleTotpMode()" style="background:none;border:none;color:#94a3b8;font-size:13px;font-weight:500;cursor:pointer;padding:12px 4px 0;width:100%;">
+                    Use a backup code instead
+                </button>
+                <button type="button" onclick="showAuthForm()" style="background:none;border:none;color:#94a3b8;font-size:13px;font-weight:500;cursor:pointer;padding:4px;width:100%;">
+                    ← Back to login
+                </button>
+            </div>
+
             <div class="toggle-row" id="forgotRow">
                 <a href="/forgot-password.html" style="color:#94a3b8;font-weight:500;">Forgot password?</a>
             </div>
@@ -145,6 +169,10 @@
                 } else if (data.needsVerification) {
                     // Login blocked — unverified account
                     showVerifyState(data.email || email, 'Email not verified', `Your account isn't activated yet. We sent a link to`);
+                } else if (data.needsTotp) {
+                    // Password was correct — this account has 2FA enabled and
+                    // this device isn't remembered, so finish with a code.
+                    showTotpState(data.pendingToken);
                 } else if (data.success) {
                     const next = new URLSearchParams(window.location.search).get('next');
                     window.location.href = (next && next.startsWith('/')) ? next : '/dashboard.html';
@@ -175,8 +203,91 @@
             document.getElementById('forgotRow').style.display   = '';
             document.getElementById('toggleRow').style.display   = '';
             document.getElementById('verifyState').style.display = 'none';
+            document.getElementById('totpState').style.display   = 'none';
             authTitle.textContent = isLogin ? 'Organizer Login' : 'Create Account';
             authDesc.textContent  = isLogin ? 'Manage your events and tickets.' : 'Start hosting your own events today.';
+        }
+
+        let pendingTotpToken = '';
+        let totpUsingBackupCode = false;
+
+        function showTotpState(pendingToken) {
+            pendingTotpToken = pendingToken;
+            totpUsingBackupCode = false;
+            document.getElementById('authForm').style.display  = 'none';
+            document.getElementById('forgotRow').style.display = 'none';
+            document.getElementById('toggleRow').style.display = 'none';
+            document.getElementById('totpState').style.display = 'block';
+            authTitle.textContent = 'Two-Factor Authentication';
+            authDesc.textContent  = '';
+            applyTotpMode();
+            document.getElementById('totpCode').focus();
+        }
+
+        // Toggles the code field between a 6-digit authenticator code and a
+        // one-time backup code (10 chars, letters+digits) — same endpoint
+        // either way, the server tries TOTP first and falls back to a
+        // backup-code match.
+        function toggleTotpMode() {
+            totpUsingBackupCode = !totpUsingBackupCode;
+            applyTotpMode();
+            document.getElementById('totpCode').focus();
+        }
+
+        function applyTotpMode() {
+            const input = document.getElementById('totpCode');
+            input.value = '';
+            if (totpUsingBackupCode) {
+                document.getElementById('totpPrompt').textContent = 'Enter one of your backup codes.';
+                document.getElementById('totpCodeLabel').textContent = 'Backup Code';
+                input.maxLength = 12;
+                input.inputMode = 'text';
+                input.autocapitalize = 'characters';
+                input.placeholder = 'XXXXXXXXXX';
+                input.style.letterSpacing = '1px';
+                document.getElementById('totpModeToggle').textContent = 'Use your authenticator app instead';
+            } else {
+                document.getElementById('totpPrompt').textContent = 'Enter the 6-digit code from your authenticator app.';
+                document.getElementById('totpCodeLabel').textContent = 'Authentication Code';
+                input.maxLength = 6;
+                input.inputMode = 'numeric';
+                input.removeAttribute('autocapitalize');
+                input.placeholder = '123456';
+                input.style.letterSpacing = '3px';
+                document.getElementById('totpModeToggle').textContent = 'Use a backup code instead';
+            }
+        }
+
+        async function submitTotp() {
+            const code = document.getElementById('totpCode').value.trim();
+            const remember = document.getElementById('totpRemember').checked;
+            if (totpUsingBackupCode) {
+                if (code.length < 6) { alert('Enter one of your backup codes.'); return; }
+            } else if (!/^\d{6}$/.test(code)) {
+                alert('Enter the 6-digit code from your app.'); return;
+            }
+            const btn = document.getElementById('totpSubmitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Verifying…';
+            try {
+                const r = await fetch('/api/auth/login/totp-verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pendingToken: pendingTotpToken, code, remember })
+                });
+                const data = await r.json();
+                if (data.success) {
+                    if (data.usedBackupCode) alert('Signed in with a backup code. Check Account Settings if you\'re running low.');
+                    const next = new URLSearchParams(window.location.search).get('next');
+                    window.location.href = (next && next.startsWith('/')) ? next : '/dashboard.html';
+                } else {
+                    alert(data.error || 'Invalid code');
+                }
+            } catch { alert('Connection error'); }
+            finally {
+                btn.disabled = false;
+                btn.textContent = 'Verify';
+            }
         }
 
         async function resendVerification() {
