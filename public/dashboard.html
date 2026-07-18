@@ -19,6 +19,19 @@
             box-sizing: border-box;
             margin: 0;
             padding: 0;
+            /* Kills Safari's default gray tap-flash rectangle on every button/
+               card/link — without this, every single tap reads as "webpage,"
+               no matter how native the rest of the styling looks. */
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            /* Keeps rubber-band scroll contained to this page instead of it
+               chaining into browser-level gestures (e.g. Safari's own
+               back/forward swipe or pull-to-refresh) once you hit the top/
+               bottom edge — one more thing that otherwise reads as "browser
+               tab," not "app." */
+            overscroll-behavior-y: contain;
         }
 
         /* iOS Safari auto-zooms the page on focus for any text field whose
@@ -180,11 +193,17 @@
             flex-direction: column;
             overflow: hidden;
             background: #fff;
+            -webkit-touch-callout: none;
         }
 
         .event-card:hover {
             box-shadow: 0 6px 20px rgba(26, 26, 46, 0.08);
             transform: translateY(-2px);
+        }
+
+        .event-card:active {
+            transform: scale(0.98);
+            transition-duration: 0.05s;
         }
 
         .event-card.active {
@@ -248,12 +267,20 @@
         }
 
         .event-checkbox {
+            display: none;
             margin-top: 2px;
             accent-color: #dc2626;
             width: 15px;
             height: 15px;
             cursor: pointer;
             flex-shrink: 0;
+        }
+
+        /* Selection checkboxes only appear once "Select" is tapped — a
+           checkbox on every card by default is desktop-file-manager
+           thinking, not how a phone app asks you to multi-select. */
+        #eventList.selecting .event-checkbox {
+            display: block;
         }
 
         /* ── Main panel (focused event workspace) ── */
@@ -385,15 +412,25 @@
             font-weight: 600;
             cursor: pointer;
             border: none;
-            transition: opacity 0.15s;
+            transition: opacity 0.15s, transform 0.1s;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
             gap: 6px;
+            -webkit-touch-callout: none;
         }
 
         .btn:hover {
             opacity: 0.85;
+        }
+
+        /* :hover alone doesn't give touch a "yes, that registered" moment —
+           it can even stick after the tap on some browsers instead of firing
+           cleanly. :active is what makes a tap feel like pressing a real
+           button instead of clicking a link. */
+        .btn:active {
+            opacity: 0.7;
+            transform: scale(0.96);
         }
 
         .btn-primary {
@@ -751,6 +788,13 @@
                16px iOS won't auto-zoom on — "End Time" and its field were
                getting clipped at the modal edge. Stack them instead. */
             .dt-grid { grid-template-columns: 1fr !important; }
+
+            /* A copyright bar + "Support" link pinned under the content is
+               unmistakably a website footer — no app has one. Support is
+               still one tap away from the Account menu, so this is just
+               dead weight on a phone. !important is required to beat the
+               footer's own inline style="...display:flex;...". */
+            footer { display: none !important; }
 
             .layout {
                 flex-direction: column;
@@ -1689,6 +1733,10 @@
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                         Account Settings
                     </button>
+                    <a class="dropdown-item" href="/support.html">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        Support
+                    </a>
                     <div class="dropdown-divider"></div>
                     <button class="dropdown-item" onclick="logout()">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -1709,7 +1757,8 @@
                 </div>
                 <div class="sidebar-header-actions">
                     <button class="btn btn-primary btn-sm" onclick="openNewEventModal()">+ New</button>
-                    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;">
+                    <button class="btn btn-secondary btn-sm" id="selectModeBtn" onclick="toggleSelectMode()">Select</button>
+                    <label id="selectAllLabel" style="display:none;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;">
                         <input type="checkbox" id="selectAllEvents" onchange="toggleAllEvents(this.checked)"
                             style="accent-color:#dc2626;">
                         All
@@ -1949,6 +1998,7 @@
         let allTickets = [];
         let scanAccessCache = {}; // eventId -> rendered "Start Scanning" card HTML, so the 15s auto-refresh doesn't re-fetch the QR
         let checkedEventIds = new Set();
+        let selectingEvents = false;
         let checkedRegIds = new Set();
         let activeStatFilter = 'all'; // 'all' | 'checked' | 'pending'
         let sortState = { field: null, dir: 'asc' }; // field: null|'firstname'|'lastname'|'tickets'
@@ -2425,10 +2475,34 @@
                 </div>
             </div>
         `;
-                div.onclick = () => selectEvent(e.id);
+                div.onclick = () => {
+                    if (selectingEvents) {
+                        const cb = div.querySelector('.event-checkbox');
+                        cb.checked = !cb.checked;
+                        toggleEventCheck(e.id, cb.checked);
+                    } else {
+                        selectEvent(e.id);
+                    }
+                };
                 list.appendChild(div);
             });
             updateEventBulkBar();
+        }
+
+        // "Select" mode, same idea as Photos/Mail on iOS: checkboxes (and the
+        // "All" toggle) are hidden until explicitly requested, and tapping a
+        // card selects it instead of opening it while active — a checkbox on
+        // every card by default is desktop file-manager thinking on a phone.
+        function toggleSelectMode() {
+            selectingEvents = !selectingEvents;
+            document.getElementById('eventList').classList.toggle('selecting', selectingEvents);
+            document.getElementById('selectModeBtn').textContent = selectingEvents ? 'Cancel' : 'Select';
+            document.getElementById('selectAllLabel').style.display = selectingEvents ? 'flex' : 'none';
+            if (!selectingEvents && checkedEventIds.size) {
+                checkedEventIds.clear();
+                document.getElementById('selectAllEvents').checked = false;
+                renderSidebar();
+            }
         }
 
         function toggleEventCheck(id, checked) {
