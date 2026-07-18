@@ -1885,30 +1885,30 @@
                 <button class="modal-close" onclick="closeNewEventModal()">&times;</button>
             </div>
             <div class="form-group" style="margin-bottom:14px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name <span style="color:#c4294a">*</span></label>
+                <label for="newEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name <span style="color:#c4294a">*</span></label>
                 <input type="text" id="newEventName" placeholder="e.g. Summer Gala 2026"
                     style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;"
                     onkeydown="if(event.key==='Enter')document.getElementById('newEventTime').focus()">
             </div>
             <div class="dt-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
                 <div class="form-group">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date & Time <span style="color:#c4294a">*</span></label>
+                    <label for="newEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date & Time <span style="color:#c4294a">*</span></label>
                     <input type="datetime-local" id="newEventTime"
                         style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
                 </div>
                 <div class="form-group">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Time <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                    <label for="newEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Time <span style="color:#aaa;font-weight:400;">(optional)</span></label>
                     <input type="datetime-local" id="newEventEndTime"
                         style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
                 </div>
             </div>
             <div class="form-group" style="margin-bottom:10px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                <label for="newEventLocName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name <span style="color:#aaa;font-weight:400;">(optional)</span></label>
                 <input type="text" id="newEventLocName" placeholder="e.g. The Grand Ballroom"
                     style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
             </div>
             <div class="form-group" style="margin-bottom:14px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                <label for="newEventAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address <span style="color:#aaa;font-weight:400;">(optional)</span></label>
                 <div class="addr-wrap">
                     <input type="text" id="newEventAddress" placeholder="Start typing an address…"
                         autocomplete="off"
@@ -1950,12 +1950,12 @@
             </div>
             <div id="bulkEmailRecipientCount" style="font-size:13px;color:#666;margin-bottom:12px;"></div>
             <div style="margin-bottom:12px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Subject</label>
+                <label for="bulkEmailSubject" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Subject</label>
                 <input type="text" id="bulkEmailSubject"
                     style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
             <div style="margin-bottom:16px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Message</label>
+                <label for="bulkEmailBody" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Message</label>
                 <textarea id="bulkEmailBody" rows="6"
                     style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
             </div>
@@ -1973,12 +1973,12 @@
             </div>
             <div id="directEmailTo" style="font-size:13px;color:#666;margin-bottom:12px;"></div>
             <div style="margin-bottom:12px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Subject</label>
+                <label for="directEmailSubject" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Subject</label>
                 <input type="text" id="directEmailSubject"
                     style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
             <div style="margin-bottom:16px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Message</label>
+                <label for="directEmailBody" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Message</label>
                 <textarea id="directEmailBody" rows="6"
                     style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
             </div>
@@ -2685,7 +2685,7 @@
                 <span class="refresh-hint"><span class="live-dot"></span>auto-refreshing</span>
             </div>
         </div>
-        <input class="search-box" id="searchBox" placeholder="Search by name or email…" oninput="filterAttendees()" />
+        <input type="search" class="search-box" id="searchBox" placeholder="Search by name or email…" oninput="filterAttendees()" enterkeyhint="search" />
         <div class="attendee-table" id="attendeeTable">
             ${renderAttendeeRows(grouped)}
         </div>
@@ -3308,22 +3308,22 @@
                 <div class="modal-section-title">General</div>
                 <div class="settings-hint">Core event details — name, date, location, and ticket price.</div>
                 <div style="margin-bottom:12px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name</label>
+                    <label for="editEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name</label>
                     <input type="text" id="editEventName" value="${esc(ev.name || '')}"
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Start Date &amp; Time</label>
+                    <label for="editEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Start Date &amp; Time</label>
                     <input type="datetime-local" id="editEventTime" value="${_toLocalDT(ev.time)}"
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Date &amp; Time <span style="font-weight:400;color:#aaa;">(optional — for multi-day events)</span></label>
+                    <label for="editEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Date &amp; Time <span style="font-weight:400;color:#aaa;">(optional — for multi-day events)</span></label>
                     <input type="datetime-local" id="editEventEndTime" value="${_toLocalDT(ev.endTime)}"
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Accent Color</label>
+                    <label for="editEventColor" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Accent Color</label>
                     <div style="display:flex;align-items:center;gap:10px;">
                         <input type="color" id="editEventColor" value="${esc(hexColor)}"
                             style="width:44px;height:36px;padding:2px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
@@ -3331,12 +3331,12 @@
                     </div>
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name</label>
+                    <label for="editEventLocName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name</label>
                     <input type="text" id="editEventLocName" value="${esc(ev.location?.name || '')}"
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:16px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address</label>
+                    <label for="editEventLocAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address</label>
                     <div class="addr-wrap">
                         <input type="text" id="editEventLocAddress" placeholder="Start typing an address…"
                             autocomplete="off" value="${esc(ev.location?.address || '')}"
@@ -3347,7 +3347,7 @@
                     <input type="hidden" id="editEventLng" value="${esc(ev.location?.lng || '')}">
                 </div>
                 <div style="margin-bottom:20px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Image <span
+                    <label for="editEventImage" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Image <span
                             style="font-weight:400;color:#aaa;">(optional, replaces current)</span></label>
                     <div id="editEventImagePreview" style="margin-bottom:8px;">${imagePreview}</div>
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -3387,15 +3387,15 @@
                     </div>
                 </div>
                 <div style="margin-bottom:20px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Capacity <span style="font-weight:400;color:#aaa;">(optional — leave blank for unlimited)</span></label>
-                    <input type="number" min="1" id="editEventCapacity" placeholder="e.g. 200" value="${ev.capacity || ''}"
+                    <label for="editEventCapacity" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Capacity <span style="font-weight:400;color:#aaa;">(optional — leave blank for unlimited)</span></label>
+                    <input type="number" min="1" inputmode="numeric" id="editEventCapacity" placeholder="e.g. 200" value="${ev.capacity || ''}"
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:20px;">
-                    <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:#aaa;">(leave blank or 0 for free)</span></label>
+                    <label for="editEventTicketPrice" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:#aaa;">(leave blank or 0 for free)</span></label>
                     <div style="position:relative;">
                         <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#888;font-size:14px;">$</span>
-                        <input type="number" min="0" step="0.01" id="editEventTicketPrice" placeholder="0.00" value="${ev.ticketPrice ? (ev.ticketPrice / 100).toFixed(2) : ''}"
+                        <input type="number" min="0" step="0.01" inputmode="decimal" id="editEventTicketPrice" placeholder="0.00" value="${ev.ticketPrice ? (ev.ticketPrice / 100).toFixed(2) : ''}"
                             style="width:100%;padding:8px 8px 8px 24px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                     </div>
                     <div style="font-size:11px;color:#aaa;margin-top:4px;">Requires Stripe keys in .env and public registration enabled</div>
@@ -3661,7 +3661,7 @@
                     </div>
                     <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;">
                         <label style="font-size:13px;font-weight:600;white-space:nowrap;">Send</label>
-                        <input type="number" id="reminderHoursBefore" value="${d.hoursBefore}" min="1" max="168" ${d.sentAt ? 'disabled' : ''}
+                        <input type="number" id="reminderHoursBefore" inputmode="numeric" value="${d.hoursBefore}" min="1" max="168" ${d.sentAt ? 'disabled' : ''}
                             style="width:70px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
                         <label style="font-size:13px;font-weight:600;white-space:nowrap;">hours before event</label>
                     </div>
@@ -3754,7 +3754,7 @@
                     <hr class="settings-divider">
                     <div class="settings-subhead">Share with user</div>
                     <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
-                        <input type="email" id="shareEmail" placeholder="User email" style="flex:1;min-width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;" />
+                        <input type="email" id="shareEmail" placeholder="User email" autocomplete="email" style="flex:1;min-width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;" />
                         <select id="sharePermission" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
                             <option value="view">View / Check-in</option>
                             <option value="full">Full Access</option>
@@ -3846,12 +3846,12 @@
                     ${deviceRows}
                 </div>
                 <div style="margin-bottom:8px;">
-                    <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Title</label>
+                    <label for="pushTitle" style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Title</label>
                     <input type="text" id="pushTitle" placeholder="Update • ${esc(events.find(e => e.id === eventId)?.name || 'Event')}"
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;font-size:13px;" />
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Message</label>
+                    <label for="pushBody" style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Message</label>
                     <textarea id="pushBody" rows="3" placeholder="Message…" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"></textarea>
                 </div>
                 <button class="btn btn-primary" onclick="sendPush('${eventId}', this)">Send Push</button>
@@ -4403,13 +4403,13 @@
                     Percentage or fixed-amount codes applied at checkout for paid events. A 100%-off code issues the ticket immediately.
                 </div>
                 <div class="settings-card" style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <input type="text" id="newCodeText" placeholder="CODE" maxlength="24" style="width:110px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;text-transform:uppercase;">
+                    <input type="text" id="newCodeText" placeholder="CODE" maxlength="24" autocapitalize="characters" autocorrect="off" style="width:110px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;text-transform:uppercase;">
                     <select id="newCodeType" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
                         <option value="percent">% off</option>
                         <option value="fixed">$ off</option>
                     </select>
-                    <input type="number" id="newCodeValue" placeholder="Value" min="1" style="width:80px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
-                    <input type="number" id="newCodeMaxUses" placeholder="Max uses (optional)" min="1" style="width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                    <input type="number" id="newCodeValue" placeholder="Value" min="1" inputmode="numeric" style="width:80px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                    <input type="number" id="newCodeMaxUses" placeholder="Max uses (optional)" min="1" inputmode="numeric" style="width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
                     <button class="btn btn-primary btn-sm" onclick="createDiscountCode('${eventId}')">Add Code</button>
                 </div>
                 <div id="discountRows">${rows}</div>
@@ -4931,7 +4931,7 @@
                         </div>
                     </div>
                     <div style="margin-bottom:16px;">
-                        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Enter the 6-digit code from your app</label>
+                        <label for="twoFactorEnableCode" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Enter the 6-digit code from your app</label>
                         <input type="text" id="twoFactorEnableCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"
                             style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;font-size:16px;letter-spacing:2px;text-align:center;">
                     </div>
@@ -5221,12 +5221,12 @@
             <div id="editTicketPreview" style="margin-bottom:16px;"></div>
 
             <div style="margin-bottom:12px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Name</label>
+                <label for="editTicketName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Name</label>
                 <input type="text" id="editTicketName"
                     style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
             <div style="margin-bottom:16px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Email</label>
+                <label for="editTicketEmail" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Email</label>
                 <input type="email" id="editTicketEmail"
                     style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
@@ -5465,8 +5465,8 @@
             row.className = 'igr-row';
             row.innerHTML = `
                 <input type="text" class="igr-inp igr-name" placeholder="Full Name" value="${esc(data.name || '')}">
-                <input type="text" class="igr-inp igr-email" placeholder="email@example.com" value="${esc(data.email || '')}">
-                <input type="number" class="igr-inp igr-qty" value="${data.qty || 1}" min="1">
+                <input type="email" class="igr-inp igr-email" placeholder="email@example.com" value="${esc(data.email || '')}">
+                <input type="number" class="igr-inp igr-qty" value="${data.qty || 1}" min="1" inputmode="numeric">
                 <button class="igr-del" onclick="this.closest('.igr-row').remove(); syncImportBtn()">&times;</button>
             `;
 
