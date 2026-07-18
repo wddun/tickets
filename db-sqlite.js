@@ -235,6 +235,58 @@ try {
     `);
 } catch {}
 
+// Optional TOTP-based two-factor auth. totpPendingSecret is separate from
+// totpSecret so an abandoned setup (scanned QR but never entered a code)
+// never half-enables 2FA on the account.
+try { db.exec(`ALTER TABLE users ADD COLUMN totpSecret TEXT`); } catch {}
+try { db.exec(`ALTER TABLE users ADD COLUMN totpEnabled INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE users ADD COLUMN totpPendingSecret TEXT`); } catch {}
+try { db.exec(`ALTER TABLE users ADD COLUMN backupCodes TEXT`); } catch {}
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS trustedDevices (
+            id TEXT PRIMARY KEY,
+            userId TEXT NOT NULL,
+            tokenHash TEXT NOT NULL,
+            label TEXT,
+            createdAt TEXT NOT NULL,
+            lastUsedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_trustedDevices_userId ON trustedDevices(userId);
+        CREATE INDEX IF NOT EXISTS idx_trustedDevices_tokenHash ON trustedDevices(tokenHash);
+    `);
+} catch {}
+
+// Reserved-spot claims: when a waitlist entry for a PAID event is promoted,
+// it gets a claimToken + claimExpiresAt instead of converting immediately —
+// the capacity check treats an active (non-expired, unclaimed) reservation
+// as an occupied seat, so the promoted person's spot can't be lost to a
+// regular registrant in the meantime, and the hold naturally lapses if they
+// never complete checkout, without needing a cron job.
+try { db.exec(`ALTER TABLE waitlist ADD COLUMN claimToken TEXT`); } catch {}
+try { db.exec(`ALTER TABLE waitlist ADD COLUMN claimExpiresAt TEXT`); } catch {}
+
+// Scanning a scanner-link QR while signed in grants that account standing
+// "scanner" access to the event — it shows up in Your Events from then on,
+// not just for that one device/session. Deliberately separate from
+// sheetAccess (that's tied to the Google Sheets integration, which a
+// scanner link has nothing to do with). Scanner access is intentionally
+// weaker than a 'full' sheetAccess grant — it lets someone scan/check
+// people in but not undo a check-in or manage the event.
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS scannerAccess (
+            id TEXT PRIMARY KEY,
+            userId TEXT NOT NULL,
+            eventId TEXT NOT NULL,
+            createdAt TEXT NOT NULL,
+            UNIQUE(userId, eventId)
+        );
+        CREATE INDEX IF NOT EXISTS idx_scannerAccess_userId ON scannerAccess(userId);
+        CREATE INDEX IF NOT EXISTS idx_scannerAccess_eventId ON scannerAccess(eventId);
+    `);
+} catch {}
+
 // ── One-time migration from db.json ──────────────────────────────────────────
 
 const migrationFlag = path.join(__dirname, 'db-migrated.flag');
@@ -369,7 +421,7 @@ export function rowToEvent(row) {
 
 export function rowToUser(row) {
     if (!row) return null;
-    return { ...row, emailVerified: !!row.emailVerified };
+    return { ...row, emailVerified: !!row.emailVerified, totpEnabled: !!row.totpEnabled };
 }
 
 export function rowToDiscountCode(row) {
@@ -398,6 +450,9 @@ export const stmt = {
         setVerifyToken: db.prepare(`UPDATE users SET verifyToken = ? WHERE email = ?`),
         setPassword: db.prepare(`UPDATE users SET password = ? WHERE id = ?`),
         deleteById: db.prepare(`DELETE FROM users WHERE id = ?`),
+        setTotpPendingSecret: db.prepare(`UPDATE users SET totpPendingSecret=? WHERE id=?`),
+        enableTotp: db.prepare(`UPDATE users SET totpSecret=?, totpEnabled=1, totpPendingSecret=NULL, backupCodes=? WHERE id=?`),
+        disableTotp: db.prepare(`UPDATE users SET totpSecret=NULL, totpEnabled=0, totpPendingSecret=NULL, backupCodes=NULL WHERE id=?`),
     },
     events: {
         byId: db.prepare('SELECT * FROM events WHERE id = ?'),
@@ -503,6 +558,13 @@ export const stmt = {
         deleteById: db.prepare(`DELETE FROM sheetAccess WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM sheetAccess WHERE userId=?`),
     },
+    scannerAccess: {
+        byUserId: db.prepare('SELECT * FROM scannerAccess WHERE userId=?'),
+        byUserAndEvent: db.prepare('SELECT * FROM scannerAccess WHERE userId=? AND eventId=?'),
+        insert: db.prepare(`INSERT OR IGNORE INTO scannerAccess (id, userId, eventId, createdAt) VALUES (?,?,?,?)`),
+        deleteByUserId: db.prepare(`DELETE FROM scannerAccess WHERE userId=?`),
+        deleteByEventId: db.prepare(`DELETE FROM scannerAccess WHERE eventId=?`),
+    },
     passwordResetTokens: {
         byTokenHash: db.prepare('SELECT * FROM passwordResetTokens WHERE tokenHash=?'),
         insert: db.prepare(`INSERT INTO passwordResetTokens (id, userId, tokenHash, expiresAt, createdAt) VALUES (?,?,?,?,?)`),
@@ -535,14 +597,27 @@ export const stmt = {
         deleteById: db.prepare(`DELETE FROM discountCodes WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM discountCodes WHERE eventId=?`),
     },
+    trustedDevices: {
+        byId: db.prepare('SELECT * FROM trustedDevices WHERE id=?'),
+        byUserId: db.prepare('SELECT * FROM trustedDevices WHERE userId=? ORDER BY createdAt DESC'),
+        byTokenHash: db.prepare('SELECT * FROM trustedDevices WHERE tokenHash=?'),
+        insert: db.prepare(`INSERT INTO trustedDevices (id, userId, tokenHash, label, createdAt, lastUsedAt) VALUES (?,?,?,?,?,?)`),
+        touchLastUsed: db.prepare(`UPDATE trustedDevices SET lastUsedAt=? WHERE id=?`),
+        deleteById: db.prepare(`DELETE FROM trustedDevices WHERE id=?`),
+        deleteByUserId: db.prepare(`DELETE FROM trustedDevices WHERE userId=?`),
+    },
     waitlist: {
         byId: db.prepare('SELECT * FROM waitlist WHERE id=?'),
         byEventId: db.prepare('SELECT * FROM waitlist WHERE eventId=? ORDER BY createdAt ASC'),
         byEventAndEmail: db.prepare('SELECT * FROM waitlist WHERE eventId=? AND email=?'),
+        byEventAndClaimToken: db.prepare(`SELECT * FROM waitlist WHERE eventId=? AND claimToken=?`),
         countWaitingByEventId: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='waiting'`),
+        countWaitingAheadOf: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='waiting' AND createdAt<?`),
+        countActiveClaims: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='notified' AND claimExpiresAt>?`),
         insert: db.prepare(`INSERT INTO waitlist (id, eventId, name, email, customFields, status, createdAt) VALUES (?,?,?,?,?,?,?)`),
         setStatus: db.prepare(`UPDATE waitlist SET status=? WHERE id=?`),
         setNotified: db.prepare(`UPDATE waitlist SET status='notified', notifiedAt=? WHERE id=?`),
+        setClaim: db.prepare(`UPDATE waitlist SET status='notified', notifiedAt=?, claimToken=?, claimExpiresAt=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM waitlist WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM waitlist WHERE eventId=?`),
     },
