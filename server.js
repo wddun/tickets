@@ -2,7 +2,7 @@ import express from 'express';
 import { db, stmt, rowToTicket, rowToEvent, rowToUser, rowToDiscountCode, rowToWaitlistEntry, getWalletDevicesBySerials, getTicketsByTokens } from './db-sqlite.js';
 import { nanoid } from 'nanoid';
 import QRCode from 'qrcode';
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { SESClient, SendEmailCommand, SendRawEmailCommand } from '@aws-sdk/client-ses';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -93,7 +93,49 @@ const ses = new SESClient({
 const SES_INTERVAL_MS = parseInt(process.env.SES_MIN_INTERVAL_MS || '100');
 let emailChain = Promise.resolve();
 
-async function sendEmail({ to, subject, html, registrationId, fromName, replyTo }) {
+// Gmail (and several other clients) strip `data:` URI images out of HTML
+// email bodies as a security measure — they only render images that are
+// attached to the message and referenced by Content-ID (`cid:`). So any
+// email carrying inline images (QR codes, the wallet badge) must be sent
+// as a raw multipart/related MIME message rather than through SES's plain
+// SendEmailCommand, which has no way to attach anything.
+function wrapBase64Lines(buf) {
+    return buf.toString('base64').replace(/(.{76})/g, '$1\r\n');
+}
+
+function buildRawMimeEmail({ from, to, replyTo, subject, html, attachments = [] }) {
+    const boundary = `b_${crypto.randomBytes(16).toString('hex')}`;
+    const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`;
+
+    const lines = [
+        `From: ${from}`,
+        `To: ${to}`,
+    ];
+    if (replyTo) lines.push(`Reply-To: ${replyTo}`);
+    lines.push(`Subject: ${encodedSubject}`);
+    lines.push(`MIME-Version: 1.0`);
+    lines.push(`Content-Type: multipart/related; boundary="${boundary}"`);
+    lines.push('');
+    lines.push(`--${boundary}`);
+    lines.push(`Content-Type: text/html; charset=UTF-8`);
+    lines.push(`Content-Transfer-Encoding: base64`);
+    lines.push('');
+    lines.push(wrapBase64Lines(Buffer.from(html, 'utf8')));
+
+    for (const att of attachments) {
+        lines.push(`--${boundary}`);
+        lines.push(`Content-Type: ${att.contentType}`);
+        lines.push(`Content-Transfer-Encoding: base64`);
+        lines.push(`Content-ID: <${att.cid}>`);
+        lines.push(`Content-Disposition: inline; filename="${att.filename}"`);
+        lines.push('');
+        lines.push(wrapBase64Lines(att.content));
+    }
+    lines.push(`--${boundary}--`);
+    return lines.join('\r\n');
+}
+
+async function sendEmail({ to, subject, html, registrationId, fromName, replyTo, attachments = [] }) {
     const task = emailChain.then(() => new Promise(r => setTimeout(r, SES_INTERVAL_MS))).then(async () => {
         // Append copyright footer to every email
         const footer = `<div style="text-align:center; margin-top:32px; padding-top:16px; border-top:1px solid #eee; font-size:11px; color:#aaa;">&copy; 2026 Will's Tech Support</div>`;
@@ -109,6 +151,11 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo 
         const source = (fromName && sesFrom && !sesFrom.includes('<'))
             ? `"${fromName.replace(/["<>\\]/g, '').trim()}" <${sesFrom}>`
             : sesFrom;
+
+        if (attachments.length) {
+            const raw = buildRawMimeEmail({ from: source, to, replyTo, subject, html: tracked, attachments });
+            return ses.send(new SendRawEmailCommand({ Source: source, RawMessage: { Data: Buffer.from(raw, 'utf8') } }));
+        }
 
         return ses.send(new SendEmailCommand({
             Source: source,
@@ -128,21 +175,22 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo 
 // Shared HTML email template used by all ticket confirmation emails
 // Cached in memory (read once, reused for every email) so we're not doing
 // disk I/O per send — this is a small static asset that never changes.
-let _walletBadgeDataUri = null;
-function getWalletBadgeDataUri() {
-    if (!_walletBadgeDataUri) {
-        const buf = fs.readFileSync(path.join(__dirname, 'public', 'apple-wallet-badge.png'));
-        _walletBadgeDataUri = `data:image/png;base64,${buf.toString('base64')}`;
+let _walletBadgeBuffer = null;
+function getWalletBadgeBuffer() {
+    if (!_walletBadgeBuffer) {
+        _walletBadgeBuffer = fs.readFileSync(path.join(__dirname, 'public', 'apple-wallet-badge.png'));
     }
-    return _walletBadgeDataUri;
+    return _walletBadgeBuffer;
 }
 
-// Ticket emails embed the QR (and the wallet badge) as inline base64 data URIs
-// rather than linking to /qr/:token or the static badge file. Some mail apps
-// (Gmail's app has been reported doing this) fail to load remote images when
-// reopening an email on weak/no connectivity — embedding the image bytes
-// directly in the message means nothing needs to be fetched again once the
-// email itself has synced to the device.
+// Ticket emails embed the QR (and the wallet badge) as inline images attached
+// to the message and referenced by Content-ID (cid:), rather than linking to
+// /qr/:token or the static badge file, or embedding them as `data:` URIs.
+// Gmail (and several other mail clients) deliberately strip `data:` URI
+// images from HTML bodies as a security measure and will only render images
+// that arrive as real MIME attachments — cid: is the only reliable way to
+// get an image to always render without a live fetch, on Gmail included.
+// Returns { html, attachments } — attachments must be passed to sendEmail().
 async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '' }) {
     const dateStr = (() => {
         try {
@@ -181,18 +229,33 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         : rawColor;
 
     const n = tickets.length;
-    const walletBadgeDataUri = getWalletBadgeDataUri();
+    // Content-ID must look like an RFC 2392/822 addr-spec (unique-id@domain) —
+    // a bare slug like "wallet-badge" is non-conformant and Gmail silently
+    // fails to resolve the cid: reference even though the rest of the MIME
+    // parses fine, leaving just the alt text where the image should be.
+    const walletBadgeCid = 'wallet-badge@tickets.willstechsupport.com';
+    const attachments = [{
+        cid: walletBadgeCid,
+        content: getWalletBadgeBuffer(),
+        contentType: 'image/png',
+        filename: 'add-to-apple-wallet.png',
+    }];
+
     const qrBlocksHtml = (await Promise.all(tickets.map(async (t, i) => {
-        const qrDataUri = await QRCode.toDataURL(`ticket:${t.token}`);
+        const qrBuffer = await QRCode.toBuffer(`ticket:${t.token}`);
+        const qrCid = `qr-${t.token}@tickets.willstechsupport.com`;
+        attachments.push({ cid: qrCid, content: qrBuffer, contentType: 'image/png', filename: `ticket-qr-${i}.png` });
         return `
 <div style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:16px;background:#fff;">
   ${n > 1 ? `<div style="background:${accentHex};padding:7px 16px;"><p style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.9);text-transform:uppercase;letter-spacing:1px;margin:0;">Ticket ${i + 1} of ${n}</p></div>` : ''}
   <div style="padding:24px;text-align:center;">
     <p style="font-size:15px;font-weight:600;color:#111;margin:0 0 16px;">${t.name}</p>
-    <img src="${qrDataUri}" alt="QR Code" style="width:200px;height:200px;display:block;margin:0 auto 12px;border:1px solid #f3f4f6;border-radius:8px;background:#fff;padding:8px;">
+    <img src="cid:${qrCid}" alt="QR Code" width="200" height="200" style="width:200px;height:200px;display:block;margin:0 auto 12px;border:1px solid #f3f4f6;border-radius:8px;background:#fff;padding:8px;">
     <p style="font-size:10px;color:#9ca3af;font-family:monospace;margin:0 0 16px;word-break:break-all;">${t.token}</p>
     <a href="${BASE_URL}/api/pass/${t.token}.pkpass" style="display:inline-block;text-decoration:none;">
-      <img src="${walletBadgeDataUri}" alt="Add to Apple Wallet" style="height:44px;width:auto;display:block;margin:0 auto;">
+      <table role="presentation" width="141" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;"><tr><td>
+        <img src="cid:${walletBadgeCid}" alt="Add to Apple Wallet" width="141" height="44" style="display:block;width:141px;height:44px;">
+      </td></tr></table>
     </a>
   </div>
 </div>`;
@@ -202,11 +265,13 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
 <div style="text-align:center;margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;">
   <p style="font-size:13px;font-weight:600;color:#555;margin:0 0 10px;">Add all ${n} tickets to Apple Wallet at once:</p>
   <a href="${BASE_URL}/api/passes/bundle/${tickets[0].registrationId}" style="display:inline-block;text-decoration:none;">
-    <img src="${walletBadgeDataUri}" alt="Add All to Apple Wallet" style="height:44px;width:auto;display:block;margin:0 auto;">
+    <table role="presentation" width="141" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;"><tr><td>
+      <img src="cid:${walletBadgeCid}" alt="Add All to Apple Wallet" width="141" height="44" style="display:block;width:141px;height:44px;">
+    </td></tr></table>
   </a>
 </div>` : '';
 
-    return `
+    const html = `
 <div style="margin:0;padding:0;background:#f3f4f6;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
 <tr><td align="center" style="padding:24px 16px;">
@@ -255,6 +320,8 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
 </td></tr>
 </table>
 </div>`;
+
+    return { html, attachments };
 }
 
 // 1x1 transparent GIF for email open tracking
@@ -321,6 +388,180 @@ async function pushWalletUpdate(serialNumbers) {
         });
     }
     try { client.close(); } catch { }
+}
+
+// ── TOTP (RFC 6238) two-factor auth — implemented manually with Node's
+// built-in crypto module, no otplib/speakeasy dependency ─────────────────────
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+function base32Encode(buffer) {
+    let bits = 0, value = 0, output = '';
+    for (const byte of buffer) {
+        value = (value << 8) | byte;
+        bits += 8;
+        while (bits >= 5) {
+            output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+            bits -= 5;
+        }
+    }
+    if (bits > 0) output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+    return output;
+}
+
+function base32Decode(str) {
+    const clean = String(str).toUpperCase().replace(/[^A-Z2-7]/g, '');
+    let bits = 0, value = 0;
+    const bytes = [];
+    for (const char of clean) {
+        const idx = BASE32_ALPHABET.indexOf(char);
+        if (idx === -1) continue;
+        value = (value << 5) | idx;
+        bits += 5;
+        if (bits >= 8) {
+            bytes.push((value >>> (bits - 8)) & 0xff);
+            bits -= 8;
+        }
+    }
+    return Buffer.from(bytes);
+}
+
+function generateBase32Secret(byteLength = 20) {
+    return base32Encode(crypto.randomBytes(byteLength));
+}
+
+// HMAC-SHA1-based HOTP (RFC 4226)
+function hotp(secretBuffer, counter, digits = 6) {
+    const counterBuf = Buffer.alloc(8);
+    counterBuf.writeUInt32BE(Math.floor(counter / 0x100000000), 0);
+    counterBuf.writeUInt32BE(counter % 0x100000000, 4);
+    const hmac = crypto.createHmac('sha1', secretBuffer).update(counterBuf).digest();
+    const offset = hmac[hmac.length - 1] & 0x0f;
+    const code = ((hmac[offset] & 0x7f) << 24) |
+        ((hmac[offset + 1] & 0xff) << 16) |
+        ((hmac[offset + 2] & 0xff) << 8) |
+        (hmac[offset + 3] & 0xff);
+    return (code % (10 ** digits)).toString().padStart(digits, '0');
+}
+
+// TOTP (RFC 6238): HOTP with counter derived from a 30s time step
+function totp(base32Secret, { step = 30, digits = 6, time = Date.now() } = {}) {
+    const counter = Math.floor(time / 1000 / step);
+    return hotp(base32Decode(base32Secret), counter, digits);
+}
+
+// Accepts a code from the previous/current/next time step (+/-1) to tolerate clock drift
+function verifyTotp(base32Secret, code, { step = 30, digits = 6, window = 1 } = {}) {
+    if (!base32Secret || typeof code !== 'string' || !/^\d{6}$/.test(code)) return false;
+    const now = Date.now();
+    const codeBuf = Buffer.from(code);
+    for (let w = -window; w <= window; w++) {
+        const candidate = Buffer.from(totp(base32Secret, { step, digits, time: now + w * step * 1000 }));
+        if (candidate.length === codeBuf.length && crypto.timingSafeEqual(candidate, codeBuf)) return true;
+    }
+    return false;
+}
+
+// ── Signed short-lived tokens for the 2FA login handshake, and signed
+// "remember this device" cookies — both HMAC'd with SESSION_SECRET rather
+// than stored/trusted as opaque values ───────────────────────────────────────
+const PENDING_TOTP_TOKEN_TTL_MS = 5 * 60 * 1000;
+const REMEMBER_DEVICE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function hmacSign(payload) {
+    return crypto.createHmac('sha256', process.env.SESSION_SECRET).update(payload).digest('base64url');
+}
+
+function timingSafeStringEqual(a, b) {
+    const bufA = Buffer.from(String(a));
+    const bufB = Buffer.from(String(b));
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function signPendingTotpToken(userId) {
+    const payload = `${userId}.${Date.now() + PENDING_TOTP_TOKEN_TTL_MS}`;
+    return `${payload}.${hmacSign(payload)}`;
+}
+
+// Returns the userId if the token is well-formed, correctly signed, and not expired
+function verifyPendingTotpToken(token) {
+    if (!token || typeof token !== 'string') return null;
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [userId, expStr, sig] = parts;
+    const payload = `${userId}.${expStr}`;
+    if (!timingSafeStringEqual(hmacSign(payload), sig)) return null;
+    const exp = parseInt(expStr, 10);
+    if (!exp || Date.now() > exp) return null;
+    return userId;
+}
+
+function signDeviceToken() {
+    const selector = crypto.randomBytes(24).toString('hex');
+    const payload = `${selector}.${Date.now()}`;
+    return `${payload}.${hmacSign(payload)}`;
+}
+
+// Returns the raw token string if well-formed, correctly signed, and within
+// the remember-device max age; the caller still has to check the hash
+// against a live (non-revoked) trustedDevices row.
+function verifyDeviceToken(token) {
+    if (!token || typeof token !== 'string') return null;
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [selector, issuedAtStr, sig] = parts;
+    const payload = `${selector}.${issuedAtStr}`;
+    if (!timingSafeStringEqual(hmacSign(payload), sig)) return null;
+    const issuedAt = parseInt(issuedAtStr, 10);
+    if (!issuedAt || Date.now() - issuedAt > REMEMBER_DEVICE_MAX_AGE_MS) return null;
+    return token;
+}
+
+function hashDeviceToken(token) {
+    return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function parseCookies(req) {
+    const header = req.headers.cookie;
+    const out = {};
+    if (!header) return out;
+    for (const pair of header.split(';')) {
+        const idx = pair.indexOf('=');
+        if (idx < 0) continue;
+        const k = pair.slice(0, idx).trim();
+        const v = pair.slice(idx + 1).trim();
+        if (k) { try { out[k] = decodeURIComponent(v); } catch { out[k] = v; } }
+    }
+    return out;
+}
+
+// One-time backup codes shown once at 2FA-enable time; only bcrypt hashes are stored
+function generateBackupCodes(count = 8, length = 10) {
+    const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous 0/O/1/I
+    const codes = [];
+    for (let i = 0; i < count; i++) {
+        const bytes = crypto.randomBytes(length);
+        let code = '';
+        for (let j = 0; j < length; j++) code += charset[bytes[j] % charset.length];
+        codes.push(code);
+    }
+    return codes;
+}
+
+function deviceLabelFromUserAgent(ua) {
+    if (!ua) return 'Unknown device';
+    const os = /iPhone|iPad|iPod/.test(ua) ? 'iOS'
+        : /Macintosh/.test(ua) ? 'Mac'
+        : /Android/.test(ua) ? 'Android'
+        : /Windows/.test(ua) ? 'Windows'
+        : /Linux/.test(ua) ? 'Linux'
+        : 'Unknown OS';
+    const browser = /Edg\//.test(ua) ? 'Edge'
+        : /Chrome\//.test(ua) ? 'Chrome'
+        : /Firefox\//.test(ua) ? 'Firefox'
+        : /Safari\//.test(ua) ? 'Safari'
+        : 'Browser';
+    return `${browser} on ${os}`;
 }
 
 async function pushAppNotificationToUser(userId, { title, body, data } = {}) {
@@ -473,11 +714,12 @@ app.use(session({
     secret: process.env.SESSION_SECRET || (() => { throw new Error('SESSION_SECRET env var is required'); })(),
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
         httpOnly: true,
         sameSite: 'strict',
         secure: process.env.NODE_ENV === 'production',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        maxAge: 30 * 24 * 60 * 60 * 1000
     }
 }));
 
@@ -666,8 +908,76 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     }
 
     const isAdmin = user.email === process.env.ADMIN_EMAIL;
+
+    if (user.totpEnabled) {
+        let deviceTrusted = false;
+        const rawDeviceToken = parseCookies(req).rememberDevice;
+        const verifiedToken = verifyDeviceToken(rawDeviceToken);
+        if (verifiedToken) {
+            const device = stmt.trustedDevices.byTokenHash.get(hashDeviceToken(verifiedToken));
+            if (device && device.userId === user.id) {
+                deviceTrusted = true;
+                stmt.trustedDevices.touchLastUsed.run(new Date().toISOString(), device.id);
+            }
+        }
+
+        if (!deviceTrusted) {
+            const pendingToken = signPendingTotpToken(user.id);
+            log('login', `[2fa] TOTP required — email: ${normalizedEmail}  id: ${user.id}  ip: ${getIP(req)}`);
+            return res.json({ needsTotp: true, pendingToken });
+        }
+    }
+
     req.session.userId = user.id;
     log('login', `[OK] Success — email: ${normalizedEmail}  id: ${user.id}  role: ${isAdmin ? 'admin' : 'staff'}  ip: ${getIP(req)}`);
+    res.json({ success: true, user: { id: user.id, email: user.email } });
+});
+
+// Second step of login when the account has TOTP 2FA enabled — exchanges the
+// short-lived pendingToken from /api/auth/login plus a 6-digit code for a
+// real session, optionally remembering this device for future logins.
+app.post('/api/auth/login/totp-verify', loginLimiter, async (req, res) => {
+    const { pendingToken, code, remember } = req.body;
+    const userId = verifyPendingTotpToken(pendingToken);
+    if (!userId) {
+        log('login', `[2fa] [ERR] Invalid/expired pending token  ip: ${getIP(req)}`);
+        return res.status(401).json({ error: 'Invalid code' });
+    }
+
+    const user = rowToUser(stmt.users.byId.get(userId));
+    if (!user || !user.totpEnabled || !user.totpSecret) {
+        return res.status(401).json({ error: 'Invalid code' });
+    }
+
+    const codeStr = String(code || '').trim();
+    if (!verifyTotp(user.totpSecret, codeStr)) {
+        log('login', `[2fa] [ERR] Wrong code — email: ${user.email}  id: ${user.id}  ip: ${getIP(req)}`);
+        return res.status(401).json({ error: 'Invalid code' });
+    }
+
+    req.session.userId = user.id;
+
+    if (remember === true) {
+        const deviceToken = signDeviceToken();
+        const now = new Date().toISOString();
+        stmt.trustedDevices.insert.run(
+            nanoid(),
+            user.id,
+            hashDeviceToken(deviceToken),
+            deviceLabelFromUserAgent(req.headers['user-agent']),
+            now,
+            now
+        );
+        res.cookie('rememberDevice', deviceToken, {
+            httpOnly: true,
+            sameSite: 'strict',
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: REMEMBER_DEVICE_MAX_AGE_MS,
+        });
+    }
+
+    const isAdmin = user.email === process.env.ADMIN_EMAIL;
+    log('login', `[OK] TOTP verified — email: ${user.email}  id: ${user.id}  role: ${isAdmin ? 'admin' : 'staff'}  ip: ${getIP(req)}`);
     res.json({ success: true, user: { id: user.id, email: user.email } });
 });
 
@@ -724,7 +1034,7 @@ app.get('/api/auth/me', (req, res) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user.email === process.env.ADMIN_EMAIL;
-    res.json({ user: { id: user.id, email: user.email, isAdmin } });
+    res.json({ user: { id: user.id, email: user.email, isAdmin, createdAt: user.createdAt } });
 });
 
 
@@ -798,6 +1108,7 @@ app.delete('/api/auth/account', async (req, res) => {
         for (const eventId of eventIds) stmt.tickets.deleteByEventId.run(eventId);
         stmt.events.deleteByUserId.run(userId);
         stmt.sheetAccess.deleteByUserId.run(userId);
+        stmt.scannerAccess.deleteByUserId.run(userId);
         stmt.pushDevices.deleteByUserId.run(userId);
         stmt.pushSubscriptions.deleteByUserId.run(userId);
         stmt.users.deleteById.run(userId);
@@ -812,6 +1123,106 @@ const requireAuth = (req, res, next) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
     next();
 };
+
+// --- Optional TOTP two-factor auth (account settings) ---
+
+// Start (or restart) 2FA setup: generates a new secret that isn't active
+// until confirmed via /api/account/2fa/enable, so an abandoned setup never
+// half-enables 2FA on the account.
+app.post('/api/account/2fa/setup', requireAuth, async (req, res) => {
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const secret = generateBase32Secret();
+    stmt.users.setTotpPendingSecret.run(secret, user.id);
+
+    const otpauthUrl = `otpauth://totp/WTS%20Tickets:${encodeURIComponent(user.email)}?secret=${secret}&issuer=WTS%20Tickets&algorithm=SHA1&digits=6&period=30`;
+    const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
+    log('2fa', `[setup] Pending secret generated — email: ${user.email}  id: ${user.id}`);
+    res.json({ secret, otpauthUrl, qrDataUrl });
+});
+
+// Confirm setup with a live code from the authenticator app; only now does
+// totpPendingSecret get promoted to the real totpSecret and 2FA turn on.
+app.post('/api/account/2fa/enable', requireAuth, async (req, res) => {
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    if (!user.totpPendingSecret) return res.status(400).json({ error: 'No pending 2FA setup. Start setup again.' });
+
+    const codeStr = String(req.body?.code || '').trim();
+    if (!verifyTotp(user.totpPendingSecret, codeStr)) {
+        log('2fa', `[enable] [ERR] Wrong code — email: ${user.email}  id: ${user.id}`);
+        return res.status(401).json({ error: 'Invalid code' });
+    }
+
+    const backupCodes = generateBackupCodes();
+    const hashedCodes = await Promise.all(backupCodes.map(c => bcrypt.hash(c, 10)));
+    stmt.users.enableTotp.run(user.totpPendingSecret, JSON.stringify(hashedCodes), user.id);
+    log('2fa', `[enable] [OK] 2FA enabled — email: ${user.email}  id: ${user.id}`);
+    // Backup codes are shown once, in plaintext, and never retrievable again.
+    res.json({ success: true, backupCodes });
+});
+
+// Turn 2FA off. Re-checks the password (not just the session) since this is
+// a security-lowering action, then clears secrets, backup codes, and every
+// remembered device for the account.
+app.post('/api/account/2fa/disable', requireAuth, async (req, res) => {
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const match = user.password ? await bcrypt.compare(String(req.body?.password || ''), user.password) : false;
+    if (!match) {
+        log('2fa', `[disable] [ERR] Wrong password — email: ${user.email}  id: ${user.id}`);
+        return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    stmt.users.disableTotp.run(user.id);
+    stmt.trustedDevices.deleteByUserId.run(user.id);
+    log('2fa', `[disable] [OK] 2FA disabled — email: ${user.email}  id: ${user.id}`);
+    res.json({ success: true });
+});
+
+app.get('/api/account/2fa/status', requireAuth, (req, res) => {
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    res.json({ enabled: !!user.totpEnabled });
+});
+
+app.get('/api/account/2fa/devices', requireAuth, (req, res) => {
+    const devices = stmt.trustedDevices.byUserId.all(req.session.userId).map(d => ({
+        id: d.id,
+        label: d.label,
+        createdAt: d.createdAt,
+        lastUsedAt: d.lastUsedAt,
+    }));
+    res.json(devices);
+});
+
+app.delete('/api/account/2fa/devices/:id', requireAuth, (req, res) => {
+    const device = stmt.trustedDevices.byId.get(req.params.id);
+    if (!device || device.userId !== req.session.userId) {
+        return res.status(404).json({ error: 'Not found' });
+    }
+    stmt.trustedDevices.deleteById.run(device.id);
+    res.json({ success: true });
+});
+
+app.post('/api/account/password', requireAuth, async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'currentPassword and newPassword required' });
+
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const match = await bcrypt.compare(currentPassword, user.password);
+    if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    if (newPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    stmt.users.setPassword.run(hashedPassword, user.id);
+    res.json({ success: true });
+});
 
 app.get('/api/admin/logs', requireAuth, (req, res) => {
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
@@ -882,6 +1293,7 @@ function userHasEventAccess(userId, eventId) {
     const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return false;
     if (event.userId === userId) return true;
+    if (stmt.scannerAccess.byUserAndEvent.get(userId, eventId)) return true;
     const myAccess = stmt.sheetAccess.byUserId.all(userId);
     return myAccess.some(a => {
         const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
@@ -1013,12 +1425,7 @@ app.post('/api/register', async (req, res) => {
         const count = stmt.tickets.byEventId.all(eventId).length;
         if (count >= event.capacity) {
             if (event.waitlistEnabled) {
-                const cleanEmail = email.trim().toLowerCase();
-                const existing = stmt.waitlist.byEventAndEmail.get(eventId, cleanEmail);
-                if (existing) return res.json({ waitlisted: true, alreadyOnList: true });
-                stmt.waitlist.insert.run(nanoid(10), eventId, name.trim(), cleanEmail, null, 'waiting', new Date().toISOString());
-                log('waitlist', `[join] Added to waitlist — name: ${name}  email: ${cleanEmail}  event: ${event.name}`);
-                return res.json({ waitlisted: true });
+                return res.json(await joinWaitlist(event, name, email));
             }
             return res.status(400).json({ error: 'This event is sold out' });
         }
@@ -1038,17 +1445,19 @@ app.post('/api/register', async (req, res) => {
     const qrDataUrl = await QRCode.toDataURL(`ticket:${token}`);
 
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        const { html, attachments } = await buildTicketEmailHtml({
+            firstName,
+            intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+            event,
+            tickets: [ticket],
+        });
         sendEmail({
             to: email.trim().toLowerCase(),
             fromName: `Tickets - ${event.name}`,
             replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
             subject: `Your ticket for ${event.name}`,
-            html: await buildTicketEmailHtml({
-                firstName,
-                intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
-                event,
-                tickets: [ticket],
-            }),
+            html,
+            attachments,
             registrationId,
         }).catch(() => {});
     }
@@ -1115,17 +1524,19 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
     const ticket = rowToTicket(stmt.tickets.byToken.get(token));
 
     if (buyerEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        const { html, attachments } = await buildTicketEmailHtml({
+            firstName,
+            intro: `You&rsquo;re all set for <strong>${dbEvent.name}</strong>! We&rsquo;ll see you there.`,
+            event: dbEvent,
+            tickets: [ticket],
+        });
         sendEmail({
             to: buyerEmail,
             fromName: `Tickets - ${dbEvent.name}`,
             replyTo: rowToUser(stmt.users.byId.get(dbEvent.userId))?.email,
             subject: `Your ticket for ${dbEvent.name}`,
-            html: await buildTicketEmailHtml({
-                firstName,
-                intro: `You&rsquo;re all set for <strong>${dbEvent.name}</strong>! We&rsquo;ll see you there.`,
-                event: dbEvent,
-                tickets: [ticket],
-            }),
+            html,
+            attachments,
             registrationId,
         }).catch(() => {});
     }
@@ -1136,7 +1547,7 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
 // Create a Checkout Session for a paid ticket
 app.post('/api/checkout/:eventId', async (req, res) => {
     if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
-    const { name, email, discountCode } = req.body;
+    const { name, email, discountCode, claimToken } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
 
     const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
@@ -1147,15 +1558,26 @@ app.post('/api/checkout/:eventId', async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanName  = name.trim();
 
-    if (event.capacity) {
+    // A promoted waitlist entry gets a claimToken good for a limited window —
+    // presenting a still-active one bypasses the capacity gate entirely,
+    // since the organizer already chose to seat this specific person.
+    let claimEntry = null;
+    if (claimToken) {
+        const candidate = stmt.waitlist.byEventAndClaimToken.get(event.id, claimToken);
+        if (candidate && candidate.status === 'notified' && candidate.claimExpiresAt > new Date().toISOString()) {
+            claimEntry = candidate;
+        }
+    }
+
+    if (event.capacity && !claimEntry) {
         const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
-        if (registered >= event.capacity) {
+        // Active (unexpired, unclaimed) reservations count as occupied seats
+        // too, so someone else can't take a spot that was already promised
+        // to a promoted waitlist entry still inside its claim window.
+        const reserved = stmt.waitlist.countActiveClaims.get(event.id, new Date().toISOString())?.cnt ?? 0;
+        if (registered + reserved >= event.capacity) {
             if (event.waitlistEnabled) {
-                const existing = stmt.waitlist.byEventAndEmail.get(event.id, cleanEmail);
-                if (existing) return res.json({ waitlisted: true, alreadyOnList: true });
-                stmt.waitlist.insert.run(nanoid(10), event.id, cleanName, cleanEmail, null, 'waiting', new Date().toISOString());
-                log('waitlist', `[join] Added to waitlist — name: ${cleanName}  email: ${cleanEmail}  event: ${event.name}`);
-                return res.json({ waitlisted: true });
+                return res.json(await joinWaitlist(event, name, email));
             }
             return res.status(400).json({ error: 'This event is sold out' });
         }
@@ -1182,6 +1604,7 @@ app.post('/api/checkout/:eventId', async (req, res) => {
         if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
         if (discountCodeId) stmt.discountCodes.incrementUse.run(discountCodeId);
         stmt.orders.insert.run(nanoid(8), nanoid(16), event.id, issued.registrationId, cleanName, cleanEmail, 0, 'usd', 'fulfilled', new Date().toISOString(), discountCodeId, discountAmount);
+        if (claimEntry) stmt.waitlist.setStatus.run('converted', claimEntry.id);
         const qrDataUrl = await QRCode.toDataURL(`ticket:${issued.ticket.token}`);
         log('stripe', `[checkout] 100% discount — ticket issued directly — name: ${cleanName}  event: ${event.name}  code: ${discountCode}`);
         return res.json({ success: true, ticket: { token: issued.ticket.token, registrationId: issued.registrationId }, qr: qrDataUrl });
@@ -1203,7 +1626,7 @@ app.post('/api/checkout/:eventId', async (req, res) => {
         }],
         mode: 'payment',
         customer_email: cleanEmail,
-        metadata: { eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail, discountCodeId: discountCodeId || '' },
+        metadata: { eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail, discountCodeId: discountCodeId || '', waitlistId: claimEntry?.id || '' },
         success_url: `${BASE_URL}/register.html?session={CHECKOUT_SESSION_ID}&id=${event.id}`,
         cancel_url: `${BASE_URL}/register.html?id=${event.id}`,
     });
@@ -1246,7 +1669,7 @@ app.post('/api/stripe/webhook', async (req, res) => {
 
     if (stripeEvent.type === 'checkout.session.completed') {
         const session = stripeEvent.data.object;
-        const { eventId, buyerName, buyerEmail, discountCodeId } = session.metadata || {};
+        const { eventId, buyerName, buyerEmail, discountCodeId, waitlistId } = session.metadata || {};
         if (!eventId || !buyerName || !buyerEmail) return res.json({ received: true });
 
         const existing = stmt.orders.bySessionId.get(session.id);
@@ -1259,6 +1682,10 @@ app.post('/api/stripe/webhook', async (req, res) => {
         // Only counts toward the code's usage limit once payment is actually
         // confirmed — an abandoned checkout never gets here.
         if (discountCodeId) stmt.discountCodes.incrementUse.run(discountCodeId);
+        // Releases the reserved-seat hold now that the promoted person has
+        // actually completed checkout — the ticket itself is what counts
+        // toward capacity from here on.
+        if (waitlistId) stmt.waitlist.setStatus.run('converted', waitlistId);
         log('stripe', `[webhook] Ticket issued — name: ${buyerName}  event: ${issued.dbEvent.name}  session: ${session.id}`);
     } else if (stripeEvent.type === 'charge.refunded') {
         // Catches refunds issued directly from the Stripe dashboard, not just
@@ -1390,6 +1817,73 @@ app.get('/api/event/:id/discount-codes/preview', (req, res) => {
 
 // ── Waitlist ────────────────────────────────────────────────────────────────────
 
+// Shared by /api/register and /api/checkout so both entry points behave
+// identically. Emails an immediate confirmation with a link to check live
+// status, since there's no attendee login to come back and look this up
+// any other way.
+async function joinWaitlist(event, name, email) {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+    const existing = stmt.waitlist.byEventAndEmail.get(event.id, cleanEmail);
+    if (existing) {
+        const position = existing.status === 'waiting'
+            ? (stmt.waitlist.countWaitingAheadOf.get(event.id, existing.createdAt)?.cnt ?? 0) + 1
+            : null;
+        return { waitlisted: true, alreadyOnList: true, position, waitlistId: existing.id };
+    }
+    const id = nanoid(10);
+    const now = new Date().toISOString();
+    stmt.waitlist.insert.run(id, event.id, cleanName, cleanEmail, null, 'waiting', now);
+    const position = (stmt.waitlist.countWaitingAheadOf.get(event.id, now)?.cnt ?? 0) + 1;
+    log('waitlist', `[join] Added to waitlist — name: ${cleanName}  email: ${cleanEmail}  event: ${event.name}  position: ${position}`);
+
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        const statusUrl = `${BASE_URL}/waitlist-status.html?id=${id}`;
+        sendEmail({
+            to: cleanEmail,
+            fromName: `Tickets - ${event.name}`,
+            subject: `You're on the waitlist for ${event.name}`,
+            html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
+                <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
+                <h2 style="color:#1a1f3c;margin:0 0 8px;">You're on the waitlist</h2>
+                <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">You're <strong>#${position}</strong> in line for <strong>${event.name}</strong>.</p>
+                <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">We'll email you the moment a spot opens up. You can check your live position any time.</p>
+                <div style="text-align:center;margin-bottom:8px;">
+                    <a href="${statusUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Check My Position</a>
+                </div>
+            </div>`,
+        }).catch(() => {});
+    }
+
+    return { waitlisted: true, position, waitlistId: id };
+}
+
+// Public — a waitlisted person's own status/position, looked up by their
+// waitlist entry id (opaque nanoid, emailed to them — not guessable, no
+// separate auth needed since it grants no more than "see your own position").
+app.get('/api/waitlist/entry/:id', (req, res) => {
+    const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    const event = rowToEvent(stmt.events.byId.get(entry.eventId));
+    if (!event) return res.status(404).json({ error: 'Not found' });
+
+    let position = null;
+    if (entry.status === 'waiting') {
+        position = (stmt.waitlist.countWaitingAheadOf.get(entry.eventId, entry.createdAt)?.cnt ?? 0) + 1;
+    }
+
+    const claimActive = entry.status === 'notified' && entry.claimToken && entry.claimExpiresAt && entry.claimExpiresAt > new Date().toISOString();
+    res.json({
+        status: entry.status,
+        position,
+        eventName: event.name,
+        eventId: event.id,
+        isPaid: event.ticketPrice > 0,
+        claimUrl: claimActive ? `${BASE_URL}/register.html?id=${event.id}&claim=${entry.claimToken}` : null,
+        claimExpired: entry.status === 'notified' && !claimActive,
+    });
+});
+
 app.put('/api/event/:id/waitlist-enabled', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -1427,12 +1921,7 @@ app.post('/api/event/:id/waitlist', async (req, res) => {
     if (!event.waitlistEnabled) return res.status(403).json({ error: 'This event does not have a waitlist' });
     const { name, email } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
-    const cleanEmail = email.trim().toLowerCase();
-    const existing = stmt.waitlist.byEventAndEmail.get(event.id, cleanEmail);
-    if (existing) return res.json({ waitlisted: true, alreadyOnList: true });
-    stmt.waitlist.insert.run(nanoid(10), event.id, name.trim(), cleanEmail, null, 'waiting', new Date().toISOString());
-    log('waitlist', `[join] Added to waitlist — name: ${name}  email: ${cleanEmail}  event: ${event.name}`);
-    res.json({ waitlisted: true });
+    res.json(await joinWaitlist(event, name, email));
 });
 
 // Promote someone off the waitlist: issues them a free ticket directly (for
@@ -1450,14 +1939,29 @@ app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     if (event.ticketPrice > 0) {
-        stmt.waitlist.setNotified.run(new Date().toISOString(), entry.id);
+        // A real reservation, not just a nudge: the claim token is good for
+        // 48 hours, and the capacity check elsewhere treats an active claim
+        // as an occupied seat, so this specific person's spot can't be lost
+        // to someone else registering in the meantime.
+        const claimToken = nanoid(24);
+        const claimExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+        stmt.waitlist.setClaim.run(new Date().toISOString(), claimToken, claimExpiresAt, entry.id);
         if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+            const claimUrl = `${BASE_URL}/register.html?id=${event.id}&claim=${claimToken}`;
             sendEmail({
                 to: entry.email,
                 fromName: `Tickets - ${event.name}`,
                 replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
                 subject: `A spot opened up for ${event.name}!`,
-                html: `<div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px;"><p>Good news — a ticket for <strong>${event.name}</strong> just became available. <a href="${BASE_URL}/register.html?id=${event.id}">Complete your registration</a> to claim it before it's gone.</p></div>`,
+                html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
+                    <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
+                    <h2 style="color:#1a1f3c;margin:0 0 8px;">A spot opened up!</h2>
+                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">Good news — a ticket for <strong>${event.name}</strong> just became available, and it's reserved for you.</p>
+                    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">This hold lasts <strong>48 hours</strong> — complete your registration before then to keep it.</p>
+                    <div style="text-align:center;margin-bottom:8px;">
+                        <a href="${claimUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Complete Your Registration</a>
+                    </div>
+                </div>`,
             }).catch(() => {});
         }
         logAudit(req, { eventId: event.id, action: 'waitlist.notified', details: { email: entry.email } });
@@ -1694,21 +2198,23 @@ app.post('/api/register-bulk', async (req, res) => {
     <span style="color:#333;">${v}</span>
   </div>`).join('')}
 </div>` : '';
+            const { html, attachments } = await buildTicketEmailHtml({
+                firstName,
+                intro: isUpdate
+                    ? `Your registration for <strong>${event.name}</strong> has been updated.`
+                    : `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+                event,
+                tickets: ticketsToSend,
+                changesHtml,
+                customFieldsHtml,
+            });
             await sendEmail({
                 to: email,
                 fromName: `Tickets - ${event.name}`,
                 replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
                 subject: isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`,
-                html: await buildTicketEmailHtml({
-                    firstName,
-                    intro: isUpdate
-                        ? `Your registration for <strong>${event.name}</strong> has been updated.`
-                        : `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
-                    event,
-                    tickets: ticketsToSend,
-                    changesHtml,
-                    customFieldsHtml,
-                }),
+                html,
+                attachments,
                 registrationId: ticketsToSend[0].registrationId
             });
             log('bulk-register', `[email] Email ${isUpdate ? 'updated' : 'sent'} → ${email}  name: ${fullName}  tickets: ${actualCount}  event: ${event.name}  regId: ${ticketsToSend[0].registrationId}`);
@@ -1901,6 +2407,9 @@ app.get('/api/events', requireAuth, (req, res) => {
             return link ? link.eventId : null;
         }).filter(Boolean)
     );
+    // Events reached via a scanner-link QR while signed in — same idea as a
+    // sheetAccess grant, just without any Google Sheets involvement.
+    for (const a of stmt.scannerAccess.byUserId.all(req.session.userId)) linkedEventIds.add(a.eventId);
     const userEvents = stmt.events.byUserId.all(req.session.userId).map(rowToEvent);
     const linkedEvents = [...linkedEventIds].map(id => rowToEvent(stmt.events.byId.get(id))).filter(Boolean);
     const seen = new Set(userEvents.map(e => e.id));
@@ -1995,6 +2504,16 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
         } else {
             imageUrl = `/uploads/${req.file.filename}`;
         }
+    } else if (req.body.removeImage === 'true') {
+        if (event.imageUrl && event.imageUrl.startsWith('/uploads/')) {
+            try {
+                const oldPath = path.join(uploadsDir, path.basename(event.imageUrl));
+                fs.unlinkSync(oldPath);
+            } catch (_) {
+                // best-effort — missing file shouldn't fail the request
+            }
+        }
+        imageUrl = null;
     }
 
     const allowReentry = req.body.allowReentry === 'true';
@@ -2049,20 +2568,7 @@ app.patch('/api/event/:id', requireAuth, async (req, res) => {
 });
 
 app.get('/api/event/:id/tickets', requireAuth, (req, res) => {
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-
-    let hasSheetAccess = false;
-    if (!isAdmin) {
-        const myAccess = stmt.sheetAccess.byUserId.all(req.session.userId);
-        hasSheetAccess = myAccess.some(a => {
-            const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
-            return link && link.eventId === req.params.id;
-        });
-    }
-
-    const event = rowToEvent(stmt.events.byId.get(req.params.id));
-    if (!event || (!isAdmin && event.userId !== req.session.userId && !hasSheetAccess)) {
+    if (!stmt.events.byId.get(req.params.id) || !userHasEventAccess(req.session.userId, req.params.id)) {
         return res.status(401).json({ error: 'Unauthorized or not found' });
     }
     const tickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
@@ -2082,6 +2588,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.tickets.deleteByEventId.run(req.params.id);
         stmt.pushSubscriptions.deleteByEventId.run(req.params.id);
         stmt.scannerLinks.deleteByEventId.run(req.params.id);
+        stmt.scannerAccess.deleteByEventId.run(req.params.id);
         stmt.events.deleteById.run(req.params.id);
     });
     deleteEvent();
@@ -2104,6 +2611,7 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
             stmt.tickets.deleteByEventId.run(eventId);
             stmt.pushSubscriptions.deleteByEventId.run(eventId);
             stmt.scannerLinks.deleteByEventId.run(eventId);
+            stmt.scannerAccess.deleteByEventId.run(eventId);
             stmt.events.deleteById.run(eventId);
         }
     });
@@ -2226,17 +2734,19 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
         const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
 
+        const { html, attachments } = await buildTicketEmailHtml({
+            firstName: newTickets[0].firstName,
+            intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+            event,
+            tickets: newTickets,
+        });
         await sendEmail({
             to: email,
             fromName: `Tickets - ${event.name}`,
             replyTo: eventOwner?.email,
             subject: `Your ${ticketLabel} for ${event.name}`,
-            html: await buildTicketEmailHtml({
-                firstName: newTickets[0].firstName,
-                intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
-                event,
-                tickets: newTickets,
-            }),
+            html,
+            attachments,
             registrationId
         }).catch(err => {
             log('ticket-create', `[ERR] Email send failed — email: ${email}  err: ${err.message}`);
@@ -2280,17 +2790,19 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
     if (!noEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
+        const { html, attachments } = await buildTicketEmailHtml({
+            firstName: updatedTickets[0].firstName,
+            intro: `Your registration details for <strong>${event.name}</strong> have been updated.`,
+            event,
+            tickets: updatedTickets,
+        });
         await sendEmail({
             to: email,
             fromName: `Tickets - ${event.name}`,
             replyTo: eventOwner?.email,
             subject: `Updated registration for ${event.name}`,
-            html: await buildTicketEmailHtml({
-                firstName: updatedTickets[0].firstName,
-                intro: `Your registration details for <strong>${event.name}</strong> have been updated.`,
-                event,
-                tickets: updatedTickets,
-            }),
+            html,
+            attachments,
             registrationId: updatedTickets[0].registrationId
         }).catch(err => {
             log('ticket-edit', `[ERR] Email send failed — email: ${email}  err: ${err.message}`);
@@ -2330,17 +2842,19 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
 
     const actualCount = groupTickets.length;
     const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
+    const { html, attachments } = await buildTicketEmailHtml({
+        firstName: groupTickets[0].firstName,
+        intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
+        event,
+        tickets: groupTickets,
+    });
     await sendEmail({
         to: ticket.email,
         fromName: `Tickets - ${event.name}`,
         replyTo: eventOwner?.email,
         subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
-        html: await buildTicketEmailHtml({
-            firstName: groupTickets[0].firstName,
-            intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
-            event,
-            tickets: groupTickets,
-        }),
+        html,
+        attachments,
         registrationId: ticket.registrationId
     }).then(() => {
         res.json({ success: true, count: actualCount });
@@ -2758,17 +3272,19 @@ app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
         const actualCount = groupTickets.length;
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
         try {
+            const { html, attachments } = await buildTicketEmailHtml({
+                firstName: ticket.firstName,
+                intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
+                event,
+                tickets: groupTickets,
+            });
             await sendEmail({
                 to: ticket.email,
                 fromName: `Tickets - ${event.name}`,
                 replyTo: eventOwner?.email,
                 subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
-                html: await buildTicketEmailHtml({
-                    firstName: ticket.firstName,
-                    intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
-                    event,
-                    tickets: groupTickets,
-                }),
+                html,
+                attachments,
                 registrationId: regId
             });
             sent++;
@@ -3107,15 +3623,22 @@ app.delete('/api/scanner-links/:id', requireAuth, (req, res) => {
     res.json({ success: true });
 });
 
-// PUBLIC: resolve a scan link to its event — no auth, this is the whole point.
-// Scanning itself (/api/validate, /api/checkout) already requires no session;
-// this endpoint's only job is telling a no-account device which event to lock to.
+// PUBLIC: resolve a scan link to its event — no auth required, this is the
+// whole point. Scanning itself (/api/validate, /api/checkout) already works
+// without a session; this endpoint's job is telling the device which event
+// to lock to. If the request DOES carry a valid session (the person opening
+// the link happens to be signed in), also grant that account standing
+// "scanner" access to the event, so it shows up in Your Events from now on
+// instead of only being locked in for this one device/session.
 app.get('/api/scanner-links/:token', (req, res) => {
     const link = stmt.scannerLinks.byToken.get(req.params.token);
     if (!link) return res.status(404).json({ error: 'Invalid or revoked scan link' });
     const event = rowToEvent(stmt.events.byId.get(link.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     stmt.scannerLinks.touchLastUsed.run(new Date().toISOString(), link.id);
+    if (req.session.userId && req.session.userId !== event.userId) {
+        stmt.scannerAccess.insert.run(nanoid(10), req.session.userId, event.id, new Date().toISOString());
+    }
     res.json({
         eventId: event.id,
         eventName: event.name,
@@ -3234,7 +3757,7 @@ async function pushWalletIfChanged(tickets, events) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 11;
+const PASS_TEMPLATE_VERSION = 13;
 function passContentHash(ticket, event) {
     const data = JSON.stringify({
         _v: PASS_TEMPLATE_VERSION,
@@ -3427,12 +3950,14 @@ async function generatePassBuffer(ticket, event) {
     if (event.imageUrl) {
         const imagePath = path.resolve(__dirname, 'public', event.imageUrl.replace(/^\/+/, ''));
         if (fs.existsSync(imagePath)) {
-            const [strip1x, strip2x] = await Promise.all([
-                sharp(imagePath).resize(320, 123, { fit: 'cover' }).png().toBuffer(),
-                sharp(imagePath).resize(640, 246, { fit: 'cover' }).png().toBuffer(),
+            const [thumb1x, thumb2x, thumb3x] = await Promise.all([
+                sharp(imagePath).resize(90, 90, { fit: 'cover' }).png().toBuffer(),
+                sharp(imagePath).resize(180, 180, { fit: 'cover' }).png().toBuffer(),
+                sharp(imagePath).resize(270, 270, { fit: 'cover' }).png().toBuffer(),
             ]);
-            pass.addBuffer('strip.png', strip1x);
-            pass.addBuffer('strip@2x.png', strip2x);
+            pass.addBuffer('thumbnail.png', thumb1x);
+            pass.addBuffer('thumbnail@2x.png', thumb2x);
+            pass.addBuffer('thumbnail@3x.png', thumb3x);
         }
     }
 
@@ -3884,6 +4409,27 @@ app.post('/api/sheet/share', requireAuth, async (req, res) => {
         stmt.sheetAccess.insert.run(nanoid(10), targetUser.id, link.id, new Date().toISOString(), permission);
     }
     logAudit(req, { eventId: event.id, action: 'access.granted', details: { email: targetUser.email, permission } });
+
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        const permissionLabel = permission === 'full' ? 'full' : 'view';
+        sendEmail({
+            to: targetUser.email,
+            fromName: `Tickets - ${event.name}`,
+            replyTo: user?.email,
+            subject: `${user?.email} shared access to ${event.name}`,
+            html: `
+                <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
+                    <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
+                    <h2 style="color:#1a1f3c;margin:0 0 8px;">You've been given access</h2>
+                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 12px;"><strong>${user?.email}</strong> shared <strong>${permissionLabel}</strong> access to <strong>${event.name}</strong> with you.</p>
+                    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">Log in to view it.</p>
+                    <div style="text-align:center;margin-bottom:8px;">
+                        <a href="${BASE_URL}/login.html" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Log In</a>
+                    </div>
+                </div>`,
+        }).catch(() => {});
+    }
+
     res.json({ success: true, message: 'Access granted' });
 });
 
