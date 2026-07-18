@@ -3,9 +3,17 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Dashboard | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
+    <!-- Installable as its own home-screen icon, separate from the scanner's
+         (manifest.json) — start_url differs, so the dashboard reopens into
+         itself instead of the scanner. Not linked from any other page. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="WTS Dashboard">
+    <link rel="manifest" href="/manifest-dashboard.json">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <style>
         * {
             box-sizing: border-box;
@@ -34,8 +42,12 @@
         /* ── Top bar ── */
         .topbar {
             background: #1a1f3c;
-            padding: 0 20px;
-            height: 56px;
+            /* min-height (not height) + safe-area-inset-top: as a standalone
+               PWA (no Safari chrome) this bar sits directly under the notch/
+               Dynamic Island, so it needs room to grow into that area rather
+               than clip its contents against a fixed height. */
+            padding: env(safe-area-inset-top, 0px) 20px 0;
+            min-height: 56px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -835,7 +847,7 @@
                 flex-wrap: wrap;
                 height: auto;
                 min-height: 56px;
-                padding: 10px 12px;
+                padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px;
                 row-gap: 8px;
             }
             .topbar-actions { flex-wrap: wrap; justify-content: flex-end; }
@@ -1499,7 +1511,7 @@
         .settings-save-bar {
             position: fixed;
             left: 50%;
-            bottom: 24px;
+            bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
             transform: translate(-50%, 100px);
             width: calc(100% - 40px);
             max-width: 640px;
@@ -1533,7 +1545,7 @@
             .settings-save-bar {
                 left: 12px;
                 right: 12px;
-                bottom: 12px;
+                bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
                 width: auto;
                 max-width: none;
                 transform: translateY(100px);
@@ -1547,7 +1559,7 @@
            self-dismissing, stackable, non-blocking. */
         #toastStack {
             position: fixed;
-            bottom: 20px;
+            bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
             right: 20px;
             z-index: 2000;
             display: flex;
@@ -1740,7 +1752,7 @@
         </div>
     </div>
 
-    <footer style="background:#10132a;border-top:1px solid rgba(255,255,255,0.06);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;">
+    <footer style="background:#10132a;border-top:1px solid rgba(255,255,255,0.06);padding:10px 20px calc(env(safe-area-inset-bottom, 0px) + 10px);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;">
         <img src="/logo-nav.svg" alt="WTS Tickets" style="height:20px;width:auto;opacity:0.7;">
         <span style="font-size:12px;color:rgba(255,255,255,0.28);">&copy; 2026 Will's Tech Support</span>
         <a href="/support.html" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;">Support</a>
