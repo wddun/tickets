@@ -24,6 +24,12 @@ struct ScannerView: View {
     @AppStorage("scanLinkJustEntered")     private var scanLinkJustEntered = false
     @State private var showScanLinkEnter = false
     @State private var showEventPicker = false
+    // Set when the event this scanner is locked to (lastSelectedEventData)
+    // turns out to be unreachable on the currently signed-in account — either
+    // no one is signed in, or the account has no access to that event (e.g.
+    // it switched accounts, or access was revoked). Blocks scanning until
+    // resolved via Switch Account or Switch Event.
+    @State private var eventAccessIssue: EventAccessIssue?
     // How long the full-screen scan result stays up — a per-device
     // preference, set from Settings > Scanner.
     @AppStorage("resultDisplayDuration")   private var resultDisplayDuration: Double = 1.2
@@ -83,9 +89,19 @@ struct ScannerView: View {
             scanLinkBanner
             // One-second full-screen "entering" animation, scan-link mode only
             scanLinkEnterOverlay
+            // Blocks scanning if the locked event isn't reachable on this account
+            if let issue = eventAccessIssue {
+                EventAccessIssueOverlay(
+                    issue: issue,
+                    onSwitchEvent: { showEventPicker = true },
+                    onSwitchAccount: switchAccount
+                )
+                .transition(.opacity)
+                .zIndex(150)
+            }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showNotifBanner)
-        .task { await api.checkAuth() }
+        .task { await verifyEventAccess() }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             startHeartbeat()
@@ -152,26 +168,21 @@ struct ScannerView: View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: 10) {
-                // Scan history — a real review log, not just the last scan.
-                // Tapping any card (not just the newest) opens its own detail.
-                if !recentScans.isEmpty {
+                // The last scan gets its full info shown directly (no tap
+                // needed) — name/email/event on one side, custom fields on
+                // the other if any exist. Older scans stay as compact cards
+                // you can tap into for the same detail.
+                if let last = recentScans.first {
+                    lastScanPanel(last)
+                }
+                if recentScans.count > 1 {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(Array(recentScans.enumerated()), id: \.offset) { _, scan in
+                            ForEach(Array(recentScans.dropFirst().enumerated()), id: \.offset) { _, scan in
                                 scanHistoryCard(scan)
                             }
                         }
                         .padding(.horizontal, 2)
-                    }
-                }
-                if !(currentEventInfo?.isLink ?? false) {
-                    Button(action: switchToManual) {
-                        Label("Manual Check-in", systemImage: "person.text.rectangle")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
-                            .background(.ultraThinMaterial, in: Capsule())
                     }
                 }
             }
@@ -181,12 +192,65 @@ struct ScannerView: View {
     }
 
     @ViewBuilder
+    private func lastScanPanel(_ scan: ScanResult) -> some View {
+        let isGreen = scan.status == .success || scan.status == .reentryEnter
+        let isBlue  = scan.status == .checkedOut
+        let accent: Color = isGreen ? .green : isBlue ? Color(red: 0.15, green: 0.39, blue: 0.92) : Color(red: 0.9, green: 0.5, blue: 0.1)
+        let fields = (scan.customFields ?? [:]).filter { !$0.value.isEmpty }
+        let fieldLine = fields.sorted(by: { $0.key < $1.key })
+            .map { "\($0.key): \($0.value)" }
+            .joined(separator: " · ")
+
+        // Single stacked column, same shape as a check-in with no custom
+        // fields. No event name — status title, name, email, then the
+        // custom field (if any) as its own line.
+        Button(action: { selectedScan = scan; showingDetail = true }) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Image(systemName: isGreen ? "checkmark.circle.fill" : isBlue ? "arrow.uturn.left.circle.fill" : "exclamationmark.circle.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(accent)
+                    Text(scan.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+                Text(scan.firstName ?? scan.name)
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let email = scan.email, !email.isEmpty {
+                    Text(email)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                }
+                if !fieldLine.isEmpty {
+                    Text(fieldLine)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
     private func scanHistoryCard(_ scan: ScanResult) -> some View {
         let isGreen = scan.status == .success || scan.status == .reentryEnter
         let isBlue  = scan.status == .checkedOut
         let accent: Color = isGreen ? .green : isBlue ? Color(red: 0.15, green: 0.39, blue: 0.92) : Color(red: 0.9, green: 0.5, blue: 0.1)
-        let summary = (scan.customFields?.values.filter { !$0.isEmpty } ?? []).joined(separator: " · ")
+        let fieldLine = (scan.customFields ?? [:]).filter { !$0.value.isEmpty }
+            .sorted(by: { $0.key < $1.key })
+            .map { "\($0.key): \($0.value)" }
+            .joined(separator: " · ")
 
+        // Older scans in the strip: just the name, plus the custom field
+        // if there is one — no "Checked In!"/"Checked Back In!" status text.
         Button(action: { selectedScan = scan; showingDetail = true }) {
             HStack(spacing: 10) {
                 Image(systemName: isGreen ? "checkmark.circle.fill" : isBlue ? "arrow.uturn.left.circle.fill" : "exclamationmark.circle.fill")
@@ -197,10 +261,12 @@ struct ScannerView: View {
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                    Text(summary.isEmpty ? scan.title : "\(scan.title) · \(summary)")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineLimit(1)
+                    if !fieldLine.isEmpty {
+                        Text(fieldLine)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(1)
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -221,6 +287,9 @@ struct ScannerView: View {
 
         // Don't interrupt a pending checkout confirmation
         if scanResult != nil { return }
+
+        // Locked event isn't reachable on this account — resolve that first
+        if eventAccessIssue != nil { return }
 
         // 5-second same-token debounce — prevents accidental double-scan
         let now = Date()
@@ -348,7 +417,8 @@ struct ScannerView: View {
                     title: "Checked Out",
                     name: captured?.name ?? "Guest",
                     firstName: captured?.firstName,
-                    eventName: captured?.eventName
+                    eventName: captured?.eventName,
+                    customFields: captured?.customFields
                 )
                 dismissExitOverlay()
                 showBanner(checkoutResult)
@@ -421,6 +491,32 @@ struct ScannerView: View {
         return selectedOwnEvent?.id
     }
 
+    // A scan-link lock never needs an account, so it's exempt from this
+    // check entirely — only an own-account event selection can go stale
+    // (signed out, or switched to an account without access to it).
+    private func verifyEventAccess() async {
+        guard scanLinkEvent == nil, let event = selectedOwnEvent else {
+            eventAccessIssue = nil
+            return
+        }
+        await api.checkAuth()
+        guard api.isAuthenticated else {
+            eventAccessIssue = .notSignedIn(eventName: event.name)
+            return
+        }
+        let events = (try? await api.getEvents()) ?? []
+        eventAccessIssue = events.contains(where: { $0.id == event.id })
+            ? nil
+            : .noAccess(eventName: event.name)
+    }
+
+    private func switchAccount() {
+        Task {
+            try? await api.logout()
+            switchToManual()
+        }
+    }
+
     // Recognizes only an actual scan-link URL (/scan/TOKEN or ?scanToken=) —
     // never falls back to treating arbitrary scanned text as a token, so a
     // normal ticket QR is never misread as a scan link.
@@ -441,6 +537,7 @@ struct ScannerView: View {
     private func switchToOwnEvent(_ event: Event) {
         scanLinkEventData = Data() // leaving link mode, if any
         lastSelectedEventData = (try? JSONEncoder().encode(event)) ?? Data()
+        eventAccessIssue = nil // picked from this account's own event list — known-good
         showEnteringAnimation()
     }
 
@@ -453,12 +550,12 @@ struct ScannerView: View {
     }
 
     private func exitScanLinkMode() {
+        // Used to force-navigate to Manual Check-In here when there was no
+        // own-event fallback, since a bare scanner with nothing selected and
+        // no pill was a dead end. scanLinkBanner now always renders a
+        // "Select Event" pill in that case, so staying put and letting it
+        // appear is enough — no redirect needed.
         scanLinkEventData = Data()
-        if selectedOwnEvent == nil {
-            // No account event to fall back to — don't leave the camera
-            // scanning with nothing selected; go back to Events/Sign In.
-            switchToManual()
-        }
     }
 
     private func colorFromHex(_ hex: String?) -> Color? {
@@ -503,27 +600,19 @@ struct ScannerView: View {
 
     // Persistent pill naming whichever event this scanner is locked to — a
     // scan link gets an X to exit; a signed-in user's own event gets a
-    // switch affordance instead (full-screen picker, matching web).
+    // switch affordance instead (full-screen picker, matching web). When
+    // nothing is locked at all (fresh install, signed out of a stale
+    // selection, or just tapped the X above with no own-event fallback),
+    // this is the *only* way back in — Manual Check-In's empty state points
+    // here, and the old event-browsing list doesn't exist anymore — so it
+    // has to render unconditionally rather than only when there's already
+    // something to show, or there'd be no way to ever pick a first event.
     @ViewBuilder private var scanLinkBanner: some View {
-        if let info = currentEventInfo, !showScanLinkEnter {
+        if !showScanLinkEnter {
             VStack {
                 Group {
-                    if info.isLink {
-                        HStack(spacing: 8) {
-                            Circle().fill(colorFromHex(info.color) ?? Color.accentColor).frame(width: 8, height: 8)
-                            Text(info.name)
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                            Button(action: exitScanLinkMode) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.6))
-                            }
-                        }
-                    } else {
-                        Button(action: { showEventPicker = true }) {
+                    if let info = currentEventInfo {
+                        if info.isLink {
                             HStack(spacing: 8) {
                                 Circle().fill(colorFromHex(info.color) ?? Color.accentColor).frame(width: 8, height: 8)
                                 Text(info.name)
@@ -531,7 +620,39 @@ struct ScannerView: View {
                                     .foregroundStyle(.white)
                                     .lineLimit(1)
                                 Spacer(minLength: 0)
-                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Button(action: exitScanLinkMode) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.6))
+                                }
+                            }
+                        } else {
+                            Button(action: { showEventPicker = true }) {
+                                HStack(spacing: 8) {
+                                    Circle().fill(colorFromHex(info.color) ?? Color.accentColor).frame(width: 8, height: 8)
+                                    Text(info.name)
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.6))
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } else {
+                        Button(action: { showEventPicker = true }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "qrcode.viewfinder")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white)
+                                Text("Select Event")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundStyle(.white.opacity(0.6))
                             }
@@ -681,6 +802,7 @@ struct EventPickerSheet: View {
                                     Text(event.name)
                                         .foregroundStyle(.primary)
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
@@ -841,10 +963,10 @@ struct ScanResult: Equatable {
     let usedAt: String?
     let registrationId: String?
 
-    init(status: Status, title: String, name: String = "", firstName: String? = nil, email: String? = nil, eventName: String? = nil) {
+    init(status: Status, title: String, name: String = "", firstName: String? = nil, email: String? = nil, eventName: String? = nil, customFields: [String: String]? = nil) {
         self.status = status; self.title = title; self.name = name
         self.firstName = firstName; self.email = email; self.eventName = eventName
-        self.customFields = nil; self.usedAt = nil; self.registrationId = nil
+        self.customFields = customFields; self.usedAt = nil; self.registrationId = nil
     }
 
     init(from response: ValidateResponse, status: Status, title: String) {
@@ -857,6 +979,92 @@ struct ScanResult: Equatable {
         self.customFields = response.customFields
         self.usedAt = response.used_at
         self.registrationId = response.registrationId
+    }
+}
+
+enum EventAccessIssue: Equatable {
+    case notSignedIn(eventName: String)
+    case noAccess(eventName: String)
+
+    var eventName: String {
+        switch self {
+        case .notSignedIn(let name), .noAccess(let name): return name
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .notSignedIn: return "Not Signed In"
+        case .noAccess: return "No Access to This Event"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .notSignedIn:
+            return "You're not signed in, but this scanner is set to \"\(eventName)\". Sign in to keep scanning for it, or switch to a different event."
+        case .noAccess:
+            return "This account doesn't have access to \"\(eventName)\". Switch accounts, or pick a different event."
+        }
+    }
+
+    var primaryButtonLabel: String {
+        switch self {
+        case .notSignedIn: return "Sign In"
+        case .noAccess: return "Switch Account"
+        }
+    }
+}
+
+struct EventAccessIssueOverlay: View {
+    let issue: EventAccessIssue
+    var onSwitchEvent: () -> Void
+    var onSwitchAccount: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.92).ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                Image(systemName: "exclamationmark.shield.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.orange)
+                    .padding(.bottom, 4)
+
+                Text(issue.title)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+
+                Text(issue.message)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 12)
+
+                VStack(spacing: 10) {
+                    Button(action: onSwitchAccount) {
+                        Text(issue.primaryButtonLabel)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                            .background(Color(red: 0.77, green: 0.16, blue: 0.29), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    Button(action: onSwitchEvent) {
+                        Text("Switch Event")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+                .padding(.top, 8)
+            }
+            .padding(28)
+            .frame(maxWidth: 340)
+        }
     }
 }
 
@@ -897,22 +1105,24 @@ struct ScanFlashOverlay: View {
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.8))
 
-                // Custom fields (e.g. T-Shirt Size) — same row style as
-                // ScanResultOverlay/TicketDetailSheet for a consistent look.
+                // Custom fields (e.g. T-Shirt Size) — a plain stacked list,
+                // same width as everything else here. Never side-by-side
+                // with anything, so it can't balloon into a two-column
+                // layout on events with several fields.
                 if let fields = result.customFields, !fields.isEmpty {
                     VStack(spacing: 8) {
                         ForEach(fields.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
                             HStack {
                                 Text(key)
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(.white.opacity(0.7))
                                 Spacer()
                                 Text(value)
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.system(size: 15, weight: .medium))
                                     .foregroundStyle(.white)
                             }
                             .padding(.horizontal, 20)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 8)
                             .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
