@@ -13,6 +13,14 @@
             padding: 0;
         }
 
+        /* iOS Safari auto-zooms the page on focus for any text field whose
+           computed font-size is under 16px — !important is required to beat
+           the many inline style="font-size:1{2,3,4}px" attributes on inputs/
+           selects/textareas throughout this file. */
+        input, select, textarea {
+            font-size: 16px !important;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             background: #f4f5f7;
@@ -89,6 +97,7 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            min-height: 0;
         }
 
         .sidebar-header {
@@ -340,6 +349,8 @@
             font-weight: 800;
             letter-spacing: -0.5px;
             margin-bottom: 6px;
+            word-break: break-word;
+            overflow-wrap: break-word;
         }
 
         .detail-meta {
@@ -712,7 +723,22 @@
 
         /* ── Responsive ── */
         @media (max-width: 700px) {
-            body { overflow: auto; }
+            /* body was locked to height:100vh (a hard cap, not a floor) with
+               overflow:auto — its flex-shrink:0 children (topbar, footer)
+               stayed pinned to the top/bottom of that fixed-height box while
+               only the middle content scrolled *inside* it, which looks
+               identical to position:fixed even though nothing was. Letting
+               body grow with its content and scroll as part of the normal
+               document (min-height keeps short pages filling the screen)
+               is what actually makes every child scroll together as one. */
+            body { height: auto; min-height: 100vh; overflow: visible; -webkit-overflow-scrolling: touch; }
+
+            /* New Event modal: two datetime-local inputs side by side in a
+               1fr/1fr grid don't leave enough room for their native
+               mm/dd/yyyy,--:-- picker text once inputs are forced to the
+               16px iOS won't auto-zoom on — "End Time" and its field were
+               getting clipped at the modal edge. Stack them instead. */
+            .dt-grid { grid-template-columns: 1fr !important; }
 
             .layout {
                 flex-direction: column;
@@ -721,26 +747,124 @@
             }
 
             .sidebar-header { padding: 20px 16px 4px; }
-            .event-list { padding: 12px 16px 24px; grid-template-columns: 1fr; }
-            .main { padding: 16px; }
+            /* On mobile the whole page scrolls (see `.layout`/`body` above) —
+               the sidebar and event list no longer form their own internal
+               scroll region (that pattern requires a definite height from a
+               100vh-constrained ancestor, which mobile intentionally drops).
+               Without this, `.event-list` keeps flex:1 + overflow-y:auto from
+               the desktop rules, and a flex/grid item that's also a scroll
+               container gets an automatic minimum size of 0 — so instead of
+               growing to fit its cards, it gets squashed into whatever space
+               is left and clips them, with no scrollbar able to reach the rest. */
+            .sidebar { overflow: visible; }
+            .event-list { flex: none; overflow-y: visible; padding: 12px 16px 24px; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            /* Same fix as .sidebar/.event-list above: .main is still forced to
+               a fixed height by flex:1 (its own `height:auto` doesn't override
+               flex-basis:0), so its own overflow-y:auto made it (not the page)
+               the scroll container — a short internal scrollbar bound to the
+               panel's box instead of the whole page, and the kind of nested
+               scroll-plus-position:sticky combination iOS Safari handles badly.
+               Letting it overflow into the page's own scroll keeps one single,
+               consistent scroll context (and one native scrollbar) everywhere. */
+            .main { flex: none; overflow-y: visible; padding: 16px; }
+
+            /* Compact, closer-to-square event cards on mobile: shrink the
+               media banner and drop the location line (name/date/status stay
+               legible) so a 2-up grid doesn't feel cramped. */
+            .event-card-media { height: 56px; }
+            .event-card-row { padding: 10px 12px; gap: 8px; }
+            .event-card-name { font-size: 13px; margin-bottom: 3px; }
+            .event-card-meta { font-size: 12px; }
+            .event-card-location { display: none; }
+            .event-card-badge { font-size: 10px; padding: 2px 7px; margin-top: 6px; }
 
             .stats-row {
                 grid-template-columns: 1fr 1fr;
             }
 
-            .attendee-row {
+            .attendee-row.header-row {
                 grid-template-columns: 32px 1fr auto auto;
             }
 
             .attendee-row .ticket-count,
             .attendee-row.header-row .col-tickets,
-            .attendee-row .attendee-email {
+            .attendee-row .col-email {
                 display: none;
             }
+
+            /* Attendee rows: the desktop 6-column grid (checkbox/name/email/
+               tickets/status/buttons) squeezed into 4 columns still let a
+               long name's wrapped height stretch the whole grid row, so the
+               status pill and Check In/Edit buttons ended up stranded
+               mid-row instead of sitting with the content they belong to.
+               Below the row switches to two stacked flex lines instead —
+               name+pill on top, actions full-width underneath — so row
+               height always matches its own content and stays scannable
+               and tappable at a glance. */
+            .attendee-row:not(.header-row) {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: flex-start;
+                gap: 6px 10px;
+                padding: 12px 14px;
+            }
+            .attendee-row:not(.header-row) > input.ticket-checkbox { margin-top: 3px; flex-shrink: 0; }
+            .attendee-row:not(.header-row) > div:nth-child(2) { flex: 1; min-width: 0; }
+            .attendee-row:not(.header-row) > div:nth-child(5) { flex-shrink: 0; }
+            .attendee-row:not(.header-row) > div:last-child {
+                flex-basis: 100%;
+                display: flex;
+                justify-content: flex-end;
+            }
+            .attendee-row:not(.header-row) .btn-sm { min-height: 34px; padding: 6px 12px; }
 
             /* Hide less important topbar items on mobile */
             .topbar-hide-mobile { display: none !important; }
             .topbar-logo img    { height: 20px; }
+
+            /* Topbar: let actions wrap instead of overflowing/crushing on
+               narrow phones (same flex-wrap pattern as .sidebar-header).
+               position:static overrides the desktop rule's sticky/top:0 —
+               once body is the scroll container here (see .layout/.main
+               above), a sticky topbar hits the same iOS Safari bug those
+               fight: it detaches from the true top during momentum
+               scrolling and floats stuck mid-page instead of tracking the
+               viewport or scrolling away with the rest of the content. */
+            .topbar {
+                position: static;
+                flex-wrap: wrap;
+                height: auto;
+                min-height: 56px;
+                padding: 10px 12px;
+                row-gap: 8px;
+            }
+            .topbar-actions { flex-wrap: wrap; justify-content: flex-end; }
+            .topbar-btn { padding: 9px 12px; min-height: 40px; }
+
+            /* Event detail header: the fixed 90px image + 26px title left
+               almost no room for a long event name on a 375-430px phone.
+               Shrink the image and title, and let the title wrap. */
+            .detail-header { flex-direction: column; gap: 10px; }
+            .detail-image,
+            .detail-image-placeholder {
+                width: 60px;
+                height: 60px;
+                border-radius: 10px;
+            }
+            .detail-title { font-size: 19px; }
+
+            /* Ticket picker sheet: don't hard-clip long event/ticket names
+               on phones — wrap onto up to 2 lines instead. */
+            .ticket-picker-name,
+            .ticket-picker-id {
+                white-space: normal;
+                word-break: break-word;
+                overflow-wrap: break-word;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
         }
 
         /* ── Settings modal ── */
@@ -976,7 +1100,7 @@
         .settings-hint {
             font-size: 12px;
             color: #888;
-            margin-bottom: 14px;
+            margin-bottom: 18px;
             line-height: 1.5;
         }
 
@@ -1115,7 +1239,7 @@
         }
         .metrics-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #6366f1, #818cf8);
+            background: linear-gradient(90deg, #475569, #64748b);
             border-radius: 6px;
             transition: width 0.4s ease;
         }
@@ -1183,7 +1307,7 @@
         }
         .admin-mini-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #6366f1, #818cf8);
+            background: linear-gradient(90deg, #475569, #64748b);
             border-radius: 4px;
         }
 
@@ -1304,12 +1428,13 @@
             background: #fff;
             border: 1px solid #eee;
             border-radius: 14px;
-            padding: 24px 28px;
+            padding: 32px 36px;
+            box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
         }
         .settings-section {
             scroll-margin-top: 20px;
-            padding-bottom: 28px;
-            margin-bottom: 28px;
+            padding-bottom: 32px;
+            margin-bottom: 32px;
             border-bottom: 1px solid #f0f0f0;
         }
         .settings-section:last-child {
@@ -1317,20 +1442,37 @@
             margin-bottom: 0;
             border-bottom: none;
         }
-        @media (max-width: 800px) {
+        /* Sub-group divider used to separate distinct concerns within a single
+           settings tab (e.g. "Public Registration" vs "At-Door Sales") without
+           implying they're separate top-level sections. */
+        .settings-divider {
+            height: 1px;
+            background: #f0f0f0;
+            border: none;
+            margin: 24px 0;
+        }
+        .settings-subhead {
+            font-size: 13px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 12px;
+        }
+        @media (max-width: 700px) {
             .settings-layout { flex-direction: column; }
             .settings-nav {
                 width: 100%;
                 flex-direction: row;
-                flex-wrap: nowrap;
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-                position: static;
+                flex-wrap: wrap;
+                position: sticky;
+                top: 0; /* was 56px to sit below the old fixed/sticky topbar — that topbar
+                           is position:static now (see its mobile rule above), so it scrolls
+                           away instead of reserving that space, and top:0 is what actually
+                           pins this flush against the viewport instead of leaving a gap. */
                 gap: 6px;
                 padding-bottom: 6px;
-                scrollbar-width: none;
+                background: #f4f5f7;
+                z-index: 10;
             }
-            .settings-nav::-webkit-scrollbar { display: none; }
             .settings-nav-item {
                 flex: 0 0 auto;
                 white-space: nowrap;
@@ -1338,6 +1480,66 @@
             }
             .settings-nav-item.active { background: #1a1f3c; color: #fff; }
             .settings-panel { max-width: none; width: 100%; padding: 18px 18px; }
+
+            /* Touch targets: bump small/secondary buttons up to a more
+               comfortable tap size on the settings panel and event detail
+               header, without changing desktop sizing. */
+            .settings-nav-item { padding: 11px 12px; min-height: 40px; }
+            .btn { min-height: 40px; }
+            .btn-sm { min-height: 36px; padding: 8px 12px; font-size: 13px; }
+            .revoke-btn { min-height: 36px; padding: 8px 12px; }
+            .detail-actions .btn,
+            .detail-actions .btn-settings { min-height: 44px; }
+            .tap-target-sm,
+            #settingsSaveBarDiscardBtn,
+            #settingsSaveBarSaveBtn { min-height: 44px; }
+        }
+
+        /* ── Settings: floating unsaved-changes bar ── */
+        .settings-save-bar {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            transform: translate(-50%, 100px);
+            width: calc(100% - 40px);
+            max-width: 640px;
+            background: #1a1f3c;
+            color: #fff;
+            border-radius: 12px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+            z-index: 60;
+            opacity: 0;
+            pointer-events: none;
+            transition: transform 0.2s ease, opacity 0.2s ease;
+        }
+        .settings-save-bar.visible {
+            transform: translate(-50%, 0);
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .settings-save-bar-text { font-size: 13px; font-weight: 600; }
+        .settings-save-bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+        .settings-save-bar .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        @media (max-width: 700px) {
+            .settings-save-bar {
+                left: 12px;
+                right: 12px;
+                bottom: 12px;
+                width: auto;
+                max-width: none;
+                transform: translateY(100px);
+                flex-wrap: wrap;
+            }
+            .settings-save-bar.visible { transform: translateY(0); }
         }
 
         /* ── Toast notifications ── */
@@ -1471,14 +1673,14 @@
                         Admin Overview
                     </button>
                     <div class="dropdown-divider" id="adminDivider" style="display:none;"></div>
+                    <button class="dropdown-item" onclick="openAccountSettingsModal();closeAllDropdowns()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        Account Settings
+                    </button>
+                    <div class="dropdown-divider"></div>
                     <button class="dropdown-item" onclick="logout()">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                         Sign Out
-                    </button>
-                    <div class="dropdown-divider"></div>
-                    <button class="dropdown-item danger" onclick="confirmDeleteAccount()">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-                        Delete Account
                     </button>
                 </div>
             </div>
@@ -1531,9 +1733,9 @@
             style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px;border-bottom:1px solid #1e293b;">
             <span style="color:#94a3b8;font-size:12px;font-weight:600;letter-spacing:.5px;">SERVER LOGS</span>
             <button id="adminLogsToggle" onclick="toggleLogsPanel()"
-                style="background:none;border:none;color:#64748b;cursor:pointer;font-size:13px;padding:2px 6px;">▼</button>
+                style="background:none;border:none;color:#64748b;cursor:pointer;font-size:13px;padding:2px 6px;">▲</button>
         </div>
-        <div id="adminLogsBody" style="height:180px;overflow-y:auto;padding:8px 14px;">
+        <div id="adminLogsBody" style="display:none;height:180px;overflow-y:auto;padding:8px 14px;">
             <div id="adminLogsContent" style="font-family:monospace;"></div>
         </div>
     </div>
@@ -1544,6 +1746,60 @@
         <a href="/support.html" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;">Support</a>
     </footer>
 
+
+    <!-- Account Settings Modal -->
+    <div class="modal-overlay" id="accountSettingsModal" style="display:none;z-index:200;"
+        onclick="if(event.target===this)closeAccountSettingsModal()">
+        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+                <h2>Account Settings</h2>
+                <button class="modal-close" onclick="closeAccountSettingsModal()">&times;</button>
+            </div>
+
+            <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #f0f0f0;">
+                <div class="modal-section-title">Account</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:13px;">
+                    <span style="color:#888;">Email</span>
+                    <span id="acctSettingsEmail" style="font-weight:600;color:#1a1a2e;">—</span>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:13px;">
+                    <span style="color:#888;">Member since</span>
+                    <span id="acctSettingsCreated" style="font-weight:600;color:#1a1a2e;">—</span>
+                </div>
+            </div>
+
+            <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #f0f0f0;">
+                <div class="modal-section-title">Change Password</div>
+                <div style="margin-bottom:10px;">
+                    <input type="password" id="acctCurrentPassword" placeholder="Current password" autocomplete="current-password"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                </div>
+                <div style="margin-bottom:10px;">
+                    <input type="password" id="acctNewPassword" placeholder="New password" autocomplete="new-password"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                </div>
+                <div style="margin-bottom:10px;">
+                    <input type="password" id="acctConfirmPassword" placeholder="Confirm new password" autocomplete="new-password"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                </div>
+                <div id="acctPasswordMsg" style="font-size:12px;margin-bottom:10px;min-height:14px;"></div>
+                <button class="btn btn-primary" id="acctChangePasswordBtn" style="width:100%;" onclick="changeAccountPassword()">Update Password</button>
+            </div>
+
+            <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #f0f0f0;">
+                <div class="modal-section-title">Two-Factor Authentication</div>
+                <div id="twoFactorModalBody" style="min-height:80px;">
+                    <div style="text-align:center;padding:32px;color:#bbb;">Loading…</div>
+                </div>
+            </div>
+
+            <div>
+                <div class="modal-section-title" style="color:#dc2626;">Danger Zone</div>
+                <div style="font-size:12px;color:#888;margin-bottom:10px;">Permanently delete your account, all your events, and all tickets. This cannot be undone.</div>
+                <button class="btn btn-danger" style="width:100%;" onclick="confirmDeleteAccount()">Delete Account</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Metrics Modal -->
     <div class="modal-overlay" id="metricsModal" style="display:none;z-index:200;"
@@ -1573,7 +1829,7 @@
                     style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;"
                     onkeydown="if(event.key==='Enter')document.getElementById('newEventTime').focus()">
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+            <div class="dt-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
                 <div class="form-group">
                     <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date & Time <span style="color:#c4294a">*</span></label>
                     <input type="datetime-local" id="newEventTime"
@@ -1757,6 +2013,156 @@
             });
         }
 
+        // ── Settings: unsaved-changes tracking + floating save bar ──────────────
+        // Each settings tab used to save its own fields independently (some via
+        // an explicit "Save" button, some by firing a fetch() the instant a
+        // toggle changed). This coordinates them: edits are tracked per-tab as
+        // "dirty" and a single floating bar lets the user Save everything (or
+        // Discard) at once. Tabs opt in by wrapping their field markup in a
+        // `.dirty-scope` element carrying `data-tab="tab-id"` — see
+        // renderGeneralSection/renderSettingsCustomFields/renderRegistrationSection/
+        // renderWaitlistSection/loadReminderSection. Access & Sharing, Discounts,
+        // and Payments are left out of this — their controls (Share, Revoke,
+        // Add Code, Refund, Promote…) are one-shot actions that already take
+        // effect immediately when clicked, not form fields meant to be batched.
+        let settingsDirtyTabs = new Set();
+        let settingsCurrentEventId = null;
+
+        // Tab id -> function that persists that tab's current field values,
+        // reusing the exact same save calls each tab already had.
+        const settingsSaveActions = {
+            'tab-general': (id) => submitEditEvent(id),
+            'tab-fields': (id) => saveEventCustomFields(id),
+            'tab-registration': async (id) => {
+                const pub = document.getElementById('publicRegToggle');
+                const atDoor = document.getElementById('atDoorToggle');
+                if (pub) await setPublicRegistration(id, pub.checked);
+                if (atDoor) await setAtDoorEnabled(id, atDoor.checked);
+            },
+            'tab-waitlist': async (id) => {
+                const wl = document.getElementById('waitlistToggle');
+                if (wl) await setWaitlistEnabled(id, wl.checked);
+            },
+            'tab-notifications': async (id) => {
+                if (document.getElementById('reminderEnabled')) await saveReminder(id);
+            },
+        };
+
+        function onSettingsFieldChange(e) {
+            const scope = e.target.closest('.dirty-scope');
+            if (!scope) return;
+            const tabId = scope.dataset.tab;
+            if (tabId) markSettingsDirty(tabId);
+        }
+
+        function markSettingsDirty(tabId) {
+            settingsDirtyTabs.add(tabId);
+            const bar = document.getElementById('settingsSaveBar');
+            if (bar) bar.classList.add('visible');
+        }
+
+        function clearSettingsDirty(tabId) {
+            settingsDirtyTabs.delete(tabId);
+            if (settingsDirtyTabs.size === 0) hideSettingsSaveBar();
+        }
+
+        function hideSettingsSaveBar() {
+            const bar = document.getElementById('settingsSaveBar');
+            if (bar) bar.classList.remove('visible');
+        }
+
+        function hasUnsavedSettingsChanges() {
+            return settingsDirtyTabs.size > 0;
+        }
+
+        async function saveAllSettings() {
+            const id = settingsCurrentEventId;
+            if (!id || settingsDirtyTabs.size === 0) return;
+            const saveBtn = document.getElementById('settingsSaveBarSaveBtn');
+            const discardBtn = document.getElementById('settingsSaveBarDiscardBtn');
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+            if (discardBtn) discardBtn.disabled = true;
+            try {
+                for (const tabId of [...settingsDirtyTabs]) {
+                    const action = settingsSaveActions[tabId];
+                    if (action) await action(id);
+                }
+                settingsDirtyTabs.clear();
+                hideSettingsSaveBar();
+                showToast('All changes saved.');
+            } catch (err) {
+                showToast('Some changes failed to save.');
+            } finally {
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+                if (discardBtn) discardBtn.disabled = false;
+            }
+        }
+
+        async function handleDiscardAllSettings() {
+            if (!await confirmDialog('Discard all unsaved changes in settings?', { confirmText: 'Discard' })) return;
+            settingsDirtyTabs.clear();
+            hideSettingsSaveBar();
+            if (settingsCurrentEventId) await loadAccessData(settingsCurrentEventId);
+        }
+
+        // 3-way variant of confirmDialog (Save / Discard / Cancel) for
+        // intercepted navigation, reusing the same modal-overlay/modal visuals.
+        function confirmUnsavedChangesDialog() {
+            return new Promise(resolve => {
+                const overlay = document.createElement('div');
+                overlay.className = 'modal-overlay';
+                overlay.style.zIndex = '1500';
+                overlay.innerHTML = `
+                    <div class="modal" style="max-width:420px;">
+                        <div class="modal-header"><h2>Unsaved changes</h2></div>
+                        <div style="font-size:14px;color:#444;line-height:1.5;margin-bottom:22px;">You have unsaved changes in event settings. Save them before leaving?</div>
+                        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+                            <button class="btn btn-secondary" id="unsavedCancelBtn">Cancel</button>
+                            <button class="btn btn-danger" id="unsavedDiscardBtn">Discard</button>
+                            <button class="btn btn-primary" id="unsavedSaveBtn">Save</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+
+                const finish = (result) => {
+                    document.removeEventListener('keydown', onKeydown);
+                    overlay.remove();
+                    resolve(result);
+                };
+                const onKeydown = (e) => { if (e.key === 'Escape') finish('cancel'); };
+                document.addEventListener('keydown', onKeydown);
+                overlay.addEventListener('click', (e) => { if (e.target === overlay) finish('cancel'); });
+                overlay.querySelector('#unsavedCancelBtn').onclick = () => finish('cancel');
+                overlay.querySelector('#unsavedDiscardBtn').onclick = () => finish('discard');
+                overlay.querySelector('#unsavedSaveBtn').onclick = () => finish('save');
+            });
+        }
+
+        // Called before any in-app navigation away from the settings view
+        // (back to event overview, back to the event list, or selecting a
+        // different event). Returns true if it's OK to proceed.
+        async function guardSettingsNavigation() {
+            if (!hasUnsavedSettingsChanges()) return true;
+            const choice = await confirmUnsavedChangesDialog();
+            if (choice === 'cancel') return false;
+            if (choice === 'save') {
+                await saveAllSettings();
+                return true;
+            }
+            // discard
+            settingsDirtyTabs.clear();
+            hideSettingsSaveBar();
+            return true;
+        }
+
+        window.addEventListener('beforeunload', (e) => {
+            if (hasUnsavedSettingsChanges()) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+
         function setUrlState(params) {
             const url = new URL(location.href);
             url.search = '';
@@ -1781,6 +2187,8 @@
             ['metricsModal', 'closeMetricsModal'],
             ['newEventModal', 'closeNewEventModal'],
             ['editTicketModal', 'closeEditTicketModal'],
+            ['accountSettingsModal', 'closeAccountSettingsModal'],
+            ['imageCropModal', 'closeImageCropModal'],
         ];
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape') return;
@@ -2000,7 +2408,7 @@
                 <div class="event-card-body">
                     <div class="event-card-name">${esc(e.name)}</div>
                     <div class="event-card-meta">${fmtDateRange(e.time, e.endTime)}</div>
-                    <div class="event-card-meta">${esc(e.location?.name || '')}</div>
+                    <div class="event-card-meta event-card-location">${esc(e.location?.name || '')}</div>
                     ${total > 0 ? `<span class="event-card-badge${allDone ? ' all-clear' : ''}">${scanned}/${total} checked in</span>` : ''}
                 </div>
             </div>
@@ -2067,6 +2475,7 @@
         }
 
         async function selectEvent(id) {
+            if (!(await guardSettingsNavigation())) return;
             selectedId = id;
             setUrlState({ event: id });
             checkedRegIds.clear();
@@ -2087,7 +2496,8 @@
             refreshTimer = setInterval(() => fetchAndRender(event, true), 15000);
         }
 
-        function backToEventList() {
+        async function backToEventList() {
+            if (!(await guardSettingsNavigation())) return;
             document.body.classList.remove('event-selected');
             selectedId = null;
             setUrlState({});
@@ -2266,7 +2676,7 @@
         <div class="attendee-row header-row">
             <input type="checkbox" class="ticket-checkbox" id="selectAllTickets" onchange="toggleAllTickets(this.checked, ${JSON.stringify(filtered.map(g => g.registrationId)).replace(/"/g, '&quot;')})">
             <div><button class="sort-btn${nameActive ? ' sort-active' : ''}" onclick="cycleNameSort()">${nameSortLabel()}</button></div>
-            <div>Email</div>
+            <div class="col-email">Email</div>
             <div class="col-tickets"><button class="sort-btn${ticketsActive ? ' sort-active' : ''}" onclick="cycleTicketsSort()">${ticketSortLabel()}</button></div>
             <div>Status</div>
             <div></div>
@@ -2316,10 +2726,10 @@
                 <div class="attendee-name">${esc(g.name)}</div>
                 <div style="display:flex;gap:4px;margin-top:3px;">
                     ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : `<span title="Email not opened" style="font-size:10px;font-weight:600;color:#9ca3af;">Sent</span>`}
-                    ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:#6366f1;">Downloaded to Wallet</span>` : ''}
+                    ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:#475569;">Downloaded to Wallet</span>` : ''}
                 </div>
             </div>
-            <div>
+            <div class="col-email">
                 <div class="attendee-email">${esc(g.email || '')}</div>
             </div>
             <div class="ticket-count">${total} ticket${total !== 1 ? 's' : ''}</div>
@@ -2573,9 +2983,234 @@
             return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
         }
 
+        // ── Event image cropping (plain <canvas>, no library — see CLAUDE.md) ───
+        // Picking a file via #editEventImage no longer feeds the raw File
+        // straight into FormData: it's intercepted (handleEventImageFileSelected),
+        // cropped interactively in a modal, and the result stored here as a
+        // Blob. submitEditEvent() reads these instead of the file input.
+        // Reset in renderGeneralSection whenever the General tab is (re)built
+        // so stale state from a previously-viewed event can't leak in.
+        let _pendingEventImageBlob = null;
+        let _pendingRemoveImage = false;
+        let _pendingImagePreviewUrl = null; // objectURL behind the live preview, revoked on replace
+        let _cropState = null;
+        let _cropCanvasEventsBound = false;
+        const CROP_OUTPUT_MAX = 800; // long-edge px for the final cropped PNG
+
+        function handleEventImageFileSelected(input) {
+            const file = input.files && input.files[0];
+            // Always clear so the same file can be re-selected later — covers
+            // both the immediate re-read here and the modal's Cancel button.
+            input.value = '';
+            if (!file) return;
+            if (!file.type.startsWith('image/')) return showToast('Please select an image file.');
+            const reader = new FileReader();
+            reader.onload = (e) => openImageCropModal(e.target.result);
+            reader.onerror = () => showToast('Could not read that file.');
+            reader.readAsDataURL(file);
+        }
+
+        function openImageCropModal(dataUrl) {
+            const img = new Image();
+            img.onload = () => {
+                _cropState = {
+                    img,
+                    naturalW: img.naturalWidth,
+                    naturalH: img.naturalHeight,
+                    ratioKey: 'square',
+                    zoom: 1,
+                    offsetX: 0,
+                    offsetY: 0,
+                    dragging: false,
+                    vw: 0, vh: 0, baseScale: 1,
+                };
+                document.getElementById('imageCropModal').style.display = 'flex';
+                setCropRatio('square');
+                initCropCanvasEvents();
+            };
+            img.onerror = () => showToast('Could not load that image.');
+            img.src = dataUrl;
+        }
+
+        function _cropRatioValue(key) {
+            if (key === 'square') return 1;
+            if (key === 'wide') return 16 / 9;
+            return _cropState.naturalW / _cropState.naturalH; // 'original' — matches the image, so it fits with no crop
+        }
+
+        // Switches the crop box's aspect ratio, resizes the on-screen canvas to
+        // match (capped to MAXDIM on the long edge), and resets pan/zoom so the
+        // new ratio starts centered at 1x ("cover" scale).
+        function setCropRatio(key) {
+            if (!_cropState) return;
+            _cropState.ratioKey = key;
+            _cropState.zoom = 1;
+            _cropState.offsetX = 0;
+            _cropState.offsetY = 0;
+
+            const ratio = _cropRatioValue(key);
+            const MAXDIM = 360;
+            let vw, vh;
+            if (ratio >= 1) { vw = MAXDIM; vh = MAXDIM / ratio; }
+            else { vh = MAXDIM; vw = MAXDIM * ratio; }
+            _cropState.vw = Math.round(vw);
+            _cropState.vh = Math.round(vh);
+            // "Cover" scale: smallest scale at which the image still fully fills the viewport.
+            _cropState.baseScale = Math.max(_cropState.vw / _cropState.naturalW, _cropState.vh / _cropState.naturalH);
+
+            const canvas = document.getElementById('cropCanvas');
+            canvas.width = _cropState.vw;
+            canvas.height = _cropState.vh;
+
+            const slider = document.getElementById('cropZoomSlider');
+            if (slider) slider.value = 1;
+
+            ['square', 'wide', 'original'].forEach(k => {
+                const btn = document.getElementById('cropRatioBtn-' + k);
+                if (btn) btn.classList.toggle('active', k === key);
+            });
+
+            drawCrop();
+        }
+
+        function _cropMaxOffsets() {
+            const { naturalW, naturalH, baseScale, zoom, vw, vh } = _cropState;
+            const scale = baseScale * zoom;
+            return {
+                maxOffsetX: Math.max(0, (naturalW * scale - vw) / 2),
+                maxOffsetY: Math.max(0, (naturalH * scale - vh) / 2),
+            };
+        }
+
+        function setCropOffset(x, y) {
+            if (!_cropState) return;
+            const { maxOffsetX, maxOffsetY } = _cropMaxOffsets();
+            _cropState.offsetX = Math.min(maxOffsetX, Math.max(-maxOffsetX, x));
+            _cropState.offsetY = Math.min(maxOffsetY, Math.max(-maxOffsetY, y));
+            drawCrop();
+        }
+
+        function setCropZoom(z) {
+            if (!_cropState) return;
+            _cropState.zoom = Math.min(3, Math.max(1, z));
+            setCropOffset(_cropState.offsetX, _cropState.offsetY); // re-clamp pan for the new scale
+        }
+
+        function drawCrop() {
+            if (!_cropState) return;
+            const { img, naturalW, naturalH, baseScale, zoom, offsetX, offsetY, vw, vh } = _cropState;
+            const canvas = document.getElementById('cropCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, vw, vh);
+            const scale = baseScale * zoom;
+            const drawW = naturalW * scale;
+            const drawH = naturalH * scale;
+            const drawX = vw / 2 - drawW / 2 + offsetX;
+            const drawY = vh / 2 - drawH / 2 + offsetY;
+            ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        }
+
+        // Bound once — the canvas element itself persists across ratio switches
+        // (only its width/height attributes change), so this only needs to run
+        // the first time the modal is opened.
+        function initCropCanvasEvents() {
+            if (_cropCanvasEventsBound) return;
+            _cropCanvasEventsBound = true;
+            const canvas = document.getElementById('cropCanvas');
+            canvas.addEventListener('pointerdown', (e) => {
+                if (!_cropState) return;
+                _cropState.dragging = true;
+                _cropState.dragStartX = e.clientX;
+                _cropState.dragStartY = e.clientY;
+                _cropState.dragStartOffsetX = _cropState.offsetX;
+                _cropState.dragStartOffsetY = _cropState.offsetY;
+                canvas.setPointerCapture(e.pointerId);
+                canvas.style.cursor = 'grabbing';
+            });
+            canvas.addEventListener('pointermove', (e) => {
+                if (!_cropState || !_cropState.dragging) return;
+                setCropOffset(
+                    _cropState.dragStartOffsetX + (e.clientX - _cropState.dragStartX),
+                    _cropState.dragStartOffsetY + (e.clientY - _cropState.dragStartY)
+                );
+            });
+            const stopDrag = () => { if (_cropState) _cropState.dragging = false; canvas.style.cursor = 'grab'; };
+            canvas.addEventListener('pointerup', stopDrag);
+            canvas.addEventListener('pointercancel', stopDrag);
+            canvas.addEventListener('pointerleave', stopDrag);
+            canvas.addEventListener('wheel', (e) => {
+                if (!_cropState) return;
+                e.preventDefault();
+                const z = _cropState.zoom + (e.deltaY < 0 ? 0.08 : -0.08);
+                const slider = document.getElementById('cropZoomSlider');
+                if (slider) slider.value = Math.min(3, Math.max(1, z));
+                setCropZoom(z);
+            }, { passive: false });
+        }
+
+        function closeImageCropModal() {
+            document.getElementById('imageCropModal').style.display = 'none';
+            _cropState = null;
+        }
+
+        function confirmImageCrop() {
+            if (!_cropState) return;
+            const { img, naturalW, naturalH, baseScale, zoom, offsetX, offsetY, vw, vh } = _cropState;
+            const scale = baseScale * zoom;
+            const drawW = naturalW * scale;
+            const drawH = naturalH * scale;
+            const drawX = vw / 2 - drawW / 2 + offsetX;
+            const drawY = vh / 2 - drawH / 2 + offsetY;
+
+            // Source rectangle, in original-image pixel coordinates, that's
+            // currently visible inside the viewport — this is the crop.
+            const sx = -drawX / scale;
+            const sy = -drawY / scale;
+            const sw = vw / scale;
+            const sh = vh / scale;
+
+            const outRatio = vw / vh;
+            let outW, outH;
+            if (outRatio >= 1) { outW = CROP_OUTPUT_MAX; outH = Math.round(CROP_OUTPUT_MAX / outRatio); }
+            else { outH = CROP_OUTPUT_MAX; outW = Math.round(CROP_OUTPUT_MAX * outRatio); }
+
+            const out = document.createElement('canvas');
+            out.width = outW; out.height = outH;
+            out.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+
+            out.toBlob((blob) => {
+                if (!blob) return showToast('Could not process that image.');
+                _pendingEventImageBlob = blob;
+                _pendingRemoveImage = false;
+                if (_pendingImagePreviewUrl) URL.revokeObjectURL(_pendingImagePreviewUrl);
+                _pendingImagePreviewUrl = URL.createObjectURL(blob);
+                document.getElementById('editEventImagePreview').innerHTML =
+                    `<img src="${_pendingImagePreviewUrl}" style="max-width:100%;max-height:120px;border-radius:8px;border:1px solid #eee;">`;
+                const removeBtn = document.getElementById('removeEventImageBtn');
+                if (removeBtn) removeBtn.style.display = '';
+                markSettingsDirty('tab-general');
+                closeImageCropModal();
+            }, 'image/png');
+        }
+
+        function removeEventImage() {
+            _pendingEventImageBlob = null;
+            _pendingRemoveImage = true;
+            if (_pendingImagePreviewUrl) { URL.revokeObjectURL(_pendingImagePreviewUrl); _pendingImagePreviewUrl = null; }
+            document.getElementById('editEventImagePreview').innerHTML = '<span style="font-size:12px;color:#aaa;">No image set</span>';
+            const removeBtn = document.getElementById('removeEventImageBtn');
+            if (removeBtn) removeBtn.style.display = 'none';
+            markSettingsDirty('tab-general');
+        }
+
         function renderGeneralSection(eventId) {
             const ev = events.find(e => e.id === eventId);
             if (!ev) return '';
+            // Fresh render of the General tab (including switching to a different
+            // event) — any staged crop/removal from a previous event is now stale.
+            _pendingEventImageBlob = null;
+            _pendingRemoveImage = false;
+            if (_pendingImagePreviewUrl) { URL.revokeObjectURL(_pendingImagePreviewUrl); _pendingImagePreviewUrl = null; }
             const colorRaw = ev.color || '#6366f1';
             const hexColor = colorRaw.startsWith('rgb')
                 ? '#' + colorRaw.match(/\d+/g).map(n => parseInt(n).toString(16).padStart(2, '0')).join('')
@@ -2629,7 +3264,10 @@
                     <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Image <span
                             style="font-weight:400;color:#aaa;">(optional, replaces current)</span></label>
                     <div id="editEventImagePreview" style="margin-bottom:8px;">${imagePreview}</div>
-                    <input type="file" id="editEventImage" accept="image/png,image/jpeg" style="font-size:13px;">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <input type="file" id="editEventImage" accept="image/png,image/jpeg" style="font-size:13px;" onchange="handleEventImageFileSelected(this)">
+                        <button type="button" class="btn btn-secondary btn-sm" id="removeEventImageBtn" onclick="removeEventImage()" style="${ev.imageUrl ? '' : 'display:none;'}">Remove Image</button>
+                    </div>
                 </div>
                 <div
                     style="margin-bottom:20px;padding:14px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:10px;">
@@ -2676,9 +3314,12 @@
                     </div>
                     <div style="font-size:11px;color:#aaa;margin-top:4px;">Requires Stripe keys in .env and public registration enabled</div>
                 </div>
-                <button class="btn btn-primary" id="generalSaveBtn" style="width:100%;" onclick="submitEditEvent('${eventId}')">Save Changes</button>
+            `;
+        }
 
-                <div class="modal-section-title" style="margin-top:32px;color:#dc2626;">Danger Zone</div>
+        function renderDangerZoneSection(eventId) {
+            return `
+                <div class="modal-section-title" style="color:#dc2626;">Danger Zone</div>
                 <div class="settings-hint">Deleting an event permanently removes it and all its tickets. This cannot be undone.</div>
                 <button class="btn btn-danger" onclick="deleteEvent('${eventId}')">Delete Event</button>
             `;
@@ -2693,7 +3334,6 @@
             const locationAddress = document.getElementById('editEventLocAddress').value.trim();
             const lat = document.getElementById('editEventLat').value;
             const lng = document.getElementById('editEventLng').value;
-            const imageFile = document.getElementById('editEventImage').files[0];
 
             if (!name) return showToast('Event name is required.');
 
@@ -2723,16 +3363,24 @@
             fd.append('ticketPrice', ticketPrice || '0');
             if (lat) fd.append('lat', lat);
             if (lng) fd.append('lng', lng);
-            if (imageFile) fd.append('image', imageFile);
+            if (_pendingEventImageBlob) {
+                fd.append('image', _pendingEventImageBlob, 'event-photo.png');
+            } else if (_pendingRemoveImage) {
+                fd.append('removeImage', 'true');
+            }
 
-            const btn = document.getElementById('generalSaveBtn');
-            btn.disabled = true; btn.textContent = 'Saving…';
-
+            // Saving is now driven exclusively by the floating settings save
+            // bar, which owns its own button's disabled/label state — this
+            // tab no longer has its own inline save button.
             const r2 = await fetch(`/api/event/${id}`, { method: 'PUT', body: fd });
-            btn.disabled = false; btn.textContent = 'Save Changes';
 
             if (r2.ok) {
                 const updated = await r2.json();
+                // The staged crop/removal has now been persisted (or wasn't
+                // set) — clear it so it doesn't get resubmitted on a later,
+                // unrelated save of this same tab.
+                _pendingEventImageBlob = null;
+                _pendingRemoveImage = false;
                 // Update local cache
                 const idx = events.findIndex(e => e.id === id);
                 if (idx !== -1) events[idx] = { ...events[idx], ...updated };
@@ -2745,6 +3393,7 @@
                     if (subtitle) subtitle.textContent = ev.name;
                 }
                 renderSidebar();
+                clearSettingsDirty('tab-general');
                 showToast('Event details saved.');
             } else {
                 const d = await r2.json();
@@ -2797,14 +3446,35 @@
                     <div class="settings-panel">
                         <div id="settingsContent"><div class="settings-empty">Loading…</div></div>
                     </div>
+                </div>
+                <div class="settings-save-bar" id="settingsSaveBar">
+                    <span class="settings-save-bar-text">You have unsaved changes</span>
+                    <div class="settings-save-bar-actions">
+                        <button class="btn btn-secondary btn-sm" id="settingsSaveBarDiscardBtn" onclick="handleDiscardAllSettings()">Discard</button>
+                        <button class="btn btn-primary btn-sm" id="settingsSaveBarSaveBtn" onclick="saveAllSettings()">Save</button>
+                    </div>
                 </div>`;
             setUrlState({ event: id, view: 'settings' });
+
+            // Reset unsaved-changes tracking for this settings session, then
+            // watch every field across every tab via one delegated listener
+            // (tabs opt in per-section with the .dirty-scope wrapper — see
+            // markSettingsDirty/onSettingsFieldChange).
+            settingsCurrentEventId = id;
+            settingsDirtyTabs.clear();
+            const panel = view.querySelector('.settings-panel');
+            if (panel) {
+                panel.addEventListener('input', onSettingsFieldChange);
+                panel.addEventListener('change', onSettingsFieldChange);
+            }
+
             await loadAccessData(id);
             initAddressAutocomplete('editEventLocAddress', 'editEventAddressAC', 'editEventLat', 'editEventLng');
             initSettingsScrollSpy();
         }
 
-        function showOverviewView(id) {
+        async function showOverviewView(id) {
+            if (!(await guardSettingsNavigation())) return;
             document.getElementById('settingsView').style.display = 'none';
             document.getElementById('eventDetail').style.display = 'block';
             setUrlState({ event: id });
@@ -2838,12 +3508,8 @@
                 <div class="modal-section-title">Custom Fields</div>
                 <div class="settings-hint">Define fields that appear when adding or editing tickets (e.g. T-Shirt Size, Meal choice).</div>
                 <div id="settingsCfRows">${rows}</div>
-                <div style="display:flex;gap:8px;margin-top:6px;">
-                    <button type="button" onclick="addSettingsCfRow()"
-                        style="flex:1;font-size:12px;color:#6366f1;background:none;border:1px dashed #c4b5fd;border-radius:6px;padding:7px 12px;cursor:pointer;">+ Add field</button>
-                    <button type="button" onclick="saveEventCustomFields('${eventId}')"
-                        class="btn btn-primary btn-sm" style="flex:1;">Save Fields</button>
-                </div>`;
+                <button type="button" onclick="addSettingsCfRow()"
+                    style="width:100%;margin-top:6px;font-size:12px;color:#6366f1;background:none;border:1px dashed #c4b5fd;border-radius:6px;padding:7px 12px;cursor:pointer;">+ Add field</button>`;
         }
 
         function addSettingsCfRow() {
@@ -2874,9 +3540,8 @@
             // Update local events cache so ticket modals immediately reflect changes
             const ev = events.find(e => e.id === eventId);
             if (ev) ev.customFields = keys;
-            // Flash the button
-            const btn = document.querySelector(`#settingsContent .btn-primary`);
-            if (btn) { btn.textContent = '✓ Saved'; setTimeout(() => btn.textContent = 'Save Fields', 1500); }
+            clearSettingsDirty('tab-fields');
+            showToast('Custom fields saved.');
         }
 
         async function loadReminderSection(eventId) {
@@ -2893,12 +3558,14 @@
                 } else if (isPast) {
                     statusText = `<span style="color:#aaa;font-size:12px;">Event has passed</span>`;
                 } else if (d.enabled) {
-                    statusText = `<span style="color:#6366f1;font-size:12px;">Will send ~24h before event</span>`;
+                    statusText = `<span style="color:#475569;font-size:12px;">Will send ~24h before event</span>`;
                 } else {
                     statusText = `<span style="color:#aaa;font-size:12px;">Disabled</span>`;
                 }
                 return `
-                    <div class="modal-section-title" style="margin-top:20px;">24-Hour Reminder Email</div>
+                    <div class="dirty-scope" data-tab="tab-notifications">
+                    <hr class="settings-divider">
+                    <div class="settings-subhead">24-Hour Reminder Email</div>
                     <div style="margin-bottom:10px;display:flex;align-items:center;gap:12px;">
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;">
                             <input type="checkbox" id="reminderEnabled" ${d.enabled ? 'checked' : ''} ${d.sentAt ? 'disabled' : ''} style="accent-color:#6366f1;width:16px;height:16px;">
@@ -2919,15 +3586,17 @@
                             placeholder="Your event is coming up in 24 hours. We look forward to seeing you!">${esc(d.message)}</textarea>
                     </div>
                     <div style="display:flex;gap:8px;margin-bottom:4px;">
-                        ${d.sentAt ? '' : `<button class="btn btn-primary btn-sm" onclick="saveReminder('${eventId}')">Save</button>`}
                         <button class="btn btn-secondary btn-sm" onclick="window.open('/api/event/${eventId}/reminder/preview','_blank')">Preview</button>
+                    </div>
                     </div>
                 `;
             } catch { return ''; }
         }
 
         async function saveReminder(eventId) {
-            const enabled = document.getElementById('reminderEnabled').checked;
+            const enabledEl = document.getElementById('reminderEnabled');
+            if (!enabledEl) return; // reminder section wasn't part of this render (e.g. access API failed)
+            const enabled = enabledEl.checked;
             const message = document.getElementById('reminderMessage').value.trim();
             const hoursBefore = parseInt(document.getElementById('reminderHoursBefore').value) || 24;
             const r = await fetch(`/api/event/${eventId}/reminder`, {
@@ -2936,8 +3605,8 @@
                 body: JSON.stringify({ enabled, message, hoursBefore })
             });
             if (r.ok) {
-                const btn = document.querySelector('#settingsContent .btn-primary');
-                if (btn) { btn.textContent = '✓ Saved'; setTimeout(() => btn.textContent = 'Save', 1500); }
+                clearSettingsDirty('tab-notifications');
+                showToast('Reminder settings saved.');
             } else {
                 showToast('Failed to save reminder settings.');
             }
@@ -2961,14 +3630,15 @@
                     const reminderHtml = await loadReminderSection(eventId);
                     const auditHtml = await renderAuditLogSection(eventId);
                     document.getElementById('settingsContent').innerHTML =
-                        `<div class="settings-section" id="tab-general">${renderGeneralSection(eventId)}</div>` +
-                        `<div class="settings-section" id="tab-fields">${cfHtml}</div>` +
-                        `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div>${note}${auditHtml}</div>` +
-                        `<div class="settings-section" id="tab-notifications"><div class="modal-section-title">Notifications</div>${pushHtml}${reminderHtml}</div>` +
-                        `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>` +
-                        `<div class="settings-section" id="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
+                        `<div class="settings-section dirty-scope" id="tab-general" data-tab="tab-general">${renderGeneralSection(eventId)}</div>` +
+                        `<div class="settings-section dirty-scope" id="tab-fields" data-tab="tab-fields">${cfHtml}</div>` +
+                        `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div><div class="settings-hint">Control who can view or manage this event, and audit what's changed.</div>${note}${auditHtml}</div>` +
+                        `<div class="settings-section" id="tab-notifications"><div class="modal-section-title">Notifications</div><div class="settings-hint">Reach attendees by push notification, or automatically remind them before the event.</div>${pushHtml}${reminderHtml}</div>` +
+                        `<div class="settings-section dirty-scope" id="tab-registration" data-tab="tab-registration">${renderRegistrationSection(eventId)}</div>` +
+                        `<div class="settings-section dirty-scope" id="tab-waitlist" data-tab="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-discounts">${await renderDiscountsSection(eventId)}</div>` +
-                        `<div class="settings-section" id="tab-payments">${await renderPaymentsSection(eventId)}</div>`;
+                        `<div class="settings-section" id="tab-payments">${await renderPaymentsSection(eventId)}</div>` +
+                        `<div class="settings-section" id="tab-danger">${renderDangerZoneSection(eventId)}</div>`;
                     togglePushDeviceList();
                     return;
                 }
@@ -2982,7 +3652,7 @@
                             <label>Sharing Link</label>
                             <div style="display:flex;gap:8px;">
                                 <input type="text" value="${esc(data.linkUrl)}" readonly onclick="this.select()">
-                                <button class="btn btn-primary btn-sm" onclick="copySettingsLink('${esc(data.linkUrl)}')">Copy</button>
+                                <button class="btn btn-primary btn-sm tap-target-sm" onclick="copySettingsLink('${esc(data.linkUrl)}')">Copy</button>
                             </div>
                         </div>
                     `;
@@ -2995,7 +3665,8 @@
                 }
 
                 let accessHtml = `
-                    <div class="modal-section-title" style="margin-top:4px;">Share with user</div>
+                    <hr class="settings-divider">
+                    <div class="settings-subhead">Share with user</div>
                     <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
                         <input type="email" id="shareEmail" placeholder="User email" style="flex:1;min-width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;" />
                         <select id="sharePermission" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
@@ -3007,7 +3678,7 @@
                 `;
                 if (data.access && data.access.length > 0) {
                     accessHtml += `
-                        <div class="modal-section-title">Users with access</div>
+                        <div class="settings-subhead">Users with access</div>
                         <div>
                             ${data.access.map(a => `
                                 <div class="access-item">
@@ -3023,7 +3694,7 @@
                     `;
                 } else {
                     accessHtml += `
-                        <div class="modal-section-title">Users with access</div>
+                        <div class="settings-subhead">Users with access</div>
                         <div class="settings-empty">No users have been added yet.</div>
                     `;
                 }
@@ -3035,14 +3706,15 @@
                 const reminderHtml = await loadReminderSection(eventId);
                 const auditHtml = await renderAuditLogSection(eventId);
                 document.getElementById('settingsContent').innerHTML =
-                    `<div class="settings-section" id="tab-general">${renderGeneralSection(eventId)}</div>` +
-                    `<div class="settings-section" id="tab-fields">${cfHtml}</div>` +
-                    `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div>${linkHtml}${accessHtml}${auditHtml}</div>` +
-                    `<div class="settings-section" id="tab-notifications"><div class="modal-section-title">Notifications</div>${pushHtml}${reminderHtml}</div>` +
-                    `<div class="settings-section" id="tab-registration">${renderRegistrationSection(eventId)}</div>` +
-                    `<div class="settings-section" id="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
+                    `<div class="settings-section dirty-scope" id="tab-general" data-tab="tab-general">${renderGeneralSection(eventId)}</div>` +
+                    `<div class="settings-section dirty-scope" id="tab-fields" data-tab="tab-fields">${cfHtml}</div>` +
+                    `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div><div class="settings-hint">Control who can view or manage this event, and audit what's changed.</div>${linkHtml}${accessHtml}${auditHtml}</div>` +
+                    `<div class="settings-section" id="tab-notifications"><div class="modal-section-title">Notifications</div><div class="settings-hint">Reach attendees by push notification, or automatically remind them before the event.</div>${pushHtml}${reminderHtml}</div>` +
+                    `<div class="settings-section dirty-scope" id="tab-registration" data-tab="tab-registration">${renderRegistrationSection(eventId)}</div>` +
+                    `<div class="settings-section dirty-scope" id="tab-waitlist" data-tab="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-discounts">${await renderDiscountsSection(eventId)}</div>` +
-                    `<div class="settings-section" id="tab-payments">${await renderPaymentsSection(eventId)}</div>`;
+                    `<div class="settings-section" id="tab-payments">${await renderPaymentsSection(eventId)}</div>` +
+                    `<div class="settings-section" id="tab-danger">${renderDangerZoneSection(eventId)}</div>`;
                 togglePushDeviceList();
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
@@ -3074,7 +3746,7 @@
                 : '<div class="settings-empty" style="padding:8px 0;text-align:left;">No subscribed devices found.</div>';
 
             return `
-                <div class="modal-section-title" style="margin-top:20px;">Push Notifications</div>
+                <div class="settings-subhead">Push Notifications</div>
                 <div class="settings-hint">
                     Send a notification to event subscribers or selected devices.
                 </div>
@@ -3369,7 +4041,7 @@
                 </div>
                 <label class="settings-toggle">
                     <input type="checkbox" id="publicRegToggle" ${enabled ? 'checked' : ''}
-                        onchange="setPublicRegistration('${eventId}', this.checked)">
+                        onchange="document.getElementById('publicRegLinkBox').style.display = this.checked ? 'block' : 'none';">
                     <div>
                         <div class="settings-toggle-title">Public Registration</div>
                         <div class="settings-toggle-desc">Anyone with the link can self-register${isPaid ? ' and check out' : ' for a free ticket'}</div>
@@ -3388,9 +4060,9 @@
                     </div>
                 </div>
 
-                <label class="settings-toggle" style="margin-top:16px;">
-                    <input type="checkbox" id="atDoorToggle" ${atDoor ? 'checked' : ''}
-                        onchange="setAtDoorEnabled('${eventId}', this.checked)">
+                <hr class="settings-divider">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="atDoorToggle" ${atDoor ? 'checked' : ''}>
                     <div>
                         <div class="settings-toggle-title">At-Door Sales</div>
                         <div class="settings-toggle-desc">Staff-only — requires being logged in on the device. ${atDoorDesc}</div>
@@ -3460,8 +4132,7 @@
                     When an event is full, people can join a waitlist instead of being turned away. Promote an entry to issue them a ticket (free events) or send them a claim link (paid events).
                 </div>
                 <label class="settings-toggle" style="margin-bottom:18px;">
-                    <input type="checkbox" id="waitlistToggle" ${enabled ? 'checked' : ''}
-                        onchange="setWaitlistEnabled('${eventId}', this.checked)">
+                    <input type="checkbox" id="waitlistToggle" ${enabled ? 'checked' : ''}>
                     <div>
                         <div class="settings-toggle-title">Enable Waitlist</div>
                         <div class="settings-toggle-desc">Requires a capacity limit set on this event</div>
@@ -3528,7 +4199,7 @@
                             <div class="scan-access-sub">Scan this code with any camera app, or share the link — it opens straight into the scanner for this event only, no login needed.</div>
                             <div style="display:flex;gap:8px;margin-top:10px;">
                                 <input type="text" value="${esc(primary.url)}" readonly onclick="this.select()" style="flex:1;min-width:0;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:12px;">
-                                <button class="btn btn-primary btn-sm" onclick="copySettingsLink('${esc(primary.url)}')">Copy</button>
+                                <button class="btn btn-primary btn-sm tap-target-sm" onclick="copySettingsLink('${esc(primary.url)}')">Copy</button>
                             </div>
                             <button class="scan-access-toggle" onclick="toggleScanAccessManage()">Manage scan links (${links.length})</button>
                         </div>
@@ -3762,7 +4433,7 @@
                 const r = await fetch(`/api/event/${eventId}/audit-log?limit=25`);
                 if (!r.ok) return '';
                 const { entries } = await r.json();
-                if (!entries.length) return `<div class="modal-section-title" style="margin-top:20px;">Activity Log</div><div class="settings-empty">No activity recorded yet.</div>`;
+                if (!entries.length) return `<hr class="settings-divider"><div class="settings-subhead">Activity Log</div><div class="settings-empty">No activity recorded yet.</div>`;
                 const rows = entries.map(e => `
                     <tr>
                         <td>${esc(e.userEmail || 'system')}</td>
@@ -3770,8 +4441,9 @@
                         <td style="color:#999;font-size:11px;">${fmtDate(e.createdAt)}</td>
                     </tr>`).join('');
                 return `
-                    <div class="modal-section-title" style="margin-top:20px;">Activity Log</div>
-                    <div style="font-size:12px;color:#888;margin-bottom:10px;">Who did what to this event, most recent first.</div>
+                    <hr class="settings-divider">
+                    <div class="settings-subhead">Activity Log</div>
+                    <div class="settings-hint">Who did what to this event, most recent first.</div>
                     <div style="max-height:220px;overflow-y:auto;">
                         <table class="mini-table"><thead><tr><th>Who</th><th>Action</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>
                     </div>
@@ -3976,7 +4648,7 @@
                 <div class="metrics-stat-grid">
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.total}</div><div class="metrics-stat-label">Tickets</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num" style="color:#10b981">${d.scanned}</div><div class="metrics-stat-label">Checked In</div></div>
-                    <div class="metrics-stat"><div class="metrics-stat-num" style="color:#6366f1">${d.pct}%</div><div class="metrics-stat-label">Attendance</div></div>
+                    <div class="metrics-stat"><div class="metrics-stat-num" style="color:#475569">${d.pct}%</div><div class="metrics-stat-label">Attendance</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.uniqueRegistrations}</div><div class="metrics-stat-label">Registrations</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.walletDownloads}</div><div class="metrics-stat-label">Wallet DL</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.emailOpens}</div><div class="metrics-stat-label">Email Opens</div></div>
@@ -4037,7 +4709,7 @@
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalEvents}</div><div class="metrics-stat-label">Events</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalTickets}</div><div class="metrics-stat-label">Total Tickets</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num" style="color:#10b981">${d.totalScanned}</div><div class="metrics-stat-label">Checked In</div></div>
-                        <div class="metrics-stat"><div class="metrics-stat-num" style="color:#6366f1">${d.totalPct}%</div><div class="metrics-stat-label">Overall Rate</div></div>
+                        <div class="metrics-stat"><div class="metrics-stat-num" style="color:#475569">${d.totalPct}%</div><div class="metrics-stat-label">Overall Rate</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalWalletDownloads}</div><div class="metrics-stat-label">Wallet DLs</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalEmailOpens}</div><div class="metrics-stat-label">Email Opens</div></div>
                     </div>
@@ -4061,6 +4733,241 @@
                 location.href = '/login.html';
             } else {
                 showToast('Failed to delete account. Please try again.');
+            }
+        }
+
+        // ── Account Settings ──────────────────────────────────────────────────────
+        function openAccountSettingsModal() {
+            document.getElementById('accountSettingsModal').style.display = 'flex';
+            loadAccountSettingsOverview();
+            loadTwoFactorStatus();
+        }
+
+        function closeAccountSettingsModal() {
+            document.getElementById('accountSettingsModal').style.display = 'none';
+        }
+
+        function loadAccountSettingsOverview() {
+            const emailEl = document.getElementById('acctSettingsEmail');
+            const createdEl = document.getElementById('acctSettingsCreated');
+            const currentPwEl = document.getElementById('acctCurrentPassword');
+            const newPwEl = document.getElementById('acctNewPassword');
+            const confirmPwEl = document.getElementById('acctConfirmPassword');
+            const msgEl = document.getElementById('acctPasswordMsg');
+            if (currentPwEl) currentPwEl.value = '';
+            if (newPwEl) newPwEl.value = '';
+            if (confirmPwEl) confirmPwEl.value = '';
+            if (msgEl) msgEl.textContent = '';
+            if (emailEl) emailEl.textContent = currentUser?.email || '—';
+            if (createdEl) createdEl.textContent = currentUser?.createdAt ? fmtDate(currentUser.createdAt) : '—';
+        }
+
+        async function changeAccountPassword() {
+            const currentPassword = document.getElementById('acctCurrentPassword').value;
+            const newPassword = document.getElementById('acctNewPassword').value;
+            const confirmPassword = document.getElementById('acctConfirmPassword').value;
+            const msgEl = document.getElementById('acctPasswordMsg');
+            const setMsg = (text, ok) => { msgEl.textContent = text; msgEl.style.color = ok ? '#10b981' : '#dc2626'; };
+
+            if (!currentPassword || !newPassword || !confirmPassword) return setMsg('Fill in all password fields.', false);
+            if (newPassword !== confirmPassword) return setMsg('New password and confirmation do not match.', false);
+            if (newPassword.length < 8) return setMsg('New password must be at least 8 characters.', false);
+
+            const btn = document.getElementById('acctChangePasswordBtn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Updating…'; }
+            try {
+                const r = await fetch('/api/account/password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ currentPassword, newPassword })
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok || d.error) { setMsg(d.error || 'Failed to update password.', false); return; }
+                setMsg('Password updated.', true);
+                document.getElementById('acctCurrentPassword').value = '';
+                document.getElementById('acctNewPassword').value = '';
+                document.getElementById('acctConfirmPassword').value = '';
+            } catch {
+                setMsg('Failed to update password.', false);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Update Password'; }
+            }
+        }
+
+        // ── Two-Factor Authentication ────────────────────────────────────────────
+
+        async function loadTwoFactorStatus() {
+            const body = document.getElementById('twoFactorModalBody');
+            body.innerHTML = '<div style="text-align:center;padding:32px;color:#bbb;">Loading…</div>';
+            try {
+                const r = await fetch('/api/account/2fa/status');
+                if (!r.ok) throw new Error();
+                const d = await r.json();
+                if (d.enabled) await renderTwoFactorEnabled();
+                else renderTwoFactorDisabled();
+            } catch {
+                body.innerHTML = '<div class="settings-empty">Could not load two-factor status.</div>';
+            }
+        }
+
+        function renderTwoFactorDisabled() {
+            const body = document.getElementById('twoFactorModalBody');
+            body.innerHTML = `
+                <div style="font-size:13px;color:#666;line-height:1.5;margin-bottom:16px;">
+                    Two-factor authentication is currently <strong>off</strong>. Turning it on requires a 6-digit
+                    code from an authenticator app (Google Authenticator, Authy, 1Password, etc.) whenever you
+                    sign in from a new device.
+                </div>
+                <button class="btn btn-primary" style="width:100%;" onclick="start2FASetup()">Enable Two-Factor Authentication</button>
+            `;
+        }
+
+        async function start2FASetup() {
+            const body = document.getElementById('twoFactorModalBody');
+            body.innerHTML = '<div style="text-align:center;padding:32px;color:#bbb;">Generating setup code…</div>';
+            try {
+                const r = await fetch('/api/account/2fa/setup', { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) { showToast(d.error || 'Failed to start setup.'); renderTwoFactorDisabled(); return; }
+                body.innerHTML = `
+                    <div style="font-size:13px;color:#666;line-height:1.5;margin-bottom:14px;">
+                        Scan this code with your authenticator app, or enter the secret manually if you can't scan it.
+                    </div>
+                    <div style="text-align:center;margin-bottom:14px;">
+                        <img src="${d.qrDataUrl}" alt="Two-factor setup QR code" style="width:180px;height:180px;border:1px solid #eee;border-radius:8px;">
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:6px;font-size:12px;color:#888;">Manual entry secret</label>
+                        <div style="display:flex;gap:8px;">
+                            <input type="text" readonly value="${esc(d.secret)}" onclick="this.select()"
+                                style="flex:1;min-width:0;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;font-family:monospace;background:#f9f9f9;">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="copyToClipboard('${esc(d.secret)}', this)">Copy</button>
+                        </div>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Enter the 6-digit code from your app</label>
+                        <input type="text" id="twoFactorEnableCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"
+                            style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;font-size:16px;letter-spacing:2px;text-align:center;">
+                    </div>
+                    <button class="btn btn-primary" style="width:100%;" id="twoFactorVerifyBtn" onclick="verify2FAEnable()">Verify &amp; Enable</button>
+                `;
+                document.getElementById('twoFactorEnableCode')?.focus();
+            } catch {
+                showToast('Failed to start two-factor setup.');
+                renderTwoFactorDisabled();
+            }
+        }
+
+        async function verify2FAEnable() {
+            const codeInput = document.getElementById('twoFactorEnableCode');
+            const code = codeInput ? codeInput.value.trim() : '';
+            if (!/^\d{6}$/.test(code)) { showToast('Enter the 6-digit code from your app.'); return; }
+            const btn = document.getElementById('twoFactorVerifyBtn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+            try {
+                const r = await fetch('/api/account/2fa/enable', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code })
+                });
+                const d = await r.json();
+                if (!r.ok) { showToast(d.error || 'Invalid code.'); return; }
+                renderTwoFactorBackupCodes(d.backupCodes || []);
+            } catch {
+                showToast('Failed to verify code.');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Verify & Enable'; }
+            }
+        }
+
+        let _twoFactorBackupCodes = [];
+
+        function renderTwoFactorBackupCodes(codes) {
+            _twoFactorBackupCodes = codes;
+            const body = document.getElementById('twoFactorModalBody');
+            body.innerHTML = `
+                <div style="font-size:13px;color:#10b981;font-weight:600;margin-bottom:10px;">Two-factor authentication is now enabled.</div>
+                <div style="font-size:12px;color:#c4294a;font-weight:600;margin-bottom:10px;">
+                    Save these backup codes somewhere safe — each works once if you lose access to your authenticator
+                    app. They will not be shown again.
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#f8f8f8;border:1px solid #eee;border-radius:8px;padding:12px;margin-bottom:16px;font-family:monospace;font-size:13px;">
+                    ${codes.map(c => `<div>${esc(c)}</div>`).join('')}
+                </div>
+                <button type="button" class="btn btn-secondary" style="width:100%;margin-bottom:8px;"
+                    onclick="copyBackupCodes(this)">Copy All Codes</button>
+                <button class="btn btn-primary" style="width:100%;" onclick="loadTwoFactorStatus()">Done</button>
+            `;
+        }
+
+        function copyBackupCodes(btn) {
+            copyToClipboard(_twoFactorBackupCodes.join('\n'), btn);
+        }
+
+        async function renderTwoFactorEnabled() {
+            const body = document.getElementById('twoFactorModalBody');
+            let devicesHtml = '<div class="settings-empty">No trusted devices.</div>';
+            try {
+                const r = await fetch('/api/account/2fa/devices');
+                if (r.ok) {
+                    const devices = await r.json();
+                    if (devices.length) {
+                        devicesHtml = devices.map(dv => `
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #f3f3f3;">
+                                <div style="min-width:0;">
+                                    <div style="font-size:13px;font-weight:600;">${esc(dv.label || 'Unknown device')}</div>
+                                    <div style="font-size:11px;color:#888;">Added ${fmtDate(dv.createdAt)}${dv.lastUsedAt ? ` · Last used ${fmtDate(dv.lastUsedAt)}` : ''}</div>
+                                </div>
+                                <button class="revoke-btn" style="flex-shrink:0;" onclick="revokeTrustedDevice('${dv.id}')">Revoke</button>
+                            </div>
+                        `).join('');
+                    }
+                }
+            } catch {}
+            body.innerHTML = `
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                    <div style="font-size:13px;font-weight:600;color:#10b981;">Two-factor authentication is enabled</div>
+                </div>
+                <div class="modal-section-title" style="margin-bottom:8px;">Trusted Devices</div>
+                <div style="margin-bottom:20px;">${devicesHtml}</div>
+                <div style="border-top:1px solid #f0f0f0;padding-top:16px;">
+                    <div style="font-size:12px;color:#888;margin-bottom:8px;">Enter your password to disable two-factor authentication.</div>
+                    <input type="password" id="twoFactorDisablePassword" placeholder="Current password" autocomplete="current-password"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;margin-bottom:10px;">
+                    <button class="btn btn-danger" style="width:100%;" onclick="disable2FA()">Disable Two-Factor Authentication</button>
+                </div>
+            `;
+        }
+
+        async function disable2FA() {
+            const input = document.getElementById('twoFactorDisablePassword');
+            const password = input ? input.value : '';
+            if (!password) { showToast('Enter your password to disable two-factor authentication.'); return; }
+            if (!await confirmDialog('Disable two-factor authentication for your account?', { confirmText: 'Disable' })) return;
+            try {
+                const r = await fetch('/api/account/2fa/disable', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                const d = await r.json();
+                if (!r.ok) { showToast(d.error || 'Failed to disable two-factor authentication.'); return; }
+                showToast('Two-factor authentication disabled.');
+                renderTwoFactorDisabled();
+            } catch {
+                showToast('Failed to disable two-factor authentication.');
+            }
+        }
+
+        async function revokeTrustedDevice(id) {
+            if (!await confirmDialog('Revoke this trusted device? It will need to verify with a code again next time it signs in.')) return;
+            try {
+                const r = await fetch(`/api/account/2fa/devices/${id}`, { method: 'DELETE' });
+                if (!r.ok) { showToast('Failed to revoke device.'); return; }
+                await renderTwoFactorEnabled();
+            } catch {
+                showToast('Failed to revoke device.');
             }
         }
 
@@ -4210,6 +5117,57 @@
             <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:#666;"></div>
         </div>
     </div>
+
+    <!-- Image Crop Modal -->
+    <div class="modal-overlay" id="imageCropModal" style="display:none;z-index:200;"
+        onclick="if(event.target===this)closeImageCropModal()">
+        <div class="modal" style="max-width:480px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+                <h2>Crop Event Image</h2>
+                <button class="modal-close" onclick="closeImageCropModal()">&times;</button>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-bottom:14px;">
+                <button type="button" class="crop-ratio-btn active" id="cropRatioBtn-square" onclick="setCropRatio('square')">Square <span>1:1</span></button>
+                <button type="button" class="crop-ratio-btn" id="cropRatioBtn-wide" onclick="setCropRatio('wide')">Wide <span>16:9</span></button>
+                <button type="button" class="crop-ratio-btn" id="cropRatioBtn-original" onclick="setCropRatio('original')">Original</button>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:center;background:#f4f5f8;border:1px solid #dde3ed;border-radius:10px;padding:12px;margin-bottom:14px;">
+                <canvas id="cropCanvas" style="cursor:grab;touch-action:none;border-radius:4px;max-width:100%;"></canvas>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                <span style="font-size:12px;color:#888;font-weight:600;flex-shrink:0;">Zoom</span>
+                <input type="range" id="cropZoomSlider" min="1" max="3" step="0.01" value="1" style="flex:1;" oninput="setCropZoom(parseFloat(this.value))">
+            </div>
+            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:16px;">Drag the image to reposition. Scroll, or use the slider, to zoom.</div>
+
+            <div style="display:flex;gap:8px;">
+                <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeImageCropModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" style="flex:1;" onclick="confirmImageCrop()">Use This Image</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .crop-ratio-btn {
+            flex: 1;
+            padding: 8px 10px;
+            border: 1px solid #dde3ed;
+            background: #fff;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .crop-ratio-btn span { font-weight: 400; color: #aaa; }
+        .crop-ratio-btn:hover { background: #f4f5f8; }
+        .crop-ratio-btn.active { border-color: #1a1f3c; background: #1a1f3c; color: #fff; }
+        .crop-ratio-btn.active span { color: rgba(255,255,255,0.65); }
+    </style>
 
     <style>
         .ticket-picker-item {
@@ -4579,7 +5537,7 @@
 
             if (errors.length) {
                 const summary = successCount
-                    ? `Added ${successCount} of ${validData.length} registrations. ${errors.length} failed:`
+                    ? `Added ${successCount} of ${validData.length} registration${validData.length === 1 ? '' : 's'}. ${errors.length} failed:`
                     : `No registrations were added:`;
                 resMsg.innerHTML = `<span style="color:var(--danger);font-weight:600;">${summary}</span>` +
                     `<ul style="margin:6px 0 0;padding-left:18px;color:var(--danger);font-size:13px;">${errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>`;
@@ -4588,7 +5546,7 @@
                 return;
             }
 
-            resMsg.innerHTML = `<span style="color:#059669;font-weight:600;">✓ Successfully added ${successCount} registrations.</span>`;
+            resMsg.innerHTML = `<span style="color:#059669;font-weight:600;">✓ Successfully added ${successCount} registration${successCount === 1 ? '' : 's'}.</span>`;
             setTimeout(() => {
                 closeBulkImportModal();
                 loadEvents(); // Refresh data
@@ -4628,7 +5586,7 @@
                     statusBadge = `<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">✓ Checked in ${new Date(tk.used_at).toLocaleString()}</span>`;
                 }
                 const walletBadge = tk.wallet_downloaded_at
-                    ? `<div style="font-size:10px;font-weight:600;color:#6366f1;margin-top:3px;" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">Downloaded to Wallet</div>`
+                    ? `<div style="font-size:10px;font-weight:600;color:#475569;margin-top:3px;" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">Downloaded to Wallet</div>`
                     : `<div style="font-size:10px;color:#d1d5db;margin-top:3px;">No wallet download</div>`;
                 const toggleBtn = checkedIn
                     ? (reentryEvent?.fullAccess ? `<button onclick="toggleTicketInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Undo Check-in</button>` : '')
