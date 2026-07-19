@@ -2658,6 +2658,11 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.pushSubscriptions.deleteByEventId.run(req.params.id);
         stmt.scannerLinks.deleteByEventId.run(req.params.id);
         stmt.scannerAccess.deleteByEventId.run(req.params.id);
+        const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
+        if (watcher) {
+            stmt.sheetWatcherSeen.deleteByWatcherId.run(watcher.id);
+            stmt.sheetWatchers.deleteById.run(watcher.id);
+        }
         stmt.events.deleteById.run(req.params.id);
     });
     deleteEvent();
@@ -2681,6 +2686,11 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
             stmt.pushSubscriptions.deleteByEventId.run(eventId);
             stmt.scannerLinks.deleteByEventId.run(eventId);
             stmt.scannerAccess.deleteByEventId.run(eventId);
+            const watcher = stmt.sheetWatchers.byEventId.get(eventId);
+            if (watcher) {
+                stmt.sheetWatcherSeen.deleteByWatcherId.run(watcher.id);
+                stmt.sheetWatchers.deleteById.run(watcher.id);
+            }
             stmt.events.deleteById.run(eventId);
         }
     });
@@ -4446,39 +4456,357 @@ app.get('/api/event/:id/access', requireAuth, (req, res) => {
     res.json({ access: accessEntries, linkUrl: BASE_URL + '/link/' + link.token });
 });
 
-// Get (or mint) the apiKey for an event, for use with /api/register-bulk from
-// external integrations like a Google Form Apps Script trigger.
-app.get('/api/event/:id/api-key', requireAuth, (req, res) => {
+// True when the session user may manage this event: admin, owner, or a
+// sheet-share grant with 'full' permission (same rule used across settings).
+function canManageEvent(req, eventId) {
+    if (!req.session.userId) return false;
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const event = rowToEvent(stmt.events.byId.get(req.params.id));
-    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const event = rowToEvent(stmt.events.byId.get(eventId));
+    if (!event) return false;
+    if (isAdmin || event.userId === req.session.userId) return true;
+    const link = stmt.sheetLinks.byEventId.get(eventId);
+    if (!link) return false;
+    const access = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
+    return !!(access && access.permission === 'full');
+}
 
-    let hasAccess = isAdmin || event.userId === req.session.userId;
-    let link = stmt.sheetLinks.byEventId.get(req.params.id);
-    if (!hasAccess && link) {
-        const myAccess = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
-        if (myAccess && myAccess.permission === 'full') hasAccess = true;
-    }
-    if (!hasAccess) return res.status(403).json({ error: 'Admin access required' });
-
+// Returns the event's integration apiKey, minting the backing sheetLink
+// row if the event has never had one.
+function ensureEventApiKey(eventId) {
+    let link = stmt.sheetLinks.byEventId.get(eventId);
     if (!link) {
         link = {
             id: nanoid(10),
             token: nanoid(20),
             spreadsheetId: null,
             sheetName: 'API Access',
-            eventId: event.id,
+            eventId,
             createdAt: new Date().toISOString(),
             apiKey: nanoid(24),
         };
         stmt.sheetLinks.insert.run(link.id, link.token, link.spreadsheetId, link.sheetName, link.eventId, link.createdAt, link.apiKey);
-    } else if (!link.apiKey) {
-        stmt.sheetLinks.setApiKey.run(nanoid(24), link.id);
-        link = stmt.sheetLinks.byId.get(link.id);
+        return link.apiKey;
+    }
+    if (!link.apiKey) {
+        const apiKey = nanoid(24);
+        stmt.sheetLinks.setApiKey.run(apiKey, link.id);
+        return apiKey;
+    }
+    return link.apiKey;
+}
+
+// Get (or mint) the apiKey for an event, for use with /api/register-bulk from
+// external integrations like a Google Form Apps Script trigger.
+app.get('/api/event/:id/api-key', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
+    res.json({ eventId: event.id, apiKey: ensureEventApiKey(event.id) });
+});
+
+// ============================================================
+//  SHEET WATCHER — the server polls a link-shared Google Sheet
+//  (a form's response sheet) and issues tickets for new rows
+//  whose trigger column has the configured option checked.
+//  The no-code alternative to the Apps Script snippet.
+// ============================================================
+
+// Minimal RFC-4180-ish CSV parser (quotes, escaped quotes, newlines in cells).
+function parseCsv(text) {
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (inQuotes) {
+            if (c === '"') {
+                if (text[i + 1] === '"') { field += '"'; i++; }
+                else inQuotes = false;
+            } else field += c;
+        } else if (c === '"') {
+            inQuotes = true;
+        } else if (c === ',') {
+            row.push(field); field = '';
+        } else if (c === '\n' || c === '\r') {
+            if (c === '\r' && text[i + 1] === '\n') i++;
+            row.push(field); field = '';
+            rows.push(row); row = [];
+        } else field += c;
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(r => r.some(cell => String(cell).trim() !== ''));
+}
+
+// Normalises any pasted Google Sheets link into a CSV export URL.
+// Handles regular /d/<id> share links (with optional #gid=), already-
+// published /d/e/…/pub links, and passes through any other direct URL.
+function sheetCsvUrl(shareUrl) {
+    if (!/^https?:\/\//i.test(shareUrl)) return null;
+    if (shareUrl.includes('/spreadsheets/d/e/')) {
+        if (shareUrl.includes('output=csv')) return shareUrl;
+        return shareUrl + (shareUrl.includes('?') ? '&' : '?') + 'output=csv';
+    }
+    const m = shareUrl.match(/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    if (m) {
+        const gid = (shareUrl.match(/[#?&]gid=(\d+)/) || [])[1] || '0';
+        return `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv&gid=${gid}`;
+    }
+    return shareUrl;
+}
+
+async function fetchSheetRows(csvUrl) {
+    let resp;
+    try {
+        resp = await fetch(csvUrl, { redirect: 'follow' });
+    } catch (err) {
+        throw new Error(`Could not reach the sheet: ${err.message}`);
+    }
+    if (!resp.ok) throw new Error(`Sheet fetch failed (HTTP ${resp.status}) — is the sheet shared as "Anyone with the link"?`);
+    const text = await resp.text();
+    if (/^\s*</.test(text)) throw new Error('Google returned a sign-in page instead of the sheet. Share it as "Anyone with the link — Viewer" and try again.');
+    const rows = parseCsv(text);
+    if (!rows.length) throw new Error('The sheet appears to be empty.');
+    return { headers: rows[0].map(h => String(h).trim()), rows: rows.slice(1) };
+}
+
+function watcherConfig(w) {
+    try { return JSON.parse(w.config) || {}; } catch { return {}; }
+}
+
+function watcherRowMatches(cfg, cell) {
+    const value = String(cell || '');
+    if (cfg.matchMode === 'contains') {
+        return value.toLowerCase().includes(cfg.triggerValue.toLowerCase());
+    }
+    // 'option': checkbox answers arrive as one comma-joined string
+    return value.split(',').map(s => s.trim().toLowerCase()).includes(cfg.triggerValue.toLowerCase());
+}
+
+// A row's dedupe key: form timestamp + email. Editing other columns (e.g.
+// a leader's follow-up notes) never re-triggers a row, and a second
+// submission by the same person (new timestamp) counts as a new row.
+function watcherRowKey(row, rowIndex, tsIdx, email) {
+    return `${tsIdx >= 0 ? String(row[tsIdx]).trim() : 'row' + rowIndex}|${email.toLowerCase()}`;
+}
+
+async function pollSheetWatcher(watcher) {
+    const cfg = watcherConfig(watcher);
+    const summary = { matched: 0, issued: 0, alreadySeen: 0, failed: 0 };
+    let lastError = null;
+    try {
+        const { headers, rows } = await fetchSheetRows(watcher.csvUrl);
+        const need = (name, label) => {
+            const i = headers.indexOf(name);
+            if (i === -1) throw new Error(`${label} column "${name}" not found — did the sheet's headers change?`);
+            return i;
+        };
+        const trigIdx = need(cfg.triggerColumn, 'Trigger');
+        const firstIdx = need(cfg.firstNameColumn, 'First-name');
+        const emailIdx = need(cfg.emailColumn, 'Email');
+        const lastIdx = cfg.lastNameColumn ? headers.indexOf(cfg.lastNameColumn) : -1;
+        const tsIdx = headers.findIndex(h => h.toLowerCase().includes('timestamp'));
+        const apiKey = ensureEventApiKey(watcher.eventId);
+
+        for (let r = 0; r < rows.length; r++) {
+            const row = rows[r];
+            if (!watcherRowMatches(cfg, row[trigIdx])) continue;
+            summary.matched++;
+
+            const email = String(row[emailIdx] || '').trim();
+            if (!email.includes('@')) { summary.failed++; lastError = `Row ${r + 2}: missing or invalid email`; continue; }
+            const key = watcherRowKey(row, r, tsIdx, email);
+            if (stmt.sheetWatcherSeen.exists.get(watcher.id, key)) { summary.alreadySeen++; continue; }
+
+            let firstName = String(row[firstIdx] || '').trim();
+            let lastName = lastIdx >= 0 ? String(row[lastIdx] || '').trim() : '';
+            if (!lastName && firstName.includes(' ')) {
+                const parts = firstName.split(/\s+/);
+                firstName = parts.shift();
+                lastName = parts.join(' ');
+            }
+            if (!firstName) { summary.failed++; lastError = `Row ${r + 2}: missing first name`; continue; }
+
+            const customFields = {};
+            (cfg.extraColumns || []).forEach(name => {
+                const i = headers.indexOf(name);
+                if (i >= 0 && String(row[i] || '').trim()) customFields[name] = String(row[i]).trim();
+            });
+
+            // Issue through the real register-bulk route so capacity checks,
+            // audit logging, and the ticket email all stay on one code path.
+            const resp = await fetch(`http://127.0.0.1:${PORT}/api/register-bulk`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    firstName,
+                    lastName: lastName || '(none)',
+                    email,
+                    eventId: watcher.eventId,
+                    ticketCount: cfg.ticketCount || 1,
+                    apiKey,
+                    customFields,
+                }),
+            });
+            if (resp.ok) {
+                stmt.sheetWatcherSeen.insert.run(watcher.id, key, new Date().toISOString());
+                stmt.sheetWatchers.incrementIssued.run(1, watcher.id);
+                summary.issued++;
+                log('sheet-watch', `[issued] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`);
+            } else {
+                // Deliberately NOT marked seen — a transient failure (e.g. at
+                // capacity) retries on the next poll instead of losing the row.
+                summary.failed++;
+                const body = await resp.text().catch(() => '');
+                lastError = `Row ${r + 2} (${email}): HTTP ${resp.status} ${body.slice(0, 200)}`;
+                log('sheet-watch', `[ERR] ${lastError}`);
+            }
+        }
+    } catch (err) {
+        lastError = err.message;
+        log('sheet-watch', `[ERR] Poll failed — watcher: ${watcher.id}  ${err.message}`);
+    }
+    stmt.sheetWatchers.setPollResult.run(new Date().toISOString(), lastError, watcher.id);
+    return summary;
+}
+
+// Scheduler: wakes every 30s, polls each enabled watcher whose interval has
+// elapsed. Cost per poll is one small HTTP GET + a few ms of parsing.
+let sheetPollBusy = false;
+setInterval(async () => {
+    if (sheetPollBusy) return;
+    sheetPollBusy = true;
+    try {
+        const now = Date.now();
+        for (const w of stmt.sheetWatchers.allEnabled.all()) {
+            const dueMs = (w.intervalMinutes || 2) * 60 * 1000;
+            const last = w.lastPolledAt ? new Date(w.lastPolledAt).getTime() : 0;
+            if (now - last >= dueMs - 5000) await pollSheetWatcher(w);
+        }
+    } catch (err) {
+        log('sheet-watch', `[ERR] Poll loop: ${err.message}`);
+    } finally {
+        sheetPollBusy = false;
+    }
+}, 30 * 1000);
+
+// Fetch the sheet once and return headers + sample rows + auto-suggested
+// column mapping, so the dashboard can offer dropdowns instead of typing.
+app.post('/api/event/:id/sheet-watch/preview', requireAuth, async (req, res) => {
+    if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
+    const url = String(req.body?.url || '').trim();
+    if (!url) return res.status(400).json({ error: 'url required' });
+    const csvUrl = sheetCsvUrl(url);
+    if (!csvUrl) return res.status(400).json({ error: "That doesn't look like a link — paste the sheet's URL from your browser's address bar" });
+    try {
+        const { headers, rows } = await fetchSheetRows(csvUrl);
+        const lower = headers.map(h => h.toLowerCase());
+        const findH = (...words) => {
+            const i = lower.findIndex(h => words.some(w => h.includes(w)));
+            return i === -1 ? null : headers[i];
+        };
+        res.json({
+            headers,
+            sampleRows: rows.slice(0, 10),
+            rowCount: rows.length,
+            suggested: {
+                triggerColumn: findH('check any', 'apply', 'interest'),
+                firstNameColumn: findH('first name') || findH('name'),
+                lastNameColumn: findH('last name'),
+                emailColumn: findH('email'),
+            },
+        });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+app.get('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
+    if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
+    const w = stmt.sheetWatchers.byEventId.get(req.params.id);
+    if (!w) return res.json({ watcher: null });
+    res.json({ watcher: { ...w, config: watcherConfig(w), seenCount: stmt.sheetWatcherSeen.countByWatcherId.get(w.id).cnt } });
+});
+
+// Create or update the event's watcher.
+app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
+    if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
+    const { url, triggerColumn, triggerValue, matchMode, firstNameColumn, lastNameColumn, emailColumn, extraColumns, intervalMinutes, ticketCount, includeExisting } = req.body || {};
+    if (!url || !triggerColumn || !triggerValue || !firstNameColumn || !emailColumn) {
+        return res.status(400).json({ error: 'url, triggerColumn, triggerValue, firstNameColumn, and emailColumn are required' });
+    }
+    const cleanUrl = String(url).trim();
+    const csvUrl = sheetCsvUrl(cleanUrl);
+    if (!csvUrl) return res.status(400).json({ error: "That doesn't look like a valid sheet link" });
+    const interval = Math.min(15, Math.max(1, parseInt(intervalMinutes, 10) || 2));
+    const config = JSON.stringify({
+        triggerColumn,
+        triggerValue: String(triggerValue).trim(),
+        matchMode: matchMode === 'contains' ? 'contains' : 'option',
+        firstNameColumn,
+        lastNameColumn: lastNameColumn || null,
+        emailColumn,
+        extraColumns: Array.isArray(extraColumns) ? extraColumns.slice(0, 20) : [],
+        ticketCount: Math.min(10, Math.max(1, parseInt(ticketCount, 10) || 1)),
+    });
+
+    let watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
+    const isNew = !watcher;
+    if (watcher) {
+        stmt.sheetWatchers.updateConfig.run(cleanUrl, csvUrl, config, interval, watcher.id);
+    } else {
+        stmt.sheetWatchers.insert.run(nanoid(10), req.params.id, cleanUrl, csvUrl, config, interval, 1, new Date().toISOString());
+    }
+    watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
+
+    // On first connect, unless the user asked to back-fill existing rows,
+    // mark every currently-matching row as seen so only rows submitted
+    // from now on get tickets.
+    if (isNew && !includeExisting) {
+        try {
+            const cfg = watcherConfig(watcher);
+            const { headers, rows } = await fetchSheetRows(csvUrl);
+            const trigIdx = headers.indexOf(cfg.triggerColumn);
+            const emailIdx = headers.indexOf(cfg.emailColumn);
+            const tsIdx = headers.findIndex(h => h.toLowerCase().includes('timestamp'));
+            rows.forEach((row, r) => {
+                if (trigIdx === -1 || !watcherRowMatches(cfg, row[trigIdx])) return;
+                const email = String(row[emailIdx] || '').trim();
+                stmt.sheetWatcherSeen.insert.run(watcher.id, watcherRowKey(row, r, tsIdx, email), new Date().toISOString());
+            });
+        } catch { /* the first scheduled poll will surface any fetch error */ }
     }
 
-    res.json({ eventId: event.id, apiKey: link.apiKey });
+    logAudit(req, { eventId: req.params.id, action: isNew ? 'sheet_watch.connected' : 'sheet_watch.updated', details: { url: cleanUrl, triggerColumn, triggerValue: String(triggerValue).trim(), intervalMinutes: interval } });
+    res.json({ success: true, watcher: { ...watcher, config: watcherConfig(watcher) } });
+});
+
+// Manual "Check now".
+app.post('/api/event/:id/sheet-watch/poll', requireAuth, async (req, res) => {
+    if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
+    const w = stmt.sheetWatchers.byEventId.get(req.params.id);
+    if (!w) return res.status(404).json({ error: 'No sheet watcher configured for this event' });
+    const summary = await pollSheetWatcher(w);
+    const fresh = stmt.sheetWatchers.byEventId.get(req.params.id);
+    res.json({ success: true, summary, watcher: { ...fresh, config: watcherConfig(fresh) } });
+});
+
+app.post('/api/event/:id/sheet-watch/toggle', requireAuth, (req, res) => {
+    if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
+    const w = stmt.sheetWatchers.byEventId.get(req.params.id);
+    if (!w) return res.status(404).json({ error: 'No sheet watcher configured for this event' });
+    stmt.sheetWatchers.setEnabled.run(req.body?.enabled ? 1 : 0, w.id);
+    logAudit(req, { eventId: req.params.id, action: req.body?.enabled ? 'sheet_watch.resumed' : 'sheet_watch.paused', details: {} });
+    res.json({ success: true });
+});
+
+app.delete('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
+    if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
+    const w = stmt.sheetWatchers.byEventId.get(req.params.id);
+    if (!w) return res.status(404).json({ error: 'No sheet watcher configured for this event' });
+    stmt.sheetWatcherSeen.deleteByWatcherId.run(w.id);
+    stmt.sheetWatchers.deleteById.run(w.id);
+    logAudit(req, { eventId: req.params.id, action: 'sheet_watch.disconnected', details: { url: w.url } });
+    res.json({ success: true });
 });
 
 app.post('/api/sheet/share', requireAuth, async (req, res) => {

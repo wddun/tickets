@@ -4208,6 +4208,126 @@
             `;
         }
 
+        function renderSheetWatcherConnect(eventId) {
+            return `
+                <div class="settings-card">
+                    <div style="margin-bottom:12px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Step 1: Paste your form's response sheet link</label>
+                        <input type="text" id="swUrl" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;box-sizing:border-box;margin-bottom:8px;">
+                        <button class="btn btn-primary btn-sm" onclick="swPreview('${eventId}')" style="margin-right:6px;">Preview Sheet</button>
+                    </div>
+                    <div id="swPreviewArea"></div>
+                </div>
+            `;
+        }
+
+        function renderSheetWatcherStatus(eventId, watcher) {
+            const cfg = watcher.config;
+            return `
+                <div class="settings-card">
+                    <div style="margin-bottom:12px;">
+                        <div style="font-size:12px;margin-bottom:6px;">
+                            <strong>Trigger:</strong> ${esc(cfg.triggerColumn)} contains "${esc(cfg.triggerValue)}"
+                        </div>
+                        <div style="font-size:12px;margin-bottom:6px;">
+                            <strong>Name & Email:</strong> ${esc(cfg.firstNameColumn)}${cfg.lastNameColumn ? ' + ' + esc(cfg.lastNameColumn) : ''} → ${esc(cfg.emailColumn)}
+                        </div>
+                        <div style="font-size:12px;margin-bottom:12px;">
+                            <strong>Poll every:</strong> ${watcher.config.intervalMinutes || 2} min
+                            <strong style="margin-left:20px;">Issued:</strong> ${watcher.issuedCount} ticket(s)
+                        </div>
+                        ${watcher.lastError ? `<div style="font-size:11px;color:#991b1b;background:#fef2f2;padding:6px 8px;border-radius:4px;margin-bottom:8px;">Last error: ${esc(watcher.lastError)}</div>` : ''}
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn btn-secondary btn-sm" onclick="swPoll('${eventId}')">Check Now</button>
+                            <button class="btn btn-secondary btn-sm" onclick="swEdit('${eventId}')">Edit</button>
+                            <button class="btn btn-danger btn-sm" onclick="swDisconnect('${eventId}')">Disconnect</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function swPreview(eventId) {
+            const url = document.getElementById('swUrl').value;
+            if (!url.trim()) { showToast('Paste the sheet link first.'); return; }
+            const area = document.getElementById('swPreviewArea');
+            area.innerHTML = '<div style="font-size:12px;color:#888;">Fetching sheet…</div>';
+            const res = await fetch(`/api/event/${eventId}/sheet-watch/preview`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url}) });
+            if (!res.ok) { area.innerHTML = `<div style="font-size:12px;color:#991b1b;">${esc((await res.json()).error)}</div>`; return; }
+            const data = await res.json();
+            window.__swPreview = data;
+            area.innerHTML = `
+                <div style="margin-bottom:12px;">
+                    <div style="font-size:11px;color:#666;margin-bottom:8px;">${data.rowCount} rows, ${data.headers.length} columns</div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Which column has the checkbox you want to watch?</label>
+                        <select id="swTrigger" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            <option value="">-- Select --</option>
+                            ${data.headers.map(h => `<option value="${esc(h)}" ${data.suggested.triggerColumn === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">First name column</label>
+                        <select id="swFirst" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            ${data.headers.map(h => `<option value="${esc(h)}" ${data.suggested.firstNameColumn === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Last name column (optional)</label>
+                        <select id="swLast" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            <option value="">-- None --</option>
+                            ${data.headers.map(h => `<option value="${esc(h)}" ${data.suggested.lastNameColumn === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Email column</label>
+                        <select id="swEmail" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            ${data.headers.map(h => `<option value="${esc(h)}" ${data.suggested.emailColumn === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">What text should trigger a ticket?</label>
+                        <input type="text" id="swValue" placeholder='e.g., "Giveaway"' style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;box-sizing:border-box;">
+                    </div>
+                    <label style="display:flex;gap:6px;font-size:12px;align-items:center;margin-bottom:8px;">
+                        <input type="checkbox" id="swIncludeExisting">
+                        <span>Include rows already in the sheet</span>
+                    </label>
+                    <button class="btn btn-primary btn-sm" onclick="swConnect('${eventId}')">Connect Sheet Watcher</button>
+                </div>
+            `;
+        }
+
+        async function swConnect(eventId) {
+            const trigger = document.getElementById('swTrigger').value;
+            const first = document.getElementById('swFirst').value;
+            const last = document.getElementById('swLast').value;
+            const email = document.getElementById('swEmail').value;
+            const value = document.getElementById('swValue').value;
+            const includeExisting = document.getElementById('swIncludeExisting').checked;
+            if (!trigger || !first || !email || !value) { showToast('Fill in all the required fields.'); return; }
+            const res = await fetch(`/api/event/${eventId}/sheet-watch`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url: document.getElementById('swUrl').value, triggerColumn: trigger, firstNameColumn: first, lastNameColumn: last, emailColumn: email, triggerValue: value, includeExisting}) });
+            if (res.ok) { showToast('Sheet watcher connected!'); loadAccessData(eventId); } else { showToast((await res.json()).error); }
+        }
+
+        async function swPoll(eventId) {
+            const res = await fetch(`/api/event/${eventId}/sheet-watch/poll`, {method: 'POST'});
+            if (res.ok) { const r = await res.json(); showToast(`Found ${r.summary.matched}, issued ${r.summary.issued}, already seen ${r.summary.alreadySeen}.`); loadAccessData(eventId); } else { showToast('Poll failed.'); }
+        }
+
+        async function swEdit(eventId) {
+            const w = window.__swCurrent;
+            if (!w) return;
+            // For now, just disconnect and reconnect
+            await swDisconnect(eventId);
+        }
+
+        async function swDisconnect(eventId) {
+            if (!confirm('Disconnect this sheet watcher?')) return;
+            const res = await fetch(`/api/event/${eventId}/sheet-watch`, {method: 'DELETE'});
+            if (res.ok) { showToast('Sheet watcher disconnected.'); loadAccessData(eventId); } else { showToast('Failed to disconnect.'); }
+        }
+
         async function renderApiSection(eventId) {
             let keyInfo = null;
             try {
@@ -4221,6 +4341,14 @@
                     <div class="settings-empty">Could not load API access — only administrators can view this.</div>
                 `;
             }
+
+            let watcher = null;
+            try {
+                const r = await fetch(`/api/event/${eventId}/sheet-watch`);
+                if (r.ok) watcher = (await r.json()).watcher;
+            } catch (e) { /* rendered as not-connected below */ }
+            window.__swCurrent = watcher;
+            const watcherHtml = watcher ? renderSheetWatcherStatus(eventId, watcher) : renderSheetWatcherConnect(eventId);
 
             const registerUrl = `${location.origin}/api/register-bulk`;
             const snippet = `// ── Ticket giveaway integration ──────────────────────────────
@@ -4303,7 +4431,15 @@ function onFormSubmit(e) {
             return `
                 <div class="modal-section-title">API Access</div>
                 <div class="settings-hint">
-                    Use these to call <code>/api/register-bulk</code> from an external integration — for example a Google Form Apps Script trigger that issues a ticket when a checkbox is selected.
+                    Issue tickets automatically from a Google Form. The easiest way is the Sheet Watcher — the server checks the form's response sheet on a schedule, no code or add-ons needed.
+                </div>
+                <div class="settings-subhead">Google Sheet Watcher</div>
+                <div id="swArea">${watcherHtml}</div>
+
+                <hr class="settings-divider">
+                <div class="settings-subhead">Credentials</div>
+                <div class="settings-hint">
+                    For calling <code>/api/register-bulk</code> yourself from any external integration.
                 </div>
                 <div class="settings-card">
                     <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Event ID</div>
@@ -4327,9 +4463,9 @@ function onFormSubmit(e) {
                 </div>
 
                 <hr class="settings-divider">
-                <div class="settings-subhead">Google Form (Apps Script) snippet</div>
+                <div class="settings-subhead">Apps Script snippet (instant alternative)</div>
                 <div class="settings-hint">
-                    Issues a ticket automatically when someone checks the giveaway option on your Google Form. Paste into Extensions → Apps Script on the form's linked Sheet, then run <code>setup</code> once — it installs its own trigger and finds your name/email columns automatically.
+                    Does the same as the Sheet Watcher but issues the ticket the moment the form is submitted, at the cost of a code-paste setup. Paste into Extensions → Apps Script on the form's linked Sheet, then run <code>setup</code> once — it installs its own trigger and finds your name/email columns automatically.
                 </div>
                 <div class="settings-card" style="position:relative;">
                     <textarea readonly onclick="this.select()" spellcheck="false"

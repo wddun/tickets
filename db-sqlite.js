@@ -287,6 +287,37 @@ try {
     `);
 } catch {}
 
+// Sheet watcher: the server polls a link-shared Google Sheet (a form's
+// response sheet) and issues tickets for new rows whose trigger column
+// contains the configured option — the no-code alternative to the Apps
+// Script snippet. One watcher per event. `config` is a JSON blob of the
+// column mapping so adding mapping options never needs a migration.
+// sheetWatcherSeen records rows already processed (or intentionally
+// skipped at connect time) so a row is never double-issued.
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS sheetWatchers (
+            id TEXT PRIMARY KEY,
+            eventId TEXT UNIQUE NOT NULL,
+            url TEXT NOT NULL,
+            csvUrl TEXT NOT NULL,
+            config TEXT NOT NULL,
+            intervalMinutes INTEGER DEFAULT 2,
+            enabled INTEGER DEFAULT 1,
+            lastPolledAt TEXT,
+            lastError TEXT,
+            issuedCount INTEGER DEFAULT 0,
+            createdAt TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sheetWatcherSeen (
+            watcherId TEXT NOT NULL,
+            seenKey TEXT NOT NULL,
+            processedAt TEXT NOT NULL,
+            PRIMARY KEY (watcherId, seenKey)
+        );
+    `);
+} catch {}
+
 // ── One-time migration from db.json ──────────────────────────────────────────
 
 const migrationFlag = path.join(__dirname, 'db-migrated.flag');
@@ -621,6 +652,24 @@ export const stmt = {
         setClaim: db.prepare(`UPDATE waitlist SET status='notified', notifiedAt=?, claimToken=?, claimExpiresAt=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM waitlist WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM waitlist WHERE eventId=?`),
+    },
+    sheetWatchers: {
+        byId: db.prepare('SELECT * FROM sheetWatchers WHERE id=?'),
+        byEventId: db.prepare('SELECT * FROM sheetWatchers WHERE eventId=?'),
+        allEnabled: db.prepare('SELECT * FROM sheetWatchers WHERE enabled=1'),
+        insert: db.prepare(`INSERT INTO sheetWatchers (id, eventId, url, csvUrl, config, intervalMinutes, enabled, createdAt) VALUES (?,?,?,?,?,?,?,?)`),
+        updateConfig: db.prepare(`UPDATE sheetWatchers SET url=?, csvUrl=?, config=?, intervalMinutes=? WHERE id=?`),
+        setEnabled: db.prepare(`UPDATE sheetWatchers SET enabled=? WHERE id=?`),
+        setPollResult: db.prepare(`UPDATE sheetWatchers SET lastPolledAt=?, lastError=? WHERE id=?`),
+        incrementIssued: db.prepare(`UPDATE sheetWatchers SET issuedCount = issuedCount + ? WHERE id=?`),
+        deleteById: db.prepare(`DELETE FROM sheetWatchers WHERE id=?`),
+        deleteByEventId: db.prepare(`DELETE FROM sheetWatchers WHERE eventId=?`),
+    },
+    sheetWatcherSeen: {
+        exists: db.prepare('SELECT 1 FROM sheetWatcherSeen WHERE watcherId=? AND seenKey=?'),
+        countByWatcherId: db.prepare('SELECT COUNT(*) as cnt FROM sheetWatcherSeen WHERE watcherId=?'),
+        insert: db.prepare(`INSERT OR IGNORE INTO sheetWatcherSeen (watcherId, seenKey, processedAt) VALUES (?,?,?)`),
+        deleteByWatcherId: db.prepare(`DELETE FROM sheetWatcherSeen WHERE watcherId=?`),
     },
 };
 
