@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waitlist Status | WTS Tickets</title>
+    <meta name="theme-color" content="#1a1f3c">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .container { max-width: 480px; padding: 24px 16px 40px; }
+
+        .status-box {
+            background: #fff; border: 1px solid var(--border);
+            border-radius: 14px; padding: 28px 20px;
+            text-align: center;
+        }
+        .status-icon { width: 52px; height: 52px; margin: 0 auto 12px; display: block; }
+        .status-title { font-size: 20px; font-weight: 800; color: var(--navy); margin-bottom: 6px; }
+        .status-sub   { font-size: 14px; color: var(--text-muted); margin-bottom: 6px; line-height: 1.5; }
+
+        .position-badge {
+            display: inline-block;
+            background: var(--navy); color: #fff;
+            font-size: 28px; font-weight: 800;
+            padding: 14px 28px; border-radius: 16px;
+            margin: 12px 0 18px;
+        }
+        .position-badge span { font-size: 14px; font-weight: 600; display: block; opacity: .75; margin-top: 2px; }
+
+        .btn-outline {
+            background: var(--bg); color: var(--navy);
+            border: 1.5px solid var(--border);
+            font-size: 15px;
+        }
+        .btn-outline:hover { background: #e8ecf4; }
+
+        @media (max-width: 480px) {
+            .container { padding: 16px 12px 32px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div id="loadingView">
+                <div class="status-box">
+                    <div class="status-sub">Checking your status…</div>
+                </div>
+            </div>
+
+            <div id="waitingView" style="display:none;">
+                <div class="status-box">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <div class="status-title" id="waitingEventName"></div>
+                    <div class="status-sub">You're in line for this event.</div>
+                    <div class="position-badge">#<span id="positionNum"></span><span>your position</span></div>
+                    <div class="status-sub">We'll email you the moment a spot opens up — no need to keep checking.</div>
+                </div>
+            </div>
+
+            <div id="notifiedView" style="display:none;">
+                <div class="status-box">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
+                    <div class="status-title">A spot opened up!</div>
+                    <div class="status-sub" id="notifiedEventName"></div>
+                    <div class="status-sub">Complete your registration to keep it — this hold won't last forever.</div>
+                    <button class="btn-outline" id="claimBtn" style="margin-top:14px;background:var(--navy);color:#fff;border:none;">Complete Your Registration</button>
+                </div>
+            </div>
+
+            <div id="expiredView" style="display:none;">
+                <div class="status-box">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--danger-soft-text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <div class="status-title">Your hold has expired</div>
+                    <div class="status-sub">The reserved spot for <strong id="expiredEventName"></strong> is no longer available. Contact the organizer if you'd still like to attend.</div>
+                </div>
+            </div>
+
+            <div id="convertedView" style="display:none;">
+                <div class="status-box">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
+                    <div class="status-title">You already have a ticket</div>
+                    <div class="status-sub">Check your email for your QR code for <strong id="convertedEventName"></strong>.</div>
+                </div>
+            </div>
+
+            <div id="errorView" style="display:none;">
+                <div class="status-box">
+                    <div class="status-title">Not found</div>
+                    <div class="status-sub">This waitlist link is invalid or has expired.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="nav">
+            <a href="/">Home</a>
+        </div>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const id = params.get('id');
+
+        function showView(name) {
+            for (const v of ['loadingView', 'waitingView', 'notifiedView', 'expiredView', 'convertedView', 'errorView']) {
+                document.getElementById(v).style.display = v === name ? 'block' : 'none';
+            }
+        }
+
+        async function load() {
+            if (!id) return showView('errorView');
+            try {
+                const res = await fetch(`/api/waitlist/entry/${id}`);
+                if (!res.ok) return showView('errorView');
+                const data = await res.json();
+                document.title = `Waitlist — ${data.eventName}`;
+
+                if (data.status === 'waiting') {
+                    document.getElementById('waitingEventName').textContent = data.eventName;
+                    document.getElementById('positionNum').textContent = data.position;
+                    showView('waitingView');
+                } else if (data.status === 'notified' && data.claimUrl) {
+                    document.getElementById('notifiedEventName').textContent = data.eventName;
+                    document.getElementById('claimBtn').onclick = () => window.location.href = data.claimUrl;
+                    showView('notifiedView');
+                } else if (data.status === 'notified' && data.claimExpired) {
+                    document.getElementById('expiredEventName').textContent = data.eventName;
+                    showView('expiredView');
+                } else if (data.status === 'converted') {
+                    document.getElementById('convertedEventName').textContent = data.eventName;
+                    showView('convertedView');
+                } else {
+                    showView('errorView');
+                }
+            } catch {
+                showView('errorView');
+            }
+        }
+        load();
+    </script>
+    <footer class="wts-footer">
+        <img src="/logo-nav.svg" alt="Will's Tech Support" style="height:14px;width:auto;opacity:.6">
+        <span>&copy; 2026 Will's Tech Support</span>
+    </footer>
+</body>
+</html>

@@ -1450,6 +1450,23 @@
             gap: 32px;
             align-items: flex-start;
         }
+        /* Sticks to the top of .main's scroll area so it's always reachable
+           without scrolling back up — background covers content scrolling
+           underneath it. .settings-nav's top offset is pushed down by this
+           bar's height (see JS-measured --settings-back-bar-h below) so the
+           two stickies stack without overlapping. */
+        .settings-back-bar {
+            position: sticky;
+            top: 0;
+            z-index: 6;
+            background: #fff;
+            padding: 4px 0 14px;
+            margin-bottom: 2px;
+        }
+        .settings-back-bar .back-btn {
+            margin-bottom: 0;
+        }
+
         .settings-nav {
             width: 200px;
             flex-shrink: 0;
@@ -1457,7 +1474,7 @@
             flex-direction: column;
             gap: 2px;
             position: sticky;
-            top: 28px;
+            top: var(--settings-back-bar-h, 38px);
         }
         .settings-nav-item {
             display: flex;
@@ -1520,10 +1537,12 @@
                 flex-direction: row;
                 flex-wrap: wrap;
                 position: sticky;
-                top: 0; /* was 56px to sit below the old fixed/sticky topbar — that topbar
-                           is position:static now (see its mobile rule above), so it scrolls
-                           away instead of reserving that space, and top:0 is what actually
-                           pins this flush against the viewport instead of leaving a gap. */
+                /* Was a flat 0 to sit flush against the viewport (the old
+                   fixed/sticky topbar is position:static on mobile, see its
+                   mobile rule above, so it scrolls away instead of reserving
+                   that space) — now pushed down by the back bar's actual
+                   height so the two stickies don't paint on top of each other. */
+                top: var(--settings-back-bar-h, 38px);
                 gap: 6px;
                 padding-bottom: 6px;
                 background: #f4f5f7;
@@ -2615,6 +2634,15 @@
             const grouped = groupTickets(tickets);
 
             const el = document.getElementById('eventDetail');
+
+            // Detach (don't destroy) the existing scan-access card before
+            // wiping el.innerHTML below — its QR <img> would otherwise be
+            // torn down and reloaded from the network on every 15s silent
+            // auto-refresh, flickering, even though the scan link's content
+            // never actually changes between refreshes.
+            const prevScanCard = document.getElementById('scanAccessCard');
+            const reuseScanCard = prevScanCard && prevScanCard.dataset.eventId === event.id ? prevScanCard : null;
+
             el.innerHTML = `
         <button class="back-btn" onclick="backToEventList()">
             <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,1 1,7 7,13"/></svg>
@@ -2646,7 +2674,7 @@
             </div>
         </div>
 
-        <div id="scanAccessCard">${scanAccessCache[event.id] || '<div class="scan-access-card scan-access-skeleton">Loading scan link…</div>'}</div>
+        <div id="scanAccessCardSlot"></div>
 
         <div class="stats-row">
             <div class="stat-box${activeStatFilter === 'all' ? ' stat-active' : ''}" onclick="setStatFilter('all')">
@@ -2690,7 +2718,17 @@
             ${renderAttendeeRows(grouped)}
         </div>
     `;
-            if (!scanAccessCache[event.id]) loadScanAccessCard(event.id);
+            const scanCardSlot = document.getElementById('scanAccessCardSlot');
+            if (reuseScanCard) {
+                scanCardSlot.replaceWith(reuseScanCard);
+            } else {
+                const freshScanCard = document.createElement('div');
+                freshScanCard.id = 'scanAccessCard';
+                freshScanCard.dataset.eventId = event.id;
+                freshScanCard.innerHTML = scanAccessCache[event.id] || '<div class="scan-access-card scan-access-skeleton">Loading scan link…</div>';
+                scanCardSlot.replaceWith(freshScanCard);
+                if (!scanAccessCache[event.id]) loadScanAccessCard(event.id);
+            }
         }
 
         function groupTickets(tickets) {
@@ -3479,8 +3517,8 @@
                     if (subtitle) subtitle.textContent = ev.name;
                 }
                 renderSidebar();
+                // No success toast here — see saveEventCustomFields for why.
                 clearSettingsDirty('tab-general');
-                showToast('Event details saved.');
             } else {
                 const d = await r2.json();
                 showToast(d.error || 'Failed to save event.');
@@ -3510,10 +3548,12 @@
             const view = document.getElementById('settingsView');
             view.style.display = 'block';
             view.innerHTML = `
-                <button class="back-btn" onclick="showOverviewView('${id}')">
-                    <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,1 1,7 7,13"/></svg>
-                    <span id="settingsBackLabel">Back to ${event ? esc(event.name) : 'Event'}</span>
-                </button>
+                <div class="settings-back-bar" id="settingsBackBar">
+                    <button class="back-btn" onclick="showOverviewView('${id}')">
+                        <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,1 1,7 7,13"/></svg>
+                        <span id="settingsBackLabel">Back to ${event ? esc(event.name) : 'Event'}</span>
+                    </button>
+                </div>
                 <div class="settings-page-header">
                     <h1>Settings</h1>
                     <div class="settings-hint" id="settingsHeaderSubtitle">${event ? esc(event.name) : ''}</div>
@@ -3528,6 +3568,7 @@
                         <button class="settings-nav-item" id="navfor-tab-waitlist" onclick="switchSettingsTab(this,'tab-waitlist')">Waitlist</button>
                         <button class="settings-nav-item" id="navfor-tab-discounts" onclick="switchSettingsTab(this,'tab-discounts')">Discounts</button>
                         <button class="settings-nav-item" id="navfor-tab-payments" onclick="switchSettingsTab(this,'tab-payments')">Payments<span class="beta-pill">BETA</span></button>
+                        <button class="settings-nav-item" id="navfor-tab-api" onclick="switchSettingsTab(this,'tab-api')">API Access</button>
                     </div>
                     <div class="settings-panel">
                         <div id="settingsContent"><div class="settings-empty">Loading…</div></div>
@@ -3541,6 +3582,12 @@
                     </div>
                 </div>`;
             setUrlState({ event: id, view: 'settings' });
+
+            // Push .settings-nav's sticky offset down by the back bar's
+            // actual rendered height so the two stickies stack cleanly
+            // instead of overlapping (avoids hardcoding a guessed pixel gap).
+            const backBar = document.getElementById('settingsBackBar');
+            if (backBar) view.style.setProperty('--settings-back-bar-h', `${backBar.offsetHeight}px`);
 
             // Reset unsaved-changes tracking for this settings session, then
             // watch every field across every tab via one delegated listener
@@ -3626,8 +3673,10 @@
             // Update local events cache so ticket modals immediately reflect changes
             const ev = events.find(e => e.id === eventId);
             if (ev) ev.customFields = keys;
+            // No success toast here — this only ever runs as part of the
+            // floating settings save bar's batched save, which shows its own
+            // single "All changes saved." toast once every dirty tab is done.
             clearSettingsDirty('tab-fields');
-            showToast('Custom fields saved.');
         }
 
         async function loadReminderSection(eventId) {
@@ -3691,8 +3740,8 @@
                 body: JSON.stringify({ enabled, message, hoursBefore })
             });
             if (r.ok) {
+                // No success toast here — see saveEventCustomFields for why.
                 clearSettingsDirty('tab-notifications');
-                showToast('Reminder settings saved.');
             } else {
                 showToast('Failed to save reminder settings.');
             }
@@ -3724,6 +3773,7 @@
                         `<div class="settings-section dirty-scope" id="tab-waitlist" data-tab="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-discounts">${await renderDiscountsSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-payments">${await renderPaymentsSection(eventId)}</div>` +
+                        `<div class="settings-section" id="tab-api">${await renderApiSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-danger">${renderDangerZoneSection(eventId)}</div>`;
                     togglePushDeviceList();
                     return;
@@ -3800,6 +3850,7 @@
                     `<div class="settings-section dirty-scope" id="tab-waitlist" data-tab="tab-waitlist">${await renderWaitlistSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-discounts">${await renderDiscountsSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-payments">${await renderPaymentsSection(eventId)}</div>` +
+                    `<div class="settings-section" id="tab-api">${await renderApiSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-danger">${renderDangerZoneSection(eventId)}</div>`;
                 togglePushDeviceList();
             } catch (err) {
@@ -4157,6 +4208,94 @@
             `;
         }
 
+        async function renderApiSection(eventId) {
+            let keyInfo = null;
+            try {
+                const res = await fetch(`/api/event/${eventId}/api-key`);
+                if (res.ok) keyInfo = await res.json();
+            } catch (e) { /* handled by null keyInfo below */ }
+
+            if (!keyInfo) {
+                return `
+                    <div class="modal-section-title">API Access</div>
+                    <div class="settings-empty">Could not load API access — only administrators can view this.</div>
+                `;
+            }
+
+            const registerUrl = `${location.origin}/api/register-bulk`;
+            const snippet = `function onFormSubmit(e) {
+  const itemResponses = e.response.getItemResponses();
+
+  // Question 1 — checkbox/multiple-choice; adjust the match to your option text
+  const q1Answer = itemResponses[0].getResponse();
+  const hasGiveaway = Array.isArray(q1Answer)
+    ? q1Answer.includes('giveaway')
+    : q1Answer === 'giveaway';
+
+  if (!hasGiveaway) return;
+
+  const fullName = itemResponses[1].getResponse(); // adjust index to your Name question
+  const email = itemResponses[2].getResponse();     // adjust index to your Email question
+  const [firstName, ...rest] = fullName.split(' ');
+  const lastName = rest.join(' ') || '(none)';
+
+  UrlFetchApp.fetch('${registerUrl}', {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      firstName,
+      lastName,
+      email,
+      eventId: '${eventId}',
+      ticketCount: 1,
+      apiKey: '${keyInfo.apiKey}'
+    }),
+    muteHttpExceptions: true
+  });
+}`;
+
+            return `
+                <div class="modal-section-title">API Access</div>
+                <div class="settings-hint">
+                    Use these to call <code>/api/register-bulk</code> from an external integration — for example a Google Form Apps Script trigger that issues a ticket when a checkbox is selected.
+                </div>
+                <div class="settings-card">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Event ID</div>
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:14px;">
+                        <input type="text" readonly value="${esc(keyInfo.eventId)}" onclick="this.select()"
+                            style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;color:#555;background:#f9f9f9;cursor:text;min-width:0;">
+                        <button onclick="copyToClipboard('${esc(keyInfo.eventId)}', this)"
+                            style="flex-shrink:0;padding:8px 12px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                            Copy
+                        </button>
+                    </div>
+                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">API Key</div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <input type="text" readonly value="${esc(keyInfo.apiKey)}" onclick="this.select()"
+                            style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;color:#555;background:#f9f9f9;cursor:text;min-width:0;">
+                        <button onclick="copyToClipboard('${esc(keyInfo.apiKey)}', this)"
+                            style="flex-shrink:0;padding:8px 12px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+
+                <hr class="settings-divider">
+                <div class="settings-subhead">Google Form (Apps Script) snippet</div>
+                <div class="settings-hint">
+                    Paste into Extensions → Apps Script on the form's linked Sheet, adjust the question indices, then add an "On form submit" trigger for <code>onFormSubmit</code>.
+                </div>
+                <div class="settings-card" style="position:relative;">
+                    <textarea readonly onclick="this.select()" spellcheck="false"
+                        style="width:100%;min-height:340px;padding:10px;border:1px solid #ddd;border-radius:6px;font-family:monospace;font-size:12px;color:#333;background:#f9f9f9;resize:vertical;box-sizing:border-box;">${esc(snippet)}</textarea>
+                    <button onclick="copyToClipboard(${JSON.stringify(snippet).replace(/</g, '\\u003c')}, this)"
+                        style="position:absolute;top:22px;right:22px;padding:6px 10px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
+                        Copy
+                    </button>
+                </div>
+            `;
+        }
+
         async function setPublicRegistration(eventId, enabled) {
             try {
                 await fetch(`/api/event/${eventId}/public-registration`, {
@@ -4468,7 +4607,9 @@
             let rows = '<div class="settings-empty">No orders yet for this event.</div>';
             try {
                 const r = await fetch(`/api/event/${eventId}/orders`);
-                if (r.ok) {
+                if (r.status === 403) {
+                    rows = '<div class="settings-empty">You don\'t have permission to view orders for this event.</div>';
+                } else if (r.ok) {
                     const orders = await r.json();
                     if (orders.length) {
                         rows = `<table class="mini-table"><thead><tr><th>Buyer</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>` +
@@ -4517,6 +4658,9 @@
         async function renderAuditLogSection(eventId) {
             try {
                 const r = await fetch(`/api/event/${eventId}/audit-log?limit=25`);
+                if (r.status === 403) {
+                    return `<hr class="settings-divider"><div class="settings-subhead">Activity Log</div><div class="settings-empty">You don't have permission to view this event's activity log.</div>`;
+                }
                 if (!r.ok) return '';
                 const { entries } = await r.json();
                 if (!entries.length) return `<hr class="settings-divider"><div class="settings-subhead">Activity Log</div><div class="settings-empty">No activity recorded yet.</div>`;

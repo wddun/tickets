@@ -60,7 +60,7 @@
         <a href="/"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
         <a href="/">← Back</a>
     </nav>
-    <div class="auth-wrap">
+    <div class="auth-wrap" id="authWrap" style="visibility:hidden">
         <div class="auth-card">
             <div class="auth-logo"><img src="/logo-nav-dark.svg" alt="Will's Tech Support"></div>
             <div class="auth-title" id="authTitle">Organizer Login</div>
@@ -76,6 +76,10 @@
                     <label for="password">Password</label>
                     <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password">
                 </div>
+                <label id="rememberMeRow" style="display:flex; align-items:center; gap:8px; font-size:14px; color:#475569; margin:-6px 0 18px; cursor:pointer;">
+                    <input type="checkbox" id="rememberMe" checked style="width:auto;">
+                    Remember me
+                </label>
                 <button type="submit" id="submitBtn">Login</button>
             </form>
 
@@ -133,6 +137,27 @@
     </div>
 
     <script>
+        async function redirectIfAlreadyLoggedIn() {
+            try {
+                const r = await fetch('/api/auth/me', { cache: 'no-store' });
+                if (r.ok) {
+                    const next = new URLSearchParams(window.location.search).get('next');
+                    window.location.replace((next && next.startsWith('/')) ? next : '/dashboard.html');
+                    return;
+                }
+            } catch {}
+            document.getElementById('authWrap').style.visibility = 'visible';
+        }
+        redirectIfAlreadyLoggedIn();
+
+        // Safari/Chrome can restore this page from the back-forward cache
+        // (e.g. hitting Back after logging in elsewhere) without re-running
+        // any of the above — event.persisted catches that restore and
+        // re-checks instead of showing a stale, already-logged-in login form.
+        window.addEventListener('pageshow', event => {
+            if (event.persisted) redirectIfAlreadyLoggedIn();
+        });
+
         let isLogin = true;
         let pendingVerifyEmail = '';
         const toggleBtn  = document.getElementById('toggleBtn');
@@ -151,17 +176,19 @@
             submitBtn.textContent  = isLogin ? 'Login' : 'Create Account';
             document.querySelector('input[autocomplete="current-password"]').autocomplete = isLogin ? 'current-password' : 'new-password';
             document.getElementById('forgotRow').style.display = isLogin ? '' : 'none';
+            document.getElementById('rememberMeRow').style.display = isLogin ? '' : 'none';
         };
 
         document.getElementById('authForm').onsubmit = async e => {
             e.preventDefault();
-            const email    = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
+            const email      = document.getElementById('email').value;
+            const password   = document.getElementById('password').value;
+            const rememberMe = document.getElementById('rememberMe').checked;
+            const endpoint   = isLogin ? '/api/auth/login' : '/api/auth/signup';
             submitBtn.disabled = true;
             submitBtn.textContent = isLogin ? 'Logging in…' : 'Creating account…';
             try {
-                const r    = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+                const r    = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, rememberMe }) });
                 const data = await r.json();
                 if (data.success && data.needsVerification) {
                     // Signup — show check-your-email screen
@@ -172,6 +199,7 @@
                 } else if (data.needsTotp) {
                     // Password was correct — this account has 2FA enabled and
                     // this device isn't remembered, so finish with a code.
+                    pendingRememberMe = rememberMe;
                     showTotpState(data.pendingToken);
                 } else if (data.success) {
                     const next = new URLSearchParams(window.location.search).get('next');
@@ -209,6 +237,7 @@
         }
 
         let pendingTotpToken = '';
+        let pendingRememberMe = true;
         let totpUsingBackupCode = false;
 
         function showTotpState(pendingToken) {
@@ -273,7 +302,7 @@
                 const r = await fetch('/api/auth/login/totp-verify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pendingToken: pendingTotpToken, code, remember })
+                    body: JSON.stringify({ pendingToken: pendingTotpToken, code, remember, rememberMe: pendingRememberMe })
                 });
                 const data = await r.json();
                 if (data.success) {

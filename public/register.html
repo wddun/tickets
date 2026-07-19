@@ -98,6 +98,22 @@
                 </div>
             </div>
 
+            <div id="closedView" style="display:none;">
+                <div class="success-box">
+                    <div class="success-title">Registration is closed</div>
+                    <div class="success-sub">This event isn't accepting new registrations right now.</div>
+                </div>
+            </div>
+
+            <div id="waitlistView" style="display:none;">
+                <div class="success-box">
+                    <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <div class="success-title" id="waitlistTitle">You're on the waitlist</div>
+                    <div class="success-sub" id="waitlistSub"></div>
+                    <button class="btn-outline" onclick="window.location.href = window.location.pathname + '?id=' + eventId">Back</button>
+                </div>
+            </div>
+
             <div id="successView" style="display:none;">
                 <div class="success-box">
                     <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
@@ -123,9 +139,11 @@
         const params  = new URLSearchParams(window.location.search);
         const eventId = params.get('id');
         const sessionId = params.get('session');
+        const claimToken = params.get('claim');
         if (!eventId) { alert('No Event ID provided.'); window.location.href = '/'; }
 
         let eventTicketPrice = 0;
+        let isFullWaitlistable = false;
 
         async function loadEvent() {
             try {
@@ -137,6 +155,15 @@
                     `${event.location?.name || ''} · ${new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
                 document.title = `Register — ${event.name}`;
 
+                // Claim links (promoted waitlist entries) always get a shot at
+                // the form — the backend re-validates the claim regardless of
+                // whether registration is generally open.
+                if (!event.allowPublicRegistration && !claimToken) {
+                    document.getElementById('formView').style.display = 'none';
+                    document.getElementById('closedView').style.display = 'block';
+                    return;
+                }
+
                 eventTicketPrice = event.ticketPrice || 0;
                 if (eventTicketPrice > 0) {
                     const price = (eventTicketPrice / 100).toFixed(2);
@@ -145,7 +172,11 @@
                     document.getElementById('submitBtn').textContent = `Buy Ticket — $${price}`;
                 }
 
-                if (event.capacity && event.ticketsRemaining != null) {
+                // A claim link means this specific visitor has a reserved spot
+                // (see the waitlist-promotion flow) — always let them through
+                // the normal buy/register flow regardless of what capacity
+                // looks like for everyone else; the backend enforces this.
+                if (event.capacity && event.ticketsRemaining != null && !claimToken) {
                     const left = event.ticketsRemaining;
                     const lowCount = left < 20;
                     const lowPct   = left / event.capacity < 0.20;
@@ -154,10 +185,19 @@
                         el.textContent = left === 0 ? 'Sold out' : `Only ${left} ticket${left === 1 ? '' : 's'} left`;
                         el.style.display = 'block';
                         if (left === 0) {
-                            document.getElementById('submitBtn').disabled = true;
-                            el.style.background = 'var(--danger-soft-bg)';
-                            el.style.borderColor = 'var(--danger-soft-border)';
-                            el.style.color = 'var(--danger-soft-text)';
+                            if (event.waitlistEnabled) {
+                                isFullWaitlistable = true;
+                                document.getElementById('submitBtn').textContent = 'Join Waitlist';
+                                el.textContent = "Sold out — join the waitlist below and we'll email you if a spot opens up.";
+                                el.style.background = 'var(--warning-bg)';
+                                el.style.borderColor = '#fcd34d';
+                                el.style.color = 'var(--warning-text)';
+                            } else {
+                                document.getElementById('submitBtn').disabled = true;
+                                el.style.background = 'var(--danger-soft-bg)';
+                                el.style.borderColor = 'var(--danger-soft-border)';
+                                el.style.color = 'var(--danger-soft-text)';
+                            }
                         }
                     }
                 }
@@ -165,6 +205,17 @@
                 alert('Event not found or has been removed.');
                 window.location.href = '/';
             }
+        }
+
+        function showWaitlisted(data) {
+            document.getElementById('formView').style.display      = 'none';
+            document.getElementById('processingView').style.display = 'none';
+            document.getElementById('waitlistView').style.display  = 'block';
+            document.getElementById('waitlistTitle').textContent =
+                data.alreadyOnList ? "You're already on the waitlist" : "You're on the waitlist";
+            document.getElementById('waitlistSub').textContent = data.position
+                ? `You're #${data.position} in line. We'll email you the moment a spot opens up.`
+                : `We'll email you the moment a spot opens up.`;
         }
 
         function showSuccess(ticket, qr) {
@@ -210,20 +261,31 @@
             const btn  = document.getElementById('submitBtn');
             const name  = document.getElementById('name').value;
             const email = document.getElementById('email').value;
+            const resetBtnText = () => {
+                btn.textContent = isFullWaitlistable ? 'Join Waitlist'
+                    : eventTicketPrice > 0 ? `Buy Ticket — $${(eventTicketPrice/100).toFixed(2)}`
+                    : 'Get My Ticket';
+            };
             btn.disabled = true; btn.textContent = 'Processing…';
             try {
                 if (eventTicketPrice > 0) {
                     const res  = await fetch(`/api/checkout/${eventId}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, email })
+                        body: JSON.stringify({ name, email, claimToken: claimToken || undefined })
                     });
                     const data = await res.json();
                     if (data.url) {
                         window.location.href = data.url;
                         return;
+                    } else if (data.success) {
+                        // 100%-discount checkout issues the ticket directly (no Stripe redirect)
+                        showSuccess(data.ticket, data.qr);
+                    } else if (data.waitlisted) {
+                        showWaitlisted(data);
+                    } else {
+                        alert('Error: ' + (data.error || 'Could not create checkout session.'));
                     }
-                    alert('Error: ' + (data.error || 'Could not create checkout session.'));
                 } else {
                     const res  = await fetch('/api/register', {
                         method: 'POST',
@@ -233,12 +295,14 @@
                     const data = await res.json();
                     if (data.success) {
                         showSuccess(data.ticket, data.qr);
+                    } else if (data.waitlisted) {
+                        showWaitlisted(data);
                     } else {
                         alert('Error: ' + data.error);
                     }
                 }
             } catch { alert('Connection error. Please try again.'); }
-            finally  { btn.disabled = false; btn.textContent = eventTicketPrice > 0 ? `Buy Ticket — $${(eventTicketPrice/100).toFixed(2)}` : 'Get My Ticket'; }
+            finally  { btn.disabled = false; resetBtnText(); }
         };
     </script>
     <footer class="wts-footer">

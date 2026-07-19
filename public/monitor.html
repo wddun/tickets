@@ -333,6 +333,11 @@
             color: #888;
         }
 
+        .badge-push-off {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
         .scanner-body {
             padding: 0 18px 16px;
         }
@@ -881,6 +886,14 @@
             if (platform.includes('ios')) { badgeClass = 'badge-ios'; badgeLabel = '📱 iOS App'; }
             else if (platform.includes('web')) { badgeClass = 'badge-web'; badgeLabel = '🌐 Web'; }
 
+            // Devices without notification permission still get admin
+            // messages (they arrive as an in-app banner over this same SSE
+            // channel), but they'll never get a real push when the app isn't
+            // open — flag it so admin knows who to nudge in person.
+            const pushOffBadge = platform.includes('ios') && s.pushEnabled === false
+                ? `<span class="platform-badge badge-push-off" title="This device hasn't enabled notifications — it can still receive in-app messages while the app is open.">Push Off</span>`
+                : '';
+
             // Last scan result pill
             let pillClass = 'pill-idle', pillLabel = 'Idle';
             if (lastR) {
@@ -906,6 +919,7 @@
                 <div class="scanner-meta">${esc(eventName)}</div>
             </div>
             <span class="platform-badge ${badgeClass}">${badgeLabel}</span>
+            ${pushOffBadge}
         </div>
         <div class="scanner-body">
             <div class="scan-result-row">
@@ -939,12 +953,14 @@
         }
 
         function detailsHTML(s) {
+            const pushLabel = s.pushEnabled === true ? 'Enabled' : s.pushEnabled === false ? 'Off' : 'Unknown';
             const rows = [
                 ['IP', s.ip || '—'],
                 ['Platform', s.platform || '—'],
                 ['OS', s.osVersion || '—'],
                 ['App', s.appVersion ? `v${s.appVersion}` : '—'],
                 ['Device', s.deviceName || '—'],
+                ['Push notifications', pushLabel],
                 ['Token', s.pairToken || '—'],
                 ['Last seen', s.lastSeen ? new Date(s.lastSeen).toLocaleString() : '—'],
                 ['User-Agent', s.userAgent || '—'],

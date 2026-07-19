@@ -233,7 +233,16 @@ const content = document.getElementById('content');
 if (!eventId) {
     content.innerHTML = '<div class="card" style="color:var(--red);">Missing ?id= in URL.</div>';
 } else {
-    loadEvent();
+    checkAuth().then(ok => { if (ok) loadEvent(); });
+}
+
+async function checkAuth() {
+    const r = await fetch('/api/auth/me');
+    if (!r.ok) {
+        location.href = `/login.html?next=${encodeURIComponent(location.pathname + location.search)}`;
+        return false;
+    }
+    return true;
 }
 
 async function loadEvent() {

@@ -361,6 +361,7 @@ let events = [];
 let allAttendees = [];
 let filteredAttendees = [];
 let sheetRegId = null;
+let accessError = false;
 let lockedEventId = null;
 
 function currentEventFullAccess() {
@@ -414,8 +415,10 @@ async function loadAttendees(eventId) {
     document.getElementById('attendeeList').innerHTML = '<div class="list-empty">Loading…</div>';
     const ev = events.find(e => e.id === eventId);
     document.getElementById('navTitle').textContent = ev ? ev.name : 'Check-In';
+    accessError = false;
     try {
         const r = await fetch(`/api/event/${eventId}/tickets`);
+        if (r.status === 401) { accessError = true; throw new Error(); }
         if (!r.ok) throw new Error();
         const tickets = await r.json();
         const groups = {};
@@ -442,6 +445,12 @@ function filterList() {
 
 function renderList() {
     const container = document.getElementById('attendeeList');
+
+    if (accessError) {
+        container.innerHTML = '<div class="list-empty">You no longer have access to this event</div>';
+        document.getElementById('navStats').textContent = '';
+        return;
+    }
 
     if (!allAttendees.length) {
         container.innerHTML = '<div class="list-empty">No attendees found</div>';

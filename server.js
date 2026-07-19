@@ -250,7 +250,11 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
   ${n > 1 ? `<div style="background:${accentHex};padding:7px 16px;"><p style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.9);text-transform:uppercase;letter-spacing:1px;margin:0;">Ticket ${i + 1} of ${n}</p></div>` : ''}
   <div style="padding:24px;text-align:center;">
     <p style="font-size:15px;font-weight:600;color:#111;margin:0 0 16px;">${t.name}</p>
-    <img src="cid:${qrCid}" alt="QR Code" width="200" height="200" style="width:200px;height:200px;display:block;margin:0 auto 12px;border:1px solid #f3f4f6;border-radius:8px;background:#fff;padding:8px;">
+    <table role="presentation" width="200" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 12px;">
+      <tr><td>
+        <img src="cid:${qrCid}" alt="QR Code" width="200" height="200" style="width:200px;height:200px;display:block;border:1px solid #f3f4f6;border-radius:8px;background:#fff;padding:8px;">
+      </td></tr>
+    </table>
     <p style="font-size:10px;color:#9ca3af;font-family:monospace;margin:0 0 16px;word-break:break-all;">${t.token}</p>
     <a href="${BASE_URL}/api/pass/${t.token}.pkpass" style="display:inline-block;text-decoration:none;">
       <table role="presentation" width="141" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;"><tr><td>
@@ -710,6 +714,32 @@ app.get('/sw.js', (req, res) => {
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.resolve(__dirname, 'public/sw.js'));
 });
+app.use(session({
+    store: new FileStore({
+        path: './sessions',
+        retries: 0
+    }),
+    secret: process.env.SESSION_SECRET || (() => { throw new Error('SESSION_SECRET env var is required'); })(),
+    resave: false,
+    saveUninitialized: false,
+    rolling: true,
+    cookie: {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 30 * 24 * 60 * 60 * 1000
+    }
+}));
+// Gate these pages before express.static gets a chance to serve them
+// unconditionally — static file matches short-circuit the pipeline, so this
+// must run first (scanner is PIN-protected itself, so excluded).
+app.get('/admin.html', (req, res) => res.redirect('/dashboard.html'));
+app.get('/dashboard.html', (req, res, next) => {
+    if (!req.session.userId) return res.redirect('/login.html');
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user || user.email !== process.env.ADMIN_EMAIL) return res.redirect('/login.html');
+    next();
+});
 app.use(express.static('public', { extensions: ['html'] }));
 app.get('/html5-qrcode.min.js', (req, res) => {
     res.sendFile(path.resolve(__dirname, 'node_modules/html5-qrcode/html5-qrcode.min.js'));
@@ -727,22 +757,6 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
         }
     }]);
 });
-app.use(session({
-    store: new FileStore({
-        path: './sessions',
-        retries: 0
-    }),
-    secret: process.env.SESSION_SECRET || (() => { throw new Error('SESSION_SECRET env var is required'); })(),
-    resave: false,
-    saveUninitialized: false,
-    rolling: true,
-    cookie: {
-        httpOnly: true,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 30 * 24 * 60 * 60 * 1000
-    }
-}));
 
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -906,7 +920,7 @@ app.post('/api/auth/setup-admin', loginLimiter, async (req, res) => {
 });
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, rememberMe } = req.body;
     const normalizedEmail = (email || '').toLowerCase();
     log('login', `[login] Attempt — email: ${normalizedEmail}  ip: ${getIP(req)}`);
 
@@ -950,6 +964,10 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     }
 
     req.session.userId = user.id;
+    // Unchecking "Remember me" drops the cookie's Expires/Max-Age so it's a
+    // browser-session cookie — gone once the browser fully closes, instead
+    // of the default 30-day persistent login.
+    if (rememberMe === false) req.session.cookie.expires = false;
     log('login', `[OK] Success — email: ${normalizedEmail}  id: ${user.id}  role: ${isAdmin ? 'admin' : 'staff'}  ip: ${getIP(req)}`);
     res.json({ success: true, user: { id: user.id, email: user.email } });
 });
@@ -958,7 +976,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 // short-lived pendingToken from /api/auth/login plus a 6-digit code for a
 // real session, optionally remembering this device for future logins.
 app.post('/api/auth/login/totp-verify', loginLimiter, async (req, res) => {
-    const { pendingToken, code, remember } = req.body;
+    const { pendingToken, code, remember, rememberMe } = req.body;
     const userId = verifyPendingTotpToken(pendingToken);
     if (!userId) {
         log('login', `[2fa] [ERR] Invalid/expired pending token  ip: ${getIP(req)}`);
@@ -982,6 +1000,7 @@ app.post('/api/auth/login/totp-verify', loginLimiter, async (req, res) => {
     }
 
     req.session.userId = user.id;
+    if (rememberMe === false) req.session.cookie.expires = false;
 
     if (remember === true) {
         const deviceToken = signDeviceToken();
@@ -1418,6 +1437,15 @@ app.post('/api/event/:id/push-send', requireAuth, async (req, res) => {
     const body = String(req.body?.body || '').trim();
     const target = req.body?.target === 'devices' ? 'devices' : 'subscribers';
 
+    // Also show as an in-app banner to anyone with a scanner open for this
+    // event right now — same mechanism as Monitor's Notify (SSE), so unlike
+    // the real APNs push below it doesn't depend on notification permission
+    // at all. APNs is still needed to reach devices where the app isn't open.
+    const bannerPayload = { type: 'notification', title, message: body, sentAt: new Date().toISOString() };
+    for (const [pairToken, data] of scannerRegistry) {
+        if (data.eventId === eventId) broadcastToPair(pairToken, bannerPayload);
+    }
+
     if (target === 'devices') {
         const tokens = Array.isArray(req.body?.tokens) ? req.body.tokens.filter(Boolean) : [];
         if (!tokens.length) return res.status(400).json({ error: 'No devices selected' });
@@ -1447,15 +1475,6 @@ app.get('/api/track/open/:registrationId', async (req, res) => {
         stmt.tickets.setEmailOpened.run(now, registrationId);
         log('email-open', `[opened] Opened — regId: ${registrationId}  name: ${tickets[0].name}`);
     }
-});
-
-// Serve protected pages for admin only (scanner is PIN-protected itself, so excluded)
-app.get('/admin.html', (req, res) => res.redirect('/dashboard.html'));
-app.get('/dashboard.html', (req, res, next) => {
-    if (!req.session.userId) return res.redirect('/login.html');
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    if (!user || user.email !== process.env.ADMIN_EMAIL) return res.redirect('/login.html');
-    next();
 });
 
 // Public self-registration — creates a free ticket and emails it
@@ -4427,6 +4446,41 @@ app.get('/api/event/:id/access', requireAuth, (req, res) => {
     res.json({ access: accessEntries, linkUrl: BASE_URL + '/link/' + link.token });
 });
 
+// Get (or mint) the apiKey for an event, for use with /api/register-bulk from
+// external integrations like a Google Form Apps Script trigger.
+app.get('/api/event/:id/api-key', requireAuth, (req, res) => {
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    let hasAccess = isAdmin || event.userId === req.session.userId;
+    let link = stmt.sheetLinks.byEventId.get(req.params.id);
+    if (!hasAccess && link) {
+        const myAccess = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
+        if (myAccess && myAccess.permission === 'full') hasAccess = true;
+    }
+    if (!hasAccess) return res.status(403).json({ error: 'Admin access required' });
+
+    if (!link) {
+        link = {
+            id: nanoid(10),
+            token: nanoid(20),
+            spreadsheetId: null,
+            sheetName: 'API Access',
+            eventId: event.id,
+            createdAt: new Date().toISOString(),
+            apiKey: nanoid(24),
+        };
+        stmt.sheetLinks.insert.run(link.id, link.token, link.spreadsheetId, link.sheetName, link.eventId, link.createdAt, link.apiKey);
+    } else if (!link.apiKey) {
+        stmt.sheetLinks.setApiKey.run(nanoid(24), link.id);
+        link = stmt.sheetLinks.byId.get(link.id);
+    }
+
+    res.json({ eventId: event.id, apiKey: link.apiKey });
+});
+
 app.post('/api/sheet/share', requireAuth, async (req, res) => {
     const { eventId, email, permission } = req.body;
     if (!eventId || !email || !permission) return res.status(400).json({ error: 'Missing fields' });
@@ -4899,7 +4953,7 @@ app.get('/api/monitor/scanners', requireAuth, async (req, res) => {
 // Called by iOS app/web scanner on launch and every 30 s to stay visible in
 // the monitor even before any scan has happened.
 app.post('/api/scan/heartbeat', async (req, res) => {
-    const { pairToken, eventId, platform, deviceName, appVersion, osVersion } = req.body;
+    const { pairToken, eventId, platform, deviceName, appVersion, osVersion, pushEnabled } = req.body;
     if (!pairToken) return res.status(400).json({ error: 'pairToken required' });
 
     const ev = eventId ? rowToEvent(stmt.events.byId.get(eventId)) : null;
@@ -4915,6 +4969,12 @@ app.post('/api/scan/heartbeat', async (req, res) => {
         online: scannerChannels.has(pairToken),
         eventId: eventId || null,
         eventName: ev ? ev.name : null,
+        // Whether this device has OS notification permission granted — lets
+        // admin spot devices that won't get a real push (they'll still get
+        // the in-app banner via this SSE channel regardless) and nudge them
+        // in person. Undefined (not 'true'/'false') means unknown, e.g. an
+        // older app build that doesn't report it yet.
+        pushEnabled: pushEnabled === undefined ? undefined : pushEnabled === true || pushEnabled === 'true',
     });
 
     res.json({ ok: true });

@@ -219,11 +219,11 @@
     let user = null;
     try {
         const r = await fetch('/api/auth/me');
-        if (!r.ok) { window.location.href = '/'; return; }
+        if (!r.ok) { window.location.href = `/login.html?next=${encodeURIComponent(location.pathname + location.search)}`; return; }
         const d = await r.json();
         user = d.user;
     } catch (_) {
-        window.location.href = '/';
+        window.location.href = `/login.html?next=${encodeURIComponent(location.pathname + location.search)}`;
         return;
     }
 
