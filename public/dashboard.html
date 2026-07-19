@@ -4350,83 +4350,6 @@
             window.__swCurrent = watcher;
             const watcherHtml = watcher ? renderSheetWatcherStatus(eventId, watcher) : renderSheetWatcherConnect(eventId);
 
-            const registerUrl = `${location.origin}/api/register-bulk`;
-            const snippet = `// ── Ticket giveaway integration ──────────────────────────────
-// Setup (one time):
-//   1. Open the spreadsheet your Google Form writes responses into.
-//   2. Extensions → Apps Script, and paste this whole file in
-//      (replace anything already there).
-//   3. In the toolbar, pick the function "setup", press Run, and
-//      approve the permissions. That's the whole install.
-//   4. Test by submitting the form with the giveaway box checked.
-//      The Executions page (clock icon) shows each run and errors.
-
-const CONFIG = {
-  registerUrl: '${registerUrl}',
-  eventId: '${eventId}',
-  apiKey: '${keyInfo.apiKey}',
-  // The checkbox/multiple-choice answer that grants a ticket
-  // (case-insensitive, must match the option's text on the form):
-  giveawayOption: 'Giveaway',
-};
-
-// Run this once from the editor — it installs the form-submit
-// trigger for you (no manual trigger setup needed).
-function setup() {
-  ScriptApp.getProjectTriggers()
-    .filter(function (t) { return t.getHandlerFunction() === 'onFormSubmit'; })
-    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger('onFormSubmit')
-    .forSpreadsheet(SpreadsheetApp.getActive())
-    .onFormSubmit()
-    .create();
-}
-
-function onFormSubmit(e) {
-  const answers = (e && e.namedValues) || {};
-  // Finds a question by partial, case-insensitive title match, so
-  // exact wording/punctuation of your form questions doesn't matter.
-  const find = function (words) {
-    const key = Object.keys(answers).find(function (k) {
-      return words.some(function (w) { return k.toLowerCase().indexOf(w) !== -1; });
-    });
-    return key ? String(answers[key][0] || '').trim() : '';
-  };
-
-  const checked = find(['check any', 'apply', 'interest']);
-  const wantsTicket = checked.toLowerCase().split(',')
-    .map(function (s) { return s.trim(); })
-    .indexOf(CONFIG.giveawayOption.toLowerCase()) !== -1;
-  if (!wantsTicket) return;
-
-  let firstName = find(['first name']);
-  let lastName = find(['last name']);
-  if (!firstName) {
-    const parts = find(['name']).split(' ');
-    firstName = parts.shift() || '';
-    lastName = lastName || parts.join(' ');
-  }
-  const email = find(['email']);
-  if (!firstName || !email) {
-    console.log('Skipped: could not find name/email columns. Headers seen: ' + Object.keys(answers).join(' | '));
-    return;
-  }
-
-  const resp = UrlFetchApp.fetch(CONFIG.registerUrl, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({
-      firstName: firstName,
-      lastName: lastName || '(none)',
-      email: email,
-      eventId: CONFIG.eventId,
-      ticketCount: 1,
-      apiKey: CONFIG.apiKey,
-    }),
-    muteHttpExceptions: true,
-  });
-  console.log('Ticket API: ' + resp.getResponseCode() + ' ' + resp.getContentText());
-}`;
 
             return `
                 <div class="modal-section-title">API Access</div>
@@ -4462,19 +4385,6 @@ function onFormSubmit(e) {
                     </div>
                 </div>
 
-                <hr class="settings-divider">
-                <div class="settings-subhead">Apps Script snippet (instant alternative)</div>
-                <div class="settings-hint">
-                    Does the same as the Sheet Watcher but issues the ticket the moment the form is submitted, at the cost of a code-paste setup. Paste into Extensions → Apps Script on the form's linked Sheet, then run <code>setup</code> once — it installs its own trigger and finds your name/email columns automatically.
-                </div>
-                <div class="settings-card" style="position:relative;">
-                    <textarea readonly onclick="this.select()" spellcheck="false"
-                        style="width:100%;min-height:340px;padding:10px;border:1px solid #ddd;border-radius:6px;font-family:monospace;font-size:12px;color:#333;background:#f9f9f9;resize:vertical;box-sizing:border-box;">${esc(snippet)}</textarea>
-                    <button onclick="copyToClipboard(${JSON.stringify(snippet).replace(/</g, '\\u003c')}, this)"
-                        style="position:absolute;top:22px;right:22px;padding:6px 10px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
-                        Copy
-                    </button>
-                </div>
             `;
         }
 
