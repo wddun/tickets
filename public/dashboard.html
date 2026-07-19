@@ -4223,35 +4223,81 @@
             }
 
             const registerUrl = `${location.origin}/api/register-bulk`;
-            const snippet = `function onFormSubmit(e) {
-  const itemResponses = e.response.getItemResponses();
+            const snippet = `// ── Ticket giveaway integration ──────────────────────────────
+// Setup (one time):
+//   1. Open the spreadsheet your Google Form writes responses into.
+//   2. Extensions → Apps Script, and paste this whole file in
+//      (replace anything already there).
+//   3. In the toolbar, pick the function "setup", press Run, and
+//      approve the permissions. That's the whole install.
+//   4. Test by submitting the form with the giveaway box checked.
+//      The Executions page (clock icon) shows each run and errors.
 
-  // Question 1 — checkbox/multiple-choice; adjust the match to your option text
-  const q1Answer = itemResponses[0].getResponse();
-  const hasGiveaway = Array.isArray(q1Answer)
-    ? q1Answer.includes('giveaway')
-    : q1Answer === 'giveaway';
+const CONFIG = {
+  registerUrl: '${registerUrl}',
+  eventId: '${eventId}',
+  apiKey: '${keyInfo.apiKey}',
+  // The checkbox/multiple-choice answer that grants a ticket
+  // (case-insensitive, must match the option's text on the form):
+  giveawayOption: 'Giveaway',
+};
 
-  if (!hasGiveaway) return;
+// Run this once from the editor — it installs the form-submit
+// trigger for you (no manual trigger setup needed).
+function setup() {
+  ScriptApp.getProjectTriggers()
+    .filter(function (t) { return t.getHandlerFunction() === 'onFormSubmit'; })
+    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('onFormSubmit')
+    .forSpreadsheet(SpreadsheetApp.getActive())
+    .onFormSubmit()
+    .create();
+}
 
-  const fullName = itemResponses[1].getResponse(); // adjust index to your Name question
-  const email = itemResponses[2].getResponse();     // adjust index to your Email question
-  const [firstName, ...rest] = fullName.split(' ');
-  const lastName = rest.join(' ') || '(none)';
+function onFormSubmit(e) {
+  const answers = (e && e.namedValues) || {};
+  // Finds a question by partial, case-insensitive title match, so
+  // exact wording/punctuation of your form questions doesn't matter.
+  const find = function (words) {
+    const key = Object.keys(answers).find(function (k) {
+      return words.some(function (w) { return k.toLowerCase().indexOf(w) !== -1; });
+    });
+    return key ? String(answers[key][0] || '').trim() : '';
+  };
 
-  UrlFetchApp.fetch('${registerUrl}', {
+  const checked = find(['check any', 'apply', 'interest']);
+  const wantsTicket = checked.toLowerCase().split(',')
+    .map(function (s) { return s.trim(); })
+    .indexOf(CONFIG.giveawayOption.toLowerCase()) !== -1;
+  if (!wantsTicket) return;
+
+  let firstName = find(['first name']);
+  let lastName = find(['last name']);
+  if (!firstName) {
+    const parts = find(['name']).split(' ');
+    firstName = parts.shift() || '';
+    lastName = lastName || parts.join(' ');
+  }
+  const email = find(['email']);
+  if (!firstName || !email) {
+    console.log('Skipped: could not find name/email columns. Headers seen: ' + Object.keys(answers).join(' | '));
+    return;
+  }
+
+  const resp = UrlFetchApp.fetch(CONFIG.registerUrl, {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({
-      firstName,
-      lastName,
-      email,
-      eventId: '${eventId}',
+      firstName: firstName,
+      lastName: lastName || '(none)',
+      email: email,
+      eventId: CONFIG.eventId,
       ticketCount: 1,
-      apiKey: '${keyInfo.apiKey}'
+      apiKey: CONFIG.apiKey,
     }),
-    muteHttpExceptions: true
+    muteHttpExceptions: true,
   });
+  console.log('Ticket API: ' + resp.getResponseCode() + ' ' + resp.getContentText());
 }`;
 
             return `
@@ -4283,7 +4329,7 @@
                 <hr class="settings-divider">
                 <div class="settings-subhead">Google Form (Apps Script) snippet</div>
                 <div class="settings-hint">
-                    Paste into Extensions → Apps Script on the form's linked Sheet, adjust the question indices, then add an "On form submit" trigger for <code>onFormSubmit</code>.
+                    Issues a ticket automatically when someone checks the giveaway option on your Google Form. Paste into Extensions → Apps Script on the form's linked Sheet, then run <code>setup</code> once — it installs its own trigger and finds your name/email columns automatically.
                 </div>
                 <div class="settings-card" style="position:relative;">
                     <textarea readonly onclick="this.select()" spellcheck="false"
