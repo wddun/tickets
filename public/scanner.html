@@ -85,6 +85,23 @@
         .scan-box::after        { top:0;    right:0; border-width: 3px 3px 0 0; border-radius: 0 3px 0 0; }
         .scan-box > span::before{ bottom:0; left:0;  border-width: 0 0 3px 3px; border-radius: 0 0 0 3px; }
         .scan-box > span::after { bottom:0; right:0; border-width: 0 3px 3px 0; border-radius: 0 0 3px 0; }
+        .scan-hint {
+            position: absolute;
+            top: calc(100% + 18px);
+            left: 50%;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            font-size: 14px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.75);
+            background: rgba(0,0,0,0.4);
+            padding: 7px 14px;
+            border-radius: 20px;
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            transition: opacity 0.3s ease;
+        }
+        .scan-hint.hide { opacity: 0; pointer-events: none; }
 
         /* ── Top bar ── */
         .top-bar {
@@ -310,6 +327,27 @@
             text-align: center;
         }
         #gateScanCancelWrap .ag-btn { width: auto; display: inline-block; padding: 12px 28px; }
+
+        /* ── First-time walkthrough ── */
+        #walkthrough {
+            position: fixed;
+            inset: 0;
+            z-index: 95;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.88);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+        #walkthrough.show { display: flex; }
+        .wt-dots { display: flex; gap: 6px; margin-bottom: 18px; }
+        .wt-dots span {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: rgba(255,255,255,0.25);
+            transition: background 0.2s ease, width 0.2s ease;
+        }
+        .wt-dots span.active { background: #c4294a; width: 20px; border-radius: 4px; }
 
         /* ── Full-screen result overlay — reentry exit confirm only ── */
         #resultOverlay {
@@ -614,7 +652,7 @@
 
 <div id="reader"></div>
 
-<div class="scan-guide"><div class="scan-box"><span></span></div></div>
+<div class="scan-guide"><div class="scan-box"><span></span><div class="scan-hint" id="scanHint">Point camera at ticket QR code</div></div></div>
 
 <!-- Scan-link (no-login) entry animation + persistent event banner -->
 <div id="scanLinkEnterOverlay">
@@ -679,6 +717,18 @@
     </div>
 </div>
 
+<!-- First-time walkthrough for signed-in users (mirrors the iOS app's onboarding) -->
+<div id="walkthrough">
+    <div class="ag-panel">
+        <div class="wt-dots" id="wtDots"></div>
+        <div class="ag-icon" id="wtIcon"></div>
+        <div class="ag-title" id="wtTitle"></div>
+        <div class="ag-sub" id="wtSub"></div>
+        <button class="ag-btn ag-btn-primary" id="wtNextBtn" onclick="wtAdvance()">Next</button>
+        <button class="ag-btn ag-btn-secondary" onclick="wtDismiss()">Skip</button>
+    </div>
+</div>
+
 <!-- Shown while scanning a QR from the gate (camera runs behind it) -->
 <div id="gateScanCancelWrap" style="display:none;">
     <button class="ag-btn ag-btn-secondary" onclick="cancelGateScan()">Cancel</button>
@@ -694,7 +744,6 @@
 <div class="top-bar" id="topBar">
     <a id="signInBtn" class="pill-btn" href="/login.html?next=/scanner.html" style="display:none;">Sign In</a>
     <button id="torchBtn" class="pill-btn" onclick="toggleTorch()" style="display:none;" aria-label="Toggle flashlight">🔦</button>
-    <a class="pill-btn" id="listBtn" style="display:none;" href="/checkin.html">Manual Check-In</a>
 </div>
 
 <!-- Full-screen scan result overlay -->
@@ -751,21 +800,7 @@
 
     <!-- Main settings view -->
     <div id="settingsMain">
-        <div class="settings-section-label">Scanning</div>
-        <button class="settings-nav-row" onclick="openEventPicker()">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-            Switch Event
-            <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
-        </button>
-
-        <div class="settings-section-label">Account</div>
-        <button class="settings-nav-row" onclick="openAccountSettings()">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            Account Settings
-            <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
-        </button>
-
-        <div class="settings-section-label" style="margin-top:4px;">Door Display</div>
+        <div class="settings-section-label">Door Display</div>
         <div class="dp-event-name" id="dpEventName"></div>
 
         <div id="dpQRWrap" class="dp-qr-wrap" style="display:none">
@@ -794,6 +829,20 @@
         </div>
 
         <button class="dp-rotate-btn" id="dpRotateBtn" onclick="rotateDisplayToken()">Regenerate Link</button>
+
+        <div class="settings-section-label" style="margin-top:16px;">Scanning</div>
+        <button class="settings-nav-row" onclick="openEventPicker()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            Switch Event
+            <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
+        </button>
+
+        <div class="settings-section-label">Account</div>
+        <button class="settings-nav-row" onclick="openAccountSettings()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Account Settings
+            <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
+        </button>
     </div>
 
     <!-- Account sub-view -->
@@ -981,6 +1030,7 @@ function exitScanLinkMode() {
         }
         startSessionWatcher();
         if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
+        maybeShowWalkthrough();
     } else {
         // Not logged in and no scan-link token in the URL — don't start the
         // camera blind with no event selected. Force a choice: sign in (and
@@ -988,6 +1038,62 @@ function exitScanLinkMode() {
         document.getElementById('anonGate').classList.add('show');
     }
 })();
+
+// ── First-time walkthrough (mirrors the iOS app's onboarding) ──
+const WT_PAGES = [
+    {
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3M21 14v.01M14 21v-.01M18 18h.01M21 21v-.01"/></svg>',
+        title: 'Scan Tickets',
+        sub: 'Point the camera at any ticket QR code for instant feedback. Tap any card in the recent-scans strip to see full details, including custom fields.',
+    },
+    {
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+        title: 'Pick Your Event',
+        sub: 'Use Settings to switch which event you\'re scanning for, or open a scan link an organizer sent you to lock in without signing in.',
+    },
+    {
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+        title: 'Pair a Door Display',
+        sub: 'Turn any nearby phone or tablet into a live door display from Settings — pair by QR code, no extra app needed.',
+    },
+    {
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+        title: 'Manual Check-In',
+        sub: 'Tap Check-In in the tab bar to browse attendees, search by name or email, and check people in without scanning.',
+    },
+];
+let wtPage = 0;
+
+function maybeShowWalkthrough() {
+    if (localStorage.getItem('hasSeenScannerWalkthrough')) return;
+    wtPage = 0;
+    renderWtPage();
+    document.getElementById('walkthrough').classList.add('show');
+}
+
+function renderWtPage() {
+    const p = WT_PAGES[wtPage];
+    document.getElementById('wtIcon').innerHTML = p.icon;
+    document.getElementById('wtTitle').textContent = p.title;
+    document.getElementById('wtSub').textContent = p.sub;
+    document.getElementById('wtNextBtn').textContent = wtPage === WT_PAGES.length - 1 ? 'Get Started' : 'Next';
+    document.getElementById('wtDots').innerHTML = WT_PAGES.map((_, i) =>
+        `<span class="${i === wtPage ? 'active' : ''}"></span>`).join('');
+}
+
+function wtAdvance() {
+    if (wtPage < WT_PAGES.length - 1) {
+        wtPage++;
+        renderWtPage();
+    } else {
+        wtDismiss();
+    }
+}
+
+function wtDismiss() {
+    localStorage.setItem('hasSeenScannerWalkthrough', '1');
+    document.getElementById('walkthrough').classList.remove('show');
+}
 
 function showAnonGateCodeEntry() {
     document.getElementById('anonGateChoice').style.display = 'none';
@@ -1396,7 +1502,6 @@ let recentScansList = [];
 let flashTimer = null;
 let exitConfirmTimer = null;
 let scanCardTimer = null;
-let scanFadeTimer = null;
 
 // Full-screen colored flash — auto-dismisses after 1.2s, tap also dismisses
 function showFlash(data) {
@@ -1438,34 +1543,47 @@ function showBanner(data) { showFlash(data); }
 function addToHistory(data, status) {
     lastScanData = { ...data, status };
     clearTimeout(scanCardTimer);
-    clearTimeout(scanFadeTimer);
+    document.getElementById('scanHint')?.classList.add('hide');
 
     const accent = STATUS_COLORS[status] || '#818cf8';
-    const name   = escHtml(data.firstName || data.name || 'Unknown');
-    const label  = escHtml(STATUS_TITLES[status] || 'Unknown');
+    const name    = escHtml(data.firstName || data.name || 'Unknown');
+    const label   = escHtml(STATUS_TITLES[status] || 'Unknown');
+    const email   = data.email ? `<div style="font-size:13px;color:rgba(255,255,255,0.65);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;">${escHtml(data.email)}</div>` : '';
+    const evt     = data.eventName ? `<div style="font-size:12px;color:rgba(255,255,255,0.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;">${escHtml(data.eventName)}</div>` : '';
+
+    const fields = data.customFields
+        ? Object.entries(data.customFields).filter(([, v]) => v)
+        : [];
+    const fieldsHtml = fields.length ? `
+        <div style="flex:1;min-width:0;padding-left:16px;border-left:1px solid rgba(255,255,255,0.12);display:flex;flex-direction:column;gap:7px;">
+            ${fields.map(([k, v]) => `
+                <div>
+                    <div style="font-size:10px;font-weight:600;letter-spacing:0.03em;text-transform:uppercase;color:rgba(255,255,255,0.45);">${escHtml(k)}</div>
+                    <div style="font-size:13px;font-weight:500;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(v)}</div>
+                </div>`).join('')}
+        </div>` : '';
 
     const container = document.getElementById('recentScans');
     container.innerHTML = `
         <div id="scanHistCard" onclick="openDetail()"
-             style="display:flex;align-items:center;gap:12px;
+             style="display:flex;align-items:flex-start;gap:16px;
                     background:rgba(22,22,24,0.96);
                     backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
                     border:1px solid rgba(255,255,255,0.09);
                     border-left:3px solid ${accent};
-                    border-radius:14px;padding:12px 16px;margin:0 14px;
+                    border-radius:16px;padding:14px 16px;margin:0 14px;
                     cursor:pointer;pointer-events:none;
                     animation:slideUp 0.38s cubic-bezier(0.34,1.56,0.64,1);">
             <div style="flex:1;min-width:0;">
-                <div style="font-size:15px;font-weight:700;color:#fff;
-                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-                            margin-bottom:2px;">${name}</div>
-                <div style="font-size:12px;font-weight:600;color:${accent};">${label}</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <span style="font-size:12px;font-weight:600;color:${accent};">${label}</span>
+                </div>
+                <div style="font-size:18px;font-weight:700;color:#fff;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
+                ${email}
+                ${evt}
             </div>
-            <svg width="7" height="12" viewBox="0 0 7 12" fill="none"
-                 stroke="rgba(255,255,255,0.22)" stroke-width="2"
-                 stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="1 1 6 6 1 11"/>
-            </svg>
+            ${fieldsHtml}
         </div>`;
 
     // Block taps for 1.5 s — prevents accidentally opening the sheet while
@@ -1474,16 +1592,6 @@ function addToHistory(data, status) {
         const c = document.getElementById('scanHistCard');
         if (c) c.style.pointerEvents = 'auto';
     }, 1500);
-
-    // Auto-fade after 8 s
-    scanFadeTimer = setTimeout(() => {
-        const c = document.getElementById('scanHistCard');
-        if (c) {
-            c.style.transition = 'opacity 0.5s ease';
-            c.style.opacity = '0';
-            setTimeout(() => { container.innerHTML = ''; }, 500);
-        }
-    }, 8000);
 }
 
 let pendingCheckoutName = null;
