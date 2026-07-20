@@ -204,7 +204,7 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
             : sesFrom;
 
         if (attachments.length) {
-            const raw = buildRawMimeEmail({ from: source, to, replyTo, subject, html: tracked, text, attachments });
+            const raw = buildRawMimeEmail({ from: source, to, replyTo, subject, html: withFooter, text, attachments });
             return ses.send(new SendRawEmailCommand({ Source: source, RawMessage: { Data: Buffer.from(raw, 'utf8') } }));
         }
 
@@ -215,7 +215,7 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
             Message: {
                 Subject: { Data: subject, Charset: 'UTF-8' },
                 Body: {
-                    Html: { Data: tracked, Charset: 'UTF-8' },
+                    Html: { Data: withFooter, Charset: 'UTF-8' },
                     Text: { Data: text, Charset: 'UTF-8' }
                 }
             }
@@ -2851,14 +2851,15 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
 
     const insertTickets = db.transaction(() => {
         for (let i = 0; i < count; i++) {
+            const nameParts = name.trim().split(/\s+/);
             const t = {
                 id: nanoid(8),
                 token: nanoid(12),
                 eventId: event.id,
                 registrationId,
                 name,
-                firstName: name.split(' ')[0],
-                lastName: name.split(' ').slice(1).join(' '),
+                firstName: nameParts.length > 1 ? nameParts.slice(0, -1).join(' ') : nameParts[0],
+                lastName: nameParts.length > 1 ? nameParts[nameParts.length - 1] : null,
                 email,
                 customFields: customFields || {},
                 created_at: now,

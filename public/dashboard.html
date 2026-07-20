@@ -1192,7 +1192,7 @@
         /* ── Grid Styles ── */
         .igr-row {
             display: grid;
-            grid-template-columns: 1fr 1fr 52px 28px;
+            grid-template-columns: 1fr 1fr 1.3fr 46px 24px;
             gap: 4px;
             align-items: center;
         }
@@ -1911,7 +1911,7 @@
             </div>
             <div class="dt-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
                 <div class="form-group">
-                    <label for="newEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date & Time <span style="color:#c4294a">*</span></label>
+                    <label for="newEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date & Time <span style="color:#aaa;font-weight:400;">(optional)</span></label>
                     <input type="datetime-local" id="newEventTime"
                         style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
                 </div>
@@ -2469,7 +2469,7 @@
                 return;
             }
             list.innerHTML = '';
-            const sorted = [...events].sort((a, b) => new Date(b.time) - new Date(a.time));
+            const sorted = [...events].sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0));
             sorted.forEach(e => {
                 const total = e._counts ? e._counts.total : (e._tickets || []).length;
                 const scanned = e._counts ? e._counts.scanned : (e._tickets || []).filter(t => t.used_at).length;
@@ -3424,6 +3424,18 @@
                         <button type="button" class="btn btn-secondary btn-sm" onclick="copyToClipboard('${esc(eventId)}', this)">Copy</button>
                     </div>
                 </div>
+                <div
+                    style="margin-bottom:20px;padding:14px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:10px;">
+                    <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+                        <input type="checkbox" id="editEventWalletLockScreen" ${ev.walletLockScreenEnabled !== false ? 'checked' : ''}
+                            onchange="setWalletLockScreenEnabled('${eventId}', this.checked)"
+                            style="width:18px;height:18px;accent-color:#1a1f3c;cursor:pointer;flex-shrink:0;">
+                        <div>
+                            <div style="font-size:13px;font-weight:600;">Show on Lock Screen</div>
+                            <div style="font-size:12px;color:#888;margin-top:2px;">Apple Wallet reminds attendees near the event time and when they're close to the venue (e.g. "Tonight at 8pm"). Turn off to keep the ticket silent in Wallet — recommended if you'd rather guests not see event details on a locked phone.</div>
+                        </div>
+                    </label>
+                </div>
                 <div style="margin-bottom:20px;">
                     <label for="editEventCapacity" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Capacity <span style="font-weight:400;color:#aaa;">(optional — leave blank for unlimited)</span></label>
                     <input type="number" min="1" inputmode="numeric" id="editEventCapacity" placeholder="e.g. 200" value="${ev.capacity || ''}"
@@ -3686,10 +3698,14 @@
                 const d = await r.json();
                 const eventObj = events.find(e => e.id === eventId);
                 const eventEnd = eventObj && (eventObj.endTime || eventObj.time);
-                const isPast = eventObj && new Date(eventEnd) < new Date();
+                const isUndated = !!eventObj && !eventObj.time;
+                const isPast = !!(eventEnd && new Date(eventEnd) < new Date());
+                const reminderDisabled = d.sentAt || isUndated;
                 let statusText = '';
                 if (d.sentAt) {
                     statusText = `<span style="color:#10b981;font-size:12px;">✓ Sent ${fmtDate(d.sentAt)}</span>`;
+                } else if (isUndated) {
+                    statusText = `<span style="color:#aaa;font-size:12px;">Set an event date to enable reminders</span>`;
                 } else if (isPast) {
                     statusText = `<span style="color:#aaa;font-size:12px;">Event has passed</span>`;
                 } else if (d.enabled) {
@@ -3703,20 +3719,20 @@
                     <div class="settings-subhead">24-Hour Reminder Email</div>
                     <div style="margin-bottom:10px;display:flex;align-items:center;gap:12px;">
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;">
-                            <input type="checkbox" id="reminderEnabled" ${d.enabled ? 'checked' : ''} ${d.sentAt ? 'disabled' : ''} style="accent-color:#6366f1;width:16px;height:16px;">
+                            <input type="checkbox" id="reminderEnabled" ${d.enabled ? 'checked' : ''} ${reminderDisabled ? 'disabled' : ''} style="accent-color:#6366f1;width:16px;height:16px;">
                             Enable reminder
                         </label>
                         ${statusText}
                     </div>
                     <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;">
                         <label style="font-size:13px;font-weight:600;white-space:nowrap;">Send</label>
-                        <input type="number" id="reminderHoursBefore" inputmode="numeric" value="${d.hoursBefore}" min="1" max="168" ${d.sentAt ? 'disabled' : ''}
+                        <input type="number" id="reminderHoursBefore" inputmode="numeric" value="${d.hoursBefore}" min="1" max="168" ${reminderDisabled ? 'disabled' : ''}
                             style="width:70px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
                         <label style="font-size:13px;font-weight:600;white-space:nowrap;">hours before event</label>
                     </div>
                     <div style="margin-bottom:8px;">
                         <label style="display:block;margin-bottom:6px;font-size:12px;color:#888;">Custom message (optional — leave blank for default)</label>
-                        <textarea id="reminderMessage" rows="3" ${d.sentAt ? 'disabled' : ''}
+                        <textarea id="reminderMessage" rows="3" ${reminderDisabled ? 'disabled' : ''}
                             style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"
                             placeholder="Your event is coming up in 24 hours. We look forward to seeing you!">${esc(d.message)}</textarea>
                     </div>
@@ -4024,7 +4040,6 @@
             const btn         = document.getElementById('newEventSubmitBtn');
 
             if (!name) { errEl.textContent = 'Event name is required.'; errEl.style.display = 'block'; return; }
-            if (!timeVal) { errEl.textContent = 'Date & time is required.'; errEl.style.display = 'block'; return; }
             errEl.style.display = 'none';
 
             btn.disabled = true; btn.textContent = 'Creating…';
@@ -4034,7 +4049,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         name,
-                        time: new Date(timeVal).toISOString(),
+                        time: timeVal ? new Date(timeVal).toISOString() : null,
                         endTime: endVal ? new Date(endVal).toISOString() : null,
                         locationName: locName,
                         locationAddress: locAddress,
@@ -4208,6 +4223,305 @@
             `;
         }
 
+        // ── Sheet Watcher condition builder ─────────────────────────────────
+        const SW_OPERATORS = [
+            { value: 'contains',       label: 'Contains' },
+            { value: 'notContains',    label: "Doesn't contain" },
+            { value: 'equals',         label: 'Equals' },
+            { value: 'notEquals',      label: 'Does not equal' },
+            { value: 'greaterThan',    label: 'Greater than' },
+            { value: 'lessThan',       label: 'Less than' },
+            { value: 'greaterOrEqual', label: 'Greater than or equal to' },
+            { value: 'lessOrEqual',    label: 'Less than or equal to' },
+            { value: 'isEmpty',        label: 'Is empty' },
+            { value: 'isNotEmpty',     label: 'Is not empty' },
+        ];
+        const SW_OPERATOR_LABEL = Object.fromEntries(SW_OPERATORS.map(o => [o.value, o.label]));
+        const swNeedsValue = op => op !== 'isEmpty' && op !== 'isNotEmpty';
+
+        // Mirrors cellMatchesCondition/evaluateConditions in server.js — kept
+        // in sync deliberately so the "X of N sample rows match" preview
+        // reflects exactly what the server will do on the real sheet.
+        function swCellMatches(cell, operator, targetValue) {
+            const value = String(cell || '').trim();
+            const target = String(targetValue || '').trim();
+            switch (operator) {
+                case 'equals': return value.toLowerCase() === target.toLowerCase();
+                case 'notEquals': return value.toLowerCase() !== target.toLowerCase();
+                case 'contains': return value.toLowerCase().includes(target.toLowerCase());
+                case 'notContains': return !value.toLowerCase().includes(target.toLowerCase());
+                case 'greaterThan': return parseFloat(value) > parseFloat(target);
+                case 'lessThan': return parseFloat(value) < parseFloat(target);
+                case 'greaterOrEqual': return parseFloat(value) >= parseFloat(target);
+                case 'lessOrEqual': return parseFloat(value) <= parseFloat(target);
+                case 'isEmpty': return value === '';
+                case 'isNotEmpty': return value !== '';
+                default: return false;
+            }
+        }
+        // Recursive tree evaluator — mirrors evaluateNode() on the server.
+        // A node is a leaf {column,operator,value} or a group
+        // {match:'all'|'any', children:[…]}. Groups make (A AND B) OR C and
+        // A AND (B OR C) both expressible without operator-precedence guesswork.
+        function swEvaluateNode(node, headers, row) {
+            if (!node) return false;
+            if (Array.isArray(node.children)) {
+                if (!node.children.length) return false;
+                return node.match === 'any'
+                    ? node.children.some(k => swEvaluateNode(k, headers, row))
+                    : node.children.every(k => swEvaluateNode(k, headers, row));
+            }
+            const idx = headers.indexOf(node.column);
+            const cell = idx >= 0 ? row[idx] : '';
+            return swCellMatches(cell, node.operator, node.value);
+        }
+
+        // Build the editable tree from a saved config, migrating every older
+        // format (flat conditions list, legacy single trigger) so existing
+        // watchers open cleanly. Mirrors the server's fallback chain.
+        function swGroupFromConfig(cfg, defaultColumn) {
+            const clone = n => Array.isArray(n.children)
+                ? { match: n.match === 'any' ? 'any' : 'all', children: n.children.map(clone) }
+                : { column: n.column || '', operator: n.operator || 'contains', value: n.value || '' };
+            if (cfg && cfg.conditionGroup && Array.isArray(cfg.conditionGroup.children)) {
+                return clone(cfg.conditionGroup);
+            }
+            if (cfg && Array.isArray(cfg.conditions) && cfg.conditions.length) {
+                const leaves = cfg.conditions.map(c => ({ column: c.column || '', operator: c.operator || 'contains', value: c.value || '' }));
+                if (leaves.length === 1) return { match: 'all', children: leaves };
+                const joins = cfg.conditions.slice(1).map(c => c.join === 'OR' ? 'OR' : 'AND');
+                if (joins.every(j => j === 'AND')) return { match: 'all', children: leaves };
+                if (joins.every(j => j === 'OR')) return { match: 'any', children: leaves };
+                // Mixed joins: rebuild left-associatively so the old flat
+                // left-to-right result is preserved exactly.
+                let node = leaves[0];
+                for (let i = 1; i < leaves.length; i++) {
+                    node = { match: joins[i - 1] === 'OR' ? 'any' : 'all', children: [node, leaves[i]] };
+                }
+                return node;
+            }
+            if (cfg && cfg.triggerColumn) {
+                return { match: 'all', children: [{ column: cfg.triggerColumn, operator: 'contains', value: cfg.triggerValue || '' }] };
+            }
+            return { match: 'all', children: [{ column: defaultColumn || '', operator: 'contains', value: '' }] };
+        }
+
+        // Every leaf has a column and (a value, or a no-value operator), and
+        // every group has at least one child. Gate save + preview on this.
+        function swGroupReady(node) {
+            if (!node) return false;
+            if (Array.isArray(node.children)) {
+                return node.children.length > 0 && node.children.every(swGroupReady);
+            }
+            return !!node.column && (!swNeedsValue(node.operator) || node.value !== '');
+        }
+
+        // Human-readable one-liner for the status card, e.g.
+        // RSVP equals "Yes" and (Guests greater than "0" or Shirt is not empty).
+        function swGroupSummaryText(cfg) {
+            const node = (cfg && cfg.conditionGroup) ? cfg.conditionGroup : swGroupFromConfig(cfg);
+            const render = (n, top) => {
+                if (Array.isArray(n.children)) {
+                    const join = n.match === 'any' ? ' or ' : ' and ';
+                    const inner = n.children.map(k => render(k, false)).join(join);
+                    return top ? inner : '(' + inner + ')';
+                }
+                const opLabel = (SW_OPERATOR_LABEL[n.operator] || n.operator).toLowerCase();
+                const valuePart = swNeedsValue(n.operator) ? ` "${esc(n.value)}"` : '';
+                return `${esc(n.column)} ${opLabel}${valuePart}`;
+            };
+            return render(node, true);
+        }
+
+        // ── Tree node addressing: a path is a dash-joined chain of child
+        // indices ('' = root, '0-2' = root.children[0].children[2]). ──
+        function swNodeByPath(p) {
+            let node = window.__swGroup;
+            if (!p) return node;
+            for (const seg of p.split('-')) node = node.children[+seg];
+            return node;
+        }
+
+        // A single condition (leaf): column + operator (+ value), wrapping so
+        // it never overflows on a narrow panel.
+        function swRenderLeaf(node, path) {
+            const headers = window.__swPreview.headers;
+            return `
+                <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span style="font-size:10px;font-weight:700;color:#9ca3af;letter-spacing:.05em;">CONDITION</span>
+                        <button type="button" onclick="swNodeRemove('${path}')" title="Remove condition" style="border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:17px;line-height:1;padding:0 2px;">&times;</button>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        <select onchange="swLeafSetField('${path}','column',this.value)" style="flex:1 1 45%;min-width:130px;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            <option value="">-- Column --</option>
+                            ${headers.map(h => `<option value="${esc(h)}" ${node.column === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
+                        </select>
+                        <select onchange="swLeafSetField('${path}','operator',this.value)" style="flex:1 1 45%;min-width:130px;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            ${SW_OPERATORS.map(o => `<option value="${o.value}" ${node.operator === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                        </select>
+                        ${swNeedsValue(node.operator)
+                            ? `<input type="text" value="${esc(node.value)}" oninput="swLeafSetValue('${path}',this.value)" placeholder="value" style="flex:1 1 100%;min-width:0;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;box-sizing:border-box;">`
+                            : ''}
+                    </div>
+                </div>`;
+        }
+
+        // A group: an ALL/ANY toggle governing all its children, a faint
+        // and/or connector between them, and buttons to add a condition or a
+        // nested sub-group (nesting capped at 3 levels deep).
+        function swRenderGroup(node, path, depth) {
+            const isRoot = depth === 0;
+            const matchVal = node.match === 'any' ? 'any' : 'all';
+            const seg = (val, label) => `<button type="button" onclick="swGroupSetMatch('${path}','${val}')" style="border:none;cursor:pointer;font-size:11px;font-weight:700;padding:4px 14px;${matchVal === val ? 'background:#4f46e5;color:#fff;' : 'background:transparent;color:#4338ca;'}">${label}</button>`;
+            const connectorWord = (matchVal === 'any' ? 'OR' : 'AND');
+            const childrenHtml = node.children.map((child, j) => {
+                const childPath = path === '' ? String(j) : path + '-' + j;
+                const connector = j === 0 ? '' : `<div style="text-align:center;font-size:10px;font-weight:800;color:#a5b4fc;letter-spacing:.1em;margin:3px 0;">${connectorWord}</div>`;
+                return connector + (Array.isArray(child.children) ? swRenderGroup(child, childPath, depth + 1) : swRenderLeaf(child, childPath));
+            }).join('');
+            const removeBtn = isRoot ? '' : `<button type="button" onclick="swNodeRemove('${path}')" title="Remove group" style="border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:17px;line-height:1;padding:0 2px;">&times;</button>`;
+            const canNest = depth < 2;
+            const wrapStyle = isRoot ? '' : `border:1px dashed #c7d2fe;border-radius:10px;padding:8px;background:${depth % 2 ? '#f5f3ff' : '#eef2ff'};`;
+            return `
+                <div style="${wrapStyle}margin-bottom:6px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#555;">
+                            <span>Match</span>
+                            <span style="display:inline-flex;border:1px solid #c7d2fe;border-radius:999px;overflow:hidden;background:#eef2ff;">${seg('all', 'ALL')}${seg('any', 'ANY')}</span>
+                            <span>of these:</span>
+                        </div>
+                        ${removeBtn}
+                    </div>
+                    <div style="${isRoot ? '' : 'padding-left:6px;'}">${childrenHtml}</div>
+                    <div style="display:flex;gap:6px;margin-top:6px;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="swGroupAddCondition('${path}')">+ Condition</button>
+                        ${canNest ? `<button type="button" class="btn btn-secondary btn-sm" onclick="swGroupAddGroup('${path}')">+ Group</button>` : ''}
+                    </div>
+                </div>`;
+        }
+
+        function swRenderConditionsUI() {
+            const list = document.getElementById('swConditionsList');
+            if (!list) return;
+            list.innerHTML = swRenderGroup(window.__swGroup, '', 0);
+            swUpdateMatchPreview();
+        }
+
+        // Reads the currently-selected name/email/ticket-count mapping straight
+        // from the DOM controls so the live preview reflects unsaved edits.
+        function swReadCurrentMapping() {
+            const g = id => (document.getElementById(id) || {}).value || '';
+            return {
+                first: g('swFirst'),
+                last: g('swLast'),
+                email: g('swEmail'),
+                ticketMode: g('swTicketMode') || 'fixed',
+                ticketFixed: parseInt(g('swTicketCount'), 10) || 1,
+                ticketColumn: g('swTicketCountColumn'),
+            };
+        }
+
+        // Mirrors the server's per-row ticket-count resolution.
+        function swResolveTicketCount(map, headers, row) {
+            if (map.ticketMode === 'column' && map.ticketColumn) {
+                const i = headers.indexOf(map.ticketColumn);
+                if (i >= 0) {
+                    const n = parseInt(String(row[i] || '').replace(/[^0-9]/g, ''), 10);
+                    if (Number.isFinite(n) && n > 0) return Math.min(n, 50);
+                }
+            }
+            return map.ticketMode === 'fixed' ? map.ticketFixed : 1;
+        }
+
+        // Updates both the "N of X match" line and the sample-rows table.
+        // Called on every edit to conditions or the column mapping so the
+        // organizer sees exactly what the watcher would do before saving.
+        function swUpdateMatchPreview() {
+            const preview = document.getElementById('swMatchPreview');
+            const table = document.getElementById('swSampleTable');
+            if (!preview) return;
+            const { headers, sampleRows } = window.__swPreview;
+            const ready = swGroupReady(window.__swGroup);
+            if (!ready || !sampleRows.length) {
+                preview.textContent = 'Fill in every condition to preview matches.';
+                if (table) table.innerHTML = '';
+                return;
+            }
+            const map = swReadCurrentMapping();
+            const matchFlags = sampleRows.map(row => swEvaluateNode(window.__swGroup, headers, row));
+            const matchCount = matchFlags.filter(Boolean).length;
+            preview.innerHTML = `<strong>${matchCount}</strong> of ${sampleRows.length} sample rows would trigger a ticket right now.`;
+
+            if (table) {
+                const gv = (row, col) => { const i = headers.indexOf(col); return i >= 0 ? String(row[i] || '') : ''; };
+                const rowsHtml = sampleRows.map((row, ri) => {
+                    const matched = matchFlags[ri];
+                    const name = [gv(row, map.first), gv(row, map.last)].filter(Boolean).join(' ') || '—';
+                    const count = matched ? swResolveTicketCount(map, headers, row) : '';
+                    return `<tr style="background:${matched ? '#ecfdf5' : 'transparent'};">
+                        <td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;text-align:center;">${matched ? '<span style="color:#059669;font-weight:700;">&#10003;</span>' : '<span style="color:#ccc;">&mdash;</span>'}</td>
+                        <td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;white-space:nowrap;">${esc(name)}</td>
+                        <td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;color:#666;white-space:nowrap;">${esc(gv(row, map.email)) || '—'}</td>
+                        <td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;text-align:center;">${count ? '&times;' + count : ''}</td>
+                    </tr>`;
+                }).join('');
+                table.innerHTML = `
+                    <div style="font-size:11px;color:#666;margin:8px 0 4px;">Preview of first ${sampleRows.length} rows (matches highlighted):</div>
+                    <div style="overflow-x:auto;border:1px solid #eee;border-radius:6px;">
+                      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                        <thead><tr style="background:#f9fafb;">
+                          <th style="padding:4px 6px;text-align:center;font-weight:600;">Match</th>
+                          <th style="padding:4px 6px;text-align:left;font-weight:600;">Name</th>
+                          <th style="padding:4px 6px;text-align:left;font-weight:600;">Email</th>
+                          <th style="padding:4px 6px;text-align:center;font-weight:600;">Tickets</th>
+                        </tr></thead>
+                        <tbody>${rowsHtml}</tbody>
+                      </table>
+                    </div>`;
+            }
+        }
+
+        function swGroupAddCondition(path) {
+            swNodeByPath(path).children.push({ column: '', operator: 'contains', value: '' });
+            swRenderConditionsUI();
+        }
+        function swGroupAddGroup(path) {
+            // New sub-groups default to ANY — the usual reason to nest inside
+            // an ALL group is to express an "any of these" alternative.
+            swNodeByPath(path).children.push({ match: 'any', children: [{ column: '', operator: 'contains', value: '' }] });
+            swRenderConditionsUI();
+        }
+        function swNodeRemove(path) {
+            const segs = path.split('-');
+            const idx = +segs.pop();
+            swNodeByPath(segs.join('-')).children.splice(idx, 1);
+            swPruneGroups(window.__swGroup);
+            // Never leave the whole builder empty.
+            if (!window.__swGroup.children.length) window.__swGroup.children.push({ column: '', operator: 'contains', value: '' });
+            swRenderConditionsUI();
+        }
+        // Drop any nested group that lost all its children (a leaf always stays).
+        function swPruneGroups(node) {
+            if (!Array.isArray(node.children)) return true;
+            node.children = node.children.filter(swPruneGroups);
+            return node.children.length > 0;
+        }
+        function swGroupSetMatch(path, value) {
+            swNodeByPath(path).match = value;
+            swRenderConditionsUI();
+        }
+        function swLeafSetField(path, field, value) {
+            swNodeByPath(path)[field] = value;
+            swRenderConditionsUI();
+        }
+        // Value edits refresh only the preview, not the whole tree — a full
+        // re-render on every keystroke would drop focus mid-type.
+        function swLeafSetValue(path, value) {
+            swNodeByPath(path).value = value;
+            swUpdateMatchPreview();
+        }
+
         function renderSheetWatcherConnect(eventId) {
             return `
                 <div class="settings-card">
@@ -4227,13 +4541,23 @@
                 <div class="settings-card">
                     <div style="margin-bottom:12px;">
                         <div style="font-size:12px;margin-bottom:6px;">
-                            <strong>Trigger:</strong> ${esc(cfg.triggerColumn)} contains "${esc(cfg.triggerValue)}"
+                            <strong>Trigger:</strong> ${swGroupSummaryText(cfg)}
                         </div>
                         <div style="font-size:12px;margin-bottom:6px;">
                             <strong>Name & Email:</strong> ${esc(cfg.firstNameColumn)}${cfg.lastNameColumn ? ' + ' + esc(cfg.lastNameColumn) : ''} → ${esc(cfg.emailColumn)}
                         </div>
+                        <div style="font-size:12px;margin-bottom:6px;">
+                            <strong>Tickets per row:</strong> ${cfg.ticketCountColumn ? 'from column "' + esc(cfg.ticketCountColumn) + '"' : (cfg.ticketCount || 1)}
+                        </div>
+                        <div style="font-size:12px;margin-bottom:6px;">
+                            <strong>Dedupe:</strong> ${cfg.oneTicketPerEmail ? 'One ticket per email address' : 'One ticket per form submission'}
+                        </div>
+                        ${cfg.extraColumns && cfg.extraColumns.length ? `
+                        <div style="font-size:12px;margin-bottom:6px;">
+                            <strong>Custom fields:</strong> ${cfg.extraColumns.map(c => esc((cfg.extraColumnLabels && cfg.extraColumnLabels[c]) ? cfg.extraColumnLabels[c] + ' (from "' + c + '")' : c)).join(', ')}
+                        </div>` : ''}
                         <div style="font-size:12px;margin-bottom:12px;">
-                            <strong>Poll every:</strong> ${watcher.config.intervalMinutes || 2} min
+                            <strong>Poll every:</strong> ${watcher.intervalMinutes || watcher.config.intervalMinutes || 2} min
                             <strong style="margin-left:20px;">Issued:</strong> ${watcher.issuedCount} ticket(s)
                         </div>
                         ${watcher.lastError ? `<div style="font-size:11px;color:#991b1b;background:#fef2f2;padding:6px 8px;border-radius:4px;margin-bottom:8px;">Last error: ${esc(watcher.lastError)}</div>` : ''}
@@ -4247,66 +4571,179 @@
             `;
         }
 
+        // Shared by "Connect" (fresh watcher) and "Edit" (existing watcher) —
+        // opts.existingConfig pre-fills every field and opts.isEdit hides the
+        // include-existing-rows checkbox, which only applies on first connect.
+        function swRenderExtraColumnsUI() {
+            const el = document.getElementById('swExtraColumns');
+            if (!el) return;
+            el.innerHTML = window.__swPreview.headers.map((h, i) => {
+                const checked = window.__swExtraColumns.includes(h);
+                const label = window.__swExtraLabels[h] || '';
+                return `
+                <div style="padding:3px 0;">
+                    <label style="display:flex;gap:6px;align-items:center;font-size:12px;cursor:pointer;">
+                        <input type="checkbox" ${checked ? 'checked' : ''} onchange="swToggleExtraColumn(${i}, this.checked)">
+                        <span style="flex:1;min-width:0;">${esc(h)}</span>
+                    </label>
+                    ${checked ? `<input type="text" value="${esc(label)}" oninput="swSetExtraLabel(${i}, this.value)" placeholder="Ticket label (optional — default: ${esc(h)})" style="width:100%;margin-top:3px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;box-sizing:border-box;">` : ''}
+                </div>`;
+            }).join('');
+        }
+        function swToggleExtraColumn(headerIndex, checked) {
+            const column = window.__swPreview.headers[headerIndex];
+            const set = new Set(window.__swExtraColumns);
+            if (checked) { set.add(column); } else { set.delete(column); delete window.__swExtraLabels[column]; }
+            window.__swExtraColumns = [...set];
+            swRenderExtraColumnsUI();
+        }
+        function swSetExtraLabel(headerIndex, value) {
+            // No re-render here — that would drop focus mid-type.
+            const column = window.__swPreview.headers[headerIndex];
+            if (value.trim()) window.__swExtraLabels[column] = value.trim();
+            else delete window.__swExtraLabels[column];
+        }
+        // Fired when the ticket-count mode dropdown changes — toggle which
+        // control (fixed number vs column picker) is visible.
+        function swOnTicketModeChange() {
+            const mode = (document.getElementById('swTicketMode') || {}).value;
+            const fixedWrap = document.getElementById('swTicketFixedWrap');
+            const colWrap = document.getElementById('swTicketColumnWrap');
+            if (fixedWrap) fixedWrap.style.display = mode === 'column' ? 'none' : 'block';
+            if (colWrap) colWrap.style.display = mode === 'column' ? 'block' : 'none';
+            swUpdateMatchPreview();
+        }
+
+        function swRenderConnectForm(eventId, data, opts = {}) {
+            const { existingConfig, isEdit } = opts;
+            window.__swPreview = data;
+            window.__swGroup = swGroupFromConfig(existingConfig, data.suggested.conditionColumn);
+            window.__swExtraColumns = existingConfig ? (existingConfig.extraColumns || []).slice() : [];
+            window.__swExtraLabels = existingConfig ? { ...(existingConfig.extraColumnLabels || {}) } : {};
+            const suggested = existingConfig || {};
+            const ticketMode = suggested.ticketCountColumn ? 'column' : 'fixed';
+            const fixedCount = suggested.ticketCount || 1;
+            const interval = suggested.intervalMinutes || (window.__swCurrent && window.__swCurrent.intervalMinutes) || 2;
+            const colOptions = (selected) => data.headers.map(h => `<option value="${esc(h)}" ${selected === h ? 'selected' : ''}>${esc(h)}</option>`).join('');
+            const intervalOpt = n => `<option value="${n}" ${interval == n ? 'selected' : ''}>${n} minute${n == 1 ? '' : 's'}</option>`;
+            const area = document.getElementById('swPreviewArea');
+            area.innerHTML = `
+                <div style="margin-bottom:12px;">
+                    <div style="font-size:11px;color:#666;margin-bottom:8px;">${data.rowCount} rows, ${data.headers.length} columns</div>
+
+                    <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">When should a ticket be issued?</label>
+                    <div id="swConditionsList"></div>
+                    <div id="swMatchPreview" style="font-size:11px;color:#4338ca;background:#eef2ff;border-radius:6px;padding:6px 8px;margin:8px 0 4px;"></div>
+                    <div id="swSampleTable" style="margin-bottom:16px;"></div>
+
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">First name column</label>
+                        <select id="swFirst" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            ${data.headers.map(h => `<option value="${esc(h)}" ${(suggested.firstNameColumn || data.suggested.firstNameColumn) === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Last name column (optional)</label>
+                        <select id="swLast" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            <option value="">-- None --</option>
+                            ${data.headers.map(h => `<option value="${esc(h)}" ${(suggested.lastNameColumn || data.suggested.lastNameColumn) === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Email column</label>
+                        <select id="swEmail" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            ${data.headers.map(h => `<option value="${esc(h)}" ${(suggested.emailColumn || data.suggested.emailColumn) === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Tickets per matching row</label>
+                        <select id="swTicketMode" onchange="swOnTicketModeChange()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            <option value="fixed" ${ticketMode === 'fixed' ? 'selected' : ''}>Fixed number</option>
+                            <option value="column" ${ticketMode === 'column' ? 'selected' : ''}>From a column (e.g. "How many guests?")</option>
+                        </select>
+                        <div id="swTicketFixedWrap" style="margin-top:6px;display:${ticketMode === 'column' ? 'none' : 'block'};">
+                            <input type="number" id="swTicketCount" min="1" max="10" value="${fixedCount}" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;box-sizing:border-box;">
+                        </div>
+                        <div id="swTicketColumnWrap" style="margin-top:6px;display:${ticketMode === 'column' ? 'block' : 'none'};">
+                            <select id="swTicketCountColumn" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                                <option value="">-- Select column --</option>
+                                ${colOptions(suggested.ticketCountColumn)}
+                            </select>
+                            <div style="font-size:11px;color:#aaa;margin-top:3px;">Reads a number from this column per row (e.g. 3 → 3 tickets). Non-numbers fall back to 1; capped at 50.</div>
+                        </div>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Custom fields on the ticket <span style="font-weight:400;color:#aaa;">(optional — copies these columns onto each ticket, e.g. T-shirt size, meal choice)</span></label>
+                        <div id="swExtraColumns" style="max-height:180px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;padding:8px;background:#fff;"></div>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Check for new entries every</label>
+                        <select id="swInterval" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            ${[1, 2, 5, 10, 15].map(intervalOpt).join('')}
+                        </select>
+                    </div>
+                    ${isEdit ? '' : `
+                    <label style="display:flex;gap:6px;font-size:12px;align-items:center;margin-bottom:8px;">
+                        <input type="checkbox" id="swIncludeExisting">
+                        <span>Include rows already in the sheet</span>
+                    </label>`}
+                    <label style="display:flex;gap:6px;font-size:12px;align-items:center;margin-bottom:8px;">
+                        <input type="checkbox" id="swOneTicketPerEmail" ${existingConfig ? (existingConfig.oneTicketPerEmail ? 'checked' : '') : 'checked'}>
+                        <span>Dedupe by email (only issue one ticket per email address, even if they submit the form more than once)</span>
+                    </label>
+                    <button class="btn btn-primary btn-sm" onclick="swConnect('${eventId}')">${isEdit ? 'Save Changes' : 'Connect Sheet Watcher'}</button>
+                </div>
+            `;
+            swRenderConditionsUI();
+            swRenderExtraColumnsUI();
+        }
+
+        async function swFetchPreview(eventId, url) {
+            const res = await fetch(`/api/event/${eventId}/sheet-watch/preview`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url}) });
+            if (!res.ok) throw new Error((await res.json()).error || 'Could not load the sheet.');
+            return res.json();
+        }
+
         async function swPreview(eventId) {
             const url = document.getElementById('swUrl').value;
             if (!url.trim()) { showToast('Paste the sheet link first.'); return; }
             const area = document.getElementById('swPreviewArea');
             area.innerHTML = '<div style="font-size:12px;color:#888;">Fetching sheet…</div>';
-            const res = await fetch(`/api/event/${eventId}/sheet-watch/preview`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url}) });
-            if (!res.ok) { area.innerHTML = `<div style="font-size:12px;color:#991b1b;">${esc((await res.json()).error)}</div>`; return; }
-            const data = await res.json();
-            window.__swPreview = data;
-            area.innerHTML = `
-                <div style="margin-bottom:12px;">
-                    <div style="font-size:11px;color:#666;margin-bottom:8px;">${data.rowCount} rows, ${data.headers.length} columns</div>
-                    <div style="margin-bottom:8px;">
-                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Which column has the checkbox you want to watch?</label>
-                        <select id="swTrigger" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
-                            <option value="">-- Select --</option>
-                            ${data.headers.map(h => `<option value="${esc(h)}" ${data.suggested.triggerColumn === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div style="margin-bottom:8px;">
-                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">First name column</label>
-                        <select id="swFirst" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
-                            ${data.headers.map(h => `<option value="${esc(h)}" ${data.suggested.firstNameColumn === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div style="margin-bottom:8px;">
-                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Last name column (optional)</label>
-                        <select id="swLast" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
-                            <option value="">-- None --</option>
-                            ${data.headers.map(h => `<option value="${esc(h)}" ${data.suggested.lastNameColumn === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div style="margin-bottom:8px;">
-                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Email column</label>
-                        <select id="swEmail" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
-                            ${data.headers.map(h => `<option value="${esc(h)}" ${data.suggested.emailColumn === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div style="margin-bottom:8px;">
-                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">What text should trigger a ticket?</label>
-                        <input type="text" id="swValue" placeholder='e.g., "Giveaway"' style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;box-sizing:border-box;">
-                    </div>
-                    <label style="display:flex;gap:6px;font-size:12px;align-items:center;margin-bottom:8px;">
-                        <input type="checkbox" id="swIncludeExisting">
-                        <span>Include rows already in the sheet</span>
-                    </label>
-                    <button class="btn btn-primary btn-sm" onclick="swConnect('${eventId}')">Connect Sheet Watcher</button>
-                </div>
-            `;
+            try {
+                const data = await swFetchPreview(eventId, url);
+                swRenderConnectForm(eventId, data);
+            } catch (err) {
+                area.innerHTML = `<div style="font-size:12px;color:#991b1b;">${esc(err.message)}</div>`;
+            }
         }
 
         async function swConnect(eventId) {
-            const trigger = document.getElementById('swTrigger').value;
             const first = document.getElementById('swFirst').value;
             const last = document.getElementById('swLast').value;
             const email = document.getElementById('swEmail').value;
-            const value = document.getElementById('swValue').value;
-            const includeExisting = document.getElementById('swIncludeExisting').checked;
-            if (!trigger || !first || !email || !value) { showToast('Fill in all the required fields.'); return; }
-            const res = await fetch(`/api/event/${eventId}/sheet-watch`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url: document.getElementById('swUrl').value, triggerColumn: trigger, firstNameColumn: first, lastNameColumn: last, emailColumn: email, triggerValue: value, includeExisting}) });
+            const ticketMode = document.getElementById('swTicketMode').value;
+            const ticketCount = parseInt(document.getElementById('swTicketCount').value, 10) || 1;
+            const ticketCountColumn = ticketMode === 'column' ? document.getElementById('swTicketCountColumn').value : '';
+            const intervalMinutes = parseInt(document.getElementById('swInterval').value, 10) || 2;
+            const includeExistingEl = document.getElementById('swIncludeExisting');
+            const includeExisting = includeExistingEl ? includeExistingEl.checked : false;
+            const oneTicketPerEmail = document.getElementById('swOneTicketPerEmail').checked;
+            if (!first || !email || !swGroupReady(window.__swGroup)) { showToast('Fill in every condition first.'); return; }
+            if (ticketMode === 'column' && !ticketCountColumn) { showToast('Pick the column that holds the ticket count.'); return; }
+            const res = await fetch(`/api/event/${eventId}/sheet-watch`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
+                url: document.getElementById('swUrl').value,
+                conditionGroup: window.__swGroup,
+                firstNameColumn: first,
+                lastNameColumn: last,
+                emailColumn: email,
+                extraColumns: window.__swExtraColumns,
+                extraColumnLabels: window.__swExtraLabels,
+                ticketCountColumn,
+                ticketCount,
+                intervalMinutes,
+                includeExisting,
+                oneTicketPerEmail,
+            }) });
             if (res.ok) { showToast('Sheet watcher connected!'); loadAccessData(eventId); } else { showToast((await res.json()).error); }
         }
 
@@ -4318,8 +4755,21 @@
         async function swEdit(eventId) {
             const w = window.__swCurrent;
             if (!w) return;
-            // For now, just disconnect and reconnect
-            await swDisconnect(eventId);
+            document.getElementById('swArea').innerHTML = `
+                <div class="settings-card">
+                    <div id="swPreviewArea"><div style="font-size:12px;color:#888;">Loading sheet…</div></div>
+                </div>
+            `;
+            try {
+                const data = await swFetchPreview(eventId, w.url);
+                swRenderConnectForm(eventId, data, { existingConfig: w.config, isEdit: true });
+                // swConnect reads the URL from #swUrl, which doesn't exist in
+                // edit mode — stash it on a hidden input instead.
+                document.getElementById('swPreviewArea').insertAdjacentHTML('afterbegin', `<input type="hidden" id="swUrl" value="${esc(w.url)}">`);
+            } catch (err) {
+                showToast(err.message);
+                loadAccessData(eventId);
+            }
         }
 
         async function swDisconnect(eventId) {
@@ -4486,6 +4936,21 @@
                 if (ev) ev.shuttleLinkEnabled = enabled;
             } catch {
                 showToast('Failed to update shuttle linking.');
+            }
+        }
+
+        async function setWalletLockScreenEnabled(eventId, enabled) {
+            try {
+                const r = await fetch(`/api/event/${eventId}/wallet-lock-screen-enabled`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!r.ok) throw new Error();
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.walletLockScreenEnabled = enabled;
+            } catch {
+                showToast('Failed to update lock screen setting.');
             }
         }
 
@@ -5345,9 +5810,11 @@
             return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
         }
         function fmtDate(t) {
+            if (!t) return 'Date TBD';
             return new Date(t).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
         }
         function fmtDateRange(startISO, endISO) {
+            if (!startISO) return 'Date TBD';
             const start = new Date(startISO);
             const end = endISO ? new Date(endISO) : null;
             if (!end || isNaN(end.getTime())) return fmtDate(startISO);
@@ -5404,10 +5871,13 @@
             </div>
 
             <!-- Column headers -->
-            <div style="display:grid;grid-template-columns:1fr 1fr 52px 28px;gap:4px;margin-bottom:4px;padding:0 2px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1.3fr 46px 24px;gap:4px;margin-bottom:4px;padding:0 2px;">
                 <div
                     style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
-                    Name</div>
+                    First</div>
+                <div
+                    style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
+                    Last</div>
                 <div
                     style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
                     Email</div>
@@ -5700,7 +6170,8 @@
             const row = document.createElement('div');
             row.className = 'igr-row';
             row.innerHTML = `
-                <input type="text" class="igr-inp igr-name" placeholder="Full Name" value="${esc(data.name || '')}">
+                <input type="text" class="igr-inp igr-first" placeholder="First" value="${esc(data.firstName || '')}" autocomplete="off">
+                <input type="text" class="igr-inp igr-last" placeholder="Last" value="${esc(data.lastName || '')}" autocomplete="off">
                 <input type="email" class="igr-inp igr-email" placeholder="email@example.com" value="${esc(data.email || '')}">
                 <input type="number" class="igr-inp igr-qty" value="${data.qty || 1}" min="1" inputmode="numeric">
                 <button class="igr-del" onclick="this.closest('.igr-row').remove(); syncImportBtn()">&times;</button>
@@ -5713,7 +6184,8 @@
                 syncImportBtn();
             };
 
-            row.querySelector('.igr-name').addEventListener('input', handleInput);
+            row.querySelector('.igr-first').addEventListener('input', handleInput);
+            row.querySelector('.igr-last').addEventListener('input', handleInput);
             row.querySelector('.igr-email').addEventListener('input', handleInput);
             row.querySelector('.igr-qty').addEventListener('input', handleInput);
 
@@ -5724,7 +6196,7 @@
                     const nextRow = row.nextElementSibling;
                     if (nextRow) {
                         e.preventDefault();
-                        nextRow.querySelector('.igr-name').focus();
+                        nextRow.querySelector('.igr-first').focus();
                     }
                 }
             };
@@ -5739,7 +6211,10 @@
                 };
             });
 
-            // Paste logic on name/email
+            // Paste logic — supports pasting either First/Last/Email/Qty or a
+            // single combined Name/Email/Qty column (spreadsheets commonly
+            // export one or the other); parseImportText detects which by
+            // column count.
             const handlePaste = (e) => {
                 const text = (e.clipboardData || window.clipboardData).getData('text');
                 if (text.includes('\t') || text.includes('\n')) {
@@ -5747,18 +6222,19 @@
                     parseImportText(text, row);
                 }
             };
-            row.querySelector('.igr-name').onpaste = handlePaste;
+            row.querySelector('.igr-first').onpaste = handlePaste;
+            row.querySelector('.igr-last').onpaste = handlePaste;
             row.querySelector('.igr-email').onpaste = handlePaste;
 
             container.appendChild(row);
-            
+
             if (autoFocus) {
                 row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                if (!data.name && !data.email) {
-                    row.querySelector('.igr-name').focus();
+                if (!data.firstName && !data.lastName && !data.email) {
+                    row.querySelector('.igr-first').focus();
                 }
             }
-            
+
             syncImportBtn();
             return row;
         }
@@ -5768,11 +6244,20 @@
             const rows = document.querySelectorAll('#importRowsContainer .igr-row');
             let hasData = false;
             rows.forEach(r => {
-                if (r.querySelector('.igr-name').value.trim() || r.querySelector('.igr-email').value.trim()) {
+                if (r.querySelector('.igr-first').value.trim() || r.querySelector('.igr-last').value.trim() || r.querySelector('.igr-email').value.trim()) {
                     hasData = true;
                 }
             });
             btn.disabled = !hasData;
+        }
+
+        // Splits a single combined name the same way the server does:
+        // last word is the last name, everything before it is the first
+        // name — so multi-word first names ("Mary Jane Smith") survive.
+        function splitFullName(full) {
+            const parts = (full || '').trim().split(/\s+/).filter(Boolean);
+            if (parts.length > 1) return { firstName: parts.slice(0, -1).join(' '), lastName: parts[parts.length - 1] };
+            return { firstName: parts[0] || '', lastName: '' };
         }
 
         function parseImportText(text, targetRow) {
@@ -5780,27 +6265,39 @@
             if (!lines.length) return;
 
             const rowsData = lines.map(line => {
-                const parts = line.split('\t');
-                if (parts.length >= 2) return { name: parts[0].trim(), email: parts[1].trim(), qty: parseInt(parts[2]) || 1 };
-                // fallback to comma if no tabs
-                const cParts = splitLine(line);
-                if (cParts.length >= 2) return { name: cParts[0], email: cParts[1], qty: parseInt(cParts[2]) || 1 };
-                return { name: line.trim(), email: '', qty: 1 };
+                let parts = line.split('\t').map(p => p.trim());
+                if (parts.length < 2) parts = splitLine(line);
+
+                // 4+ columns: source sheet already has separate First/Last.
+                if (parts.length >= 4) {
+                    return { firstName: parts[0], lastName: parts[1], email: parts[2], qty: parseInt(parts[3]) || 1 };
+                }
+                // 3 columns: combined Name, Email, Qty — split the name.
+                if (parts.length === 3) {
+                    return { ...splitFullName(parts[0]), email: parts[1], qty: parseInt(parts[2]) || 1 };
+                }
+                // 2 columns: combined Name, Email.
+                if (parts.length === 2) {
+                    return { ...splitFullName(parts[0]), email: parts[1], qty: 1 };
+                }
+                // 1 column: just a name.
+                return { ...splitFullName(parts[0]), email: '', qty: 1 };
             });
 
             // First row fills targetRow
             const first = rowsData.shift();
-            targetRow.querySelector('.igr-name').value = first.name;
+            targetRow.querySelector('.igr-first').value = first.firstName;
+            targetRow.querySelector('.igr-last').value = first.lastName;
             targetRow.querySelector('.igr-email').value = first.email;
             targetRow.querySelector('.igr-qty').value = first.qty;
 
             // Subsequent rows append
             rowsData.forEach(d => makeImportRow(d, false));
-            
+
             // Ensure empty row at the end
             const container = document.getElementById('importRowsContainer');
             const lastRow = container.lastElementChild;
-            if (lastRow && (lastRow.querySelector('.igr-name').value.trim() || lastRow.querySelector('.igr-email').value.trim())) {
+            if (lastRow && (lastRow.querySelector('.igr-first').value.trim() || lastRow.querySelector('.igr-last').value.trim() || lastRow.querySelector('.igr-email').value.trim())) {
                 makeImportRow({}, false);
             }
             syncImportBtn();
@@ -5844,26 +6341,28 @@
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
             rows.forEach(row => {
-                const nameInp = row.querySelector('.igr-name');
+                const firstInp = row.querySelector('.igr-first');
+                const lastInp = row.querySelector('.igr-last');
                 const emailInp = row.querySelector('.igr-email');
                 const qtyInp = row.querySelector('.igr-qty');
 
-                nameInp.classList.remove('err');
+                firstInp.classList.remove('err');
                 emailInp.classList.remove('err');
 
-                const name = nameInp.value.trim();
+                const firstName = firstInp.value.trim();
+                const lastName = lastInp.value.trim();
                 const email = emailInp.value.trim();
                 const qty = parseInt(qtyInp.value) || 0;
 
-                if (!name && !email) return; // Ignore empty rows
+                if (!firstName && !lastName && !email) return; // Ignore empty rows
 
                 let rowErr = false;
-                if (!name) { nameInp.classList.add('err'); rowErr = true; }
+                if (!firstName) { firstInp.classList.add('err'); rowErr = true; }
                 if (!email || !emailRegex.test(email)) { emailInp.classList.add('err'); rowErr = true; }
                 if (qty <= 0) { qtyInp.classList.add('err'); rowErr = true; }
 
                 if (rowErr) hasError = true;
-                else validData.push({ name, email, ticketCount: qty });
+                else validData.push({ name: [firstName, lastName].filter(Boolean).join(' '), email, ticketCount: qty });
             });
 
             if (hasError) {
