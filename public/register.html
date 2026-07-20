@@ -79,8 +79,12 @@
                 </div>
                 <form id="registerForm" style="margin-top:24px;">
                     <div class="form-group">
-                        <label for="name">Full Name</label>
-                        <input type="text" id="name" placeholder="Jane Smith" required autocomplete="name">
+                        <label for="firstName">First Name</label>
+                        <input type="text" id="firstName" placeholder="Jane" required autocomplete="given-name">
+                    </div>
+                    <div class="form-group">
+                        <label for="lastName">Last Name</label>
+                        <input type="text" id="lastName" placeholder="Smith" required autocomplete="family-name">
                     </div>
                     <div class="form-group">
                         <label for="email">Email Address</label>
@@ -151,8 +155,11 @@
                 if (!res.ok) throw new Error();
                 const event = await res.json();
                 document.getElementById('eventTitle').textContent = event.name;
+                const eventDateStr = event.time
+                    ? new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+                    : '';
                 document.getElementById('eventDesc').textContent  =
-                    `${event.location?.name || ''} · ${new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+                    [event.location?.name, eventDateStr].filter(Boolean).join(' · ');
                 document.title = `Register — ${event.name}`;
 
                 // Claim links (promoted waitlist entries) always get a shot at
@@ -259,7 +266,9 @@
         document.getElementById('registerForm').onsubmit = async e => {
             e.preventDefault();
             const btn  = document.getElementById('submitBtn');
-            const name  = document.getElementById('name').value;
+            const firstName = document.getElementById('firstName').value.trim();
+            const lastName  = document.getElementById('lastName').value.trim();
+            const name  = `${firstName} ${lastName}`;
             const email = document.getElementById('email').value;
             const resetBtnText = () => {
                 btn.textContent = isFullWaitlistable ? 'Join Waitlist'

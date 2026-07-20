@@ -355,8 +355,7 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
   <!-- Body -->
   <tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
     <p style="font-size:16px;color:#374151;margin:0 0 24px;line-height:1.6;">Hi <strong>${firstName}</strong>,</p>
-    <p style="font-size:15px;color:#555;margin:0 0 20px;line-height:1.6;">Thank you for registering for <strong>${event.name}</strong>. This email confirms your registration and contains your event ticket. Please save this email—you'll need it to check in at the event.</p>
-    <p style="font-size:14px;color:#666;margin:0 0 24px;line-height:1.6;">${intro}</p>
+    <p style="font-size:15px;color:#555;margin:0 0 24px;line-height:1.6;">Thank you for registering for <strong>${event.name}</strong>. This email confirms your registration and contains your event ticket. Please save this email—you'll need it to check in at the event.</p>
 
     <!-- Event details card -->
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:24px;">
