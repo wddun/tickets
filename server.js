@@ -195,13 +195,7 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
             <p style="margin:0; color:#9ca3af; font-size:11px;">&copy; 2026 Will's Tech Support. All rights reserved.<br>This is an automated message — please do not reply with sensitive information.</p>
         </div>`;
         const withFooter = html + footer;
-
-        // Inject 1x1 tracking pixel so we can detect email opens
-        const tracked = registrationId
-            ? withFooter + `\n<img src="${BASE_URL}/api/track/open/${registrationId}" width="1" height="1" style="display:none;opacity:0;" alt="">`
-            : withFooter;
-
-        const text = htmlToPlainText(tracked);
+        const text = htmlToPlainText(withFooter);
 
         const sesFrom = (process.env.SES_FROM || '').trim();
         // Only wrap in display-name format if sesFrom is a plain email (no angle brackets already)
