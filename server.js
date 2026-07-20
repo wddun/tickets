@@ -30,6 +30,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3002;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+const REPLY_TO_EMAIL = 'support@willstechsupport.com';
 
 const stripeMode = (process.env.STRIPE_MODE || 'live').toUpperCase();
 const stripeSecretKey = process.env[`STRIPE_SECRET_KEY_${stripeMode}`];
@@ -103,8 +104,47 @@ function wrapBase64Lines(buf) {
     return buf.toString('base64').replace(/(.{76})/g, '$1\r\n');
 }
 
-function buildRawMimeEmail({ from, to, replyTo, subject, html, attachments = [] }) {
-    const boundary = `b_${crypto.randomBytes(16).toString('hex')}`;
+// Small HTML→plain-text reducer for the mandatory text/plain alternative —
+// not meant to preserve exact formatting, just to give mail filters a normal
+// multipart/alternative message instead of an HTML-only one. Missing the
+// plain-text part is a well-known spam-score signal at strict mail systems
+// (university/enterprise filters especially).
+function htmlToPlainText(html) {
+    return html
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/(p|div|tr|h[1-6]|li)>/gi, '\n')
+        .replace(/<li[^>]*>/gi, '- ')
+        .replace(/<a[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, inner) => {
+            const t = inner.replace(/<[^>]+>/g, '').trim();
+            return t && t !== href ? `${t} (${href})` : href;
+        })
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&mdash;/gi, '—')
+        .replace(/&ndash;/gi, '–')
+        .replace(/&hellip;/gi, '…')
+        .replace(/&copy;/gi, '©')
+        .replace(/&reg;/gi, '®')
+        .replace(/&#x([0-9a-f]+);/gi, (_m, hex) => String.fromCodePoint(parseInt(hex, 16)))
+        .replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(parseInt(dec, 10)))
+        .replace(/&quot;/gi, '"')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&amp;/gi, '&')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+// multipart/alternative(text/plain, multipart/related(text/html, inline images))
+// — the standard nesting for "plain fallback + rich HTML with inline images".
+// Alternative parts are ordered least- to most-preferred per RFC 2046, so
+// plain text comes first and the HTML+images part comes last.
+function buildRawMimeEmail({ from, to, replyTo, subject, html, text, attachments = [] }) {
+    const altBoundary = `b_${crypto.randomBytes(16).toString('hex')}`;
+    const relBoundary = `b_${crypto.randomBytes(16).toString('hex')}`;
     const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`;
 
     const lines = [
@@ -114,16 +154,26 @@ function buildRawMimeEmail({ from, to, replyTo, subject, html, attachments = [] 
     if (replyTo) lines.push(`Reply-To: ${replyTo}`);
     lines.push(`Subject: ${encodedSubject}`);
     lines.push(`MIME-Version: 1.0`);
-    lines.push(`Content-Type: multipart/related; boundary="${boundary}"`);
+    lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
     lines.push('');
-    lines.push(`--${boundary}`);
+
+    lines.push(`--${altBoundary}`);
+    lines.push(`Content-Type: text/plain; charset=UTF-8`);
+    lines.push(`Content-Transfer-Encoding: base64`);
+    lines.push('');
+    lines.push(wrapBase64Lines(Buffer.from(text, 'utf8')));
+
+    lines.push(`--${altBoundary}`);
+    lines.push(`Content-Type: multipart/related; boundary="${relBoundary}"`);
+    lines.push('');
+    lines.push(`--${relBoundary}`);
     lines.push(`Content-Type: text/html; charset=UTF-8`);
     lines.push(`Content-Transfer-Encoding: base64`);
     lines.push('');
     lines.push(wrapBase64Lines(Buffer.from(html, 'utf8')));
 
     for (const att of attachments) {
-        lines.push(`--${boundary}`);
+        lines.push(`--${relBoundary}`);
         lines.push(`Content-Type: ${att.contentType}`);
         lines.push(`Content-Transfer-Encoding: base64`);
         lines.push(`Content-ID: <${att.cid}>`);
@@ -131,20 +181,27 @@ function buildRawMimeEmail({ from, to, replyTo, subject, html, attachments = [] 
         lines.push('');
         lines.push(wrapBase64Lines(att.content));
     }
-    lines.push(`--${boundary}--`);
+    lines.push(`--${relBoundary}--`);
+    lines.push(`--${altBoundary}--`);
     return lines.join('\r\n');
 }
 
 async function sendEmail({ to, subject, html, registrationId, fromName, replyTo, attachments = [] }) {
     const task = emailChain.then(() => new Promise(r => setTimeout(r, SES_INTERVAL_MS))).then(async () => {
-        // Append copyright footer to every email
-        const footer = `<div style="text-align:center; margin-top:32px; padding-top:16px; border-top:1px solid #eee; font-size:11px; color:#aaa;">&copy; 2026 Will's Tech Support</div>`;
+        // Append legitimacy footer to every email
+        const footer = `<div style="text-align:center; margin-top:40px; padding-top:24px; border-top:1px solid #e5e7eb; font-size:12px; color:#6b7280;">
+            <p style="margin:0 0 8px; color:#4b5563;"><strong>Will's Tech Support</strong></p>
+            <p style="margin:0 0 12px; color:#6b7280;">Questions? Reply to this email or visit <a href="${BASE_URL}" style="color:#0284c7; text-decoration:none;">our support page</a></p>
+            <p style="margin:0; color:#9ca3af; font-size:11px;">&copy; 2026 Will's Tech Support. All rights reserved.<br>This is an automated message — please do not reply with sensitive information.</p>
+        </div>`;
         const withFooter = html + footer;
 
         // Inject 1x1 tracking pixel so we can detect email opens
         const tracked = registrationId
             ? withFooter + `\n<img src="${BASE_URL}/api/track/open/${registrationId}" width="1" height="1" style="display:none;opacity:0;" alt="">`
             : withFooter;
+
+        const text = htmlToPlainText(tracked);
 
         const sesFrom = (process.env.SES_FROM || '').trim();
         // Only wrap in display-name format if sesFrom is a plain email (no angle brackets already)
@@ -153,7 +210,7 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
             : sesFrom;
 
         if (attachments.length) {
-            const raw = buildRawMimeEmail({ from: source, to, replyTo, subject, html: tracked, attachments });
+            const raw = buildRawMimeEmail({ from: source, to, replyTo, subject, html: tracked, text, attachments });
             return ses.send(new SendRawEmailCommand({ Source: source, RawMessage: { Data: Buffer.from(raw, 'utf8') } }));
         }
 
@@ -163,7 +220,10 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
             ReplyToAddresses: replyTo ? [replyTo] : undefined,
             Message: {
                 Subject: { Data: subject, Charset: 'UTF-8' },
-                Body: { Html: { Data: tracked, Charset: 'UTF-8' } }
+                Body: {
+                    Html: { Data: tracked, Charset: 'UTF-8' },
+                    Text: { Data: text, Charset: 'UTF-8' }
+                }
             }
         }));
     });
@@ -192,7 +252,7 @@ function getWalletBadgeBuffer() {
 // get an image to always render without a live fetch, on Gmail included.
 // Returns { html, attachments } — attachments must be passed to sendEmail().
 async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '' }) {
-    const dateStr = (() => {
+    const dateStr = event.time ? (() => {
         try {
             const start = new Date(event.time).toLocaleString('en-US', {
                 weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
@@ -206,7 +266,12 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
             }
             return start;
         } catch (_) { return String(event.time); }
-    })();
+    })() : '';
+    const dateRowHtml = dateStr ? `
+        <tr>
+          <td style="padding:5px 0;font-size:14px;color:#6b7280;vertical-align:top;white-space:nowrap;width:20px;">📅</td>
+          <td style="padding:5px 0 5px 8px;font-size:14px;color:#374151;">${dateStr}</td>
+        </tr>` : '';
 
     const locName = event.location?.name || '';
     const locAddress = event.location?.address || '';
@@ -283,22 +348,21 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
 
   <!-- Header -->
   <tr><td style="background:${accentHex};padding:28px 32px;text-align:center;">
-    <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Your Ticket</p>
+    <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Your Registration Confirmation</p>
     <h1 style="margin:0;font-size:26px;font-weight:800;color:#fff;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${event.name}</h1>
   </td></tr>
 
   <!-- Body -->
   <tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-    <p style="font-size:16px;color:#374151;margin:0 0 24px;line-height:1.6;">Hi <strong>${firstName}</strong>,<br>${intro}</p>
+    <p style="font-size:16px;color:#374151;margin:0 0 24px;line-height:1.6;">Hi <strong>${firstName}</strong>,</p>
+    <p style="font-size:15px;color:#555;margin:0 0 20px;line-height:1.6;">Thank you for registering for <strong>${event.name}</strong>. This email confirms your registration and contains your event ticket. Please save this email—you'll need it to check in at the event.</p>
+    <p style="font-size:14px;color:#666;margin:0 0 24px;line-height:1.6;">${intro}</p>
 
     <!-- Event details card -->
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:24px;">
     <tr><td style="padding:18px 20px;">
       <table cellpadding="0" cellspacing="0" width="100%">
-        <tr>
-          <td style="padding:5px 0;font-size:14px;color:#6b7280;vertical-align:top;white-space:nowrap;width:20px;">📅</td>
-          <td style="padding:5px 0 5px 8px;font-size:14px;color:#374151;">${dateStr}</td>
-        </tr>
+        ${dateRowHtml}
         ${locRowHtml}
       </table>
     </td></tr>
@@ -1501,8 +1565,8 @@ app.post('/api/register', async (req, res) => {
     }
 
     const nameParts = name.trim().split(/\s+/);
-    const firstName = nameParts[0];
-    const lastName = nameParts.slice(1).join(' ') || null;
+    const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(' ') : nameParts[0];
+    const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : null;
     const token = nanoid(12);
     const ticketId = nanoid(8);
     const registrationId = nanoid(10);
@@ -1523,7 +1587,7 @@ app.post('/api/register', async (req, res) => {
         sendEmail({
             to: email.trim().toLowerCase(),
             fromName: `Tickets - ${event.name}`,
-            replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
+            replyTo: REPLY_TO_EMAIL,
             subject: `Your ticket for ${event.name}`,
             html,
             attachments,
@@ -1581,9 +1645,9 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
     const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
     if (!dbEvent) return null;
 
-    const nameParts = (buyerName || '').split(/\s+/);
-    const firstName = nameParts[0] || buyerName || '';
-    const lastName  = nameParts.slice(1).join(' ') || null;
+    const nameParts = (buyerName || '').split(/\s+/).filter(Boolean);
+    const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(' ') : (nameParts[0] || '');
+    const lastName  = nameParts.length > 1 ? nameParts[nameParts.length - 1] : null;
     const token = nanoid(12);
     const ticketId = nanoid(8);
     const registrationId = nanoid(10);
@@ -1602,7 +1666,7 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
         sendEmail({
             to: buyerEmail,
             fromName: `Tickets - ${dbEvent.name}`,
-            replyTo: rowToUser(stmt.users.byId.get(dbEvent.userId))?.email,
+            replyTo: REPLY_TO_EMAIL,
             subject: `Your ticket for ${dbEvent.name}`,
             html,
             attachments,
@@ -1663,7 +1727,7 @@ app.post('/api/checkout/:eventId', async (req, res) => {
         finalAmount = result.finalAmount;
     }
 
-    const dateLabel  = (() => { try { return new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); } catch { return ''; } })();
+    const dateLabel  = (() => { if (!event.time) return ''; try { return new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); } catch { return ''; } })();
 
     // A 100%-off code means nothing to actually charge — Stripe Checkout
     // doesn't support $0 payment-mode sessions, so issue the ticket directly
@@ -1975,6 +2039,23 @@ app.put('/api/event/:id/shuttle-link-enabled', requireAuth, (req, res) => {
     res.json({ success: true, shuttleLinkEnabled: enabled });
 });
 
+// Apple Wallet passes can surface a lock-screen "Tonight at 8pm" style
+// reminder near the event time and when the phone is near the venue
+// (see setRelevantDates/setLocations in generatePassBuffer). This lets an
+// organizer turn that off so the ticket sits silently in Wallet.
+app.put('/api/event/:id/wallet-lock-screen-enabled', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    const enabled = req.body.enabled === true || req.body.enabled === 'true';
+    stmt.events.setWalletLockScreenEnabled.run(enabled ? 1 : 0, req.params.id);
+    logAudit(req, { eventId: event.id, action: enabled ? 'wallet_lock_screen.enabled' : 'wallet_lock_screen.disabled' });
+    const updated = rowToEvent(stmt.events.byId.get(req.params.id));
+    const eventTickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
+    pushWalletIfChanged(eventTickets, updated).catch(() => {});
+    res.json({ success: true, walletLockScreenEnabled: enabled });
+});
+
 app.get('/api/event/:id/waitlist', requireAuth, (req, res) => {
     const eventId = req.params.id;
     if (!userHasEventAccess(req.session.userId, eventId)) {
@@ -2020,7 +2101,7 @@ app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
             sendEmail({
                 to: entry.email,
                 fromName: `Tickets - ${event.name}`,
-                replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
+                replyTo: REPLY_TO_EMAIL,
                 subject: `A spot opened up for ${event.name}!`,
                 html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
                     <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
@@ -2280,7 +2361,7 @@ app.post('/api/register-bulk', async (req, res) => {
             await sendEmail({
                 to: email,
                 fromName: `Tickets - ${event.name}`,
-                replyTo: rowToUser(stmt.users.byId.get(event.userId))?.email,
+                replyTo: REPLY_TO_EMAIL,
                 subject: isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`,
                 html,
                 attachments,
@@ -2488,13 +2569,12 @@ app.get('/api/events', requireAuth, (req, res) => {
 app.post('/api/events', requireAuth, async (req, res) => {
     const { name, time, endTime, locationName, locationAddress, lat, lng, color } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Event name is required' });
-    if (!time) return res.status(400).json({ error: 'Event date/time is required' });
 
     const newEvent = {
         id: nanoid(10),
         userId: req.session.userId,
         name: name.trim(),
-        time,
+        time: time || null,
         endTime: endTime || null,
         color: color || 'rgb(99, 102, 241)',
         imageUrl: null,
@@ -2588,7 +2668,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     const allowReentry = req.body.allowReentry === 'true';
     const capacityRaw = req.body.capacity !== undefined ? req.body.capacity : undefined;
     const newName = name || event.name;
-    const newTime = time || event.time;
+    const newTime = time !== undefined ? (time || null) : event.time;
     const newEndTime = endTime !== undefined ? (endTime || null) : event.endTime;
     const newColor = color || event.color;
     const newCapacity = capacityRaw !== undefined ? (parseInt(capacityRaw) || null) : event.capacity;
@@ -2822,7 +2902,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
         await sendEmail({
             to: email,
             fromName: `Tickets - ${event.name}`,
-            replyTo: eventOwner?.email,
+            replyTo: REPLY_TO_EMAIL,
             subject: `Your ${ticketLabel} for ${event.name}`,
             html,
             attachments,
@@ -2878,7 +2958,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
         await sendEmail({
             to: email,
             fromName: `Tickets - ${event.name}`,
-            replyTo: eventOwner?.email,
+            replyTo: REPLY_TO_EMAIL,
             subject: `Updated registration for ${event.name}`,
             html,
             attachments,
@@ -2930,7 +3010,7 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
     await sendEmail({
         to: ticket.email,
         fromName: `Tickets - ${event.name}`,
-        replyTo: eventOwner?.email,
+        replyTo: REPLY_TO_EMAIL,
         subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
         html,
         attachments,
@@ -2973,7 +3053,7 @@ app.post('/api/ticket/:id/direct-email', requireAuth, async (req, res) => {
         await sendEmail({
             to: ticket.email,
             fromName: `Tickets - ${event.name}`,
-            replyTo: eventOwner?.email,
+            replyTo: REPLY_TO_EMAIL,
             subject,
             html,
             registrationId: ticket.registrationId
@@ -3014,15 +3094,32 @@ app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
 
     if (registrations.length === 0) return res.status(400).json({ error: 'No registrations found for this event' });
 
-    const replyTo = rowToUser(stmt.users.byId.get(event.userId))?.email;
+    const replyTo = REPLY_TO_EMAIL;
     const escapedMessage = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
 
     let sent = 0;
     const errors = [];
     for (const ticket of registrations) {
         const html = `
-            <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
-                <p style="color:#555; white-space:pre-wrap;">${escapedMessage}</p>
+            <div style="margin:0;padding:0;background:#f3f4f6;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
+            <tr><td align="center" style="padding:24px 16px;">
+            <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
+              <tr><td style="background:#2563eb;padding:24px 32px;text-align:center;">
+                <p style="margin:0;font-size:11px;font-weight:700;color:rgba(255,255,255,0.8);text-transform:uppercase;letter-spacing:1px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Update from Event Organizer</p>
+                <h2 style="margin:8px 0 0;font-size:22px;font-weight:700;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${event.name}</h2>
+              </td></tr>
+              <tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                <p style="font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">Hello,</p>
+                <p style="font-size:14px;color:#666;margin:0 0 20px;line-height:1.6;">The event organizer has sent you an important update:</p>
+                <div style="background:#f9fafb;border-left:4px solid #2563eb;padding:20px;margin:24px 0;border-radius:8px;">
+                  <p style="color:#555;white-space:pre-wrap;margin:0;font-size:15px;line-height:1.6;">${escapedMessage}</p>
+                </div>
+                <p style="font-size:13px;color:#888;margin:0 0 12px;line-height:1.5;">If you have any questions, you can reply to this email and the organizer will get back to you shortly.</p>
+              </td></tr>
+            </table>
+            </td></tr>
+            </table>
             </div>
         `;
         try {
@@ -3106,7 +3203,7 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
 <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
 <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
 <p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
-<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>
+${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>` : ''}
 ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
 ${qrBlocks}
 <script>
@@ -3184,7 +3281,7 @@ app.get('/api/tickets/bulk-preview', requireAuth, async (req, res) => {
     <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
     <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
     <p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
-    <p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>
+    ${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>` : ''}
     ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
     ${qrBlocks}
 </div>`);
@@ -3360,7 +3457,7 @@ app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
             await sendEmail({
                 to: ticket.email,
                 fromName: `Tickets - ${event.name}`,
-                replyTo: eventOwner?.email,
+                replyTo: REPLY_TO_EMAIL,
                 subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
                 html,
                 attachments,
@@ -3850,7 +3947,8 @@ function passContentHash(ticket, event) {
         eventTime: event.time,
         eventLat: event.location?.lat,
         eventLng: event.location?.lng,
-        allowReentry: !!event.allowReentry
+        allowReentry: !!event.allowReentry,
+        walletLockScreenEnabled: !!event.walletLockScreenEnabled
     });
     return crypto.createHash('sha256').update(data).digest('hex').slice(0, 16);
 }
@@ -3915,11 +4013,19 @@ async function generatePassBuffer(ticket, event) {
 
     const lat = event.location?.lat;
     const lng = event.location?.lng;
-    if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
-        const multiDay = !!(event.endTime && !Number.isNaN(new Date(event.endTime).getTime()));
-        const locObj = { latitude: Number(lat), longitude: Number(lng) };
-        if (!multiDay) locObj.relevantText = humanEventTime(new Date(event.time));
-        pass.setLocations(locObj);
+    // event.time is null for an intentionally undated event — new Date(null)
+    // would silently evaluate to the Unix epoch rather than an invalid date,
+    // so "has a time at all" and "has a *valid* time" are tracked separately.
+    const hasTime = !!event.time;
+    const eventDate = hasTime ? new Date(event.time) : null;
+    const hasValidDate = hasTime && !Number.isNaN(eventDate.getTime());
+    if (event.walletLockScreenEnabled) {
+        if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
+            const multiDay = !!(event.endTime && !Number.isNaN(new Date(event.endTime).getTime()));
+            const locObj = { latitude: Number(lat), longitude: Number(lng) };
+            if (!multiDay && hasValidDate) locObj.relevantText = humanEventTime(eventDate);
+            pass.setLocations(locObj);
+        }
     }
 
     // When checked in, show name + greyed-out event name; logoText already says "✓ CHECKED IN"
@@ -3928,7 +4034,6 @@ async function generatePassBuffer(ticket, event) {
     const customFields = ticket.customFields || {};
     const cfEntries = Object.entries(customFields);
 
-    const eventDate = new Date(event.time);
     const eventEndDate = event.endTime ? new Date(event.endTime) : null;
     const isMultiDay = eventEndDate && !Number.isNaN(eventEndDate.getTime());
     const hasNote = !!cfEntries[0];
@@ -3948,21 +4053,27 @@ async function generatePassBuffer(ticket, event) {
     };
 
     const setRelevantDatesAndExpiry = () => {
-        const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
-        const windowEnd = isMultiDay
-            ? new Date(eventEndDate.getTime() + 2 * 60 * 60 * 1000)
-            : new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
         const expiresAt = isMultiDay
             ? new Date(eventEndDate.getTime() + 24 * 60 * 60 * 1000)
             : new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
-        pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
         pass.expirationDate = expiresAt;
+        if (event.walletLockScreenEnabled) {
+            const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
+            const windowEnd = isMultiDay
+                ? new Date(eventEndDate.getTime() + 2 * 60 * 60 * 1000)
+                : new Date(eventDate.getTime() + 2 * 60 * 60 * 1000);
+            pass.setRelevantDates([{ startDate: windowStart, endDate: windowEnd }]);
+        }
     };
 
     // If notes exist, keep date in the header and notes in secondary.
     // If no notes, place date in secondary (so the row isn't empty).
+    // Three cases: a valid date (format it and drive relevance/expiry), a
+    // present-but-unparseable legacy value (show the raw string, no
+    // relevance/expiry), or no date at all (omit the field entirely — the
+    // pass simply never auto-expires and carries no relevance window).
     if (hasNote) {
-        if (!Number.isNaN(eventDate.getTime())) {
+        if (hasValidDate) {
             if (isMultiDay) {
                 pass.headerFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
             } else {
@@ -3972,12 +4083,12 @@ async function generatePassBuffer(ticket, event) {
                 });
             }
             setRelevantDatesAndExpiry();
-        } else {
+        } else if (hasTime) {
             pass.headerFields.push({ key: "date", label: "DATE", value: String(event.time) });
         }
         pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
     } else {
-        if (!Number.isNaN(eventDate.getTime())) {
+        if (hasValidDate) {
             if (isMultiDay) {
                 pass.secondaryFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
             } else {
@@ -3987,7 +4098,7 @@ async function generatePassBuffer(ticket, event) {
                 });
             }
             setRelevantDatesAndExpiry();
-        } else {
+        } else if (hasTime) {
             pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
         }
     }
@@ -4573,24 +4684,131 @@ function watcherConfig(w) {
     try { return JSON.parse(w.config) || {}; } catch { return {}; }
 }
 
-function watcherRowMatches(cfg, cell) {
-    const value = String(cell || '');
-    if (cfg.matchMode === 'contains') {
-        return value.toLowerCase().includes(cfg.triggerValue.toLowerCase());
+const CONDITION_OPERATORS = new Set([
+    'equals', 'notEquals', 'contains', 'notContains',
+    'greaterThan', 'lessThan', 'greaterOrEqual', 'lessOrEqual',
+    'isEmpty', 'isNotEmpty',
+]);
+
+function cellMatchesCondition(cell, operator, targetValue) {
+    const value = String(cell || '').trim();
+    const target = String(targetValue || '').trim();
+    switch (operator) {
+        case 'equals': return value.toLowerCase() === target.toLowerCase();
+        case 'notEquals': return value.toLowerCase() !== target.toLowerCase();
+        case 'contains': return value.toLowerCase().includes(target.toLowerCase());
+        case 'notContains': return !value.toLowerCase().includes(target.toLowerCase());
+        case 'greaterThan': return parseFloat(value) > parseFloat(target);
+        case 'lessThan': return parseFloat(value) < parseFloat(target);
+        case 'greaterOrEqual': return parseFloat(value) >= parseFloat(target);
+        case 'lessOrEqual': return parseFloat(value) <= parseFloat(target);
+        case 'isEmpty': return value === '';
+        case 'isNotEmpty': return value !== '';
+        default: return false;
     }
-    // 'option': checkbox answers arrive as one comma-joined string
-    return value.split(',').map(s => s.trim().toLowerCase()).includes(cfg.triggerValue.toLowerCase());
 }
 
-// A row's dedupe key: form timestamp + email. Editing other columns (e.g.
-// a leader's follow-up notes) never re-triggers a row, and a second
-// submission by the same person (new timestamp) counts as a new row.
-function watcherRowKey(row, rowIndex, tsIdx, email) {
+// Evaluates a flat left-to-right chain of conditions — each condition's
+// `join` ('AND'/'OR', absent on the first) combines it with the running
+// result so far, the same way you'd read a row of spreadsheet formula
+// terms. No parentheses/precedence — that's more control than a no-code
+// trigger builder needs, and keeps the UI a straight list of rows.
+function evaluateConditions(conditions, headers, row) {
+    if (!Array.isArray(conditions) || !conditions.length) return false;
+    let result = null;
+    for (const cond of conditions) {
+        const idx = headers.indexOf(cond.column);
+        const cell = idx >= 0 ? row[idx] : '';
+        const matched = cellMatchesCondition(cell, cond.operator, cond.value);
+        result = result === null ? matched : (cond.join === 'OR' ? (result || matched) : (result && matched));
+    }
+    return !!result;
+}
+
+// Configs saved before the condition builder existed only have a single
+// triggerColumn/triggerValue/matchMode — translate them into an equivalent
+// one-condition list so old watchers keep working without a re-save.
+function watcherConditions(cfg) {
+    if (Array.isArray(cfg.conditions) && cfg.conditions.length) return cfg.conditions;
+    if (cfg.triggerColumn) {
+        return [{ column: cfg.triggerColumn, operator: 'contains', value: cfg.triggerValue }];
+    }
+    return [];
+}
+
+// ── Grouped condition model (the current format) ─────────────────────────────
+// A node is either a leaf {column, operator, value} or a group
+// {match:'all'|'any', children:[node,…]}. Groups nest arbitrarily, so the
+// UI can express (A AND B) OR C and A AND (B OR C) unambiguously — no
+// operator precedence to reason about, unlike the old flat left-to-right list.
+function evaluateNode(node, headers, row) {
+    if (!node) return false;
+    if (Array.isArray(node.children)) {
+        const kids = node.children;
+        if (!kids.length) return false;
+        return node.match === 'any'
+            ? kids.some(k => evaluateNode(k, headers, row))
+            : kids.every(k => evaluateNode(k, headers, row));
+    }
+    const idx = headers.indexOf(node.column);
+    const cell = idx >= 0 ? row[idx] : '';
+    return cellMatchesCondition(cell, node.operator, node.value);
+}
+
+// Unified "does this row trigger?" — prefers the grouped tree, falls back to
+// the old flat list / legacy single-trigger config for watchers saved before
+// the group model existed.
+function watcherMatches(cfg, headers, row) {
+    if (cfg.conditionGroup && Array.isArray(cfg.conditionGroup.children)) {
+        return evaluateNode(cfg.conditionGroup, headers, row);
+    }
+    return evaluateConditions(watcherConditions(cfg), headers, row);
+}
+
+// Every column a tree references, so poll-time validation can confirm the
+// sheet still has them and back-fill can key off the right cells.
+function groupColumns(node, out = []) {
+    if (!node) return out;
+    if (Array.isArray(node.children)) node.children.forEach(k => groupColumns(k, out));
+    else if (node.column) out.push(node.column);
+    return out;
+}
+
+// Validate/clean an incoming tree from the dashboard: enforce the operator
+// whitelist, cap nesting depth and total node count (a runaway payload guard),
+// and drop leaves with no column. Returns null if nothing usable survives.
+function sanitizeGroup(node, depth = 0, budget = { nodes: 0 }) {
+    if (!node || depth > 4 || budget.nodes > 100) return null;
+    budget.nodes++;
+    if (Array.isArray(node.children)) {
+        const children = node.children
+            .map(k => sanitizeGroup(k, depth + 1, budget))
+            .filter(Boolean);
+        if (!children.length) return null;
+        return { match: node.match === 'any' ? 'any' : 'all', children };
+    }
+    const column = String(node.column || '').trim();
+    if (!column) return null;
+    return {
+        column,
+        operator: CONDITION_OPERATORS.has(node.operator) ? node.operator : 'contains',
+        value: String(node.value || '').trim(),
+    };
+}
+
+// A row's dedupe key: normally form timestamp + email, so editing other
+// columns (e.g. a leader's follow-up notes) never re-triggers a row, and a
+// second submission by the same person (new timestamp) counts as a new row.
+// When cfg.oneTicketPerEmail is set, the key is just the email — any repeat
+// submission by the same address is treated as already seen.
+function watcherRowKey(row, rowIndex, tsIdx, email, cfg) {
+    if (cfg?.oneTicketPerEmail) return email.toLowerCase();
     return `${tsIdx >= 0 ? String(row[tsIdx]).trim() : 'row' + rowIndex}|${email.toLowerCase()}`;
 }
 
 async function pollSheetWatcher(watcher) {
     const cfg = watcherConfig(watcher);
+    const conditionCols = cfg.conditionGroup ? groupColumns(cfg.conditionGroup) : watcherConditions(cfg).map(c => c.column);
     const summary = { matched: 0, issued: 0, alreadySeen: 0, failed: 0 };
     let lastError = null;
     try {
@@ -4600,7 +4818,8 @@ async function pollSheetWatcher(watcher) {
             if (i === -1) throw new Error(`${label} column "${name}" not found — did the sheet's headers change?`);
             return i;
         };
-        const trigIdx = need(cfg.triggerColumn, 'Trigger');
+        if (!conditionCols.length) throw new Error('No trigger conditions configured');
+        conditionCols.forEach(c => need(c, 'Condition'));
         const firstIdx = need(cfg.firstNameColumn, 'First-name');
         const emailIdx = need(cfg.emailColumn, 'Email');
         const lastIdx = cfg.lastNameColumn ? headers.indexOf(cfg.lastNameColumn) : -1;
@@ -4609,12 +4828,12 @@ async function pollSheetWatcher(watcher) {
 
         for (let r = 0; r < rows.length; r++) {
             const row = rows[r];
-            if (!watcherRowMatches(cfg, row[trigIdx])) continue;
+            if (!watcherMatches(cfg, headers, row)) continue;
             summary.matched++;
 
             const email = String(row[emailIdx] || '').trim();
             if (!email.includes('@')) { summary.failed++; lastError = `Row ${r + 2}: missing or invalid email`; continue; }
-            const key = watcherRowKey(row, r, tsIdx, email);
+            const key = watcherRowKey(row, r, tsIdx, email, cfg);
             if (stmt.sheetWatcherSeen.exists.get(watcher.id, key)) { summary.alreadySeen++; continue; }
 
             let firstName = String(row[firstIdx] || '').trim();
@@ -4626,11 +4845,31 @@ async function pollSheetWatcher(watcher) {
             }
             if (!firstName) { summary.failed++; lastError = `Row ${r + 2}: missing first name`; continue; }
 
+            // Copy selected columns onto the ticket, renaming to the custom
+            // label the organizer chose (form-question headers are often long
+            // and ugly — "What size shirt? (S/M/L)" → "Shirt Size").
             const customFields = {};
             (cfg.extraColumns || []).forEach(name => {
                 const i = headers.indexOf(name);
-                if (i >= 0 && String(row[i] || '').trim()) customFields[name] = String(row[i]).trim();
+                if (i >= 0 && String(row[i] || '').trim()) {
+                    const label = (cfg.extraColumnLabels && cfg.extraColumnLabels[name]) || name;
+                    customFields[label] = String(row[i]).trim();
+                }
             });
+
+            // Ticket count: fixed by default, or pulled per-row from a column
+            // (e.g. a "How many guests?" answer). Strip non-digits so "+3" or
+            // "3 people" still parse; cap so a typo can't issue hundreds. In
+            // column mode an empty/unparseable cell means 1 (they're coming,
+            // they just didn't say how many).
+            let ticketCount = cfg.ticketCountColumn ? 1 : (cfg.ticketCount || 1);
+            if (cfg.ticketCountColumn) {
+                const tci = headers.indexOf(cfg.ticketCountColumn);
+                if (tci >= 0) {
+                    const parsed = parseInt(String(row[tci] || '').replace(/[^0-9]/g, ''), 10);
+                    if (Number.isFinite(parsed) && parsed > 0) ticketCount = Math.min(parsed, 50);
+                }
+            }
 
             // Issue through the real register-bulk route so capacity checks,
             // audit logging, and the ticket email all stay on one code path.
@@ -4642,7 +4881,7 @@ async function pollSheetWatcher(watcher) {
                     lastName: lastName || '(none)',
                     email,
                     eventId: watcher.eventId,
-                    ticketCount: cfg.ticketCount || 1,
+                    ticketCount,
                     apiKey,
                     customFields,
                 }),
@@ -4709,7 +4948,7 @@ app.post('/api/event/:id/sheet-watch/preview', requireAuth, async (req, res) => 
             sampleRows: rows.slice(0, 10),
             rowCount: rows.length,
             suggested: {
-                triggerColumn: findH('check any', 'apply', 'interest'),
+                conditionColumn: findH('check any', 'apply', 'interest'),
                 firstNameColumn: findH('first name') || findH('name'),
                 lastNameColumn: findH('last name'),
                 emailColumn: findH('email'),
@@ -4730,24 +4969,52 @@ app.get('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
 // Create or update the event's watcher.
 app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
     if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
-    const { url, triggerColumn, triggerValue, matchMode, firstNameColumn, lastNameColumn, emailColumn, extraColumns, intervalMinutes, ticketCount, includeExisting } = req.body || {};
-    if (!url || !triggerColumn || !triggerValue || !firstNameColumn || !emailColumn) {
-        return res.status(400).json({ error: 'url, triggerColumn, triggerValue, firstNameColumn, and emailColumn are required' });
+    const { url, conditionGroup, conditions, firstNameColumn, lastNameColumn, emailColumn, extraColumns, extraColumnLabels, ticketCountColumn, intervalMinutes, ticketCount, includeExisting, oneTicketPerEmail } = req.body || {};
+    // New grouped format (preferred); fall back to the old flat list if a
+    // client still sends it.
+    const cleanGroup = conditionGroup ? sanitizeGroup(conditionGroup) : null;
+    const cleanConditions = Array.isArray(conditions)
+        ? conditions
+            .map((c, i) => ({
+                column: String(c?.column || '').trim(),
+                operator: CONDITION_OPERATORS.has(c?.operator) ? c.operator : 'contains',
+                value: String(c?.value || '').trim(),
+                ...(i > 0 ? { join: c?.join === 'OR' ? 'OR' : 'AND' } : {}),
+            }))
+            .filter(c => c.column)
+            .slice(0, 10)
+        : [];
+    const conditionCount = cleanGroup ? groupColumns(cleanGroup).length : cleanConditions.length;
+    if (!url || !conditionCount || !firstNameColumn || !emailColumn) {
+        return res.status(400).json({ error: 'url, at least one condition, firstNameColumn, and emailColumn are required' });
     }
     const cleanUrl = String(url).trim();
     const csvUrl = sheetCsvUrl(cleanUrl);
     if (!csvUrl) return res.status(400).json({ error: "That doesn't look like a valid sheet link" });
     const interval = Math.min(15, Math.max(1, parseInt(intervalMinutes, 10) || 2));
-    const config = JSON.stringify({
-        triggerColumn,
-        triggerValue: String(triggerValue).trim(),
-        matchMode: matchMode === 'contains' ? 'contains' : 'option',
+    const cleanExtraColumns = Array.isArray(extraColumns) ? extraColumns.slice(0, 20) : [];
+    // Keep only labels for columns that are actually selected, and only when
+    // the label differs from the raw header (no point storing a no-op rename).
+    const cleanLabels = {};
+    if (extraColumnLabels && typeof extraColumnLabels === 'object') {
+        cleanExtraColumns.forEach(col => {
+            const lbl = String(extraColumnLabels[col] || '').trim().slice(0, 60);
+            if (lbl && lbl !== col) cleanLabels[col] = lbl;
+        });
+    }
+    const configObj = {
         firstNameColumn,
         lastNameColumn: lastNameColumn || null,
         emailColumn,
-        extraColumns: Array.isArray(extraColumns) ? extraColumns.slice(0, 20) : [],
+        extraColumns: cleanExtraColumns,
+        extraColumnLabels: cleanLabels,
+        ticketCountColumn: ticketCountColumn ? String(ticketCountColumn) : null,
         ticketCount: Math.min(10, Math.max(1, parseInt(ticketCount, 10) || 1)),
-    });
+        oneTicketPerEmail: !!oneTicketPerEmail,
+    };
+    if (cleanGroup) configObj.conditionGroup = cleanGroup;
+    else configObj.conditions = cleanConditions;
+    const config = JSON.stringify(configObj);
 
     let watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
     const isNew = !watcher;
@@ -4765,18 +5032,17 @@ app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
         try {
             const cfg = watcherConfig(watcher);
             const { headers, rows } = await fetchSheetRows(csvUrl);
-            const trigIdx = headers.indexOf(cfg.triggerColumn);
             const emailIdx = headers.indexOf(cfg.emailColumn);
             const tsIdx = headers.findIndex(h => h.toLowerCase().includes('timestamp'));
             rows.forEach((row, r) => {
-                if (trigIdx === -1 || !watcherRowMatches(cfg, row[trigIdx])) return;
+                if (!watcherMatches(cfg, headers, row)) return;
                 const email = String(row[emailIdx] || '').trim();
-                stmt.sheetWatcherSeen.insert.run(watcher.id, watcherRowKey(row, r, tsIdx, email), new Date().toISOString());
+                stmt.sheetWatcherSeen.insert.run(watcher.id, watcherRowKey(row, r, tsIdx, email, cfg), new Date().toISOString());
             });
         } catch { /* the first scheduled poll will surface any fetch error */ }
     }
 
-    logAudit(req, { eventId: req.params.id, action: isNew ? 'sheet_watch.connected' : 'sheet_watch.updated', details: { url: cleanUrl, triggerColumn, triggerValue: String(triggerValue).trim(), intervalMinutes: interval } });
+    logAudit(req, { eventId: req.params.id, action: isNew ? 'sheet_watch.connected' : 'sheet_watch.updated', details: { url: cleanUrl, conditionCount, intervalMinutes: interval } });
     res.json({ success: true, watcher: { ...watcher, config: watcherConfig(watcher) } });
 });
 
@@ -4847,7 +5113,7 @@ app.post('/api/sheet/share', requireAuth, async (req, res) => {
         sendEmail({
             to: targetUser.email,
             fromName: `Tickets - ${event.name}`,
-            replyTo: user?.email,
+            replyTo: REPLY_TO_EMAIL,
             subject: `${user?.email} shared access to ${event.name}`,
             html: `
                 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
@@ -4897,16 +5163,42 @@ function buildReminderHtml(event, customMessage) {
     const msg = (customMessage || `This is a friendly reminder that ${event.name} is coming up ${timeLabel}. We look forward to seeing you there!`)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
     return `
-        <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:24px; border:1px solid #eee; border-radius:12px;">
-            <h2 style="color:#333; margin-bottom:4px;">See you ${timeLabel}!</h2>
-            <p style="color:#555;">Your event is coming up ${timeLabel}.</p>
-            <div style="background:#f4f5f7; border-radius:10px; padding:16px 20px; margin:20px 0;">
-                <p style="font-weight:700; font-size:16px; color:#1a1a2e; margin:0 0 6px;">${event.name}</p>
-                <p style="color:#555; margin:0 0 4px;">📅 ${new Date(event.time).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>
-                <p style="color:#555; margin:0;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
+        <div style="margin:0;padding:0;background:#f3f4f6;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
+        <tr><td align="center" style="padding:24px 16px;">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
+          <tr><td style="background:#059669;padding:24px 32px;text-align:center;">
+            <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.8);text-transform:uppercase;letter-spacing:1px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Event Reminder</p>
+            <h1 style="margin:8px 0 0;font-size:26px;font-weight:800;color:#fff;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">See you ${timeLabel}!</h1>
+          </td></tr>
+          <tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+            <p style="font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">Hello,</p>
+            <p style="font-size:14px;color:#666;margin:0 0 24px;line-height:1.6;">Your event is coming up ${timeLabel}. Here are the details so you can plan ahead:</p>
+
+            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin:24px 0;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr><td style="padding-bottom:12px;">
+                  <p style="font-weight:700;font-size:15px;color:#1a1a2e;margin:0 0 8px;">${event.name}</p>
+                </td></tr>
+                ${event.time ? `<tr><td style="padding-bottom:8px;">
+                  <p style="color:#555;margin:0;font-size:14px;"><span style="font-weight:600;">Date & Time:</span><br>${new Date(event.time).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>
+                </td></tr>` : ''}
+                <tr><td>
+                  <p style="color:#555;margin:0;font-size:14px;"><span style="font-weight:600;">Location:</span><br>${event.location?.name || 'TBD'}${event.location?.address ? '<br>' + event.location.address : ''}</p>
+                </td></tr>
+              </table>
             </div>
-            <p style="color:#555; white-space:pre-wrap;">${msg}</p>
-            <p style="color:#aaa; font-size:12px; margin-top:24px;">Can't find your ticket? Reply to this email and we'll send it again.</p>
+
+            <div style="background:#f0f9ff;border-left:4px solid #0284c7;padding:16px;margin:24px 0;border-radius:6px;">
+              <p style="color:#0c4a6e;white-space:pre-wrap;margin:0;font-size:14px;line-height:1.6;">${msg}</p>
+            </div>
+
+            <p style="font-size:14px;color:#666;margin:0 0 16px;line-height:1.6;"><strong>What you need to bring:</strong> This email contains your ticket. Save it or forward it to your phone so you can check in easily when you arrive.</p>
+            <p style="font-size:13px;color:#888;margin:0;">Can't find your original ticket? Reply to this email and we'll send it to you right away.</p>
+          </td></tr>
+        </table>
+        </td></tr>
+        </table>
         </div>
     `;
 }
@@ -4968,6 +5260,7 @@ setInterval(async () => {
     const now = Date.now();
 
     const due = stmt.events.reminderDue.all().map(rowToEvent).filter(e => {
+        if (!e.time) return false; // undated event — nothing to count down to
         const hours = e.reminderHoursBefore ?? 24;
         const eventMs = new Date(e.time).getTime();
         const windowStart = now + (hours - 1) * 60 * 60 * 1000;
@@ -4986,7 +5279,7 @@ setInterval(async () => {
 
         if (!registrations.length) continue;
 
-        const replyTo = rowToUser(stmt.users.byId.get(event.userId))?.email;
+        const replyTo = REPLY_TO_EMAIL;
         const html = buildReminderHtml(event, event.reminderMessage);
         let sent = 0;
 
@@ -5281,12 +5574,12 @@ app.get('/api/monitor/scanners', requireAuth, async (req, res) => {
 // Called by iOS app/web scanner on launch and every 30 s to stay visible in
 // the monitor even before any scan has happened.
 app.post('/api/scan/heartbeat', async (req, res) => {
-    const { pairToken, eventId, platform, deviceName, appVersion, osVersion, pushEnabled } = req.body;
+    const { pairToken, eventId, platform, deviceName, appVersion, osVersion, pushEnabled, pushToken } = req.body;
     if (!pairToken) return res.status(400).json({ error: 'pairToken required' });
 
     const ev = eventId ? rowToEvent(stmt.events.byId.get(eventId)) : null;
 
-    upsertScanner(pairToken, {
+    const patch = {
         ip: getClientIP(req),
         platform: platform || 'unknown',
         deviceName: deviceName || 'Unknown device',
@@ -5303,7 +5596,13 @@ app.post('/api/scan/heartbeat', async (req, res) => {
         // in person. Undefined (not 'true'/'false') means unknown, e.g. an
         // older app build that doesn't report it yet.
         pushEnabled: pushEnabled === undefined ? undefined : pushEnabled === true || pushEnabled === 'true',
-    });
+    };
+    // Unlike pushEnabled, only set pushToken when this heartbeat actually
+    // carries one — a token stays valid across heartbeats, so a build that
+    // doesn't report it yet (or a momentary gap before APNs registration
+    // finishes) shouldn't wipe out a previously-known good token.
+    if (pushToken) patch.pushToken = pushToken;
+    upsertScanner(pairToken, patch);
 
     res.json({ ok: true });
 });
@@ -5382,15 +5681,25 @@ app.post('/api/monitor/notify', requireAuth, async (req, res) => {
 
     const payload = { type: 'notification', title, message, sentAt: new Date().toISOString() };
     let notified = 0;
-
     let delivered = 0;
+    let pushed = 0;
+
+    // Deliver over the scanner's live SSE channel when the app has it open;
+    // otherwise fall back to a real APNs push so it still reaches the
+    // device's lock screen instead of silently going nowhere.
+    const notifyOne = (token, data) => {
+        notified++;
+        if (broadcastToPair(token, payload)) { delivered++; return; }
+        if (data?.pushToken) {
+            pushAppNotificationToTokens([data.pushToken], { title, body: message }).catch(() => {});
+            pushed++;
+        }
+    };
+
     if (pairToken === '*') {
         // Broadcast to all scanners for owned events
         for (const [token, data] of scannerRegistry) {
-            if (!data.eventId || userEventIds.has(data.eventId)) {
-                if (broadcastToPair(token, payload)) delivered++;
-                notified++;
-            }
+            if (!data.eventId || userEventIds.has(data.eventId)) notifyOne(token, data);
         }
     } else {
         // Notify a specific scanner — verify it belongs to an owned event
@@ -5399,12 +5708,11 @@ app.post('/api/monitor/notify', requireAuth, async (req, res) => {
         if (scannerData.eventId && !userEventIds.has(scannerData.eventId)) {
             return res.status(403).json({ error: 'Not authorized' });
         }
-        if (broadcastToPair(pairToken, payload)) delivered++;
-        notified = 1;
+        notifyOne(pairToken, scannerData);
     }
 
-    log('monitor-notify', `[notify] Delivered to ${delivered}/${notified} scanner(s) — by: ${userId}  msg: ${message.slice(0, 60)}`);
-    res.json({ ok: true, notified, delivered });
+    log('monitor-notify', `[notify] SSE ${delivered}/${notified}, push fallback ${pushed} — by: ${userId}  msg: ${message.slice(0, 60)}`);
+    res.json({ ok: true, notified, delivered, pushed });
 });
 
 // ── Per-Event Metrics ────────────────────────────────────────────────────────
