@@ -227,6 +227,11 @@ try { db.exec(`ALTER TABLE events ADD COLUMN walletLockScreenEnabled INTEGER DEF
 // built-in default template is used, so existing events keep their current
 // emails untouched.
 try { db.exec(`ALTER TABLE events ADD COLUMN emailTemplate TEXT`); } catch {}
+// IANA zone the event physically happens in (e.g. America/New_York). Times are
+// stored as true UTC instants; this is what they get rendered back into. NULL
+// falls back to DEFAULT_EVENT_TIMEZONE — without it every render used the
+// server's zone, which is UTC in production.
+try { db.exec(`ALTER TABLE events ADD COLUMN timezone TEXT`); } catch {}
 try {
     db.exec(`
         CREATE TABLE IF NOT EXISTS ticketScans (
@@ -514,6 +519,7 @@ export const stmt = {
         setShuttleLinkEnabled: db.prepare(`UPDATE events SET shuttleLinkEnabled=? WHERE id=?`),
         setWalletLockScreenEnabled: db.prepare(`UPDATE events SET walletLockScreenEnabled=? WHERE id=?`),
         setEmailTemplate: db.prepare(`UPDATE events SET emailTemplate=? WHERE id=?`),
+        setTimezone: db.prepare(`UPDATE events SET timezone=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         setOwner: db.prepare(`UPDATE events SET userId=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM events WHERE id=?`),

@@ -273,6 +273,66 @@ function getWalletBadgeBuffer() {
     return _walletBadgeBuffer;
 }
 
+// ── Event time formatting ──────────────────────────────────────────────────
+// events.time is a true UTC instant. Rendering it needs an explicit zone:
+// toLocaleString without `timeZone` uses the *server's* zone, which is UTC in
+// production, so an 8pm Eastern event rendered as "12:00 AM" the next day in
+// every email. Times are therefore always formatted in the event's own zone
+// and always labelled (EDT/CST/…) so a reader never has to guess.
+const DEFAULT_EVENT_TIMEZONE = process.env.DEFAULT_EVENT_TIMEZONE || 'America/New_York';
+
+function isValidTimeZone(tz) {
+    if (!tz || typeof tz !== 'string') return false;
+    try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
+}
+
+function eventTimeZone(event) {
+    return isValidTimeZone(event?.timezone) ? event.timezone : DEFAULT_EVENT_TIMEZONE;
+}
+
+function formatEventDateTime(value, event, { withWeekday = true, timeOnly = false, dateOnly = false, showZone = true } = {}) {
+    const d = value instanceof Date ? value : new Date(value);
+    if (isNaN(d.getTime())) return '';
+    const opts = { timeZone: eventTimeZone(event) };
+    if (!dateOnly) {
+        Object.assign(opts, { hour: 'numeric', minute: '2-digit', hour12: true });
+        if (showZone) opts.timeZoneName = 'short';
+    }
+    if (!timeOnly) {
+        Object.assign(opts, { month: 'long', day: 'numeric', year: 'numeric' });
+        if (withWeekday) opts.weekday = 'long';
+    }
+    return d.toLocaleString('en-US', opts);
+}
+
+// "Thursday, August 20, 2026 at 8:00 PM – 9:15 PM EDT" — the zone label is
+// attached to whichever part ends the string so it reads naturally.
+function formatEventDateRange(event, { withWeekday = true } = {}) {
+    if (!event?.time) return '';
+    const start = formatEventDateTime(event.time, event, { withWeekday, showZone: !event.endTime });
+    if (!event.endTime) return start;
+    const tz = eventTimeZone(event);
+    const sameDay = new Date(event.time).toLocaleDateString('en-US', { timeZone: tz })
+        === new Date(event.endTime).toLocaleDateString('en-US', { timeZone: tz });
+    const end = formatEventDateTime(event.endTime, event, { withWeekday, timeOnly: sameDay });
+    return `${start} – ${end}`;
+}
+
+// Wall-clock parts of an instant *in a given zone* — needed wherever the
+// calendar-local date/time matters rather than the absolute instant (Google's
+// ctz parameter, "is this event tonight?" phrasing).
+function zonedParts(value, timeZone) {
+    const d = value instanceof Date ? value : new Date(value);
+    if (isNaN(d.getTime())) return null;
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    }).formatToParts(d).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
+    // 'en-CA' renders midnight as 24 rather than 00 in some ICU builds.
+    if (parts.hour === '24') parts.hour = '00';
+    return parts;
+}
+
 // ── Calendar invites ───────────────────────────────────────────────────────
 // Ticket emails carry the event as a real calendar attachment (.ics) plus a
 // one-tap Google Calendar link, so attendees can add it without retyping
@@ -374,10 +434,22 @@ function buildEventIcs(event, { uid, sequence = 0 } = {}) {
 function googleCalendarUrl(event) {
     const window = eventCalendarWindow(event);
     if (!window) return null;
+    const tz = eventTimeZone(event);
+    // Wall-clock times plus ctz, rather than a UTC instant: this pins the entry
+    // to the *venue's* zone, so it still reads as an 8pm event for someone
+    // whose Google Calendar is set to a different timezone than the event.
+    const local = (d) => {
+        const p = zonedParts(d, tz);
+        return p ? `${p.year}${p.month}${p.day}T${p.hour}${p.minute}${p.second}` : null;
+    };
+    const start = local(window.start);
+    const end = local(window.end);
+    if (!start || !end) return null;
     const params = new URLSearchParams({
         action: 'TEMPLATE',
         text: event.name || 'Event',
-        dates: `${icsStamp(window.start)}/${icsStamp(window.end)}`,
+        dates: `${start}/${end}`,
+        ctz: tz,
     });
     const location = eventLocationLine(event);
     if (location) params.set('location', location);
@@ -622,21 +694,7 @@ function renderEmailBlock(block, ctx) {
 // Returns { html, attachments, subject } — attachments must be passed to
 // sendEmail(); subject is non-empty only when the template overrides it.
 async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '' }) {
-    const dateStr = event.time ? (() => {
-        try {
-            const start = new Date(event.time).toLocaleString('en-US', {
-                weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
-                hour: 'numeric', minute: '2-digit', hour12: true
-            });
-            if (event.endTime) {
-                const end = new Date(event.endTime).toLocaleString('en-US', {
-                    hour: 'numeric', minute: '2-digit', hour12: true
-                });
-                return `${start} &ndash; ${end}`;
-            }
-            return start;
-        } catch (_) { return String(event.time); }
-    })() : '';
+    const dateStr = formatEventDateRange(event);
     const dateRowHtml = dateStr ? `
         <tr>
           <td style="padding:5px 0;font-size:14px;color:#6b7280;vertical-align:top;white-space:nowrap;width:20px;">📅</td>
@@ -2137,7 +2195,7 @@ app.post('/api/checkout/:eventId', async (req, res) => {
         finalAmount = result.finalAmount;
     }
 
-    const dateLabel  = (() => { if (!event.time) return ''; try { return new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); } catch { return ''; } })();
+    const dateLabel  = (() => { if (!event.time) return ''; try { return formatEventDateTime(event.time, event, { withWeekday: false, showZone: false }); } catch { return ''; } })();
 
     // A 100%-off code means nothing to actually charge — Stripe Checkout
     // doesn't support $0 payment-mode sessions, so issue the ticket directly
@@ -2977,7 +3035,7 @@ app.get('/api/events', requireAuth, (req, res) => {
 });
 
 app.post('/api/events', requireAuth, async (req, res) => {
-    const { name, time, endTime, locationName, locationAddress, lat, lng, color } = req.body;
+    const { name, time, endTime, locationName, locationAddress, lat, lng, color, timezone } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Event name is required' });
 
     const newEvent = {
@@ -2998,6 +3056,9 @@ app.post('/api/events', requireAuth, async (req, res) => {
     };
 
     stmt.events.insert.run(newEvent.id, newEvent.userId, newEvent.name, newEvent.time, newEvent.endTime, newEvent.color, newEvent.imageUrl, newEvent.scannerPin, JSON.stringify(newEvent.location), 0, null, null, 0, null, 24, null, null, new Date().toISOString());
+    // Captured from the organiser's browser so the event renders in the zone
+    // it actually happens in, rather than the server's.
+    if (isValidTimeZone(timezone)) stmt.events.setTimezone.run(timezone, newEvent.id);
     logAudit(req, { eventId: newEvent.id, action: 'event.created', details: { name: newEvent.name } });
     res.json({ success: true, eventId: newEvent.id, event: newEvent });
 });
@@ -3064,7 +3125,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
         return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const { name, time, endTime, color, locationName, locationAddress, lat, lng } = req.body;
+    const { name, time, endTime, color, locationName, locationAddress, lat, lng, timezone } = req.body;
 
     let imageUrl = event.imageUrl;
     if (req.file) {
@@ -3104,6 +3165,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     };
 
     stmt.events.update.run(newName, newTime, newEndTime, newColor, imageUrl, allowReentry ? 1 : 0, newCapacity, JSON.stringify(newLocation), req.params.id);
+    if (isValidTimeZone(timezone)) stmt.events.setTimezone.run(timezone, req.params.id);
 
     const priceCents = req.body.ticketPrice !== undefined
         ? Math.round(Math.max(0, parseFloat(req.body.ticketPrice) || 0) * 100)
@@ -3694,11 +3756,11 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
 </div>
 <h2 style="margin-bottom:4px;">${ticket.name}</h2>
 <p style="color:#888;margin:0 0 4px;">${ticket.email}</p>
-<p style="color:#888;margin:0 0 16px;">Registered ${new Date(groupTickets[0].created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+<p style="color:#888;margin:0 0 16px;">Registered ${formatEventDateTime(groupTickets[0].created_at, event, { withWeekday: false, dateOnly: true })}</p>
 <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
 <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
 <p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
-${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>` : ''}
+${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${formatEventDateRange(event, { withWeekday: false })}</p>` : ''}
 ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
 ${qrBlocks}
 <script>
@@ -3772,11 +3834,11 @@ app.get('/api/tickets/bulk-preview', requireAuth, async (req, res) => {
 <div class="registration-block">
     <h2 style="margin-bottom:4px;">${ticket.name}</h2>
     <p style="color:#888;margin:0 0 4px;">${ticket.email}</p>
-    <p style="color:#888;margin:0 0 16px;">Registered ${new Date(ticket.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+    <p style="color:#888;margin:0 0 16px;">Registered ${formatEventDateTime(ticket.created_at, event, { withWeekday: false, dateOnly: true })}</p>
     <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
     <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
     <p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
-    ${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${new Date(event.time).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>` : ''}
+    ${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${formatEventDateRange(event, { withWeekday: false })}</p>` : ''}
     ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
     ${qrBlocks}
 </div>`);
@@ -4001,11 +4063,11 @@ app.get('/api/tickets/export-csv', requireAuth, async (req, res) => {
     const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
     const csvRows = [headers.map(esc).join(',')];
-    for (const { ticket, groupTickets } of rows) {
+    for (const { ticket, groupTickets, event } of rows) {
         const checkedIn = groupTickets.filter(t => t.used_at).length;
         const total = groupTickets.length;
         const status = checkedIn === 0 ? 'Pending' : checkedIn === total ? 'Checked In' : `${checkedIn}/${total} Checked In`;
-        const registered = ticket.created_at ? new Date(ticket.created_at).toLocaleDateString('en-US') : '';
+        const registered = ticket.created_at ? new Date(ticket.created_at).toLocaleDateString('en-US', { timeZone: eventTimeZone(event) }) : '';
         csvRows.push([ticket.name, ticket.email, total, registered, status, ...cfKeys.map(k => ticket.customFields?.[k] ?? '')].map(esc).join(','));
     }
 
@@ -4448,9 +4510,12 @@ function passContentHash(ticket, event) {
     return crypto.createHash('sha256').update(data).digest('hex').slice(0, 16);
 }
 
-function humanEventTime(date) {
-    const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    const h = date.getHours();
+// morning/afternoon/tonight has to be decided by the clock at the venue, not
+// on the server — getHours() here would read UTC in production.
+function humanEventTime(date, event) {
+    const timeStr = formatEventDateTime(date, event, { timeOnly: true, showZone: false });
+    const parts = zonedParts(date, eventTimeZone(event));
+    const h = parts ? parseInt(parts.hour, 10) : date.getUTCHours();
     if (h < 12) return `This morning at ${timeStr}`;
     if (h < 17) return `This afternoon at ${timeStr}`;
     return `Tonight at ${timeStr}`;
@@ -4518,7 +4583,7 @@ async function generatePassBuffer(ticket, event) {
         if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
             const multiDay = !!(event.endTime && !Number.isNaN(new Date(event.endTime).getTime()));
             const locObj = { latitude: Number(lat), longitude: Number(lng) };
-            if (!multiDay && hasValidDate) locObj.relevantText = humanEventTime(eventDate);
+            if (!multiDay && hasValidDate) locObj.relevantText = humanEventTime(eventDate, event);
             pass.setLocations(locObj);
         }
     }
@@ -4541,9 +4606,9 @@ async function generatePassBuffer(ticket, event) {
     const buildDateValue = (date) => {
         if (!isMultiDay) return date;
         // For multi-day events show a compact range string
-        const fmtOpts = { month: 'short', day: 'numeric' };
-        const startStr = eventDate.toLocaleString('en-US', { ...fmtOpts, hour: 'numeric', minute: '2-digit', hour12: true });
-        const endStr = eventEndDate.toLocaleString('en-US', { ...fmtOpts, hour: 'numeric', minute: '2-digit', hour12: true });
+        const fmtOpts = { month: 'short', day: 'numeric', timeZone: eventTimeZone(event), hour: 'numeric', minute: '2-digit', hour12: true };
+        const startStr = eventDate.toLocaleString('en-US', fmtOpts);
+        const endStr = eventEndDate.toLocaleString('en-US', fmtOpts);
         return `${startStr} – ${endStr}`;
     };
 
@@ -5676,7 +5741,7 @@ function buildReminderHtml(event, customMessage) {
                   <p style="font-weight:700;font-size:15px;color:#1a1a2e;margin:0 0 8px;">${event.name}</p>
                 </td></tr>
                 ${event.time ? `<tr><td style="padding-bottom:8px;">
-                  <p style="color:#555;margin:0;font-size:14px;"><span style="font-weight:600;">Date & Time:</span><br>${new Date(event.time).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}${event.endTime ? ` – ${new Date(event.endTime).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}</p>
+                  <p style="color:#555;margin:0;font-size:14px;"><span style="font-weight:600;">Date & Time:</span><br>${formatEventDateRange(event)}</p>
                 </td></tr>` : ''}
                 <tr><td>
                   <p style="color:#555;margin:0;font-size:14px;"><span style="font-weight:600;">Location:</span><br>${event.location?.name || 'TBD'}${event.location?.address ? '<br>' + event.location.address : ''}</p>

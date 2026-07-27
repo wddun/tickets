@@ -3242,6 +3242,78 @@
         }
 
         // Local time <-> stored ISO helper, shared by renderGeneralSection/submitEditEvent
+        // The event's timezone comes from whoever is editing it, read straight
+        // from the browser (exact IANA zone, no IP lookup or third-party
+        // service needed). The General tab shows it and lets it be overridden
+        // for events run in another city.
+        function browserTimezone() {
+            try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+        }
+
+        function eventTimezoneValue() {
+            const sel = document.getElementById('editEventTimezone');
+            return (sel && sel.value) || browserTimezone();
+        }
+
+        const COMMON_TIMEZONES = [
+            'America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix',
+            'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu',
+            'Europe/London', 'Europe/Paris', 'UTC',
+        ];
+
+        function timezoneSelectHtml(current) {
+            const tz = current || browserTimezone() || 'America/New_York';
+            const options = [...new Set([tz, ...COMMON_TIMEZONES])];
+            return `<select id="editEventTimezone" onchange="onEventTimezoneChanged(this.value)"
+                style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;background:#fff;">${options.map(z =>
+                `<option value="${esc(z)}" ${z === tz ? 'selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`).join('')}</select>`;
+        }
+
+        // How far `tz` is from UTC at a given instant, in ms. Derived from Intl
+        // rather than hardcoded so DST is handled without a date library.
+        function tzOffsetMs(utcMs, tz) {
+            const p = new Intl.DateTimeFormat('en-US', {
+                timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+            }).formatToParts(new Date(utcMs)).reduce((a, x) => (a[x.type] = x.value, a), {});
+            const hour = p.hour === '24' ? 0 : Number(p.hour);
+            return Date.UTC(+p.year, +p.month - 1, +p.day, hour, +p.minute, +p.second) - utcMs;
+        }
+
+        // A datetime-local value means a wall-clock time *in the event's zone*,
+        // not the editor's. Interpreting it with `new Date(str)` would silently
+        // shift the event whenever the two zones differ.
+        function zonedWallClockToISO(localStr, tz) {
+            if (!localStr) return '';
+            const [datePart, timePart] = localStr.split('T');
+            if (!datePart || !timePart) return '';
+            const [y, mo, d] = datePart.split('-').map(Number);
+            const [h, mi] = timePart.split(':').map(Number);
+            const naive = Date.UTC(y, mo - 1, d, h, mi);
+            let ts = naive - tzOffsetMs(naive, tz);
+            // Re-check once: near a DST switch the first offset can be the
+            // wrong side of the transition.
+            const corrected = naive - tzOffsetMs(ts, tz);
+            if (corrected !== ts) ts = corrected;
+            return new Date(ts).toISOString();
+        }
+
+        function _toZonedDT(iso, tz) {
+            if (!iso) return '';
+            const p = new Intl.DateTimeFormat('en-CA', {
+                timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', hour12: false,
+            }).formatToParts(new Date(iso)).reduce((a, x) => (a[x.type] = x.value, a), {});
+            return `${p.year}-${p.month}-${p.day}T${p.hour === '24' ? '00' : p.hour}:${p.minute}`;
+        }
+
+        // Switching zones keeps the wall-clock the organiser typed (8pm stays
+        // 8pm, now meaning 8pm in the newly chosen zone) — that's what someone
+        // correcting a mis-set zone expects, rather than the numbers jumping.
+        function onEventTimezoneChanged() {
+            markSettingsDirty('tab-general');
+        }
+
         function _toLocalDT(iso) {
             if (!iso) return '';
             const d = new Date(iso);
@@ -3494,13 +3566,18 @@
                 </div>
                 <div style="margin-bottom:12px;">
                     <label for="editEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Start Date &amp; Time</label>
-                    <input type="datetime-local" id="editEventTime" value="${_toLocalDT(ev.time)}"
+                    <input type="datetime-local" id="editEventTime" value="${_toZonedDT(ev.time, ev.timezone || browserTimezone())}"
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
                     <label for="editEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Date &amp; Time <span style="font-weight:400;color:#aaa;">(optional — for multi-day events)</span></label>
-                    <input type="datetime-local" id="editEventEndTime" value="${_toLocalDT(ev.endTime)}"
+                    <input type="datetime-local" id="editEventEndTime" value="${_toZonedDT(ev.endTime, ev.timezone || browserTimezone())}"
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                </div>
+                <div style="margin-bottom:12px;">
+                    <label for="editEventTimezone" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Timezone</label>
+                    ${timezoneSelectHtml(ev.timezone)}
+                    <div style="font-size:12px;color:#888;margin-top:5px;">The times above are entered and shown in this zone. Ticket emails, reminders and calendar invites all label it, so attendees never have to guess.</div>
                 </div>
                 <div style="margin-bottom:12px;">
                     <label for="editEventColor" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Accent Color</label>
@@ -3622,8 +3699,9 @@
             const color = `rgb(${r}, ${g}, ${b})`;
 
             // Convert datetime-local (local time, no tz) back to full ISO string
-            const timeISO = time ? new Date(time).toISOString() : '';
-            const endTimeISO = endTime ? new Date(endTime).toISOString() : '';
+            const eventTz = eventTimezoneValue();
+            const timeISO = time ? zonedWallClockToISO(time, eventTz) : '';
+            const endTimeISO = endTime ? zonedWallClockToISO(endTime, eventTz) : '';
 
             const allowReentry = document.getElementById('editEventAllowReentry').checked;
             const capacity = document.getElementById('editEventCapacity').value;
@@ -3639,6 +3717,7 @@
             fd.append('allowReentry', String(allowReentry));
             fd.append('capacity', capacity || '');
             fd.append('ticketPrice', ticketPrice || '0');
+            fd.append('timezone', eventTimezoneValue());
             if (lat) fd.append('lat', lat);
             if (lng) fd.append('lng', lng);
             if (_pendingEventImageBlob) {
@@ -4203,6 +4282,7 @@
                         lat: lat || null,
                         lng: lng || null,
                         color: selectedColor,
+                        timezone: eventTimezoneValue(),
                     }),
                 });
                 const data = await r.json();
