@@ -142,10 +142,28 @@ function htmlToPlainText(html) {
 // — the standard nesting for "plain fallback + rich HTML with inline images".
 // Alternative parts are ordered least- to most-preferred per RFC 2046, so
 // plain text comes first and the HTML+images part comes last.
+// Attachments split two ways: anything carrying a `cid` is an inline image
+// referenced from the HTML and belongs inside multipart/related; everything
+// else (the .ics calendar invite) is a genuine file attachment and has to sit
+// in an outer multipart/mixed instead. Putting a calendar part inside
+// multipart/related as `inline` is what makes clients quietly ignore it rather
+// than offering "Add to Calendar".
+//
+//   multipart/mixed
+//   ├── multipart/alternative
+//   │   ├── text/plain
+//   │   └── multipart/related
+//   │       ├── text/html
+//   │       └── inline images (cid:)
+//   └── file attachments
 function buildRawMimeEmail({ from, to, replyTo, subject, html, text, attachments = [] }) {
+    const mixedBoundary = `b_${crypto.randomBytes(16).toString('hex')}`;
     const altBoundary = `b_${crypto.randomBytes(16).toString('hex')}`;
     const relBoundary = `b_${crypto.randomBytes(16).toString('hex')}`;
     const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`;
+
+    const inlineParts = attachments.filter(a => a.cid);
+    const fileParts = attachments.filter(a => !a.cid);
 
     const lines = [
         `From: ${from}`,
@@ -154,6 +172,13 @@ function buildRawMimeEmail({ from, to, replyTo, subject, html, text, attachments
     if (replyTo) lines.push(`Reply-To: ${replyTo}`);
     lines.push(`Subject: ${encodedSubject}`);
     lines.push(`MIME-Version: 1.0`);
+
+    if (fileParts.length) {
+        lines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+        lines.push('');
+        lines.push(`--${mixedBoundary}`);
+    }
+
     lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
     lines.push('');
 
@@ -172,7 +197,7 @@ function buildRawMimeEmail({ from, to, replyTo, subject, html, text, attachments
     lines.push('');
     lines.push(wrapBase64Lines(Buffer.from(html, 'utf8')));
 
-    for (const att of attachments) {
+    for (const att of inlineParts) {
         lines.push(`--${relBoundary}`);
         lines.push(`Content-Type: ${att.contentType}`);
         lines.push(`Content-Transfer-Encoding: base64`);
@@ -183,6 +208,17 @@ function buildRawMimeEmail({ from, to, replyTo, subject, html, text, attachments
     }
     lines.push(`--${relBoundary}--`);
     lines.push(`--${altBoundary}--`);
+
+    for (const att of fileParts) {
+        lines.push(`--${mixedBoundary}`);
+        lines.push(`Content-Type: ${att.contentType}${att.contentType.startsWith('text/') ? '; charset=UTF-8' : ''}${att.method ? `; method=${att.method}` : ''}`);
+        lines.push(`Content-Transfer-Encoding: base64`);
+        lines.push(`Content-Disposition: attachment; filename="${att.filename}"`);
+        lines.push('');
+        lines.push(wrapBase64Lines(att.content));
+    }
+    if (fileParts.length) lines.push(`--${mixedBoundary}--`);
+
     return lines.join('\r\n');
 }
 
@@ -237,6 +273,345 @@ function getWalletBadgeBuffer() {
     return _walletBadgeBuffer;
 }
 
+// ── Calendar invites ───────────────────────────────────────────────────────
+// Ticket emails carry the event as a real calendar attachment (.ics) plus a
+// one-tap Google Calendar link, so attendees can add it without retyping
+// anything. Apple Mail / Outlook surface an attached text/calendar part as an
+// "Add to Calendar" affordance directly in the message.
+
+// Events with no explicit end time get this much duration in the invite —
+// an .ics with DTSTART == DTEND renders as a zero-length blip in most
+// calendar clients rather than a normal block.
+const DEFAULT_EVENT_DURATION_MS = 2 * 60 * 60 * 1000;
+
+function icsEscape(value) {
+    return String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/;/g, '\\;')
+        .replace(/,/g, '\\,')
+        .replace(/\r?\n/g, '\\n');
+}
+
+// RFC 5545 caps content lines at 75 octets; longer lines are folded onto
+// continuation lines beginning with a single space. Folding by octet (not
+// character) matters because escaped UTF-8 text can be multi-byte.
+function icsFold(line) {
+    const bytes = Buffer.from(line, 'utf8');
+    if (bytes.length <= 75) return line;
+    const parts = [];
+    let start = 0;
+    let limit = 75;
+    while (start < bytes.length) {
+        let end = Math.min(start + limit, bytes.length);
+        // Don't split in the middle of a multi-byte sequence.
+        while (end > start && end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
+        parts.push(bytes.subarray(start, end).toString('utf8'));
+        start = end;
+        limit = 74; // continuation lines lose one octet to the leading space
+    }
+    return parts.join('\r\n ');
+}
+
+function icsStamp(value) {
+    const d = value instanceof Date ? value : new Date(value);
+    if (isNaN(d.getTime())) return null;
+    return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+}
+
+function eventCalendarWindow(event) {
+    if (!event?.time) return null;
+    const start = new Date(event.time);
+    if (isNaN(start.getTime())) return null;
+    let end = event.endTime ? new Date(event.endTime) : null;
+    if (!end || isNaN(end.getTime()) || end <= start) {
+        end = new Date(start.getTime() + DEFAULT_EVENT_DURATION_MS);
+    }
+    return { start, end };
+}
+
+function eventLocationLine(event) {
+    const name = event?.location?.name || '';
+    const address = event?.location?.address || '';
+    if (name && address && name !== address) return `${name}, ${address}`;
+    return name || address || '';
+}
+
+// Builds the VCALENDAR body for an event. `uid` should be stable per
+// (event, recipient) so a re-sent ticket updates the existing calendar entry
+// instead of creating a duplicate one.
+function buildEventIcs(event, { uid, sequence = 0 } = {}) {
+    const window = eventCalendarWindow(event);
+    if (!window) return null;
+    const stamp = icsStamp(new Date());
+    const host = (() => { try { return new URL(BASE_URL).host; } catch { return 'tickets.local'; } })();
+
+    const lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        `PRODID:-//Will's Tech Support//WTS Tickets//EN`,
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'BEGIN:VEVENT',
+        `UID:${icsEscape(uid || `${event.id}@${host}`)}`,
+        `DTSTAMP:${stamp}`,
+        `DTSTART:${icsStamp(window.start)}`,
+        `DTEND:${icsStamp(window.end)}`,
+        `SUMMARY:${icsEscape(event.name || 'Event')}`,
+        `SEQUENCE:${Number.isFinite(sequence) ? sequence : 0}`,
+        'STATUS:CONFIRMED',
+        'TRANSP:OPAQUE',
+    ];
+
+    const location = eventLocationLine(event);
+    if (location) lines.push(`LOCATION:${icsEscape(location)}`);
+    lines.push(`URL:${icsEscape(BASE_URL)}`);
+    lines.push('BEGIN:VALARM', 'TRIGGER:-PT1H', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape(event.name || 'Event')}`, 'END:VALARM');
+    lines.push('END:VEVENT', 'END:VCALENDAR');
+
+    return lines.map(icsFold).join('\r\n') + '\r\n';
+}
+
+function googleCalendarUrl(event) {
+    const window = eventCalendarWindow(event);
+    if (!window) return null;
+    const params = new URLSearchParams({
+        action: 'TEMPLATE',
+        text: event.name || 'Event',
+        dates: `${icsStamp(window.start)}/${icsStamp(window.end)}`,
+    });
+    const location = eventLocationLine(event);
+    if (location) params.set('location', location);
+    return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+// ── Ticket email templates ─────────────────────────────────────────────────
+// The ticket email is a list of blocks stored per-event (events.emailTemplate),
+// authored in the dashboard's drag-and-drop editor. Rendering lives here on the
+// server and nowhere else — the editor's live preview calls back into this same
+// renderer, so what an organiser sees is what actually gets mailed.
+//
+// Blocks are either *static* (text/button/image/divider — content comes from
+// the template) or *dynamic* (tickets/eventDetails/calendar/changes/customFields
+// — content comes from the send-time context and can't be typed by hand).
+
+const EMAIL_TEXT_SIZES = { sm: 15, md: 16, lg: 18, xl: 22 };
+const EMAIL_ALIGNMENTS = new Set(['left', 'center', 'right']);
+
+function escEmailText(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// Only http(s)/mailto get through — a template is authored by an event owner,
+// but the rendered result is mailed to third parties, so javascript:/data:
+// URLs must never survive into the output.
+function safeEmailUrl(value) {
+    const url = String(value ?? '').trim();
+    return /^(https?:\/\/|mailto:)/i.test(url) ? url : null;
+}
+
+function safeEmailColor(value, fallback) {
+    const color = String(value ?? '').trim();
+    return /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(color) ? color : fallback;
+}
+
+function applyEmailVars(text, vars) {
+    return String(text ?? '').replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key) =>
+        Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key] ?? '') : match);
+}
+
+// Deliberately tiny markup dialect rather than raw HTML: organiser-authored
+// text is escaped first, then a fixed set of inline patterns is re-enabled.
+// That keeps arbitrary markup (and anything script-shaped) out of mail we send
+// on their behalf, while still allowing bold/italic/links.
+function renderEmailInline(text, vars) {
+    let out = escEmailText(applyEmailVars(text, vars));
+    out = out.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (match, label, url) =>
+        /^(https?:\/\/|mailto:)/i.test(url)
+            ? `<a href="${url}" style="color:#2563eb;text-decoration:underline;">${label}</a>`
+            : match);
+    out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    return out.replace(/\r?\n/g, '<br>');
+}
+
+const EMAIL_BLOCK_TYPES = new Set([
+    'header', 'text', 'intro', 'eventDetails', 'calendar', 'changes',
+    'customFields', 'tickets', 'button', 'divider', 'spacer', 'image', 'footerNote',
+]);
+
+const DEFAULT_TICKET_EMAIL_TEMPLATE = {
+    version: 1,
+    settings: { accent: 'auto', pageBackground: '#f3f4f6', cardBackground: '#ffffff', subject: '' },
+    blocks: [
+        { id: 'b-header', type: 'header', props: { eyebrow: 'Your Registration Confirmation', title: '{{eventName}}' } },
+        { id: 'b-greeting', type: 'text', props: { text: 'Hi **{{firstName}}**,', size: 'md', align: 'left', color: '#374151' } },
+        { id: 'b-body', type: 'text', props: { text: "Thank you for registering for **{{eventName}}**. This email confirms your registration and contains your event ticket. Please save this email—you'll need it to check in at the event.", size: 'sm', align: 'left', color: '#555555' } },
+        { id: 'b-details', type: 'eventDetails', props: { showMaps: true } },
+        { id: 'b-calendar', type: 'calendar', props: { google: true, ics: true } },
+        { id: 'b-changes', type: 'changes', props: {} },
+        { id: 'b-fields', type: 'customFields', props: {} },
+        { id: 'b-tickets', type: 'tickets', props: { showWallet: true, showToken: true } },
+        { id: 'b-footer', type: 'footerNote', props: { lines: ["Keep this email — it's your entry ticket.", "Don't share your QR code with others."] } },
+    ],
+};
+
+// Coerces whatever the client sent into a template we're willing to render.
+// Unknown block types and unknown props are dropped rather than rejected so a
+// newer editor talking to an older server degrades instead of erroring.
+function normalizeEmailTemplate(raw) {
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.blocks)) {
+        return JSON.parse(JSON.stringify(DEFAULT_TICKET_EMAIL_TEMPLATE));
+    }
+    const s = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
+    const blocks = raw.blocks
+        .filter(b => b && typeof b === 'object' && EMAIL_BLOCK_TYPES.has(b.type))
+        .slice(0, 40)
+        .map((b, i) => {
+            const p = b.props && typeof b.props === 'object' ? b.props : {};
+            const props = {};
+            switch (b.type) {
+                case 'header':
+                    props.eyebrow = String(p.eyebrow ?? '').slice(0, 120);
+                    props.title = String(p.title ?? '{{eventName}}').slice(0, 200);
+                    break;
+                case 'text':
+                    props.text = String(p.text ?? '').slice(0, 4000);
+                    props.size = EMAIL_TEXT_SIZES[p.size] ? p.size : 'sm';
+                    props.align = EMAIL_ALIGNMENTS.has(p.align) ? p.align : 'left';
+                    props.color = safeEmailColor(p.color, '#555555');
+                    break;
+                case 'eventDetails':
+                    props.showMaps = p.showMaps !== false;
+                    break;
+                case 'calendar':
+                    props.google = p.google !== false;
+                    props.ics = p.ics !== false;
+                    break;
+                case 'tickets':
+                    props.showWallet = p.showWallet !== false;
+                    props.showToken = p.showToken !== false;
+                    break;
+                case 'button': {
+                    props.label = String(p.label ?? 'View details').slice(0, 80);
+                    props.url = safeEmailUrl(p.url) || '';
+                    props.align = EMAIL_ALIGNMENTS.has(p.align) ? p.align : 'center';
+                    break;
+                }
+                case 'spacer':
+                    props.height = Math.min(80, Math.max(4, parseInt(p.height, 10) || 16));
+                    break;
+                case 'image':
+                    props.url = safeEmailUrl(p.url) || '';
+                    props.href = safeEmailUrl(p.href) || '';
+                    props.width = Math.min(560, Math.max(40, parseInt(p.width, 10) || 320));
+                    props.align = EMAIL_ALIGNMENTS.has(p.align) ? p.align : 'center';
+                    break;
+                case 'footerNote':
+                    props.lines = (Array.isArray(p.lines) ? p.lines : [])
+                        .slice(0, 6).map(l => String(l ?? '').slice(0, 300));
+                    break;
+                default:
+                    break; // intro / changes / customFields / divider carry no props
+            }
+            return { id: typeof b.id === 'string' && b.id ? b.id.slice(0, 40) : `b-${i}`, type: b.type, props };
+        });
+
+    return {
+        version: 1,
+        settings: {
+            accent: s.accent === 'auto' || !s.accent ? 'auto' : safeEmailColor(s.accent, 'auto'),
+            pageBackground: safeEmailColor(s.pageBackground, '#f3f4f6'),
+            cardBackground: safeEmailColor(s.cardBackground, '#ffffff'),
+            subject: String(s.subject ?? '').slice(0, 200),
+        },
+        blocks: blocks.length ? blocks : JSON.parse(JSON.stringify(DEFAULT_TICKET_EMAIL_TEMPLATE.blocks)),
+    };
+}
+
+// Renders one block to email-safe HTML. `ctx` carries everything dynamic:
+// precomputed ticket/QR markup, event detail rows, calendar links, and the
+// variable bag used for {{...}} substitution.
+function renderEmailBlock(block, ctx) {
+    const p = block.props || {};
+    switch (block.type) {
+        case 'header':
+            return `<tr><td style="background:${ctx.accentHex};padding:28px 32px;text-align:center;">
+    ${p.eyebrow ? `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.eyebrow, ctx.vars)}</p>` : ''}
+    <h1 style="margin:0;font-size:26px;font-weight:800;color:#fff;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.title, ctx.vars)}</h1>
+  </td></tr>`;
+
+        case 'text':
+            if (!String(p.text || '').trim()) return '';
+            return `<p style="font-size:${EMAIL_TEXT_SIZES[p.size] || 15}px;color:${p.color};margin:0 0 24px;line-height:1.6;text-align:${p.align};">${renderEmailInline(p.text, ctx.vars)}</p>`;
+
+        case 'intro':
+            return ctx.intro ? `<p style="font-size:15px;color:#555;margin:0 0 24px;line-height:1.6;">${ctx.intro}</p>` : '';
+
+        case 'eventDetails': {
+            const rows = ctx.dateRowHtml + (p.showMaps ? ctx.locRowHtml : ctx.locRowPlainHtml);
+            if (!rows.trim()) return '';
+            return `<table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:24px;">
+    <tr><td style="padding:18px 20px;"><table cellpadding="0" cellspacing="0" width="100%">${rows}</table></td></tr>
+    </table>`;
+        }
+
+        case 'calendar': {
+            const links = [];
+            if (p.google && ctx.googleCalendarUrl) links.push({ href: ctx.googleCalendarUrl, label: 'Google Calendar' });
+            if (p.ics && ctx.icsUrl) links.push({ href: ctx.icsUrl, label: 'Apple / Outlook' });
+            if (!links.length) return '';
+            return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="center" style="padding:4px 0 0;">
+    <p style="font-size:13px;font-weight:600;color:#555;margin:0 0 10px;">Add this event to your calendar</p>
+    ${links.map(l => `<a href="${l.href}" style="display:inline-block;margin:0 4px 6px;padding:9px 16px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-weight:600;color:#374151;text-decoration:none;background:#fff;">${l.label}</a>`).join('')}
+    </td></tr></table>`;
+        }
+
+        case 'changes':
+            return ctx.changesHtml || '';
+
+        case 'customFields':
+            return ctx.customFieldsHtml || '';
+
+        case 'tickets':
+            return ctx.addAllHtml + ctx.qrBlocksHtml;
+
+        case 'button': {
+            const url = safeEmailUrl(applyEmailVars(p.url, ctx.vars));
+            if (!url || !p.label) return '';
+            return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="${p.align}">
+    <a href="${url}" style="display:inline-block;padding:13px 26px;background:${ctx.accentHex};color:#fff;font-size:15px;font-weight:700;border-radius:10px;text-decoration:none;">${renderEmailInline(p.label, ctx.vars)}</a>
+    </td></tr></table>`;
+        }
+
+        case 'divider':
+            return `<table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;"><tr><td style="border-top:1px solid #e5e7eb;font-size:0;line-height:0;">&nbsp;</td></tr></table>`;
+
+        case 'spacer':
+            return `<div style="height:${p.height}px;line-height:${p.height}px;font-size:0;">&nbsp;</div>`;
+
+        case 'image': {
+            if (!p.url) return '';
+            const img = `<img src="${p.url}" alt="" width="${p.width}" style="width:${p.width}px;max-width:100%;height:auto;display:block;border:0;border-radius:8px;">`;
+            return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="${p.align}">${p.href ? `<a href="${p.href}" style="text-decoration:none;">${img}</a>` : img}</td></tr></table>`;
+        }
+
+        case 'footerNote': {
+            const lines = (p.lines || []).filter(l => String(l).trim());
+            if (!lines.length) return '';
+            return `<table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f3f4f6;margin-top:8px;"><tr><td style="padding-top:20px;text-align:center;">
+    ${lines.map((l, i) => `<p style="font-size:12px;color:#9ca3af;margin:0 0 ${i === lines.length - 1 ? '0' : '4px'};">${renderEmailInline(l, ctx.vars)}</p>`).join('')}
+    </td></tr></table>`;
+        }
+
+        default:
+            return '';
+    }
+}
+
 // Ticket emails embed the QR (and the wallet badge) as inline images attached
 // to the message and referenced by Content-ID (cid:), rather than linking to
 // /qr/:token or the static badge file, or embedding them as `data:` URIs.
@@ -244,7 +619,8 @@ function getWalletBadgeBuffer() {
 // images from HTML bodies as a security measure and will only render images
 // that arrive as real MIME attachments — cid: is the only reliable way to
 // get an image to always render without a live fetch, on Gmail included.
-// Returns { html, attachments } — attachments must be passed to sendEmail().
+// Returns { html, attachments, subject } — attachments must be passed to
+// sendEmail(); subject is non-empty only when the template overrides it.
 async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '' }) {
     const dateStr = event.time ? (() => {
         try {
@@ -272,20 +648,33 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
     const mapsQuery = encodeURIComponent(locAddress || locName);
     const googleMapsUrl = mapsQuery ? `https://www.google.com/maps/search/?api=1&query=${mapsQuery}` : null;
     const appleMapsUrl  = mapsQuery ? `https://maps.apple.com/?q=${mapsQuery}` : null;
-    const locRowHtml = (locName || locAddress) ? `
+    const locCellOpen = `
         <tr>
           <td style="padding:5px 0;font-size:14px;color:#6b7280;vertical-align:top;white-space:nowrap;width:20px;">📍</td>
           <td style="padding:5px 0 5px 8px;font-size:14px;color:#374151;">
-            ${locName || locAddress}
+            ${locName || locAddress}`;
+    const locRowHtml = (locName || locAddress) ? `${locCellOpen}
             ${googleMapsUrl ? `<br><span style="font-size:12px;"><a href="${googleMapsUrl}" style="color:#6366f1;text-decoration:none;font-weight:500;">Google Maps</a>&nbsp;&middot;&nbsp;<a href="${appleMapsUrl}" style="color:#6366f1;text-decoration:none;font-weight:500;">Apple Maps</a></span>` : ''}
+          </td>
+        </tr>` : '';
+    const locRowPlainHtml = (locName || locAddress) ? `${locCellOpen}
           </td>
         </tr>` : '';
 
     // Accent color: convert "rgb(r,g,b)" → hex if needed
     const rawColor = event.color || 'rgb(99,102,241)';
-    const accentHex = rawColor.startsWith('rgb')
+    const eventAccentHex = rawColor.startsWith('rgb')
         ? '#' + rawColor.match(/\d+/g).map(n => parseInt(n).toString(16).padStart(2, '0')).join('')
         : rawColor;
+
+    const template = normalizeEmailTemplate(event.emailTemplate);
+    const accentHex = template.settings.accent === 'auto' ? eventAccentHex : template.settings.accent;
+
+    // Only build what the template actually asks for: generating QR images (and
+    // attaching the wallet badge, or the .ics) for blocks the organiser removed
+    // would mean paying for the work and shipping unreferenced MIME parts.
+    const ticketsBlock = template.blocks.find(b => b.type === 'tickets');
+    const calendarBlock = template.blocks.find(b => b.type === 'calendar');
 
     const n = tickets.length;
     // Content-ID must look like an RFC 2392/822 addr-spec (unique-id@domain) —
@@ -293,14 +682,22 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
     // fails to resolve the cid: reference even though the rest of the MIME
     // parses fine, leaving just the alt text where the image should be.
     const walletBadgeCid = 'wallet-badge@tickets.willstechsupport.com';
-    const attachments = [{
+    const showWallet = !!ticketsBlock && ticketsBlock.props.showWallet !== false;
+    const attachments = showWallet ? [{
         cid: walletBadgeCid,
         content: getWalletBadgeBuffer(),
         contentType: 'image/png',
         filename: 'add-to-apple-wallet.png',
-    }];
+    }] : [];
 
-    const qrBlocksHtml = (await Promise.all(tickets.map(async (t, i) => {
+    const walletBadgeHtml = (url, alt) => `
+    <a href="${url}" style="display:inline-block;text-decoration:none;">
+      <table role="presentation" width="141" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;"><tr><td>
+        <img src="cid:${walletBadgeCid}" alt="${alt}" width="141" height="44" style="display:block;width:141px;height:44px;">
+      </td></tr></table>
+    </a>`;
+
+    const qrBlocksHtml = !ticketsBlock ? '' : (await Promise.all(tickets.map(async (t, i) => {
         const qrBuffer = await QRCode.toBuffer(`ticket:${t.token}`);
         const qrCid = `qr-${t.token}@tickets.willstechsupport.com`;
         attachments.push({ cid: qrCid, content: qrBuffer, contentType: 'image/png', filename: `ticket-qr-${i}.png` });
@@ -314,75 +711,95 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         <img src="cid:${qrCid}" alt="QR Code" width="200" height="200" style="width:200px;height:200px;display:block;border:1px solid #f3f4f6;border-radius:8px;background:#fff;padding:8px;">
       </td></tr>
     </table>
-    <p style="font-size:10px;color:#9ca3af;font-family:monospace;margin:0 0 16px;word-break:break-all;">${t.token}</p>
-    <a href="${BASE_URL}/api/pass/${t.token}.pkpass" style="display:inline-block;text-decoration:none;">
-      <table role="presentation" width="141" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;"><tr><td>
-        <img src="cid:${walletBadgeCid}" alt="Add to Apple Wallet" width="141" height="44" style="display:block;width:141px;height:44px;">
-      </td></tr></table>
-    </a>
+    ${ticketsBlock.props.showToken !== false ? `<p style="font-size:10px;color:#9ca3af;font-family:monospace;margin:0 0 16px;word-break:break-all;">${t.token}</p>` : ''}
+    ${showWallet ? walletBadgeHtml(`${BASE_URL}/api/pass/${t.token}.pkpass`, 'Add to Apple Wallet') : ''}
   </div>
 </div>`;
     }))).join('');
 
-    const addAllHtml = n > 1 ? `
+    const addAllHtml = (ticketsBlock && showWallet && n > 1) ? `
 <div style="text-align:center;margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;">
   <p style="font-size:13px;font-weight:600;color:#555;margin:0 0 10px;">Add all ${n} tickets to Apple Wallet at once:</p>
-  <a href="${BASE_URL}/api/passes/bundle/${tickets[0].registrationId}" style="display:inline-block;text-decoration:none;">
-    <table role="presentation" width="141" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;"><tr><td>
-      <img src="cid:${walletBadgeCid}" alt="Add All to Apple Wallet" width="141" height="44" style="display:block;width:141px;height:44px;">
-    </td></tr></table>
-  </a>
+  ${walletBadgeHtml(`${BASE_URL}/api/passes/bundle/${tickets[0].registrationId}`, 'Add All to Apple Wallet')}
 </div>` : '';
 
+    // The .ics rides along as a real file attachment (so Apple Mail/Outlook
+    // offer "Add to Calendar" inline) *and* is linked, for clients that hide
+    // attachments. UID is per-event so a re-send updates rather than duplicates.
+    let icsUrl = null;
+    if (calendarBlock && calendarBlock.props.ics && event.time) {
+        const ics = buildEventIcs(event, { uid: `event-${event.id}@${(() => { try { return new URL(BASE_URL).host; } catch { return 'tickets.local'; } })()}` });
+        if (ics) {
+            attachments.push({
+                content: Buffer.from(ics, 'utf8'),
+                contentType: 'text/calendar',
+                method: 'PUBLISH',
+                filename: 'event.ics',
+            });
+            icsUrl = `${BASE_URL}/api/event/${event.id}/calendar.ics`;
+        }
+    }
+
+    const ctx = {
+        accentHex,
+        intro,
+        changesHtml,
+        customFieldsHtml,
+        dateRowHtml,
+        locRowHtml,
+        locRowPlainHtml,
+        qrBlocksHtml,
+        addAllHtml,
+        icsUrl,
+        googleCalendarUrl: (calendarBlock && calendarBlock.props.google) ? googleCalendarUrl(event) : null,
+        vars: {
+            firstName: firstName || '',
+            fullName: tickets[0]?.name || firstName || '',
+            lastName: tickets[0]?.lastName || '',
+            eventName: event.name || '',
+            eventDate: dateStr ? dateStr.replace(/&ndash;/g, '–') : '',
+            eventLocation: eventLocationLine(event),
+            ticketCount: String(n),
+        },
+    };
+
+    // A `header` block is full-bleed (its own coloured row); everything else
+    // lives inside the padded body cell. Consecutive body blocks are coalesced
+    // into a single cell so padding isn't repeated between them.
+    const rows = [];
+    let bodyBuffer = [];
+    const flushBody = () => {
+        if (!bodyBuffer.length) return;
+        const inner = bodyBuffer.join('\n').trim();
+        bodyBuffer = [];
+        if (inner) rows.push(`<tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">${inner}</td></tr>`);
+    };
+    for (const block of template.blocks) {
+        if (block.type === 'header') {
+            flushBody();
+            rows.push(renderEmailBlock(block, ctx));
+        } else {
+            bodyBuffer.push(renderEmailBlock(block, ctx));
+        }
+    }
+    flushBody();
+
     const html = `
-<div style="margin:0;padding:0;background:#f3f4f6;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
+<div style="margin:0;padding:0;background:${template.settings.pageBackground};">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:${template.settings.pageBackground};">
 <tr><td align="center" style="padding:24px 16px;">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
-
-  <!-- Header -->
-  <tr><td style="background:${accentHex};padding:28px 32px;text-align:center;">
-    <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Your Registration Confirmation</p>
-    <h1 style="margin:0;font-size:26px;font-weight:800;color:#fff;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${event.name}</h1>
-  </td></tr>
-
-  <!-- Body -->
-  <tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-    <p style="font-size:16px;color:#374151;margin:0 0 24px;line-height:1.6;">Hi <strong>${firstName}</strong>,</p>
-    <p style="font-size:15px;color:#555;margin:0 0 24px;line-height:1.6;">Thank you for registering for <strong>${event.name}</strong>. This email confirms your registration and contains your event ticket. Please save this email—you'll need it to check in at the event.</p>
-
-    <!-- Event details card -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:24px;">
-    <tr><td style="padding:18px 20px;">
-      <table cellpadding="0" cellspacing="0" width="100%">
-        ${dateRowHtml}
-        ${locRowHtml}
-      </table>
-    </td></tr>
-    </table>
-
-    ${changesHtml}
-    ${customFieldsHtml}
-
-    <!-- Tickets -->
-    ${addAllHtml}
-    ${qrBlocksHtml}
-
-    <!-- Footer note -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f3f4f6;margin-top:8px;">
-    <tr><td style="padding-top:20px;text-align:center;">
-      <p style="font-size:12px;color:#9ca3af;margin:0 0 4px;">Keep this email &mdash; it&rsquo;s your entry ticket.</p>
-      <p style="font-size:12px;color:#9ca3af;margin:0;">Don&rsquo;t share your QR code with others.</p>
-    </td></tr>
-    </table>
-
-  </td></tr>
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${template.settings.cardBackground};border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
+${rows.join('\n')}
 </table>
 </td></tr>
 </table>
 </div>`;
 
-    return { html, attachments };
+    const subject = template.settings.subject
+        ? applyEmailVars(template.settings.subject, ctx.vars).trim()
+        : '';
+
+    return { html, attachments, subject };
 }
 
 // 1x1 transparent GIF for email open tracking
@@ -1571,7 +1988,7 @@ app.post('/api/register', async (req, res) => {
     const qrDataUrl = await QRCode.toDataURL(`ticket:${token}`);
 
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
-        const { html, attachments } = await buildTicketEmailHtml({
+        const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName,
             intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
             event,
@@ -1581,7 +1998,7 @@ app.post('/api/register', async (req, res) => {
             to: email.trim().toLowerCase(),
             fromName: `Tickets - ${event.name}`,
             replyTo: REPLY_TO_EMAIL,
-            subject: `Your ticket for ${event.name}`,
+            subject: subjectOverride || `Your ticket for ${event.name}`,
             html,
             attachments,
             registrationId,
@@ -1650,7 +2067,7 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
     const ticket = rowToTicket(stmt.tickets.byToken.get(token));
 
     if (buyerEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
-        const { html, attachments } = await buildTicketEmailHtml({
+        const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName,
             intro: `You&rsquo;re all set for <strong>${dbEvent.name}</strong>! We&rsquo;ll see you there.`,
             event: dbEvent,
@@ -1660,7 +2077,7 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
             to: buyerEmail,
             fromName: `Tickets - ${dbEvent.name}`,
             replyTo: REPLY_TO_EMAIL,
-            subject: `Your ticket for ${dbEvent.name}`,
+            subject: subjectOverride || `Your ticket for ${dbEvent.name}`,
             html,
             attachments,
             registrationId,
@@ -2341,7 +2758,7 @@ app.post('/api/register-bulk', async (req, res) => {
     <span style="color:#333;">${v}</span>
   </div>`).join('')}
 </div>` : '';
-            const { html, attachments } = await buildTicketEmailHtml({
+            const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
                 firstName,
                 intro: isUpdate
                     ? `Your registration for <strong>${event.name}</strong> has been updated.`
@@ -2355,7 +2772,7 @@ app.post('/api/register-bulk', async (req, res) => {
                 to: email,
                 fromName: `Tickets - ${event.name}`,
                 replyTo: REPLY_TO_EMAIL,
-                subject: isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`,
+                subject: subjectOverride || (isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`),
                 html,
                 attachments,
                 registrationId: ticketsToSend[0].registrationId
@@ -2620,6 +3037,20 @@ app.get('/api/event/:id', (req, res) => {
         event.ticketsRemaining = Math.max(0, event.capacity - registered);
     }
     res.json(event);
+});
+
+// Calendar invite for an event. Public on purpose: it's linked from ticket
+// emails, so it has to open for a recipient who has no session — and it
+// exposes nothing the public registration page doesn't already show.
+app.get('/api/event/:id/calendar.ics', (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).send('Event not found');
+    const ics = buildEventIcs(event);
+    if (!ics) return res.status(400).send('This event has no scheduled time yet.');
+    const safeName = (event.name || 'event').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'event';
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.ics"`);
+    res.send(ics);
 });
 
 // Edit event details
@@ -2887,7 +3318,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
         const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
 
-        const { html, attachments } = await buildTicketEmailHtml({
+        const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName: newTickets[0].firstName,
             intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
             event,
@@ -2897,7 +3328,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
             to: email,
             fromName: `Tickets - ${event.name}`,
             replyTo: REPLY_TO_EMAIL,
-            subject: `Your ${ticketLabel} for ${event.name}`,
+            subject: subjectOverride || `Your ${ticketLabel} for ${event.name}`,
             html,
             attachments,
             registrationId
@@ -2943,7 +3374,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
     if (!noEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
-        const { html, attachments } = await buildTicketEmailHtml({
+        const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName: updatedTickets[0].firstName,
             intro: `Your registration details for <strong>${event.name}</strong> have been updated.`,
             event,
@@ -2953,7 +3384,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
             to: email,
             fromName: `Tickets - ${event.name}`,
             replyTo: REPLY_TO_EMAIL,
-            subject: `Updated registration for ${event.name}`,
+            subject: subjectOverride || `Updated registration for ${event.name}`,
             html,
             attachments,
             registrationId: updatedTickets[0].registrationId
@@ -2971,6 +3402,76 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 });
 
 // Resend ticket email without changing any data
+// ── Ticket email template ──────────────────────────────────────────────────
+// Authorisation reuses canManageEvent (admin, owner, or a 'full' sheet-share
+// grant) — the same rule the rest of event settings uses.
+app.get('/api/event/:id/email-template', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!canManageEvent(req, event.id)) return res.status(403).json({ error: 'Not authorized' });
+    res.json({
+        customized: !!event.emailTemplate,
+        template: normalizeEmailTemplate(event.emailTemplate),
+        defaultTemplate: DEFAULT_TICKET_EMAIL_TEMPLATE,
+    });
+});
+
+app.put('/api/event/:id/email-template', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!canManageEvent(req, event.id)) return res.status(403).json({ error: 'Not authorized' });
+
+    // An explicit null resets the event back to the built-in default rather
+    // than persisting a copy of it, so future default changes still apply.
+    if (req.body?.template === null) {
+        stmt.events.setEmailTemplate.run(null, event.id);
+        logAudit(req, { eventId: event.id, action: 'email_template_reset' });
+        return res.json({ success: true, customized: false, template: DEFAULT_TICKET_EMAIL_TEMPLATE });
+    }
+
+    const template = normalizeEmailTemplate(req.body?.template);
+    stmt.events.setEmailTemplate.run(JSON.stringify(template), event.id);
+    logAudit(req, { eventId: event.id, action: 'email_template_update', details: { blocks: template.blocks.length } });
+    res.json({ success: true, customized: true, template });
+});
+
+// Renders a draft template with sample data so the editor's preview goes
+// through the exact same renderer that real sends do.
+app.post('/api/event/:id/email-template/preview', requireAuth, async (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!canManageEvent(req, event.id)) return res.status(403).json({ error: 'Not authorized' });
+
+    const template = normalizeEmailTemplate(req.body?.template);
+    const sampleCount = Math.min(2, Math.max(1, parseInt(req.body?.ticketCount, 10) || 1));
+    const real = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
+    const sample = Array.from({ length: sampleCount }, (_, i) => real[i] || {
+        token: `SAMPLE${i + 1}TOKEN`,
+        name: i === 0 ? 'Jane Smith' : 'Alex Smith',
+        firstName: i === 0 ? 'Jane' : 'Alex',
+        lastName: 'Smith',
+        registrationId: 'SAMPLEREG',
+    });
+
+    try {
+        const { html } = await buildTicketEmailHtml({
+            firstName: sample[0].firstName || 'Jane',
+            intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+            event: { ...event, emailTemplate: template },
+            tickets: sample,
+        });
+        // Inline images are cid: references that only resolve inside a real
+        // message, so swap in a live QR endpoint for the preview only.
+        const previewHtml = html
+            .replace(/src="cid:qr-([^@"]+)@[^"]*"/g, (m, token) => `src="${BASE_URL}/qr/${encodeURIComponent(token)}"`)
+            .replace(/src="cid:wallet-badge@[^"]*"/g, `src="${BASE_URL}/apple-wallet-badge.png"`);
+        res.json({ html: previewHtml });
+    } catch (err) {
+        log('email-template', `[ERR] Preview failed — event: ${event.id}  ${err.message}`);
+        res.status(500).json({ error: 'Could not render preview.' });
+    }
+});
+
 app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
     const ticket = rowToTicket(stmt.tickets.byId.get(req.params.id));
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
@@ -2995,7 +3496,7 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
 
     const actualCount = groupTickets.length;
     const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
-    const { html, attachments } = await buildTicketEmailHtml({
+    const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
         firstName: groupTickets[0].firstName,
         intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
         event,
@@ -3005,7 +3506,7 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
         to: ticket.email,
         fromName: `Tickets - ${event.name}`,
         replyTo: REPLY_TO_EMAIL,
-        subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
+        subject: subjectOverride || `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
         html,
         attachments,
         registrationId: ticket.registrationId
@@ -3442,7 +3943,7 @@ app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
         const actualCount = groupTickets.length;
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
         try {
-            const { html, attachments } = await buildTicketEmailHtml({
+            const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
                 firstName: ticket.firstName,
                 intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
                 event,
@@ -3452,7 +3953,7 @@ app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
                 to: ticket.email,
                 fromName: `Tickets - ${event.name}`,
                 replyTo: REPLY_TO_EMAIL,
-                subject: `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
+                subject: subjectOverride || `Your ticket${actualCount > 1 ? 's' : ''} for ${event.name}`,
                 html,
                 attachments,
                 registrationId: regId

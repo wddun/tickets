@@ -221,6 +221,12 @@ try { db.exec(`ALTER TABLE events ADD COLUMN waitlistEnabled INTEGER DEFAULT 0`)
 // enable on an event whose tickets are also scanned at a door by /api/validate,
 // since "boarded the bus" and "entered the venue" need to stay independent.
 try { db.exec(`ALTER TABLE events ADD COLUMN shuttleLinkEnabled INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN walletLockScreenEnabled INTEGER DEFAULT 1`); } catch {}
+// Per-event ticket email layout, stored as the JSON block document the
+// dashboard's email editor produces. NULL means "never customised" and the
+// built-in default template is used, so existing events keep their current
+// emails untouched.
+try { db.exec(`ALTER TABLE events ADD COLUMN emailTemplate TEXT`); } catch {}
 try {
     db.exec(`
         CREATE TABLE IF NOT EXISTS ticketScans (
@@ -446,6 +452,8 @@ export function rowToEvent(row) {
         reminderEnabled: !!row.reminderEnabled,
         waitlistEnabled: !!row.waitlistEnabled,
         shuttleLinkEnabled: !!row.shuttleLinkEnabled,
+        walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
+        emailTemplate: (() => { try { return row.emailTemplate ? JSON.parse(row.emailTemplate) : null; } catch { return null; } })(),
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
     };
 }
@@ -504,6 +512,8 @@ export const stmt = {
         setAtDoorEnabled: db.prepare(`UPDATE events SET atDoorEnabled=? WHERE id=?`),
         setWaitlistEnabled: db.prepare(`UPDATE events SET waitlistEnabled=? WHERE id=?`),
         setShuttleLinkEnabled: db.prepare(`UPDATE events SET shuttleLinkEnabled=? WHERE id=?`),
+        setWalletLockScreenEnabled: db.prepare(`UPDATE events SET walletLockScreenEnabled=? WHERE id=?`),
+        setEmailTemplate: db.prepare(`UPDATE events SET emailTemplate=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         setOwner: db.prepare(`UPDATE events SET userId=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM events WHERE id=?`),
