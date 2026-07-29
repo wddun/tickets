@@ -1510,13 +1510,27 @@ function showFlash(data) {
     overlay.style.background = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
     document.getElementById('roIcon').innerHTML   = STATUS_ICONS[status]  || '!';
     document.getElementById('roTitle').textContent  = STATUS_TITLES[status] || 'Error';
-    document.getElementById('roName').textContent   = data.firstName || data.name || '';
     document.getElementById('roEmail').style.display = 'none';
     document.getElementById('roEvent').style.display = 'none';
+
+    const name = data.firstName || data.name || '';
     const flashFields = data.customFields
         ? Object.entries(data.customFields).filter(([, v]) => v)
         : [];
-    document.getElementById('roFields').innerHTML = flashFields.map(([k, v]) => `
+
+    // A custom field (e.g. table/section) is more useful at the door than
+    // the name, so swap it into the big headline spot and demote the name
+    // into the field list.
+    let headline = name;
+    let listFields = flashFields;
+    if (flashFields.length) {
+        headline = flashFields[0][1];
+        listFields = flashFields.slice(1);
+        if (name) listFields = [['Name', name], ...listFields];
+    }
+    document.getElementById('roName').textContent = headline;
+
+    document.getElementById('roFields').innerHTML = listFields.map(([k, v]) => `
         <div class="ro-field">
             <span class="ro-field-label">${escHtml(k)}</span>
             <span class="ro-field-value">${escHtml(v)}</span>
