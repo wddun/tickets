@@ -1503,7 +1503,7 @@ let flashTimer = null;
 let exitConfirmTimer = null;
 let scanCardTimer = null;
 
-// Full-screen colored flash — auto-dismisses after 1.2s, tap also dismisses
+// Full-screen colored flash — auto-dismisses after 3s, tap also dismisses
 function showFlash(data) {
     const status = data.status || 'error';
     const overlay = document.getElementById('resultOverlay');
@@ -1533,7 +1533,7 @@ function showFlash(data) {
     }
     
     clearTimeout(flashTimer);
-    flashTimer = setTimeout(closeResult, 800);
+    flashTimer = setTimeout(closeResult, 3000);
     addToHistory(data, status);
 }
 
@@ -1555,11 +1555,11 @@ function addToHistory(data, status) {
         ? Object.entries(data.customFields).filter(([, v]) => v)
         : [];
     const fieldsHtml = fields.length ? `
-        <div style="flex:1;min-width:0;padding-left:16px;border-left:1px solid rgba(255,255,255,0.12);display:flex;flex-direction:column;gap:7px;">
+        <div style="flex:1;min-width:0;padding-left:16px;border-left:1px solid rgba(255,255,255,0.12);display:flex;flex-direction:column;gap:9px;">
             ${fields.map(([k, v]) => `
                 <div>
-                    <div style="font-size:10px;font-weight:600;letter-spacing:0.03em;text-transform:uppercase;color:rgba(255,255,255,0.45);">${escHtml(k)}</div>
-                    <div style="font-size:13px;font-weight:500;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(v)}</div>
+                    <div style="font-size:11px;font-weight:600;letter-spacing:0.03em;text-transform:uppercase;color:rgba(255,255,255,0.45);">${escHtml(k)}</div>
+                    <div style="font-size:18px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(v)}</div>
                 </div>`).join('')}
         </div>` : '';
 
