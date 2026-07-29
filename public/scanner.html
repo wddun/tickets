@@ -1524,7 +1524,7 @@ function showFlash(data) {
     let headline = name;
     let listFields = flashFields;
     if (flashFields.length) {
-        headline = flashFields[0][1];
+        headline = flashFields[0][0] + ': ' + flashFields[0][1];
         listFields = flashFields.slice(1);
         if (name) listFields = [['Name', name], ...listFields];
     }
