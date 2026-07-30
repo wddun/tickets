@@ -203,8 +203,8 @@
             font-family: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, sans-serif;
             text-shadow: 0 2px 3px rgba(0,0,0,0.5);
         }
-        /* Background stays translucent always — the tick "flash" only pulses
-           the glow/border, never fills solid, so the name underneath stays
+        /* Background stays translucent always — the glow layer only brightens
+           the border/halo, never fills solid, so the name underneath stays
            readable the whole time the reel is moving. */
         .reel-highlight {
             position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
@@ -212,9 +212,20 @@
             border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
             background: var(--accent-soft);
             box-shadow: 0 0 16px 0 var(--accent-soft);
-            transition: box-shadow 0.1s;
         }
-        .reel-highlight.flash { box-shadow: 0 0 30px 6px var(--accent); }
+        /* The lit state is a separate layer whose opacity is driven straight
+           from the reel's own motion every frame (see reelGlowAmount) rather
+           than by a class + timeout per item. A timeout-based flash can't keep
+           up once names are flying past faster than it can expire — it either
+           never re-triggers or lags a frame or two behind — so at speed this
+           reads as a steady energised bar, and as the reel slows it resolves
+           into one clean pulse as each name centres itself. */
+        .reel-glow {
+            position: absolute; inset: -2px; opacity: 0; pointer-events: none;
+            border-top: 2px solid #fff; border-bottom: 2px solid #fff;
+            box-shadow: 0 0 34px 7px var(--accent), inset 0 0 26px rgba(255,255,255,0.22);
+            will-change: opacity;
+        }
         .reel-sheen {
             position: absolute; left: -20%; right: -20%; top: 0; height: 40%; z-index: 3; pointer-events: none;
             background: linear-gradient(180deg, rgba(255,255,255,0.14), transparent);
@@ -429,7 +440,9 @@
             </div>
             <div class="reel-wrap">
                 <div class="reel-strip" id="reelStrip"></div>
-                <div class="reel-highlight" id="reelHighlight"></div>
+                <div class="reel-highlight" id="reelHighlight">
+                    <div class="reel-glow" id="reelGlow"></div>
+                </div>
                 <div class="reel-sheen"></div>
                 <div class="reel-fade-top"></div>
                 <div class="reel-fade-bottom"></div>
@@ -805,13 +818,19 @@ function flickPointer() {
     void el.offsetWidth;
     el.classList.add('flick');
 }
-function flashHighlight() {
-    const el = document.getElementById('reelHighlight');
-    el.classList.remove('flash');
-    void el.offsetWidth;
-    el.classList.add('flash');
-    clearTimeout(flashHighlight._t);
-    flashHighlight._t = setTimeout(() => el.classList.remove('flash'), 90);
+// How lit the highlight bar should be, given where the reel is and how fast
+// it's moving. Two regimes, cross-faded by speed:
+//   fast  — a steady bright bar; individual names are a blur, so pulsing per
+//           name would just strobe (and at 500+ entrants would be a flicker
+//           no one can track).
+//   slow  — one clean pulse per name, peaking exactly when that name is
+//           centred in the bar and dropping to nothing at the seam between
+//           two names, so the light lands *with* the name rather than after it.
+const REEL_GLOW_FAST_ITEMS_PER_SEC = 14;
+function reelGlowAmount(centerPos, itemsPerSec) {
+    const centred = 1 - Math.abs((centerPos - Math.floor(centerPos)) - 0.5) * 2;
+    const fast = Math.min(1, itemsPerSec / REEL_GLOW_FAST_ITEMS_PER_SEC);
+    return fast * 0.62 + (1 - fast) * Math.pow(centred, 3);
 }
 
 // ── Sound (synthesized — no audio assets) ──────────────────────
@@ -988,6 +1007,9 @@ function spinReel(picked) {
     const tickerEl = document.getElementById('nameTicker');
     const nameAtOffset = (off) =>
         seqNames[reelIndexAtCenter(off, REEL_ITEM_H, REEL_WINDOW_H, seqNames.length)] || '';
+    const glowEl = document.getElementById('reelGlow');
+    const centerPosAt = (off) => (REEL_WINDOW_H / 2 - off) / REEL_ITEM_H;
+    glowEl.style.opacity = '0';   // the previous spin left it lit on its winner
 
     broadcastSpin({
         style: 'reel', durationSec: duration,
@@ -999,6 +1021,9 @@ function spinReel(picked) {
     tickerEl.textContent = nameAtOffset(0);
 
     let lastTickCount = 0;
+    let lastTickSoundMs = 0;
+    let lastOffset = 0;
+    let lastFrameMs = performance.now();
     let settled = false;
     const startTime = performance.now();
     let rafId;
@@ -1008,6 +1033,8 @@ function spinReel(picked) {
         cancelAnimationFrame(rafId);
         strip.style.transform = `translateY(${targetOffset}px)`;
         tickerEl.textContent = nameAtOffset(targetOffset);
+        // The winner is dead-centre at rest, so hold the bar fully lit on them.
+        glowEl.style.opacity = '1';
         spinning = false;
         stopTicker();
         pendingWinners = picked;
@@ -1021,11 +1048,17 @@ function spinReel(picked) {
         const offset = spinEase(p) * targetOffset;
         strip.style.transform = `translateY(${offset}px)`;
         tickerEl.textContent = nameAtOffset(offset);
+        const dt = Math.max(now - lastFrameMs, 1) / 1000;
+        const itemsPerSec = Math.abs(offset - lastOffset) / REEL_ITEM_H / dt;
+        lastOffset = offset;
+        lastFrameMs = now;
+        glowEl.style.opacity = reelGlowAmount(centerPosAt(offset), itemsPerSec).toFixed(3);
+        // At cruise, names cross the bar far faster than distinct ticks can be
+        // heard — without a floor on the spacing it degrades into a buzz.
         const tickCount = Math.floor(Math.abs(offset) / REEL_ITEM_H);
         if (tickCount > lastTickCount) {
             lastTickCount = tickCount;
-            flashHighlight();
-            playTick();
+            if (now - lastTickSoundMs >= 40) { lastTickSoundMs = now; playTick(); }
         }
         if (p < 1) rafId = requestAnimationFrame(frame);
         else finish();

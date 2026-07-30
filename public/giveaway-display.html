@@ -115,9 +115,15 @@
             border-top: 3px solid var(--accent); border-bottom: 3px solid var(--accent);
             background: var(--accent-soft);
             box-shadow: 0 0 22px 0 var(--accent-soft);
-            transition: box-shadow 0.1s;
         }
-        .reel-highlight.flash { box-shadow: 0 0 40px 8px var(--accent); }
+        /* Lit state is a separate layer driven straight from the reel's motion
+           every frame — see reelGlowAmount. Must match giveaway.html. */
+        .reel-glow {
+            position: absolute; inset: -3px; opacity: 0; pointer-events: none;
+            border-top: 3px solid #fff; border-bottom: 3px solid #fff;
+            box-shadow: 0 0 44px 9px var(--accent), inset 0 0 32px rgba(255,255,255,0.22);
+            will-change: opacity;
+        }
         .reel-sheen {
             position: absolute; left: -20%; right: -20%; top: 0; height: 40%; z-index: 3; pointer-events: none;
             background: linear-gradient(180deg, rgba(255,255,255,0.14), transparent);
@@ -157,7 +163,7 @@
 </div>
 <div class="reel-wrap" id="reelWrap">
     <div class="reel-strip" id="reelStrip"></div>
-    <div class="reel-highlight" id="reelHighlight"></div>
+    <div class="reel-highlight" id="reelHighlight"><div class="reel-glow" id="reelGlow"></div></div>
     <div class="reel-sheen"></div>
     <div class="reel-fade-top"></div>
     <div class="reel-fade-bottom"></div>
@@ -230,13 +236,15 @@ function flickPointer() {
     void el.offsetWidth;
     el.classList.add('flick');
 }
-function flashHighlight() {
-    const el = document.getElementById('reelHighlight');
-    el.classList.remove('flash');
-    void el.offsetWidth;
-    el.classList.add('flash');
-    clearTimeout(flashHighlight._t);
-    flashHighlight._t = setTimeout(() => el.classList.remove('flash'), 90);
+// How lit the highlight bar should be, given where the reel is and how fast
+// it's moving — steady and bright while names are a blur, one clean pulse per
+// name (peaking when it's centred) as the reel slows. Must match
+// giveaway.html exactly so both screens light up together.
+const REEL_GLOW_FAST_ITEMS_PER_SEC = 14;
+function reelGlowAmount(centerPos, itemsPerSec) {
+    const centred = 1 - Math.abs((centerPos - Math.floor(centerPos)) - 0.5) * 2;
+    const fast = Math.min(1, itemsPerSec / REEL_GLOW_FAST_ITEMS_PER_SEC);
+    return fast * 0.62 + (1 - fast) * Math.pow(centred, 3);
 }
 
 function runClassicSpin(payload) {
@@ -333,10 +341,14 @@ function runReelSpin(payload) {
     const targetOffset = -(payload.targetIndex * itemH + itemH / 2) + wrapH / 2;
     const nameAtOffset = (off) =>
         names[reelIndexAtCenter(off, itemH, wrapH, names.length)] || '';
+    const glowEl = document.getElementById('reelGlow');
+    const centerPosAt = (off) => (wrapH / 2 - off) / itemH;
+    glowEl.style.opacity = '0';   // the previous spin left it lit on its winner
     tickerEl.classList.add('show');
     tickerEl.textContent = nameAtOffset(0);
 
-    let lastTickCount = 0;
+    let lastOffset = 0;
+    let lastFrameMs = performance.now();
     let settled = false;
     const startTime = performance.now();
     let rafId;
@@ -346,6 +358,7 @@ function runReelSpin(payload) {
         cancelAnimationFrame(rafId);
         strip.style.transform = `translateY(${targetOffset}px)`;
         tickerEl.textContent = nameAtOffset(targetOffset);
+        glowEl.style.opacity = '1';
         stopTicker();
         showWinner(names[payload.targetIndex], payload.prizeLabel);
     };
@@ -354,8 +367,11 @@ function runReelSpin(payload) {
         const offset = spinEase(p) * targetOffset;
         strip.style.transform = `translateY(${offset}px)`;
         tickerEl.textContent = nameAtOffset(offset);
-        const tickCount = Math.floor(Math.abs(offset) / itemH);
-        if (tickCount > lastTickCount) { lastTickCount = tickCount; flashHighlight(); }
+        const dt = Math.max(now - lastFrameMs, 1) / 1000;
+        const itemsPerSec = Math.abs(offset - lastOffset) / itemH / dt;
+        lastOffset = offset;
+        lastFrameMs = now;
+        glowEl.style.opacity = reelGlowAmount(centerPosAt(offset), itemsPerSec).toFixed(3);
         if (p < 1) rafId = requestAnimationFrame(frame);
         else finish();
     };
