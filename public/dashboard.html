@@ -2259,8 +2259,10 @@
             'tab-registration': async (id) => {
                 const pub = document.getElementById('publicRegToggle');
                 const atDoor = document.getElementById('atDoorToggle');
+                const skipEmails = document.getElementById('skipEmailsToggle');
                 if (pub) await setPublicRegistration(id, pub.checked);
                 if (atDoor) await setAtDoorEnabled(id, atDoor.checked);
+                if (skipEmails) await setSkipConfirmationEmails(id, skipEmails.checked);
             },
             'tab-waitlist': async (id) => {
                 const wl = document.getElementById('waitlistToggle');
@@ -2808,6 +2810,10 @@
                     ${event.atDoorEnabled ? `<a href="/at-door.html?id=${event.id}" target="_blank" class="btn-settings" style="text-decoration:none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v4a1 1 0 0 0 1 1 2 2 0 1 1 0 4 1 1 0 0 0-1 1v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4a1 1 0 0 0-1-1 2 2 0 1 1 0-4 1 1 0 0 0 1-1V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/></svg> At Door</a>` : ''}
                     <button class="btn-settings" onclick="openMetricsModal('${event.id}')">📊 Metrics</button>
                     <button class="btn-settings" onclick="openBulkEmailModal('${event.id}', ${grouped.length})">✉️ Email All</button>
+                    <a href="/giveaway.html?eventId=${event.id}" target="_blank" class="btn-settings" style="text-decoration:none;">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/><circle cx="12" cy="12" r="2.5"/></svg>
+                        Giveaway
+                    </a>
                     <button class="btn-settings" onclick="showSettingsView('${event.id}')">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                         Settings
@@ -4408,6 +4414,7 @@
             const ev = events.find(e => e.id === eventId);
             const enabled = !!ev?.allowPublicRegistration;
             const atDoor  = !!ev?.atDoorEnabled;
+            const skipEmails = !!ev?.skipConfirmationEmails;
             const isPaid  = !!ev?.ticketPrice;
             const regUrl = `${location.origin}/register.html?id=${eventId}`;
             const atDoorDesc = isPaid
@@ -4445,6 +4452,15 @@
                     <div>
                         <div class="settings-toggle-title">At-Door Sales</div>
                         <div class="settings-toggle-desc">Staff-only — requires being logged in on the device. ${atDoorDesc}</div>
+                    </div>
+                </label>
+
+                <hr class="settings-divider">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="skipEmailsToggle" ${skipEmails ? 'checked' : ''}>
+                    <div>
+                        <div class="settings-toggle-title">Skip Confirmation Emails</div>
+                        <div class="settings-toggle-desc">Default to not emailing a ticket when you manually add, CSV-import, or Google Sheets-import someone for this event — useful for giveaways where you don't want everyone entered getting an email. Doesn't affect public self-registration, checkout receipts, or waitlist notifications. Can still be overridden per-import.</div>
                     </div>
                 </label>
             `;
@@ -4918,6 +4934,10 @@
                         <input type="checkbox" id="swOneTicketPerEmail" ${existingConfig ? (existingConfig.oneTicketPerEmail ? 'checked' : '') : 'checked'}>
                         <span>Dedupe by email (only issue one ticket per email address, even if they submit the form more than once)</span>
                     </label>
+                    <label style="display:flex;gap:6px;font-size:12px;align-items:center;margin-bottom:8px;">
+                        <input type="checkbox" id="swSendEmail" ${existingConfig ? (existingConfig.sendEmail !== false ? 'checked' : '') : (events.find(e => e.id === eventId)?.skipConfirmationEmails ? '' : 'checked')}>
+                        <span>Send confirmation email to each attendee</span>
+                    </label>
                     <button class="btn btn-primary btn-sm" onclick="swConnect('${eventId}')">${isEdit ? 'Save Changes' : 'Connect Sheet Watcher'}</button>
                 </div>
             `;
@@ -4955,6 +4975,7 @@
             const includeExistingEl = document.getElementById('swIncludeExisting');
             const includeExisting = includeExistingEl ? includeExistingEl.checked : false;
             const oneTicketPerEmail = document.getElementById('swOneTicketPerEmail').checked;
+            const sendEmail = document.getElementById('swSendEmail').checked;
             if (!first || !email || !swGroupReady(window.__swGroup)) { showToast('Fill in every condition first.'); return; }
             if (ticketMode === 'column' && !ticketCountColumn) { showToast('Pick the column that holds the ticket count.'); return; }
             const res = await fetch(`/api/event/${eventId}/sheet-watch`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
@@ -4970,6 +4991,7 @@
                 intervalMinutes,
                 includeExisting,
                 oneTicketPerEmail,
+                sendEmail,
             }) });
             if (res.ok) { showToast('Sheet watcher connected!'); loadAccessData(eventId); } else { showToast((await res.json()).error); }
         }
@@ -5092,6 +5114,20 @@
                 if (ev) ev.atDoorEnabled = enabled;
             } catch {
                 showToast('Failed to update at-door settings.');
+            }
+        }
+
+        async function setSkipConfirmationEmails(eventId, enabled) {
+            try {
+                await fetch(`/api/event/${eventId}/skip-confirmation-emails`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.skipConfirmationEmails = enabled;
+            } catch {
+                showToast('Failed to update email settings.');
             }
         }
 
@@ -6373,7 +6409,8 @@
             container.innerHTML = '';
             document.getElementById('importValidationMsg').textContent = '';
             document.getElementById('importResultMsg').textContent = '';
-            document.getElementById('importNoEmail').checked = false;
+            const importEv = events.find(e => e.id === selectedId);
+            document.getElementById('importNoEmail').checked = !!importEv?.skipConfirmationEmails;
             document.getElementById('importSubmitBtn').disabled = false;
             document.getElementById('importSubmitBtn').textContent = 'Import';
 

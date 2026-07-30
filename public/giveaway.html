@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Giveaway | WTS Tickets</title>
+    <meta name="theme-color" content="#000000">
+    <link rel="stylesheet" href="kiosk.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #fff;
+            min-height: 100dvh;
+        }
+
+        .nav-bar {
+            position: sticky; top: 0; z-index: 20;
+            background: rgba(0,0,0,0.9);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 12px;
+            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+        }
+        .nav-title { font-size: 17px; font-weight: 700; flex-shrink: 0; }
+        .nav-back {
+            color: rgba(255,255,255,0.6); text-decoration: none; font-size: 13px; font-weight: 600;
+            display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+        }
+        .event-select {
+            flex: 1; min-width: 140px; max-width: 260px;
+            background: rgba(255,255,255,0.1); border: none; border-radius: 10px;
+            color: #fff; font-size: 13px; font-weight: 600; padding: 8px 10px;
+        }
+
+        .wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 60px; }
+
+        .empty-state {
+            text-align: center; color: rgba(255,255,255,0.4);
+            padding: 80px 20px; font-size: 14px;
+        }
+
+        .controls-row {
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
+        }
+        .style-seg {
+            display: inline-flex; background: rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 3px; gap: 2px;
+        }
+        .style-seg button {
+            border: none; background: transparent; color: rgba(255,255,255,0.55);
+            font-size: 12px; font-weight: 700; padding: 7px 14px; border-radius: 9px;
+            cursor: pointer; -webkit-tap-highlight-color: transparent;
+        }
+        .style-seg button.active { background: #fff; color: #1a1f3c; }
+
+        .pool-toggle {
+            display: flex; align-items: center; gap: 7px;
+            font-size: 12px; color: rgba(255,255,255,0.6); font-weight: 600;
+        }
+        .pool-toggle input { accent-color: #6366f1; width: 15px; height: 15px; }
+
+        .prize-input {
+            width: 100%; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px; padding: 10px 12px; color: #fff; font-size: 14px;
+            margin-bottom: 18px;
+        }
+        .prize-input::placeholder { color: rgba(255,255,255,0.3); }
+
+        .wheel-stage {
+            position: relative; display: flex; flex-direction: column; align-items: center;
+            padding: 10px 0 22px;
+        }
+        .wheel-pointer {
+            width: 0; height: 0; z-index: 5; margin-bottom: -6px;
+            border-left: 16px solid transparent; border-right: 16px solid transparent;
+            border-top: 26px solid #fff;
+            filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
+        }
+        .wheel-stage.style-wheel .wheel-pointer { border-top-color: #ffd400; }
+
+        .wheel-disc-wrap {
+            position: relative; width: min(88vw, 380px); aspect-ratio: 1;
+            border-radius: 50%;
+        }
+        canvas#wheelCanvas {
+            width: 100%; height: 100%; border-radius: 50%;
+            transition: transform 0s;
+            will-change: transform;
+        }
+        .wheel-hub {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            width: 15%; aspect-ratio: 1; border-radius: 50%;
+            background: #fff; box-shadow: 0 0 0 4px rgba(0,0,0,0.35);
+        }
+        .wheel-stage.style-wheel .wheel-hub { background: #ffd400; box-shadow: 0 0 0 5px #1a1f3c, 0 0 0 8px #ffd400; }
+
+        .spin-btn {
+            margin-top: 22px; padding: 14px 44px; border-radius: 30px; border: none;
+            background: #fff; color: #1a1f3c; font-size: 16px; font-weight: 800;
+            letter-spacing: 0.02em; cursor: pointer; -webkit-tap-highlight-color: transparent;
+        }
+        .wheel-stage.style-wheel .spin-btn { background: #ffd400; }
+        .spin-btn:disabled { opacity: 0.35; cursor: default; }
+        .spin-btn:active:not(:disabled) { transform: scale(0.97); }
+
+        .pool-count {
+            margin-top: 12px; font-size: 12px; color: rgba(255,255,255,0.4); font-weight: 600;
+        }
+
+        .section-title {
+            font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            color: rgba(255,255,255,0.35); margin: 26px 0 10px;
+        }
+        .entrant-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow-y: auto; }
+        .entrant-chip {
+            background: rgba(255,255,255,0.08); border-radius: 20px; padding: 5px 12px;
+            font-size: 12px; color: rgba(255,255,255,0.7);
+        }
+
+        .winner-row {
+            display: flex; align-items: center; gap: 12px;
+            background: rgba(255,255,255,0.06); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px;
+        }
+        .winner-row .wr-info { flex: 1; min-width: 0; }
+        .winner-row .wr-name { font-size: 14px; font-weight: 700; }
+        .winner-row .wr-meta { font-size: 12px; color: rgba(255,255,255,0.4); margin-top: 1px; }
+        .winner-row .wr-badge {
+            font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 12px; flex-shrink: 0;
+        }
+        .wr-badge.emailed { background: rgba(16,185,129,0.18); color: var(--success); }
+        .wr-badge.skipped { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.45); }
+
+        /* ── Winner overlay ── */
+        .winner-overlay {
+            position: fixed; inset: 0; z-index: 100;
+            background: rgba(0,0,0,0.94);
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.25s;
+            padding: 20px;
+        }
+        .winner-overlay.show { opacity: 1; pointer-events: auto; }
+        .winner-card {
+            background: #232329; border: 1px solid rgba(255,255,255,0.16);
+            border-radius: 22px; padding: 32px 28px; max-width: 380px; width: 100%;
+            text-align: center; transform: scale(0.9); transition: transform 0.25s;
+            box-shadow: 0 24px 70px rgba(0,0,0,0.65);
+        }
+        .winner-overlay.show .winner-card { transform: scale(1); }
+        .winner-label { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #ffd400; }
+        .winner-name { font-size: 30px; font-weight: 800; margin: 10px 0 4px; word-break: break-word; }
+        .winner-email { font-size: 13px; color: rgba(255,255,255,0.45); margin-bottom: 22px; }
+        .winner-email-toggle {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            font-size: 13px; color: rgba(255,255,255,0.75); margin-bottom: 20px; font-weight: 600;
+        }
+        .winner-email-toggle input { accent-color: #6366f1; width: 16px; height: 16px; }
+        .winner-actions { display: flex; gap: 10px; }
+        .winner-actions button {
+            flex: 1; padding: 13px; border-radius: 14px; border: none;
+            font-size: 14px; font-weight: 700; cursor: pointer; -webkit-tap-highlight-color: transparent;
+        }
+        .wa-reroll { background: rgba(255,255,255,0.1); color: #fff; }
+        .wa-confirm { background: #fff; color: #1a1f3c; }
+        .wa-confirm:disabled { opacity: 0.5; }
+    </style>
+</head>
+<body>
+
+<div class="nav-bar">
+    <a href="/dashboard.html" class="nav-back">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </a>
+    <div class="nav-title">Giveaway</div>
+    <select class="event-select" id="eventSelect" onchange="onEventChange()"></select>
+</div>
+
+<div class="wrap">
+    <div id="emptyState" class="empty-state" style="display:none;">Loading events…</div>
+
+    <div id="mainContent" style="display:none;">
+        <div class="controls-row">
+            <div class="style-seg">
+                <button id="styleBtnWheel" onclick="setSpinnerStyle('wheel')">Prize Wheel</button>
+                <button id="styleBtnClassic" onclick="setSpinnerStyle('classic')">Classic Spinner</button>
+            </div>
+            <label class="pool-toggle">
+                <input type="checkbox" id="checkedInOnlyToggle" onchange="rebuildPool()">
+                Only checked-in attendees
+            </label>
+        </div>
+
+        <input type="text" id="prizeInput" class="prize-input" placeholder="Prize (optional) — shown in the winner list and email, e.g. &quot;Front row seats&quot;">
+
+        <div class="wheel-stage" id="wheelStage">
+            <div class="wheel-pointer"></div>
+            <div class="wheel-disc-wrap">
+                <canvas id="wheelCanvas" width="600" height="600"></canvas>
+                <div class="wheel-hub"></div>
+            </div>
+            <button class="spin-btn" id="spinBtn" onclick="spin()">Spin</button>
+            <div class="pool-count" id="poolCount"></div>
+        </div>
+
+        <div class="section-title" id="poolSectionTitle">In the pool</div>
+        <div class="entrant-chips" id="entrantChips"></div>
+
+        <div id="winnersSection" style="display:none;">
+            <div class="section-title">Winners</div>
+            <div id="winnersList"></div>
+        </div>
+    </div>
+</div>
+
+<div class="winner-overlay" id="winnerOverlay">
+    <div class="winner-card">
+        <div class="winner-label">🎉 Winner</div>
+        <div class="winner-name" id="winnerName"></div>
+        <div class="winner-email" id="winnerEmail"></div>
+        <label class="winner-email-toggle">
+            <input type="checkbox" id="emailWinnerToggle" checked>
+            Email the winner their ticket, with a "you won" note
+        </label>
+        <div class="winner-actions">
+            <button class="wa-reroll" onclick="rerollWinner()">Put Back &amp; Reroll</button>
+            <button class="wa-confirm" id="confirmWinnerBtn" onclick="confirmWinner()">Confirm Winner</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let events = [];
+let currentEventId = null;
+let allTickets = [];
+let pool = [];       // entrants still eligible to win
+let winners = [];    // { registrationId, name, email, prizeLabel, emailed }
+let spinnerStyle = 'wheel';
+let spinning = false;
+let pendingWinner = null; // entrant object currently shown in the overlay
+let currentRotation = 0;
+
+const params = new URLSearchParams(location.search);
+
+function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s ?? '';
+    return d.innerHTML;
+}
+
+(async () => {
+    try {
+        const r = await fetch('/api/auth/me');
+        if (!r.ok) { window.location.href = '/'; return; }
+    } catch (_) { window.location.href = '/'; return; }
+
+    try {
+        const r = await fetch('/api/events');
+        if (r.ok) events = await r.json();
+    } catch (_) {}
+
+    if (!events.length) {
+        document.getElementById('emptyState').style.display = 'block';
+        document.getElementById('emptyState').textContent = 'No events yet — create one from the dashboard first.';
+        return;
+    }
+
+    const sel = document.getElementById('eventSelect');
+    sel.innerHTML = events.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('');
+
+    const wanted = params.get('eventId');
+    currentEventId = events.find(e => e.id === wanted) ? wanted : events[0].id;
+    sel.value = currentEventId;
+
+    document.getElementById('mainContent').style.display = 'block';
+    setSpinnerStyle('wheel');
+    await loadEntrants();
+})();
+
+function onEventChange() {
+    currentEventId = document.getElementById('eventSelect').value;
+    winners = [];
+    renderWinners();
+    loadEntrants();
+}
+
+async function loadEntrants() {
+    document.getElementById('poolCount').textContent = 'Loading…';
+    try {
+        const r = await fetch(`/api/event/${currentEventId}/tickets`);
+        allTickets = r.ok ? await r.json() : [];
+    } catch (_) { allTickets = []; }
+    rebuildPool();
+}
+
+function rebuildPool() {
+    const checkedInOnly = document.getElementById('checkedInOnlyToggle').checked;
+    const groups = {};
+    for (const t of allTickets) {
+        const rid = t.registrationId || t.id;
+        if (!groups[rid]) {
+            groups[rid] = { registrationId: rid, name: t.name, email: t.email, checkedIn: false };
+        }
+        if (t.used_at) groups[rid].checkedIn = true;
+    }
+    const winnerIds = new Set(winners.map(w => w.registrationId));
+    pool = Object.values(groups).filter(e =>
+        !winnerIds.has(e.registrationId) && (!checkedInOnly || e.checkedIn)
+    );
+    renderPoolChips();
+    updateSpinButton();
+    drawWheel(currentRotation);
+}
+
+function renderPoolChips() {
+    const wrap = document.getElementById('entrantChips');
+    document.getElementById('poolSectionTitle').textContent = `In the pool (${pool.length})`;
+    if (!pool.length) {
+        wrap.innerHTML = '<div style="font-size:13px;color:rgba(255,255,255,0.35);">No eligible entrants — check your filters, or everyone has already won.</div>';
+        return;
+    }
+    wrap.innerHTML = pool.map(e => `<span class="entrant-chip">${esc(e.name || e.email)}</span>`).join('');
+}
+
+function updateSpinButton() {
+    document.getElementById('spinBtn').disabled = pool.length < 2 || spinning;
+    document.getElementById('poolCount').textContent = pool.length === 1
+        ? '1 entrant left'
+        : `${pool.length} entrants in the pool`;
+}
+
+function setSpinnerStyle(style) {
+    spinnerStyle = style;
+    document.getElementById('styleBtnWheel').classList.toggle('active', style === 'wheel');
+    document.getElementById('styleBtnClassic').classList.toggle('active', style === 'classic');
+    document.getElementById('wheelStage').className = 'wheel-stage style-' + style;
+    drawWheel(currentRotation);
+}
+
+// ── Wheel drawing ────────────────────────────────────────────
+const WHEEL_PALETTES = {
+    wheel:   ['#d7263d', '#ffd400', '#1b4e9b', '#2ea043', '#f77f00'],
+    classic: ['#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b'],
+};
+
+function drawWheel(rotationDeg) {
+    const canvas = document.getElementById('wheelCanvas');
+    const ctx = canvas.getContext('2d');
+    const size = canvas.width;
+    const cx = size / 2, cy = size / 2, radius = size / 2 - 6;
+    ctx.clearRect(0, 0, size, size);
+
+    const n = Math.max(pool.length, 1);
+    const seg = (Math.PI * 2) / n;
+    const palette = WHEEL_PALETTES[spinnerStyle];
+    const showLabels = pool.length > 0 && pool.length <= 40;
+    const big = spinnerStyle === 'wheel';
+
+    if (!pool.length) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fill();
+        canvas.style.transform = `rotate(${rotationDeg}deg)`;
+        return;
+    }
+
+    for (let i = 0; i < n; i++) {
+        const start = -Math.PI / 2 + i * seg;
+        const end = start + seg;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, end);
+        ctx.closePath();
+        ctx.fillStyle = palette[i % palette.length];
+        ctx.fill();
+        if (big) {
+            ctx.lineWidth = size * 0.006;
+            ctx.strokeStyle = '#1a1f3c';
+            ctx.stroke();
+        }
+
+        if (showLabels) {
+            const label = (pool[i].name || pool[i].email || '').split(' ')[0].slice(0, 14);
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(start + seg / 2);
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#fff';
+            ctx.font = `${big ? '700' : '600'} ${Math.max(12, size * 0.032)}px -apple-system, sans-serif`;
+            ctx.shadowColor = 'rgba(0,0,0,0.4)';
+            ctx.shadowBlur = 3;
+            ctx.fillText(label, radius - 14, 0);
+            ctx.restore();
+        }
+    }
+
+    // Rim dots for the big-wheel gameshow look
+    if (big) {
+        const dots = Math.min(n * 2, 48);
+        for (let i = 0; i < dots; i++) {
+            const a = (Math.PI * 2 * i) / dots;
+            ctx.beginPath();
+            ctx.arc(cx + Math.cos(a) * (radius - 4), cy + Math.sin(a) * (radius - 4), size * 0.008, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffd400';
+            ctx.fill();
+        }
+    }
+
+    canvas.style.transform = `rotate(${rotationDeg}deg)`;
+}
+
+// ── Spin logic ───────────────────────────────────────────────
+function spin() {
+    if (spinning || pool.length < 2) return;
+    spinning = true;
+    updateSpinButton();
+
+    const winIdx = Math.floor(Math.random() * pool.length);
+    const n = pool.length;
+    const segDeg = 360 / n;
+    const centerDeg = winIdx * segDeg + segDeg / 2;
+    const jitter = (Math.random() - 0.5) * segDeg * 0.6;
+    const extraSpins = spinnerStyle === 'wheel' ? 7 : 5;
+    const targetMod = ((-(centerDeg + jitter)) % 360 + 360) % 360;
+    const finalRotation = currentRotation - (currentRotation % 360) + extraSpins * 360 + targetMod;
+
+    const canvas = document.getElementById('wheelCanvas');
+    const duration = spinnerStyle === 'wheel' ? 5.6 : 3.8;
+    canvas.style.transition = `transform ${duration}s cubic-bezier(0.12, 0.67, 0.1, 1)`;
+
+    // A backgrounded/throttled tab can fail to fire transitionend at all —
+    // fall back to a timer so the spin always resolves instead of leaving
+    // spinning=true (and the Spin button disabled) stuck forever.
+    let settled = false;
+    const finish = () => {
+        if (settled) return;
+        settled = true;
+        canvas.removeEventListener('transitionend', finish);
+        clearTimeout(fallbackTimer);
+        canvas.style.transition = 'transform 0s';
+        currentRotation = finalRotation;
+        spinning = false;
+        pendingWinner = pool[winIdx];
+        showWinnerOverlay(pendingWinner);
+        updateSpinButton();
+    };
+    canvas.addEventListener('transitionend', finish);
+    const fallbackTimer = setTimeout(finish, duration * 1000 + 500);
+    // Force a reflow so the transition reliably applies before changing transform
+    void canvas.offsetWidth;
+    currentRotation = finalRotation;
+    canvas.style.transform = `rotate(${finalRotation}deg)`;
+}
+
+// ── Winner overlay ───────────────────────────────────────────
+function showWinnerOverlay(entrant) {
+    document.getElementById('winnerName').textContent = entrant.name || '(no name)';
+    document.getElementById('winnerEmail').textContent = entrant.email || '';
+    document.getElementById('emailWinnerToggle').checked = true;
+    document.getElementById('confirmWinnerBtn').disabled = false;
+    document.getElementById('confirmWinnerBtn').textContent = 'Confirm Winner';
+    document.getElementById('winnerOverlay').classList.add('show');
+}
+
+function closeWinnerOverlay() {
+    document.getElementById('winnerOverlay').classList.remove('show');
+    pendingWinner = null;
+}
+
+function rerollWinner() {
+    // Nothing was removed from the pool yet, so just close and spin again.
+    closeWinnerOverlay();
+}
+
+async function confirmWinner() {
+    if (!pendingWinner) return;
+    const btn = document.getElementById('confirmWinnerBtn');
+    const wantsEmail = document.getElementById('emailWinnerToggle').checked;
+    const prizeLabel = document.getElementById('prizeInput').value.trim();
+
+    let emailed = false;
+    if (wantsEmail) {
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+        try {
+            const r = await fetch(`/api/event/${currentEventId}/giveaway/notify-winner`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ registrationId: pendingWinner.registrationId, prizeLabel: prizeLabel || undefined }),
+            });
+            emailed = r.ok;
+            if (!r.ok) {
+                const data = await r.json().catch(() => ({}));
+                alert(data.error || 'Failed to email the winner — they still won, just resend from the dashboard if needed.');
+            }
+        } catch (_) {
+            alert('Network error sending the winner email — they still won, just resend from the dashboard if needed.');
+        }
+    }
+
+    winners.unshift({
+        registrationId: pendingWinner.registrationId,
+        name: pendingWinner.name,
+        email: pendingWinner.email,
+        prizeLabel,
+        emailed,
+    });
+    renderWinners();
+    closeWinnerOverlay();
+    rebuildPool();
+}
+
+function renderWinners() {
+    const section = document.getElementById('winnersSection');
+    const list = document.getElementById('winnersList');
+    if (!winners.length) { section.style.display = 'none'; return; }
+    section.style.display = 'block';
+    list.innerHTML = winners.map(w => `
+        <div class="winner-row">
+            <div class="wr-info">
+                <div class="wr-name">${esc(w.name || w.email)}</div>
+                <div class="wr-meta">${esc(w.email || '')}${w.prizeLabel ? ' · ' + esc(w.prizeLabel) : ''}</div>
+            </div>
+            <span class="wr-badge ${w.emailed ? 'emailed' : 'skipped'}">${w.emailed ? 'Emailed' : 'Not emailed'}</span>
+        </div>
+    `).join('');
+}
+</script>
+</body>
+</html>

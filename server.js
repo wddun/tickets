@@ -262,6 +262,16 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
     return task;
 }
 
+// Resolves whether an admin-issued ticket (manual add, CSV import, sheet
+// import, edit) should email a confirmation. An explicit flag on the request
+// always wins; otherwise falls back to the event's default. Never used for
+// public self-registration, checkout, or waitlist notifications — those
+// always send regardless of this setting.
+function shouldSendAdminEmail(explicitFlag, event) {
+    if (explicitFlag !== undefined && explicitFlag !== null) return explicitFlag !== false;
+    return !event.skipConfirmationEmails;
+}
+
 // Shared HTML email template used by all ticket confirmation emails
 // Cached in memory (read once, reused for every email) so we're not doing
 // disk I/O per send — this is a small static asset that never changes.
@@ -2422,7 +2432,7 @@ app.get('/api/event/:id/discount-codes/preview', (req, res) => {
 // identically. Emails an immediate confirmation with a link to check live
 // status, since there's no attendee login to come back and look this up
 // any other way.
-async function joinWaitlist(event, name, email) {
+async function joinWaitlist(event, name, email, sendEmailFlag = true) {
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
     const existing = stmt.waitlist.byEventAndEmail.get(event.id, cleanEmail);
@@ -2438,7 +2448,7 @@ async function joinWaitlist(event, name, email) {
     const position = (stmt.waitlist.countWaitingAheadOf.get(event.id, now)?.cnt ?? 0) + 1;
     log('waitlist', `[join] Added to waitlist — name: ${cleanName}  email: ${cleanEmail}  event: ${event.name}  position: ${position}`);
 
-    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+    if (sendEmailFlag && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const statusUrl = `${BASE_URL}/waitlist-status.html?id=${id}`;
         sendEmail({
             to: cleanEmail,
@@ -2493,6 +2503,19 @@ app.put('/api/event/:id/waitlist-enabled', requireAuth, (req, res) => {
     stmt.events.setWaitlistEnabled.run(enabled ? 1 : 0, req.params.id);
     logAudit(req, { eventId: event.id, action: enabled ? 'waitlist.enabled' : 'waitlist.disabled' });
     res.json({ success: true, waitlistEnabled: enabled });
+});
+
+// Default for admin-issued tickets (manual add, CSV import, sheet import,
+// edits) — does not affect public self-registration, checkout, or waitlist
+// notifications, which always send.
+app.put('/api/event/:id/skip-confirmation-emails', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    const enabled = req.body.enabled === true || req.body.enabled === 'true';
+    stmt.events.setSkipConfirmationEmails.run(enabled ? 1 : 0, req.params.id);
+    logAudit(req, { eventId: event.id, action: enabled ? 'skipConfirmationEmails.enabled' : 'skipConfirmationEmails.disabled' });
+    res.json({ success: true, skipConfirmationEmails: enabled });
 });
 
 // See the shuttleLinkEnabled comment in db-sqlite.js — only for events whose
@@ -2669,10 +2692,17 @@ app.post('/api/register-bulk', async (req, res) => {
         return res.status(400).json({ error: 'ticketCount must be a number between 1 and 500' });
     }
 
-    // Capacity check — only enforced for new registrations, not resends
+    // Capacity check — only enforced for new registrations, not resends.
+    // Sheet rows are processed one at a time (Apps Script/the sheet-watch
+    // poller are both synchronous per row), so re-querying `registered` on
+    // every call naturally waitlists overflow rows in sheet order.
     if (!isResend && event.capacity) {
         const registered = stmt.tickets.countByEventId.get(event.id).cnt;
         if (registered + count > event.capacity) {
+            if (event.waitlistEnabled) {
+                const result = await joinWaitlist(event, `${firstName} ${lastName}`, email, shouldSendAdminEmail(req.body.sendEmail, event));
+                return res.json(result);
+            }
             return res.status(409).json({ error: `Event is at capacity (${event.capacity} tickets max, ${registered} registered)` });
         }
     }
@@ -2816,26 +2846,29 @@ app.post('/api/register-bulk', async (req, res) => {
     <span style="color:#333;">${v}</span>
   </div>`).join('')}
 </div>` : '';
-            const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
-                firstName,
-                intro: isUpdate
-                    ? `Your registration for <strong>${event.name}</strong> has been updated.`
-                    : `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
-                event,
-                tickets: ticketsToSend,
-                changesHtml,
-                customFieldsHtml,
-            });
-            await sendEmail({
-                to: email,
-                fromName: `Tickets - ${event.name}`,
-                replyTo: REPLY_TO_EMAIL,
-                subject: subjectOverride || (isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`),
-                html,
-                attachments,
-                registrationId: ticketsToSend[0].registrationId
-            });
-            log('bulk-register', `[email] Email ${isUpdate ? 'updated' : 'sent'} → ${email}  name: ${fullName}  tickets: ${actualCount}  event: ${event.name}  regId: ${ticketsToSend[0].registrationId}`);
+            const shouldSendEmail = shouldSendAdminEmail(req.body.sendEmail, event) && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID;
+            if (shouldSendEmail) {
+                const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
+                    firstName,
+                    intro: isUpdate
+                        ? `Your registration for <strong>${event.name}</strong> has been updated.`
+                        : `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+                    event,
+                    tickets: ticketsToSend,
+                    changesHtml,
+                    customFieldsHtml,
+                });
+                await sendEmail({
+                    to: email,
+                    fromName: `Tickets - ${event.name}`,
+                    replyTo: REPLY_TO_EMAIL,
+                    subject: subjectOverride || (isUpdate ? `Your registration for ${event.name} has been updated` : `Your ${ticketLabel} for ${event.name}`),
+                    html,
+                    attachments,
+                    registrationId: ticketsToSend[0].registrationId
+                });
+                log('bulk-register', `[email] Email ${isUpdate ? 'updated' : 'sent'} → ${email}  name: ${fullName}  tickets: ${actualCount}  event: ${event.name}  regId: ${ticketsToSend[0].registrationId}`);
+            }
         }
 
         const response = {
@@ -3210,6 +3243,56 @@ app.get('/api/event/:id/tickets', requireAuth, (req, res) => {
     res.json(tickets);
 });
 
+// Giveaway mode: email a spinner-drawn winner using their existing ticket(s)
+// for this event — reuses the standard ticket-confirmation email/QR flow
+// with a winner-specific intro, rather than a separate notification system.
+app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventFullAccess(req.session.userId, event.id)) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const { registrationId, prizeLabel } = req.body;
+    if (!registrationId) return res.status(400).json({ error: 'registrationId is required' });
+
+    const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
+    if (!tickets.length || tickets[0].eventId !== event.id) {
+        return res.status(404).json({ error: 'Registration not found for this event' });
+    }
+
+    if (!process.env.SES_FROM || !process.env.AWS_ACCESS_KEY_ID) {
+        return res.status(400).json({ error: 'Email is not configured on this server' });
+    }
+
+    const winner = tickets[0];
+    const prizeHtml = prizeLabel ? ` You won: <strong>${escEmailText(prizeLabel)}</strong>.` : '';
+    const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
+        firstName: winner.firstName,
+        intro: `&#127881; Congratulations, you're a winner of the <strong>${event.name}</strong> giveaway!${prizeHtml}`,
+        event,
+        tickets,
+    });
+    try {
+        await sendEmail({
+            to: winner.email,
+            fromName: `Tickets - ${event.name}`,
+            replyTo: REPLY_TO_EMAIL,
+            subject: subjectOverride || `You won! ${event.name}`,
+            html,
+            attachments,
+            registrationId,
+        });
+    } catch (err) {
+        log('giveaway', `[ERR] Email send failed — email: ${winner.email}  err: ${err.message}`);
+        return res.status(502).json({ error: 'Failed to send the winner email' });
+    }
+
+    log('giveaway', `[winner] Notified — name: ${winner.name}  email: ${winner.email}  event: ${event.name} (${event.id})  by: ${req.session.userId}`);
+    logAudit(req, { eventId: event.id, action: 'giveaway.winnerNotified', details: { email: winner.email, prizeLabel: prizeLabel || null } });
+    res.json({ success: true });
+});
+
 // Delete an event
 app.delete('/api/event/:id', requireAuth, async (req, res) => {
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
@@ -3375,7 +3458,8 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
         }).catch(() => { });
     });
 
-    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+    const explicitSendEmail = req.body.noEmail === true ? false : req.body.sendEmail;
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID && shouldSendAdminEmail(explicitSendEmail, event)) {
         const actualCount = newTickets.length;
         const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
@@ -3434,7 +3518,8 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
     log('ticket-edit', `[edit] Edited ${updatedTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${updatedTickets[0].registrationId}  by: ${req.session.userId}`);
 
-    if (!noEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+    const editExplicitSendEmail = noEmail === true ? false : undefined;
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID && shouldSendAdminEmail(editExplicitSendEmail, event)) {
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
         const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName: updatedTickets[0].firstName,
@@ -4201,6 +4286,16 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
         return res.json({ status: 'invalid', message: 'Invalid ticket' });
     }
 
+    // Require proof this caller is actually authorized to scan for this
+    // ticket's event — a live session, a real scan-link token, or a real
+    // display token. Checked before any ticket state is revealed or
+    // mutated, so an unauthorized caller can't check someone in or even
+    // learn the attendee's name/email.
+    if (!scannerAuthorized(req, ticket.eventId)) {
+        log('validate', `[ERR] UNAUTHORIZED scan attempt — ticket: ${ticket.id}  event: ${ticket.eventId}  ip: ${getIP(req)}`);
+        return res.status(401).json({ status: 'unauthorized', message: 'Sign in or use a valid scan link to check in tickets.' });
+    }
+
     // Security: a ticket is only ever valid for the event it was actually
     // issued for. Scanning clients pass the eventId the door staff selected
     // on their device — if it doesn't match the ticket's real event, reject
@@ -4384,7 +4479,9 @@ app.get('/scan/:token', (req, res) => {
     res.redirect(`/scanner.html?scanToken=${encodeURIComponent(req.params.token)}`);
 });
 
-// Confirm reentry check-out (no auth required — scanner uses PIN, not session)
+// Confirm reentry check-out — no session required (scanner/display support
+// no-login access via scan links and display tokens), but scannerAuthorized
+// below still requires proof of one of those, same as /api/validate.
 app.post('/api/checkout', async (req, res) => {
     const { token, registrationId, pairToken } = req.body;
     if (!token && !registrationId) return res.status(400).json({ error: 'Token or registrationId is required' });
@@ -4397,6 +4494,11 @@ app.post('/api/checkout', async (req, res) => {
         ticket = rowToTicket(stmt.tickets.firstByRegistrationId.get(registrationId));
     }
     if (!ticket) return res.json({ status: 'invalid', message: 'Invalid ticket' });
+
+    if (!scannerAuthorized(req, ticket.eventId)) {
+        log('checkout', `[ERR] UNAUTHORIZED checkout attempt — ticket: ${ticket.id}  event: ${ticket.eventId}  ip: ${getIP(req)}`);
+        return res.status(401).json({ status: 'unauthorized', message: 'Sign in or use a valid scan link to check out.' });
+    }
 
     const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event || !event.allowReentry) return res.status(400).json({ error: 'Reentry not enabled for this event' });
@@ -5129,6 +5231,29 @@ app.get('/api/event/:id/access', requireAuth, (req, res) => {
 
 // True when the session user may manage this event: admin, owner, or a
 // sheet-share grant with 'full' permission (same rule used across settings).
+// Authorization for scanner actions (/api/validate, /api/checkout) — these
+// intentionally support no-login door staff via scan links, so they can't
+// use requireAuth. But they must still prove ONE of: a logged-in session, a
+// real scan-link token that exists in the DB for this exact event, or a
+// real display token for this exact event. Without this, any client that
+// merely presents a plausible-looking ticket token can check someone in —
+// which is exactly what let a stale cached scanner.html page (with no live
+// session and no scan-link) keep scanning.
+function scannerAuthorized(req, eventId) {
+    if (req.session?.userId) return true;
+    const linkToken = req.body?.scanLinkToken;
+    if (linkToken) {
+        const link = stmt.scannerLinks.byToken.get(linkToken);
+        if (link && link.eventId === eventId) return true;
+    }
+    const dToken = req.body?.displayToken;
+    if (dToken) {
+        const event = rowToEvent(stmt.events.byId.get(eventId));
+        if (event?.displayToken && event.displayToken === dToken) return true;
+    }
+    return false;
+}
+
 function canManageEvent(req, eventId) {
     if (!req.session.userId) return false;
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
@@ -5444,6 +5569,7 @@ async function pollSheetWatcher(watcher) {
                     ticketCount,
                     apiKey,
                     customFields,
+                    sendEmail: cfg.sendEmail !== false,
                 }),
             });
             if (resp.ok) {

@@ -232,6 +232,11 @@ try { db.exec(`ALTER TABLE events ADD COLUMN emailTemplate TEXT`); } catch {}
 // falls back to DEFAULT_EVENT_TIMEZONE — without it every render used the
 // server's zone, which is UTC in production.
 try { db.exec(`ALTER TABLE events ADD COLUMN timezone TEXT`); } catch {}
+// Default for whether admin-issued tickets (manual add, CSV import, Google
+// Sheets import, edits) send a confirmation email. Doesn't affect public
+// self-registration, checkout receipts, or waitlist notifications — those
+// stay on regardless, since they're the only confirmation the person gets.
+try { db.exec(`ALTER TABLE events ADD COLUMN skipConfirmationEmails INTEGER DEFAULT 0`); } catch {}
 try {
     db.exec(`
         CREATE TABLE IF NOT EXISTS ticketScans (
@@ -457,6 +462,7 @@ export function rowToEvent(row) {
         reminderEnabled: !!row.reminderEnabled,
         waitlistEnabled: !!row.waitlistEnabled,
         shuttleLinkEnabled: !!row.shuttleLinkEnabled,
+        skipConfirmationEmails: !!row.skipConfirmationEmails,
         walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
         emailTemplate: (() => { try { return row.emailTemplate ? JSON.parse(row.emailTemplate) : null; } catch { return null; } })(),
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
@@ -516,6 +522,7 @@ export const stmt = {
         setTicketPrice: db.prepare(`UPDATE events SET ticketPrice=? WHERE id=?`),
         setAtDoorEnabled: db.prepare(`UPDATE events SET atDoorEnabled=? WHERE id=?`),
         setWaitlistEnabled: db.prepare(`UPDATE events SET waitlistEnabled=? WHERE id=?`),
+        setSkipConfirmationEmails: db.prepare(`UPDATE events SET skipConfirmationEmails=? WHERE id=?`),
         setShuttleLinkEnabled: db.prepare(`UPDATE events SET shuttleLinkEnabled=? WHERE id=?`),
         setWalletLockScreenEnabled: db.prepare(`UPDATE events SET walletLockScreenEnabled=? WHERE id=?`),
         setEmailTemplate: db.prepare(`UPDATE events SET emailTemplate=? WHERE id=?`),
