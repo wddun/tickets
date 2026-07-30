@@ -202,36 +202,18 @@ function spinEase(p) {
     const q = (p - SPIN_UP_FRACTION) / (1 - SPIN_UP_FRACTION);
     return SPIN_UP_DISTANCE + (1 - SPIN_UP_DISTANCE) * (1 - Math.pow(1 - q, 4));
 }
-function tickerIntervalForT(p) {
-    if (p <= SPIN_UP_FRACTION) {
-        const q = p / SPIN_UP_FRACTION;
-        return 130 - (130 - 22) * q;
-    }
-    const q = (p - SPIN_UP_FRACTION) / (1 - SPIN_UP_FRACTION);
-    return 22 + (320 - 22) * Math.pow(q, 3);
-}
-
-let tickerNames = [];
-let tickerIdx = 0;
-let tickerLastSwapMs = 0;
-function startTicker(names) {
-    const el = document.getElementById('nameTicker');
-    if (!names.length) return;
-    el.classList.add('show');
-    tickerNames = names;
-    tickerIdx = 0;
-    tickerLastSwapMs = -Infinity;
-    el.textContent = tickerNames[0];
-}
+// The ticker never runs on its own timer or its own list — it always reads
+// the name the spinner is actually showing right now, recomputed from the
+// live transform every frame. Must match giveaway.html's version exactly.
 function stopTicker() {
     document.getElementById('nameTicker').classList.remove('show');
 }
-function updateTicker(p, elapsedMs) {
-    const interval = tickerIntervalForT(p);
-    if (elapsedMs - tickerLastSwapMs < interval) return;
-    tickerLastSwapMs = elapsedMs;
-    tickerIdx = (tickerIdx + 1) % tickerNames.length;
-    document.getElementById('nameTicker').textContent = tickerNames[tickerIdx];
+
+// Whichever reel item currently straddles the middle of the window (where
+// the highlight bar sits).
+function reelIndexAtCenter(offset, itemH, windowH, len) {
+    const idx = Math.floor((windowH / 2 - offset) / itemH);
+    return Math.min(Math.max(idx, 0), len - 1);
 }
 
 // Ticker shows exactly the name under the pointer, derived from the wheel's
@@ -333,7 +315,7 @@ function runReelSpin(payload) {
     document.getElementById('reelWrap').classList.add('show');
     document.getElementById('winnerWrap').classList.remove('show');
     const names = payload.sequenceNames || [];
-    startTicker(names);
+    const tickerEl = document.getElementById('nameTicker');
 
     const wrap = document.getElementById('reelWrap');
     const strip = document.getElementById('reelStrip');
@@ -349,6 +331,10 @@ function runReelSpin(payload) {
     strip.style.transform = 'translateY(0px)';
 
     const targetOffset = -(payload.targetIndex * itemH + itemH / 2) + wrapH / 2;
+    const nameAtOffset = (off) =>
+        names[reelIndexAtCenter(off, itemH, wrapH, names.length)] || '';
+    tickerEl.classList.add('show');
+    tickerEl.textContent = nameAtOffset(0);
 
     let lastTickCount = 0;
     let settled = false;
@@ -359,6 +345,7 @@ function runReelSpin(payload) {
         settled = true;
         cancelAnimationFrame(rafId);
         strip.style.transform = `translateY(${targetOffset}px)`;
+        tickerEl.textContent = nameAtOffset(targetOffset);
         stopTicker();
         showWinner(names[payload.targetIndex], payload.prizeLabel);
     };
@@ -366,7 +353,7 @@ function runReelSpin(payload) {
         const p = Math.min((now - startTime) / (payload.durationSec * 1000), 1);
         const offset = spinEase(p) * targetOffset;
         strip.style.transform = `translateY(${offset}px)`;
-        updateTicker(p, now - startTime);
+        tickerEl.textContent = nameAtOffset(offset);
         const tickCount = Math.floor(Math.abs(offset) / itemH);
         if (tickCount > lastTickCount) { lastTickCount = tickCount; flashHighlight(); }
         if (p < 1) rafId = requestAnimationFrame(frame);

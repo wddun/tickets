@@ -769,45 +769,22 @@ function spinEase(p) {
     const q = (p - SPIN_UP_FRACTION) / (1 - SPIN_UP_FRACTION);
     return SPIN_UP_DISTANCE + (1 - SPIN_UP_DISTANCE) * (1 - Math.pow(1 - q, 4));
 }
-// Ticker swap interval as a function of the same normalized time — fast
-// (down to ~22ms, a real "high refresh rate" flicker) at cruise speed,
-// slow at the very start and end so it visibly speeds up and eases down
-// in lockstep with the wheel/reel itself.
-function tickerIntervalForT(p) {
-    if (p <= SPIN_UP_FRACTION) {
-        const q = p / SPIN_UP_FRACTION;
-        return 130 - (130 - 22) * q;
-    }
-    const q = (p - SPIN_UP_FRACTION) / (1 - SPIN_UP_FRACTION);
-    return 22 + (320 - 22) * Math.pow(q, 3);
-}
-
 // ── Name ticker (readable even at 500+ entrants) ────────────────
-let tickerNames = [];
-let tickerIdx = 0;
-let tickerLastSwapMs = 0;
-function startTicker() {
-    const el = document.getElementById('nameTicker');
-    if (!pool.length) return;
-    el.classList.add('show');
-    tickerNames = shuffled(pool).map(reelLabel);
-    tickerIdx = 0;
-    tickerLastSwapMs = -Infinity;
-    el.textContent = tickerNames[0];
-}
+// The ticker is never driven by its own timer or its own list — it always
+// reads the name the spinner is *actually* showing right now, recomputed
+// from the live transform every frame. Anything else drifts out of sync
+// within a second or two and makes the headline text look unrelated to
+// what's rolling past.
 function stopTicker() {
     document.getElementById('nameTicker').classList.remove('show');
 }
-function updateTicker(p, elapsedMs) {
-    const interval = tickerIntervalForT(p);
-    if (elapsedMs - tickerLastSwapMs < interval) return;
-    tickerLastSwapMs = elapsedMs;
-    tickerIdx++;
-    if (tickerIdx >= tickerNames.length) {
-        tickerNames = shuffled(pool).map(reelLabel);
-        tickerIdx = 0;
-    }
-    document.getElementById('nameTicker').textContent = tickerNames[tickerIdx];
+
+// For the vertical reel, that's whichever sequence item currently straddles
+// the middle of the window (where the highlight bar sits). Item i occupies
+// [i*itemH + offset, (i+1)*itemH + offset) in window coordinates.
+function reelIndexAtCenter(offset, itemH, windowH, len) {
+    const idx = Math.floor((windowH / 2 - offset) / itemH);
+    return Math.min(Math.max(idx, 0), len - 1);
 }
 
 // For the classic wheel, the ticker shows exactly the name currently under
@@ -1007,6 +984,10 @@ function spinReel(picked) {
 
     const targetOffset = -(targetIndex * REEL_ITEM_H + REEL_ITEM_H / 2) + REEL_WINDOW_H / 2;
     const duration = 5.8 * SPEED_MULT[customization.speed];
+    const seqNames = sequence.map(reelLabel);
+    const tickerEl = document.getElementById('nameTicker');
+    const nameAtOffset = (off) =>
+        seqNames[reelIndexAtCenter(off, REEL_ITEM_H, REEL_WINDOW_H, seqNames.length)] || '';
 
     broadcastSpin({
         style: 'reel', durationSec: duration,
@@ -1014,7 +995,8 @@ function spinReel(picked) {
         itemHeight: REEL_ITEM_H, windowHeight: REEL_WINDOW_H,
         prizeLabel: document.getElementById('prizeInput').value.trim(),
     });
-    startTicker();
+    tickerEl.classList.add('show');
+    tickerEl.textContent = nameAtOffset(0);
 
     let lastTickCount = 0;
     let settled = false;
@@ -1025,6 +1007,7 @@ function spinReel(picked) {
         settled = true;
         cancelAnimationFrame(rafId);
         strip.style.transform = `translateY(${targetOffset}px)`;
+        tickerEl.textContent = nameAtOffset(targetOffset);
         spinning = false;
         stopTicker();
         pendingWinners = picked;
@@ -1037,7 +1020,7 @@ function spinReel(picked) {
         const p = Math.min((now - startTime) / (duration * 1000), 1);
         const offset = spinEase(p) * targetOffset;
         strip.style.transform = `translateY(${offset}px)`;
-        updateTicker(p, now - startTime);
+        tickerEl.textContent = nameAtOffset(offset);
         const tickCount = Math.floor(Math.abs(offset) / REEL_ITEM_H);
         if (tickCount > lastTickCount) {
             lastTickCount = tickCount;
