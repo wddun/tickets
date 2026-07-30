@@ -306,7 +306,8 @@ function runClassicSpin(payload) {
         const delta = spinEase(p) * totalRotation;
         canvas.style.transform = `rotate(${delta}deg)`;
         updateTicker(p, now - startTime);
-        const tickCount = Math.floor(Math.abs(delta) / segDeg);
+        // Offset by half a segment — labels sit at wedge centers, not dividers.
+        const tickCount = Math.floor(Math.abs(delta) / segDeg + 0.5);
         if (tickCount > lastTickCount) { lastTickCount = tickCount; flickPointer(); }
         if (p < 1) rafId = requestAnimationFrame(frame);
         else finish();
