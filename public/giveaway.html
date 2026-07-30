@@ -183,7 +183,7 @@
         /* ── Vertical reel (slot-machine style) ── */
         .reel-wrap {
             display: none;
-            position: relative; width: min(88vw, 320px); height: 320px;
+            position: relative; width: min(88vw, 340px); height: 448px;
             border-radius: 18px; overflow: hidden;
             background: linear-gradient(180deg, #0d0d10, #050506 50%, #0d0d10);
             box-shadow:
@@ -203,15 +203,18 @@
             font-family: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, sans-serif;
             text-shadow: 0 2px 3px rgba(0,0,0,0.5);
         }
+        /* Background stays translucent always — the tick "flash" only pulses
+           the glow/border, never fills solid, so the name underneath stays
+           readable the whole time the reel is moving. */
         .reel-highlight {
             position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
             height: 64px; z-index: 2; pointer-events: none;
             border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
             background: var(--accent-soft);
             box-shadow: 0 0 16px 0 var(--accent-soft);
-            transition: background 0.08s, box-shadow 0.08s;
+            transition: box-shadow 0.1s;
         }
-        .reel-highlight.flash { background: var(--accent); box-shadow: 0 0 26px 4px var(--accent); }
+        .reel-highlight.flash { box-shadow: 0 0 30px 6px var(--accent); }
         .reel-sheen {
             position: absolute; left: -20%; right: -20%; top: 0; height: 40%; z-index: 3; pointer-events: none;
             background: linear-gradient(180deg, rgba(255,255,255,0.14), transparent);
@@ -701,7 +704,7 @@ function drawWheel(rotationDeg) {
 
 // ── Vertical reel ──────────────────────────────────────────────
 const REEL_ITEM_H = 64;
-const REEL_WINDOW_H = 320;
+const REEL_WINDOW_H = 448;
 
 function reelLabel(entrant) {
     return entrant.name || entrant.email || '(no name)';
@@ -733,14 +736,20 @@ function renderReelAtRest() {
 
 // Bounded decoy sequence so 500+ entrants still render/animate cheaply —
 // fairness comes from the random pick over the full pool, not from every
-// name appearing while it scrolls by.
+// name appearing while it scrolls by. The winner sits a few rows before
+// the end (not the very last item) so real names are still visible below
+// it once the reel comes to rest, not blank space.
 function buildReelSequence(winnerEntrant) {
     const sampleSize = Math.min(pool.length, 30);
     const loops = pool.length <= 6 ? 6 : (pool.length <= 60 ? 4 : 3);
     const sequence = [];
     for (let i = 0; i < loops; i++) sequence.push(...shuffled(pool).slice(0, sampleSize));
+    const targetIndex = sequence.length;
     sequence.push(winnerEntrant);
-    return { sequence, targetIndex: sequence.length - 1 };
+    const tailPool = pool.filter(e => e.registrationId !== winnerEntrant.registrationId);
+    const tailCount = Math.min(tailPool.length, 8);
+    sequence.push(...shuffled(tailPool).slice(0, tailCount));
+    return { sequence, targetIndex };
 }
 
 // ── Spin physics: quick spin-up, long natural deceleration ────
@@ -977,7 +986,7 @@ function spinReel(picked) {
     strip.style.transform = 'translateY(0px)';
 
     const targetOffset = -(targetIndex * REEL_ITEM_H + REEL_ITEM_H / 2) + REEL_WINDOW_H / 2;
-    const duration = 4.2 * SPEED_MULT[customization.speed];
+    const duration = 5.8 * SPEED_MULT[customization.speed];
 
     broadcastSpin({
         style: 'reel', durationSec: duration,
