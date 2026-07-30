@@ -3253,7 +3253,7 @@ app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) 
         return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const { registrationId, prizeLabel } = req.body;
+    const { registrationId, prizeLabel, customMessage } = req.body;
     if (!registrationId) return res.status(400).json({ error: 'registrationId is required' });
 
     const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
@@ -3267,9 +3267,12 @@ app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) 
 
     const winner = tickets[0];
     const prizeHtml = prizeLabel ? ` You won: <strong>${escEmailText(prizeLabel)}</strong>.` : '';
+    const intro = customMessage
+        ? `&#127881; ${escEmailText(customMessage)}${prizeHtml}`
+        : `&#127881; Congratulations, you're a winner of the <strong>${event.name}</strong> giveaway!${prizeHtml}`;
     const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
         firstName: winner.firstName,
-        intro: `&#127881; Congratulations, you're a winner of the <strong>${event.name}</strong> giveaway!${prizeHtml}`,
+        intro,
         event,
         tickets,
     });
@@ -3290,6 +3293,56 @@ app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) 
 
     log('giveaway', `[winner] Notified — name: ${winner.name}  email: ${winner.email}  event: ${event.name} (${event.id})  by: ${req.session.userId}`);
     logAudit(req, { eventId: event.id, action: 'giveaway.winnerNotified', details: { email: winner.email, prizeLabel: prizeLabel || null } });
+    res.json({ success: true });
+});
+
+// ── Giveaway presenter/display pairing (SSE) ──────────────────────────────────
+// Lets the organizer control the spin from their own device while a second,
+// audience-facing device (a TV/projector) shows a clean live view — no pool
+// list, no controls, no attendee emails. sessionId is a client-generated
+// crypto.randomUUID(), unguessable, and is the only "auth" the display needs
+// (same pattern as scanner pairing tokens above); nothing sensitive is ever
+// sent over this channel beyond entrant first/last names.
+app.get('/api/giveaway/stream/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    if (!sessionId) return res.status(400).send('sessionId required');
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    res.write(`: ${' '.repeat(2048)}\n\n`);
+
+    const prev = giveawayChannels.get(sessionId);
+    if (prev && prev !== res) { try { prev.end(); } catch (_) { } }
+    giveawayChannels.set(sessionId, res);
+    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+    const keepAlive = setInterval(() => {
+        try { res.write(': ping\n\n'); } catch (_) { clearInterval(keepAlive); }
+    }, 25000);
+
+    req.on('close', () => {
+        clearInterval(keepAlive);
+        if (giveawayChannels.get(sessionId) === res) giveawayChannels.delete(sessionId);
+    });
+});
+
+app.get('/api/giveaway/status/:sessionId', requireAuth, (req, res) => {
+    res.json({ connected: giveawayChannels.has(req.params.sessionId) });
+});
+
+app.post('/api/giveaway/broadcast/:sessionId', requireAuth, (req, res) => {
+    const { sessionId } = req.params;
+    const ch = giveawayChannels.get(sessionId);
+    if (!ch) return res.status(404).json({ error: 'No display connected for this session' });
+    try {
+        ch.write(`data: ${JSON.stringify({ type: req.body?.type, payload: req.body?.payload })}\n\n`);
+    } catch (_) {
+        giveawayChannels.delete(sessionId);
+        return res.status(410).json({ error: 'Display disconnected' });
+    }
     res.json({ success: true });
 });
 
@@ -5997,6 +6050,7 @@ const displayTokenClients = new Map(); // displayToken → Set<res>  (display sc
 const scannerChannels     = new Map(); // pairToken → res           (scanner's persistent SSE channel)
 const scannerRegistry     = new Map(); // pairToken → flat scanner data object
 const monitorClients      = new Set(); // { res, eventIds: Set<string> }
+const giveawayChannels    = new Map(); // sessionId → res           (giveaway presenter-display SSE channel)
 
 function broadcastToMonitors(eventId, payload) {
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;

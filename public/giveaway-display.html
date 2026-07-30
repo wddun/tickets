@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Giveaway | WTS Tickets</title>
+    <meta name="theme-color" content="#000000">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root { --accent: #ffd400; --accent-soft: rgba(255,212,0,0.12); }
+        html, body {
+            background: #000; color: #fff; height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        body {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 28px; padding: 4vh 4vw;
+        }
+        .live-dot {
+            position: fixed; top: 18px; right: 20px; display: flex; align-items: center; gap: 7px;
+            font-size: 12px; color: rgba(255,255,255,0.35); font-weight: 600;
+        }
+        .live-dot span { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.25); }
+        .live-dot.connected span { background: #34d399; box-shadow: 0 0 8px #34d399; }
+
+        .event-name {
+            font-size: clamp(18px, 2.4vw, 30px); font-weight: 700; color: rgba(255,255,255,0.55);
+            text-align: center;
+        }
+        .idle-msg {
+            font-size: clamp(20px, 3vw, 34px); font-weight: 700; color: rgba(255,255,255,0.35);
+            text-align: center;
+        }
+
+        .name-ticker {
+            display: none; font-size: clamp(24px, 4vw, 46px); font-weight: 800;
+            color: var(--accent); text-align: center; letter-spacing: 0.01em;
+        }
+        .name-ticker.show { display: block; }
+
+        .wheel-disc-wrap {
+            position: relative; width: min(70vh, 60vw); aspect-ratio: 1; border-radius: 50%; display: none;
+        }
+        .wheel-disc-wrap.show { display: block; }
+        canvas#wheelCanvas { width: 100%; height: 100%; border-radius: 50%; will-change: transform; }
+        .wheel-pointer {
+            width: 0; height: 0; margin-bottom: -1.4vh; z-index: 5;
+            border-left: 3vh solid transparent; border-right: 3vh solid transparent;
+            border-top: 5vh solid var(--accent);
+            filter: drop-shadow(0 3px 5px rgba(0,0,0,0.5));
+            display: none;
+        }
+        .wheel-pointer.show { display: block; }
+        .wheel-hub {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            width: 15%; aspect-ratio: 1; border-radius: 50%;
+            background: var(--accent); box-shadow: 0 0 0 6px #000, 0 0 0 10px var(--accent);
+        }
+
+        .reel-wrap {
+            display: none;
+            position: relative; width: min(70vw, 520px); height: min(56vh, 460px);
+            border-radius: 24px; overflow: hidden;
+            background: rgba(255,255,255,0.05); border: 3px solid var(--accent-soft);
+        }
+        .reel-wrap.show { display: block; }
+        .reel-strip { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+        .reel-item {
+            display: flex; align-items: center; justify-content: center;
+            font-size: clamp(24px, 3.4vw, 42px); font-weight: 800; color: rgba(255,255,255,0.85);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 24px;
+            font-family: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        .reel-highlight {
+            position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+            z-index: 2; pointer-events: none;
+            border-top: 3px solid var(--accent); border-bottom: 3px solid var(--accent);
+            background: var(--accent-soft);
+        }
+        .reel-fade-top, .reel-fade-bottom {
+            position: absolute; left: 0; right: 0; height: 22%; z-index: 3; pointer-events: none;
+        }
+        .reel-fade-top { top: 0; background: linear-gradient(#0a0a0c, transparent); }
+        .reel-fade-bottom { bottom: 0; background: linear-gradient(transparent, #0a0a0c); }
+
+        .winner-wrap {
+            display: none; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+        }
+        .winner-wrap.show { display: flex; }
+        .winner-label {
+            font-size: clamp(16px, 2vw, 22px); font-weight: 700; letter-spacing: 0.1em;
+            text-transform: uppercase; color: var(--accent);
+        }
+        .winner-name { font-size: clamp(36px, 7vw, 88px); font-weight: 900; word-break: break-word; }
+        .winner-prize { font-size: clamp(16px, 2.4vw, 26px); color: rgba(255,255,255,0.6); font-weight: 600; }
+    </style>
+</head>
+<body>
+
+<div class="live-dot" id="liveDot"><span></span> connecting…</div>
+<div class="event-name" id="eventName"></div>
+<div class="idle-msg" id="idleMsg">Get ready…</div>
+<div class="name-ticker" id="nameTicker"></div>
+
+<div class="wheel-pointer" id="wheelPointer"></div>
+<div class="wheel-disc-wrap" id="wheelDiscWrap">
+    <canvas id="wheelCanvas" width="900" height="900"></canvas>
+    <div class="wheel-hub"></div>
+</div>
+<div class="reel-wrap" id="reelWrap">
+    <div class="reel-strip" id="reelStrip"></div>
+    <div class="reel-highlight" id="reelHighlight"></div>
+    <div class="reel-fade-top"></div>
+    <div class="reel-fade-bottom"></div>
+</div>
+
+<div class="winner-wrap" id="winnerWrap">
+    <div class="winner-label">🎉 Winner</div>
+    <div class="winner-name" id="winnerName"></div>
+    <div class="winner-prize" id="winnerPrize"></div>
+</div>
+
+<script>
+const sessionId = new URLSearchParams(location.search).get('session');
+if (!sessionId) document.body.innerHTML = '<div class="idle-msg">Missing session — open this link from the giveaway page\'s Present panel.</div>';
+
+const WHEEL_PALETTE = ['#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b'];
+let tickerTimer = null;
+
+function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s ?? '';
+    return d.innerHTML;
+}
+
+function setIdle() {
+    document.getElementById('idleMsg').style.display = 'block';
+    document.getElementById('wheelPointer').classList.remove('show');
+    document.getElementById('wheelDiscWrap').classList.remove('show');
+    document.getElementById('reelWrap').classList.remove('show');
+    document.getElementById('winnerWrap').classList.remove('show');
+    stopTicker();
+}
+
+function startTicker(names) {
+    const el = document.getElementById('nameTicker');
+    if (!names.length) return;
+    el.classList.add('show');
+    let i = 0;
+    tickerTimer = setInterval(() => { el.textContent = names[i % names.length]; i++; }, 90);
+}
+function stopTicker() {
+    clearInterval(tickerTimer);
+    document.getElementById('nameTicker').classList.remove('show');
+}
+
+function runClassicSpin(payload) {
+    document.getElementById('idleMsg').style.display = 'none';
+    document.getElementById('wheelPointer').classList.add('show');
+    document.getElementById('wheelDiscWrap').classList.add('show');
+    document.getElementById('reelWrap').classList.remove('show');
+    document.getElementById('winnerWrap').classList.remove('show');
+    startTicker(payload.poolNames || []);
+
+    const canvas = document.getElementById('wheelCanvas');
+    const ctx = canvas.getContext('2d');
+    const size = canvas.width, cx = size / 2, cy = size / 2, radius = size / 2 - 8;
+    const names = payload.poolNames || [];
+    const n = Math.max(names.length, 1);
+    const seg = (Math.PI * 2) / n;
+    const showLabels = names.length > 0 && names.length <= 50;
+
+    ctx.clearRect(0, 0, size, size);
+    for (let i = 0; i < n; i++) {
+        const start = -Math.PI / 2 + i * seg, end = start + seg;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, radius, start, end); ctx.closePath();
+        ctx.fillStyle = WHEEL_PALETTE[i % WHEEL_PALETTE.length]; ctx.fill();
+        if (showLabels) {
+            const label = (names[i] || '').split(' ')[0].slice(0, 14);
+            ctx.save(); ctx.translate(cx, cy); ctx.rotate(start + seg / 2);
+            ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff';
+            ctx.font = `700 ${Math.max(16, size * 0.032)}px -apple-system, sans-serif`;
+            ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 4;
+            ctx.fillText(label, radius - 18, 0);
+            ctx.restore();
+        }
+    }
+
+    const segDeg = 360 / n;
+    const centerDeg = payload.winIdx * segDeg + segDeg / 2;
+    const extraSpins = 5;
+    const targetMod = ((-centerDeg) % 360 + 360) % 360;
+    const finalRotation = extraSpins * 360 + targetMod;
+
+    canvas.style.transition = 'transform 0s';
+    canvas.style.transform = 'rotate(0deg)';
+    void canvas.offsetWidth;
+    canvas.style.transition = `transform ${payload.durationSec}s cubic-bezier(0.12, 0.67, 0.1, 1)`;
+    canvas.style.transform = `rotate(${finalRotation}deg)`;
+
+    let settled = false;
+    const finish = () => {
+        if (settled) return;
+        settled = true;
+        stopTicker();
+        showWinner(names[payload.winIdx], payload.prizeLabel);
+    };
+    canvas.addEventListener('transitionend', finish, { once: true });
+    setTimeout(finish, payload.durationSec * 1000 + 500);
+}
+
+function runReelSpin(payload) {
+    document.getElementById('idleMsg').style.display = 'none';
+    document.getElementById('wheelPointer').classList.remove('show');
+    document.getElementById('wheelDiscWrap').classList.remove('show');
+    document.getElementById('reelWrap').classList.add('show');
+    document.getElementById('winnerWrap').classList.remove('show');
+    startTicker(payload.sequenceNames || []);
+
+    const wrap = document.getElementById('reelWrap');
+    const strip = document.getElementById('reelStrip');
+    const highlight = document.getElementById('reelHighlight');
+    const wrapH = wrap.getBoundingClientRect().height;
+    // Scale the item height to this screen's reel box, using the same
+    // proportions the controller used, so the landing math still lines up.
+    const scale = wrapH / payload.windowHeight;
+    const itemH = payload.itemHeight * scale;
+    highlight.style.height = itemH + 'px';
+
+    strip.innerHTML = (payload.sequenceNames || []).map(name => `<div class="reel-item" style="height:${itemH}px;">${esc(name)}</div>`).join('');
+    strip.style.transition = 'transform 0s';
+    strip.style.transform = 'translateY(0px)';
+    void strip.offsetHeight;
+
+    const targetOffset = -(payload.targetIndex * itemH + itemH / 2) + wrapH / 2;
+    strip.style.transition = `transform ${payload.durationSec}s cubic-bezier(0.1, 0.7, 0.15, 1)`;
+    strip.style.transform = `translateY(${targetOffset}px)`;
+
+    let settled = false;
+    const finish = () => {
+        if (settled) return;
+        settled = true;
+        stopTicker();
+        showWinner(payload.sequenceNames[payload.targetIndex], payload.prizeLabel);
+    };
+    strip.addEventListener('transitionend', finish, { once: true });
+    setTimeout(finish, payload.durationSec * 1000 + 500);
+}
+
+function showWinner(name, prizeLabel) {
+    document.getElementById('winnerName').textContent = name || '(no name)';
+    document.getElementById('winnerPrize').textContent = prizeLabel ? `Won: ${prizeLabel}` : '';
+    document.getElementById('winnerWrap').classList.add('show');
+    fireConfetti();
+}
+
+function fireConfetti() {
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:50;';
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    const colors = [getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ffd400', '#fff'];
+    const particles = Array.from({ length: 200 }, () => ({
+        x: canvas.width / 2 + (Math.random() - 0.5) * 200,
+        y: canvas.height * 0.3,
+        vx: (Math.random() - 0.5) * 12,
+        vy: -Math.random() * 12 - 5,
+        size: 6 + Math.random() * 7,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        rot: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.3,
+    }));
+    const start = performance.now();
+    function frame(now) {
+        const t = now - start;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        let alive = false;
+        for (const p of particles) {
+            p.vy += 0.22; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+            if (p.y < canvas.height + 30) alive = true;
+            ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+            ctx.fillStyle = p.color; ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+            ctx.restore();
+        }
+        if (alive && t < 3500) requestAnimationFrame(frame);
+        else canvas.remove();
+    }
+    requestAnimationFrame(frame);
+}
+
+function connect() {
+    if (!sessionId) return;
+    const es = new EventSource(`/api/giveaway/stream/${sessionId}`);
+    es.onopen = () => {
+        document.getElementById('liveDot').classList.add('connected');
+        document.getElementById('liveDot').lastChild.textContent = ' connected';
+    };
+    es.onerror = () => {
+        document.getElementById('liveDot').classList.remove('connected');
+        document.getElementById('liveDot').lastChild.textContent = ' reconnecting…';
+    };
+    es.onmessage = (e) => {
+        let msg;
+        try { msg = JSON.parse(e.data); } catch (_) { return; }
+        if (msg.type === 'connected') return;
+        if (msg.type === 'spin') {
+            const payload = msg.payload || {};
+            if (payload.eventName) document.getElementById('eventName').textContent = payload.eventName;
+            if (payload.theme) {
+                document.documentElement.style.setProperty('--accent', payload.theme);
+                document.documentElement.style.setProperty('--accent-soft', payload.theme + '22');
+            }
+            if (payload.style === 'classic') runClassicSpin(payload);
+            else runReelSpin(payload);
+        } else if (msg.type === 'reset') {
+            setIdle();
+        }
+    };
+}
+connect();
+</script>
+</body>
+</html>

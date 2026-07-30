@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="kiosk.css">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root { --accent: #ffd400; --accent-soft: rgba(255,212,0,0.12); }
         body {
             background: #000;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -33,6 +34,15 @@
             background: rgba(255,255,255,0.1); border: none; border-radius: 10px;
             color: #fff; font-size: 13px; font-weight: 600; padding: 8px 10px;
         }
+        .present-btn {
+            margin-left: auto; flex-shrink: 0;
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.14);
+            color: #fff; font-size: 12px; font-weight: 700; padding: 8px 14px; border-radius: 10px;
+            cursor: pointer; display: flex; align-items: center; gap: 6px;
+        }
+        .present-btn.live { background: rgba(16,185,129,0.18); border-color: rgba(16,185,129,0.4); color: #34d399; }
+        .present-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.3); }
+        .present-btn.live .present-dot { background: #34d399; box-shadow: 0 0 6px #34d399; }
 
         .wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 60px; }
 
@@ -56,11 +66,51 @@
         }
         .style-seg button.active { background: #fff; color: #1a1f3c; }
 
+        .controls-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
         .pool-toggle {
             display: flex; align-items: center; gap: 7px;
             font-size: 12px; color: rgba(255,255,255,0.6); font-weight: 600;
         }
-        .pool-toggle input { accent-color: #6366f1; width: 15px; height: 15px; }
+        .pool-toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+        .customize-btn {
+            background: rgba(255,255,255,0.08); border: none; color: rgba(255,255,255,0.75);
+            font-size: 12px; font-weight: 700; padding: 8px 12px; border-radius: 9px;
+            cursor: pointer; display: flex; align-items: center; gap: 6px;
+        }
+        .customize-btn.open { background: rgba(255,255,255,0.16); color: #fff; }
+
+        .customize-panel {
+            display: none; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09);
+            border-radius: 14px; padding: 16px; margin-bottom: 16px;
+        }
+        .customize-panel.open { display: block; }
+        .cz-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap; }
+        .cz-row:last-child { border-bottom: none; }
+        .cz-label { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); }
+        .cz-sub { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 2px; }
+        .cz-swatches { display: flex; gap: 8px; }
+        .cz-swatch {
+            width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+            border: 2px solid transparent; -webkit-tap-highlight-color: transparent;
+        }
+        .cz-swatch.active { border-color: #fff; }
+        .cz-seg { display: inline-flex; background: rgba(255,255,255,0.08); border-radius: 9px; padding: 2px; }
+        .cz-seg button {
+            border: none; background: transparent; color: rgba(255,255,255,0.55);
+            font-size: 11px; font-weight: 700; padding: 6px 10px; border-radius: 7px; cursor: pointer;
+        }
+        .cz-seg button.active { background: var(--accent); color: #1a1f3c; }
+        .cz-toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+        .cz-num {
+            width: 60px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; padding: 7px 8px; color: #fff; font-size: 13px; text-align: center;
+        }
+        .cz-textarea {
+            width: 100%; margin-top: 8px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; padding: 8px 10px; color: #fff; font-size: 13px; resize: vertical; min-height: 44px;
+        }
+        .cz-textarea::placeholder { color: rgba(255,255,255,0.3); }
 
         .prize-input {
             width: 100%; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
@@ -69,6 +119,12 @@
         }
         .prize-input::placeholder { color: rgba(255,255,255,0.3); }
 
+        .name-ticker {
+            display: none; text-align: center; font-size: 15px; font-weight: 700;
+            color: var(--accent); letter-spacing: 0.02em; margin-bottom: 14px; height: 20px;
+        }
+        .name-ticker.show { display: block; }
+
         .wheel-stage {
             position: relative; display: flex; flex-direction: column; align-items: center;
             padding: 10px 0 22px;
@@ -76,7 +132,7 @@
         .wheel-pointer {
             width: 0; height: 0; z-index: 5; margin-bottom: -6px;
             border-left: 16px solid transparent; border-right: 16px solid transparent;
-            border-top: 26px solid #fff;
+            border-top: 26px solid var(--accent);
             filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
         }
 
@@ -92,7 +148,7 @@
         .wheel-hub {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
             width: 15%; aspect-ratio: 1; border-radius: 50%;
-            background: #fff; box-shadow: 0 0 0 4px rgba(0,0,0,0.35);
+            background: var(--accent); box-shadow: 0 0 0 5px #1a1f3c, 0 0 0 8px var(--accent);
         }
 
         /* ── Vertical reel (slot-machine style) ── */
@@ -101,8 +157,7 @@
             position: relative; width: min(88vw, 320px); height: 320px;
             border-radius: 18px; overflow: hidden;
             background: rgba(255,255,255,0.05);
-            border: 2px solid rgba(255,212,0,0.4);
-            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+            border: 2px solid var(--accent-soft);
         }
         .wheel-stage.style-reel .reel-wrap { display: block; }
         .wheel-stage.style-reel .wheel-pointer,
@@ -117,8 +172,8 @@
         .reel-highlight {
             position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
             height: 64px; z-index: 2; pointer-events: none;
-            border-top: 2px solid #ffd400; border-bottom: 2px solid #ffd400;
-            background: rgba(255,212,0,0.08);
+            border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
+            background: var(--accent-soft);
         }
         .reel-fade-top, .reel-fade-bottom {
             position: absolute; left: 0; right: 0; height: 90px; z-index: 3; pointer-events: none;
@@ -128,26 +183,35 @@
 
         .spin-btn {
             margin-top: 22px; padding: 14px 44px; border-radius: 30px; border: none;
-            background: #fff; color: #1a1f3c; font-size: 16px; font-weight: 800;
+            background: var(--accent); color: #1a1f3c; font-size: 16px; font-weight: 800;
             letter-spacing: 0.02em; cursor: pointer; -webkit-tap-highlight-color: transparent;
         }
-        .wheel-stage.style-reel .spin-btn { background: #ffd400; }
         .spin-btn:disabled { opacity: 0.35; cursor: default; }
         .spin-btn:active:not(:disabled) { transform: scale(0.97); }
 
         .pool-count {
             margin-top: 12px; font-size: 12px; color: rgba(255,255,255,0.4); font-weight: 600;
         }
+        .pool-warn {
+            margin-top: 4px; font-size: 11px; color: rgba(255,255,255,0.3);
+        }
 
         .section-title {
             font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
             color: rgba(255,255,255,0.35); margin: 26px 0 10px;
         }
-        .entrant-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow-y: auto; }
+        .entrant-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 160px; overflow-y: auto; }
         .entrant-chip {
-            background: rgba(255,255,255,0.08); border-radius: 20px; padding: 5px 12px;
+            display: inline-flex; align-items: center; gap: 6px;
+            background: rgba(255,255,255,0.08); border-radius: 20px; padding: 5px 6px 5px 12px;
             font-size: 12px; color: rgba(255,255,255,0.7);
         }
+        .entrant-chip button {
+            border: none; background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.6);
+            width: 16px; height: 16px; border-radius: 50%; font-size: 11px; line-height: 1;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+        .entrant-chip button:hover { background: rgba(220,38,38,0.4); color: #fff; }
 
         .winner-row {
             display: flex; align-items: center; gap: 12px;
@@ -174,19 +238,20 @@
         .winner-overlay.show { opacity: 1; pointer-events: auto; }
         .winner-card {
             background: #232329; border: 1px solid rgba(255,255,255,0.16);
-            border-radius: 22px; padding: 32px 28px; max-width: 380px; width: 100%;
+            border-radius: 22px; padding: 32px 28px; max-width: 420px; width: 100%;
             text-align: center; transform: scale(0.9); transition: transform 0.25s;
             box-shadow: 0 24px 70px rgba(0,0,0,0.65);
         }
         .winner-overlay.show .winner-card { transform: scale(1); }
-        .winner-label { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #ffd400; }
+        .winner-label { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
         .winner-name { font-size: 30px; font-weight: 800; margin: 10px 0 4px; word-break: break-word; }
         .winner-email { font-size: 13px; color: rgba(255,255,255,0.45); margin-bottom: 22px; }
+        .winner-multi-list { text-align: left; max-height: 220px; overflow-y: auto; margin: 14px 0 20px; }
         .winner-email-toggle {
             display: flex; align-items: center; justify-content: center; gap: 8px;
             font-size: 13px; color: rgba(255,255,255,0.75); margin-bottom: 20px; font-weight: 600;
         }
-        .winner-email-toggle input { accent-color: #6366f1; width: 16px; height: 16px; }
+        .winner-email-toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
         .winner-actions { display: flex; gap: 10px; }
         .winner-actions button {
             flex: 1; padding: 13px; border-radius: 14px; border: none;
@@ -195,6 +260,40 @@
         .wa-reroll { background: rgba(255,255,255,0.1); color: #fff; }
         .wa-confirm { background: #fff; color: #1a1f3c; }
         .wa-confirm:disabled { opacity: 0.5; }
+
+        /* ── Present panel ── */
+        .present-overlay {
+            position: fixed; inset: 0; z-index: 110; background: rgba(0,0,0,0.7);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s; padding: 20px;
+        }
+        .present-overlay.show { opacity: 1; pointer-events: auto; }
+        .present-card {
+            background: #1c1c1e; border: 1px solid rgba(255,255,255,0.12); border-radius: 20px;
+            padding: 26px; max-width: 420px; width: 100%;
+        }
+        .present-card h3 { font-size: 17px; margin-bottom: 6px; }
+        .present-card p { font-size: 13px; color: rgba(255,255,255,0.5); margin-bottom: 16px; line-height: 1.5; }
+        .present-link-row {
+            display: flex; gap: 8px; margin-bottom: 14px;
+        }
+        .present-link-row input {
+            flex: 1; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; padding: 10px; color: #fff; font-size: 12px; min-width: 0;
+        }
+        .present-link-row button {
+            background: rgba(255,255,255,0.12); border: none; color: #fff; font-weight: 700;
+            padding: 10px 14px; border-radius: 8px; cursor: pointer; font-size: 12px; white-space: nowrap;
+        }
+        .present-status { font-size: 13px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .present-status .present-dot { width: 8px; height: 8px; }
+        .present-card-actions { display: flex; gap: 10px; }
+        .present-card-actions button {
+            flex: 1; padding: 12px; border-radius: 12px; border: none; font-weight: 700;
+            font-size: 13px; cursor: pointer;
+        }
+        .pc-close { background: rgba(255,255,255,0.1); color: #fff; }
+        .pc-stop { background: rgba(220,38,38,0.18); color: #f87171; }
     </style>
 </head>
 <body>
@@ -205,6 +304,9 @@
     </a>
     <div class="nav-title">Giveaway</div>
     <select class="event-select" id="eventSelect" onchange="onEventChange()"></select>
+    <button class="present-btn" id="presentBtn" onclick="openPresentPanel()">
+        <span class="present-dot"></span> Present
+    </button>
 </div>
 
 <div class="wrap">
@@ -216,13 +318,61 @@
                 <button id="styleBtnReel" onclick="setSpinnerStyle('reel')">Vertical Reel</button>
                 <button id="styleBtnClassic" onclick="setSpinnerStyle('classic')">Classic Spinner</button>
             </div>
-            <label class="pool-toggle">
-                <input type="checkbox" id="checkedInOnlyToggle" onchange="rebuildPool()">
-                Only checked-in attendees
-            </label>
+            <div class="controls-right">
+                <label class="pool-toggle">
+                    <input type="checkbox" id="checkedInOnlyToggle" onchange="rebuildPool()">
+                    Only checked-in attendees
+                </label>
+                <button class="customize-btn" id="customizeBtn" onclick="toggleCustomize()">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    Customize
+                </button>
+            </div>
+        </div>
+
+        <div class="customize-panel" id="customizePanel">
+            <div class="cz-row">
+                <div>
+                    <div class="cz-label">Theme color</div>
+                    <div class="cz-sub">Accent used by the pointer, highlight band, and spin button.</div>
+                </div>
+                <div class="cz-swatches" id="czSwatches"></div>
+            </div>
+            <div class="cz-row">
+                <div>
+                    <div class="cz-label">Spin speed</div>
+                </div>
+                <div class="cz-seg" id="czSpeedSeg">
+                    <button data-v="slow" onclick="setSpeed('slow')">Slow</button>
+                    <button data-v="normal" onclick="setSpeed('normal')">Normal</button>
+                    <button data-v="fast" onclick="setSpeed('fast')">Fast</button>
+                </div>
+            </div>
+            <div class="cz-row">
+                <div class="cz-label">Sound effects</div>
+                <label class="cz-toggle"><input type="checkbox" id="czSound" checked onchange="customization.sound=this.checked"></label>
+            </div>
+            <div class="cz-row">
+                <div class="cz-label">Confetti on win</div>
+                <label class="cz-toggle"><input type="checkbox" id="czConfetti" checked onchange="customization.confetti=this.checked"></label>
+            </div>
+            <div class="cz-row">
+                <div>
+                    <div class="cz-label">Winners per spin</div>
+                    <div class="cz-sub">Draw more than one winner in a single spin.</div>
+                </div>
+                <input type="number" class="cz-num" id="czWinnersPerSpin" min="1" max="20" value="1" onchange="onWinnersPerSpinChange()">
+            </div>
+            <div class="cz-row" style="display:block;">
+                <div class="cz-label">Custom "you won" message</div>
+                <div class="cz-sub">Overrides the default congratulations line in the winner email.</div>
+                <textarea class="cz-textarea" id="czCustomMessage" placeholder="e.g. You won a VIP upgrade for tonight's show!" oninput="customization.customMessage=this.value"></textarea>
+            </div>
         </div>
 
         <input type="text" id="prizeInput" class="prize-input" placeholder="Prize (optional) — shown in the winner list and email, e.g. &quot;Front row seats&quot;">
+
+        <div class="name-ticker" id="nameTicker"></div>
 
         <div class="wheel-stage" id="wheelStage">
             <div class="wheel-pointer"></div>
@@ -238,6 +388,7 @@
             </div>
             <button class="spin-btn" id="spinBtn" onclick="spin()">Spin</button>
             <div class="pool-count" id="poolCount"></div>
+            <div class="pool-warn" id="poolWarn"></div>
         </div>
 
         <div class="section-title" id="poolSectionTitle">In the pool</div>
@@ -250,18 +401,24 @@
     </div>
 </div>
 
+<canvas id="confettiCanvas" style="position:fixed;inset:0;pointer-events:none;z-index:150;display:none;"></canvas>
+
 <div class="winner-overlay" id="winnerOverlay">
-    <div class="winner-card">
-        <div class="winner-label">🎉 Winner</div>
-        <div class="winner-name" id="winnerName"></div>
-        <div class="winner-email" id="winnerEmail"></div>
-        <label class="winner-email-toggle">
-            <input type="checkbox" id="emailWinnerToggle" checked>
-            Email the winner their ticket, with a "you won" note
-        </label>
-        <div class="winner-actions">
-            <button class="wa-reroll" onclick="rerollWinner()">Put Back &amp; Reroll</button>
-            <button class="wa-confirm" id="confirmWinnerBtn" onclick="confirmWinner()">Confirm Winner</button>
+    <div class="winner-card" id="winnerCard"></div>
+</div>
+
+<div class="present-overlay" id="presentOverlay">
+    <div class="present-card">
+        <h3>Present on another screen</h3>
+        <p>Open this link on the TV, projector, or second device. It shows just the spinner and the winner &mdash; no controls, no attendee list, no emails.</p>
+        <div class="present-link-row">
+            <input type="text" id="presentLinkInput" readonly onclick="this.select()">
+            <button onclick="copyPresentLink()">Copy</button>
+        </div>
+        <div class="present-status" id="presentStatus"><span class="present-dot"></span> Waiting for the display to connect&hellip;</div>
+        <div class="present-card-actions">
+            <button class="pc-close" onclick="closePresentPanel()">Close</button>
+            <button class="pc-stop" onclick="stopPresenting()">Stop Presenting</button>
         </div>
     </div>
 </div>
@@ -270,12 +427,35 @@
 let events = [];
 let currentEventId = null;
 let allTickets = [];
-let pool = [];       // entrants still eligible to win
-let winners = [];    // { registrationId, name, email, prizeLabel, emailed }
+let pool = [];          // entrants still eligible to win
+let winners = [];       // { registrationId, name, email, prizeLabel, emailed }
 let spinnerStyle = 'reel';
 let spinning = false;
-let pendingWinner = null; // entrant object currently shown in the overlay
+let pendingWinners = [];   // entrant objects currently shown in the overlay
 let currentRotation = 0;
+let manuallyExcluded = new Set();
+let tickerTimer = null;
+
+const customization = {
+    theme: 'gold',
+    speed: 'normal',
+    sound: true,
+    confetti: true,
+    winnersPerSpin: 1,
+    customMessage: '',
+};
+const THEMES = {
+    gold:    { accent: '#ffd400', soft: 'rgba(255,212,0,0.12)' },
+    indigo:  { accent: '#6366f1', soft: 'rgba(99,102,241,0.16)' },
+    emerald: { accent: '#10b981', soft: 'rgba(16,185,129,0.16)' },
+    rose:    { accent: '#f43f5e', soft: 'rgba(244,63,94,0.16)' },
+    sky:     { accent: '#38bdf8', soft: 'rgba(56,189,248,0.16)' },
+};
+const SPEED_MULT = { slow: 1.35, normal: 1, fast: 0.68 };
+
+// Presenter/display pairing
+let presenterSessionId = null;
+let presenterPollTimer = null;
 
 const params = new URLSearchParams(location.search);
 
@@ -310,6 +490,7 @@ function esc(s) {
     sel.value = currentEventId;
 
     document.getElementById('mainContent').style.display = 'block';
+    buildSwatches();
     setSpinnerStyle('reel');
     await loadEntrants();
 })();
@@ -317,6 +498,7 @@ function esc(s) {
 function onEventChange() {
     currentEventId = document.getElementById('eventSelect').value;
     winners = [];
+    manuallyExcluded = new Set();
     renderWinners();
     loadEntrants();
 }
@@ -342,12 +524,17 @@ function rebuildPool() {
     }
     const winnerIds = new Set(winners.map(w => w.registrationId));
     pool = Object.values(groups).filter(e =>
-        !winnerIds.has(e.registrationId) && (!checkedInOnly || e.checkedIn)
+        !winnerIds.has(e.registrationId) && !manuallyExcluded.has(e.registrationId) && (!checkedInOnly || e.checkedIn)
     );
     renderPoolChips();
     updateSpinButton();
     if (spinnerStyle === 'classic') drawWheel(currentRotation);
     else renderReelAtRest();
+}
+
+function excludeEntrant(registrationId) {
+    manuallyExcluded.add(registrationId);
+    rebuildPool();
 }
 
 function renderPoolChips() {
@@ -357,14 +544,22 @@ function renderPoolChips() {
         wrap.innerHTML = '<div style="font-size:13px;color:rgba(255,255,255,0.35);">No eligible entrants — check your filters, or everyone has already won.</div>';
         return;
     }
-    wrap.innerHTML = pool.map(e => `<span class="entrant-chip">${esc(e.name || e.email)}</span>`).join('');
+    wrap.innerHTML = pool.map(e => `
+        <span class="entrant-chip">${esc(e.name || e.email)}
+            <button title="Remove from pool" onclick="excludeEntrant('${e.registrationId}')">&times;</button>
+        </span>`).join('');
 }
 
 function updateSpinButton() {
+    const need = Math.max(2, customization.winnersPerSpin + (customization.winnersPerSpin > 1 ? 0 : 1));
     document.getElementById('spinBtn').disabled = pool.length < 2 || spinning;
     document.getElementById('poolCount').textContent = pool.length === 1
         ? '1 entrant left'
         : `${pool.length} entrants in the pool`;
+    document.getElementById('poolWarn').textContent =
+        customization.winnersPerSpin > 1 && pool.length < customization.winnersPerSpin
+            ? `Fewer entrants than the ${customization.winnersPerSpin} winners you asked for — will draw as many as possible.`
+            : '';
 }
 
 function setSpinnerStyle(style) {
@@ -375,6 +570,38 @@ function setSpinnerStyle(style) {
     if (style === 'classic') drawWheel(currentRotation);
     else renderReelAtRest();
 }
+
+// ── Customize panel ─────────────────────────────────────────────
+function toggleCustomize() {
+    document.getElementById('customizePanel').classList.toggle('open');
+    document.getElementById('customizeBtn').classList.toggle('open');
+}
+function buildSwatches() {
+    const wrap = document.getElementById('czSwatches');
+    wrap.innerHTML = Object.entries(THEMES).map(([key, t]) => `
+        <span class="cz-swatch${key === customization.theme ? ' active' : ''}" data-theme="${key}"
+              style="background:${t.accent};" onclick="setTheme('${key}')"></span>
+    `).join('');
+}
+function setTheme(key) {
+    customization.theme = key;
+    const t = THEMES[key];
+    document.documentElement.style.setProperty('--accent', t.accent);
+    document.documentElement.style.setProperty('--accent-soft', t.soft);
+    buildSwatches();
+    if (spinnerStyle === 'classic') drawWheel(currentRotation);
+}
+function setSpeed(v) {
+    customization.speed = v;
+    document.querySelectorAll('#czSpeedSeg button').forEach(b => b.classList.toggle('active', b.dataset.v === v));
+}
+function onWinnersPerSpinChange() {
+    const n = Math.max(1, Math.min(20, parseInt(document.getElementById('czWinnersPerSpin').value, 10) || 1));
+    customization.winnersPerSpin = n;
+    document.getElementById('czWinnersPerSpin').value = n;
+    updateSpinButton();
+}
+setSpeed('normal');
 
 // ── Wheel drawing (Classic Spinner) ───────────────────────────
 const WHEEL_PALETTE = ['#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b'];
@@ -388,7 +615,7 @@ function drawWheel(rotationDeg) {
 
     const n = Math.max(pool.length, 1);
     const seg = (Math.PI * 2) / n;
-    const showLabels = pool.length > 0 && pool.length <= 40;
+    const showLabels = pool.length > 0 && pool.length <= 50;
 
     if (!pool.length) {
         ctx.beginPath();
@@ -453,12 +680,139 @@ function renderReelAtRest() {
         strip.style.transform = 'translateY(0px)';
         return;
     }
-    const items = shuffled(pool);
+    const items = shuffled(pool).slice(0, Math.min(pool.length, 30));
     strip.innerHTML = items.map(e => `<div class="reel-item">${esc(reelLabel(e))}</div>`).join('');
-    // Center the middle item in the highlight window at rest
     const midIdx = Math.floor(items.length / 2);
     const offset = -(midIdx * REEL_ITEM_H + REEL_ITEM_H / 2) + REEL_WINDOW_H / 2;
     strip.style.transform = `translateY(${offset}px)`;
+}
+
+// Bounded decoy sequence so 500+ entrants still render/animate cheaply —
+// fairness comes from the random pick over the full pool, not from every
+// name appearing while it scrolls by.
+function buildReelSequence(winnerEntrant) {
+    const sampleSize = Math.min(pool.length, 30);
+    const loops = pool.length <= 6 ? 6 : (pool.length <= 60 ? 4 : 3);
+    const sequence = [];
+    for (let i = 0; i < loops; i++) sequence.push(...shuffled(pool).slice(0, sampleSize));
+    sequence.push(winnerEntrant);
+    return { sequence, targetIndex: sequence.length - 1 };
+}
+
+// ── Name ticker (readable even at 500+ entrants) ──────────────
+function startTicker() {
+    const el = document.getElementById('nameTicker');
+    if (!pool.length) return;
+    el.classList.add('show');
+    let i = 0;
+    const names = shuffled(pool).map(reelLabel);
+    tickerTimer = setInterval(() => {
+        el.textContent = names[i % names.length];
+        i++;
+    }, 90);
+}
+function stopTicker() {
+    clearInterval(tickerTimer);
+    document.getElementById('nameTicker').classList.remove('show');
+}
+
+// ── Sound (synthesized — no audio assets) ──────────────────────
+let audioCtx = null;
+function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+}
+function playTick() {
+    if (!customization.sound) return;
+    try {
+        const ctx = ensureAudio();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 900;
+        osc.type = 'square';
+        gain.gain.setValueAtTime(0.06, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(); osc.stop(ctx.currentTime + 0.05);
+    } catch (_) {}
+}
+function playWinChime() {
+    if (!customization.sound) return;
+    try {
+        const ctx = ensureAudio();
+        [523.25, 659.25, 783.99].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.frequency.value = freq;
+            osc.type = 'triangle';
+            const t0 = ctx.currentTime + i * 0.11;
+            gain.gain.setValueAtTime(0.0001, t0);
+            gain.gain.linearRampToValueAtTime(0.14, t0 + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.4);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(t0); osc.stop(t0 + 0.42);
+        });
+    } catch (_) {}
+}
+function scheduleSpinTicks(durationMs) {
+    if (!customization.sound) return;
+    let delay = 60;
+    let elapsed = 0;
+    function tick() {
+        if (elapsed >= durationMs) return;
+        playTick();
+        delay = Math.min(delay * 1.12, 400);
+        elapsed += delay;
+        setTimeout(tick, delay);
+    }
+    tick();
+}
+
+// ── Confetti (lightweight, no library) ─────────────────────────
+function fireConfetti() {
+    if (!customization.confetti) return;
+    const canvas = document.getElementById('confettiCanvas');
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    canvas.style.display = 'block';
+    const ctx = canvas.getContext('2d');
+    const colors = Object.values(THEMES).map(t => t.accent).concat(['#fff']);
+    const particles = Array.from({ length: 140 }, () => ({
+        x: canvas.width / 2 + (Math.random() - 0.5) * 120,
+        y: canvas.height * 0.35,
+        vx: (Math.random() - 0.5) * 9,
+        vy: -Math.random() * 9 - 4,
+        size: 5 + Math.random() * 5,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.3,
+    }));
+    const start = performance.now();
+    function frame(now) {
+        const t = now - start;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        let alive = false;
+        for (const p of particles) {
+            p.vy += 0.22;
+            p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+            if (p.y < canvas.height + 20) alive = true;
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.rot);
+            ctx.fillStyle = p.color;
+            ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+            ctx.restore();
+        }
+        if (alive && t < 3000) requestAnimationFrame(frame);
+        else { canvas.style.display = 'none'; ctx.clearRect(0, 0, canvas.width, canvas.height); }
+    }
+    requestAnimationFrame(frame);
+}
+
+// ── Winner picking ──────────────────────────────────────────────
+function pickWinners() {
+    const n = Math.min(customization.winnersPerSpin, pool.length);
+    const shuffledPool = shuffled(pool);
+    return shuffledPool.slice(0, n);
 }
 
 // ── Spin logic ───────────────────────────────────────────────
@@ -466,12 +820,14 @@ function spin() {
     if (spinning || pool.length < 2) return;
     spinning = true;
     updateSpinButton();
-    if (spinnerStyle === 'classic') spinClassic();
-    else spinReel();
+    const picked = pickWinners();
+    if (spinnerStyle === 'classic') spinClassic(picked);
+    else spinReel(picked);
 }
 
-function spinClassic() {
-    const winIdx = Math.floor(Math.random() * pool.length);
+function spinClassic(picked) {
+    const primary = picked[0];
+    const winIdx = pool.findIndex(e => e.registrationId === primary.registrationId);
     const n = pool.length;
     const segDeg = 360 / n;
     const centerDeg = winIdx * segDeg + segDeg / 2;
@@ -481,8 +837,12 @@ function spinClassic() {
     const finalRotation = currentRotation - (currentRotation % 360) + extraSpins * 360 + targetMod;
 
     const canvas = document.getElementById('wheelCanvas');
-    const duration = 3.8;
+    const duration = 3.8 * SPEED_MULT[customization.speed];
     canvas.style.transition = `transform ${duration}s cubic-bezier(0.12, 0.67, 0.1, 1)`;
+
+    broadcastSpin({ style: 'classic', durationSec: duration, poolNames: pool.map(reelLabel), winIdx, prizeLabel: document.getElementById('prizeInput').value.trim() });
+    startTicker();
+    scheduleSpinTicks(duration * 1000);
 
     // A backgrounded/throttled tab can fail to fire transitionend at all —
     // fall back to a timer so the spin always resolves instead of leaving
@@ -496,8 +856,11 @@ function spinClassic() {
         canvas.style.transition = 'transform 0s';
         currentRotation = finalRotation;
         spinning = false;
-        pendingWinner = pool[winIdx];
-        showWinnerOverlay(pendingWinner);
+        stopTicker();
+        pendingWinners = picked;
+        playWinChime();
+        fireConfetti();
+        showWinnerOverlay(pendingWinners);
         updateSpinButton();
     };
     canvas.addEventListener('transitionend', finish);
@@ -508,17 +871,10 @@ function spinClassic() {
     canvas.style.transform = `rotate(${finalRotation}deg)`;
 }
 
-function spinReel() {
-    const winner = pool[Math.floor(Math.random() * pool.length)];
+function spinReel(picked) {
+    const primary = picked[0];
     const strip = document.getElementById('reelStrip');
-
-    // Build a long run of shuffled decoy passes through the pool, then land
-    // on the winner as the very last item.
-    const loops = pool.length <= 6 ? 6 : 3;
-    const sequence = [];
-    for (let i = 0; i < loops; i++) sequence.push(...shuffled(pool));
-    sequence.push(winner);
-    const targetIndex = sequence.length - 1;
+    const { sequence, targetIndex } = buildReelSequence(primary);
 
     strip.innerHTML = sequence.map(e => `<div class="reel-item">${esc(reelLabel(e))}</div>`).join('');
     strip.style.transition = 'transform 0s';
@@ -526,8 +882,17 @@ function spinReel() {
     void strip.offsetHeight; // force reflow before animating
 
     const targetOffset = -(targetIndex * REEL_ITEM_H + REEL_ITEM_H / 2) + REEL_WINDOW_H / 2;
-    const duration = 4.2;
+    const duration = 4.2 * SPEED_MULT[customization.speed];
     strip.style.transition = `transform ${duration}s cubic-bezier(0.1, 0.7, 0.15, 1)`;
+
+    broadcastSpin({
+        style: 'reel', durationSec: duration,
+        sequenceNames: sequence.map(reelLabel), targetIndex,
+        itemHeight: REEL_ITEM_H, windowHeight: REEL_WINDOW_H,
+        prizeLabel: document.getElementById('prizeInput').value.trim(),
+    });
+    startTicker();
+    scheduleSpinTicks(duration * 1000);
 
     let settled = false;
     const finish = () => {
@@ -536,8 +901,11 @@ function spinReel() {
         strip.removeEventListener('transitionend', finish);
         clearTimeout(fallbackTimer);
         spinning = false;
-        pendingWinner = winner;
-        showWinnerOverlay(pendingWinner);
+        stopTicker();
+        pendingWinners = picked;
+        playWinChime();
+        fireConfetti();
+        showWinnerOverlay(pendingWinners);
         updateSpinButton();
     };
     strip.addEventListener('transitionend', finish);
@@ -546,18 +914,48 @@ function spinReel() {
 }
 
 // ── Winner overlay ───────────────────────────────────────────
-function showWinnerOverlay(entrant) {
-    document.getElementById('winnerName').textContent = entrant.name || '(no name)';
-    document.getElementById('winnerEmail').textContent = entrant.email || '';
-    document.getElementById('emailWinnerToggle').checked = true;
-    document.getElementById('confirmWinnerBtn').disabled = false;
-    document.getElementById('confirmWinnerBtn').textContent = 'Confirm Winner';
+function showWinnerOverlay(entrants) {
+    const card = document.getElementById('winnerCard');
+    if (entrants.length === 1) {
+        const w = entrants[0];
+        card.innerHTML = `
+            <div class="winner-label">🎉 Winner</div>
+            <div class="winner-name">${esc(w.name || '(no name)')}</div>
+            <div class="winner-email">${esc(w.email || '')}</div>
+            <label class="winner-email-toggle">
+                <input type="checkbox" id="emailWinnerToggle" checked>
+                Email the winner their ticket, with a "you won" note
+            </label>
+            <div class="winner-actions">
+                <button class="wa-reroll" onclick="rerollWinner()">Put Back &amp; Reroll</button>
+                <button class="wa-confirm" id="confirmWinnerBtn" onclick="confirmWinner()">Confirm Winner</button>
+            </div>`;
+    } else {
+        card.innerHTML = `
+            <div class="winner-label">🎉 ${entrants.length} Winners</div>
+            <div class="winner-multi-list">${entrants.map(w => `
+                <div class="winner-row">
+                    <div class="wr-info">
+                        <div class="wr-name">${esc(w.name || '(no name)')}</div>
+                        <div class="wr-meta">${esc(w.email || '')}</div>
+                    </div>
+                </div>`).join('')}</div>
+            <label class="winner-email-toggle">
+                <input type="checkbox" id="emailWinnerToggle" checked>
+                Email every winner their ticket, with a "you won" note
+            </label>
+            <div class="winner-actions">
+                <button class="wa-reroll" onclick="rerollWinner()">Put Back &amp; Reroll</button>
+                <button class="wa-confirm" id="confirmWinnerBtn" onclick="confirmWinner()">Confirm ${entrants.length} Winners</button>
+            </div>`;
+    }
     document.getElementById('winnerOverlay').classList.add('show');
 }
 
 function closeWinnerOverlay() {
     document.getElementById('winnerOverlay').classList.remove('show');
-    pendingWinner = null;
+    pendingWinners = [];
+    broadcastReset();
 }
 
 function rerollWinner() {
@@ -566,38 +964,37 @@ function rerollWinner() {
 }
 
 async function confirmWinner() {
-    if (!pendingWinner) return;
+    if (!pendingWinners.length) return;
     const btn = document.getElementById('confirmWinnerBtn');
     const wantsEmail = document.getElementById('emailWinnerToggle').checked;
     const prizeLabel = document.getElementById('prizeInput').value.trim();
+    const customMessage = customization.customMessage.trim();
 
-    let emailed = false;
-    if (wantsEmail) {
-        btn.disabled = true;
-        btn.textContent = 'Sending…';
-        try {
-            const r = await fetch(`/api/event/${currentEventId}/giveaway/notify-winner`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ registrationId: pendingWinner.registrationId, prizeLabel: prizeLabel || undefined }),
-            });
-            emailed = r.ok;
-            if (!r.ok) {
-                const data = await r.json().catch(() => ({}));
-                alert(data.error || 'Failed to email the winner — they still won, just resend from the dashboard if needed.');
-            }
-        } catch (_) {
-            alert('Network error sending the winner email — they still won, just resend from the dashboard if needed.');
+    if (wantsEmail) { btn.disabled = true; btn.textContent = 'Sending…'; }
+
+    for (const w of pendingWinners) {
+        let emailed = false;
+        if (wantsEmail) {
+            try {
+                const r = await fetch(`/api/event/${currentEventId}/giveaway/notify-winner`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        registrationId: w.registrationId,
+                        prizeLabel: prizeLabel || undefined,
+                        customMessage: customMessage || undefined,
+                    }),
+                });
+                emailed = r.ok;
+                if (!r.ok) {
+                    const data = await r.json().catch(() => ({}));
+                    console.error('Winner email failed', w.email, data.error);
+                }
+            } catch (_) { /* logged below via emailed=false */ }
         }
+        winners.unshift({ registrationId: w.registrationId, name: w.name, email: w.email, prizeLabel, emailed });
     }
 
-    winners.unshift({
-        registrationId: pendingWinner.registrationId,
-        name: pendingWinner.name,
-        email: pendingWinner.email,
-        prizeLabel,
-        emailed,
-    });
     renderWinners();
     closeWinnerOverlay();
     rebuildPool();
@@ -617,6 +1014,67 @@ function renderWinners() {
             <span class="wr-badge ${w.emailed ? 'emailed' : 'skipped'}">${w.emailed ? 'Emailed' : 'Not emailed'}</span>
         </div>
     `).join('');
+}
+
+// ── Presenter/display pairing ───────────────────────────────────
+function openPresentPanel() {
+    if (!presenterSessionId) presenterSessionId = crypto.randomUUID();
+    const url = `${location.origin}/giveaway-display.html?session=${presenterSessionId}`;
+    document.getElementById('presentLinkInput').value = url;
+    document.getElementById('presentOverlay').classList.add('show');
+    pollPresenterStatus();
+    clearInterval(presenterPollTimer);
+    presenterPollTimer = setInterval(pollPresenterStatus, 2000);
+}
+function closePresentPanel() {
+    document.getElementById('presentOverlay').classList.remove('show');
+    clearInterval(presenterPollTimer);
+}
+function stopPresenting() {
+    presenterSessionId = null;
+    closePresentPanel();
+    updatePresentBtn(false);
+}
+function copyPresentLink() {
+    const input = document.getElementById('presentLinkInput');
+    input.select();
+    navigator.clipboard?.writeText(input.value).catch(() => document.execCommand('copy'));
+}
+async function pollPresenterStatus() {
+    if (!presenterSessionId) return;
+    try {
+        const r = await fetch(`/api/giveaway/status/${presenterSessionId}`);
+        const data = r.ok ? await r.json() : { connected: false };
+        const statusEl = document.getElementById('presentStatus');
+        statusEl.innerHTML = data.connected
+            ? '<span class="present-dot" style="background:#34d399;box-shadow:0 0 6px #34d399;"></span> Display connected'
+            : '<span class="present-dot"></span> Waiting for the display to connect…';
+        updatePresentBtn(data.connected);
+    } catch (_) {}
+}
+function updatePresentBtn(live) {
+    document.getElementById('presentBtn').classList.toggle('live', live);
+}
+async function broadcastSpin(payload) {
+    if (!presenterSessionId) return;
+    const ev = events.find(e => e.id === currentEventId);
+    try {
+        await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'spin', payload: { ...payload, eventName: ev ? ev.name : '', theme: THEMES[customization.theme].accent } }),
+        });
+    } catch (_) {}
+}
+async function broadcastReset() {
+    if (!presenterSessionId) return;
+    try {
+        await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'reset', payload: {} }),
+        });
+    } catch (_) {}
 }
 </script>
 </body>
