@@ -234,6 +234,14 @@ function updateTicker(p, elapsedMs) {
     document.getElementById('nameTicker').textContent = tickerNames[tickerIdx];
 }
 
+// Ticker shows exactly the name under the pointer, derived from the wheel's
+// live rotation — must match giveaway.html's version exactly for sync.
+function wedgeIndexAtPointer(absRotationDeg, segDeg, n) {
+    let idx = Math.round(-absRotationDeg / segDeg - 0.5);
+    idx = ((idx % n) + n) % n;
+    return idx;
+}
+
 function flickPointer() {
     const el = document.getElementById('wheelPointer');
     el.classList.remove('flick');
@@ -256,7 +264,8 @@ function runClassicSpin(payload) {
     document.getElementById('reelWrap').classList.remove('show');
     document.getElementById('winnerWrap').classList.remove('show');
     const names = payload.poolNames || [];
-    startTicker(names);
+    const tickerEl = document.getElementById('nameTicker');
+    tickerEl.classList.add('show');
 
     const canvas = document.getElementById('wheelCanvas');
     const ctx = canvas.getContext('2d');
@@ -288,6 +297,7 @@ function runClassicSpin(payload) {
     const totalRotation = extraSpins * 360 + targetMod;
 
     canvas.style.transform = 'rotate(0deg)';
+    tickerEl.textContent = names[wedgeIndexAtPointer(0, segDeg, n)] || '';
 
     let lastTickCount = 0;
     let settled = false;
@@ -298,14 +308,14 @@ function runClassicSpin(payload) {
         settled = true;
         cancelAnimationFrame(rafId);
         canvas.style.transform = `rotate(${totalRotation}deg)`;
-        stopTicker();
+        tickerEl.classList.remove('show');
         showWinner(names[payload.winIdx], payload.prizeLabel);
     };
     const frame = (now) => {
         const p = Math.min((now - startTime) / (payload.durationSec * 1000), 1);
         const delta = spinEase(p) * totalRotation;
         canvas.style.transform = `rotate(${delta}deg)`;
-        updateTicker(p, now - startTime);
+        tickerEl.textContent = names[wedgeIndexAtPointer(delta, segDeg, n)] || '';
         // Offset by half a segment — labels sit at wedge centers, not dividers.
         const tickCount = Math.floor(Math.abs(delta) / segDeg + 0.5);
         if (tickCount > lastTickCount) { lastTickCount = tickCount; flickPointer(); }

@@ -808,6 +808,17 @@ function updateTicker(p, elapsedMs) {
     document.getElementById('nameTicker').textContent = tickerNames[tickerIdx];
 }
 
+// For the classic wheel, the ticker shows exactly the name currently under
+// the pointer (derived from the wheel's actual live rotation) instead of an
+// independently-shuffled list — otherwise the "rolling" text and what's
+// visually at the pointer never agree, and the last name shown right before
+// landing doesn't match the announced winner.
+function wedgeIndexAtPointer(absRotationDeg, segDeg, n) {
+    let idx = Math.round(-absRotationDeg / segDeg - 0.5);
+    idx = ((idx % n) + n) % n;
+    return idx;
+}
+
 // ── Tactile feedback on each wedge/item that passes ─────────────
 function flickPointer() {
     const el = document.getElementById('wheelPointer');
@@ -934,9 +945,12 @@ function spinClassic(picked) {
 
     const canvas = document.getElementById('wheelCanvas');
     const duration = 3.8 * SPEED_MULT[customization.speed];
+    const names = pool.map(reelLabel);
+    const tickerEl = document.getElementById('nameTicker');
 
-    broadcastSpin({ style: 'classic', durationSec: duration, poolNames: pool.map(reelLabel), winIdx, prizeLabel: document.getElementById('prizeInput').value.trim() });
-    startTicker();
+    broadcastSpin({ style: 'classic', durationSec: duration, poolNames: names, winIdx, prizeLabel: document.getElementById('prizeInput').value.trim() });
+    tickerEl.classList.add('show');
+    tickerEl.textContent = names[wedgeIndexAtPointer(baseRotation, segDeg, n)] || '';
 
     let lastTickCount = 0;
     let settled = false;
@@ -949,7 +963,7 @@ function spinClassic(picked) {
         currentRotation = baseRotation + totalRotation;
         canvas.style.transform = `rotate(${currentRotation}deg)`;
         spinning = false;
-        stopTicker();
+        tickerEl.classList.remove('show');
         pendingWinners = picked;
         playWinChime();
         fireConfetti();
@@ -959,8 +973,9 @@ function spinClassic(picked) {
     const frame = (now) => {
         const p = Math.min((now - startTime) / (duration * 1000), 1);
         const delta = spinEase(p) * totalRotation;
-        canvas.style.transform = `rotate(${baseRotation + delta}deg)`;
-        updateTicker(p, now - startTime);
+        const absRotation = baseRotation + delta;
+        canvas.style.transform = `rotate(${absRotation}deg)`;
+        tickerEl.textContent = names[wedgeIndexAtPointer(absRotation, segDeg, n)] || '';
         // Each wedge's name label sits at its angular center, not at the
         // divider — offset by half a segment so the flick/tick lands when
         // a name is actually under the pointer, not half a wedge early.
