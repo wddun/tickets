@@ -570,9 +570,11 @@ function rebuildPool() {
         if (t.used_at) groups[rid].checkedIn = true;
     }
     const winnerIds = new Set(winners.map(w => w.registrationId));
-    pool = Object.values(groups).filter(e =>
+    // Shuffled, not in signup/API order — otherwise the wheel wedges and
+    // reel always line up the same way every time you load the page.
+    pool = shuffled(Object.values(groups).filter(e =>
         !winnerIds.has(e.registrationId) && !manuallyExcluded.has(e.registrationId) && (!checkedInOnly || e.checkedIn)
-    );
+    ));
     renderPoolChips();
     updateSpinButton();
     if (spinnerStyle === 'classic') drawWheel(currentRotation);

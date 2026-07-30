@@ -10,7 +10,7 @@
 // + clients.claim already make that happen without the user needing to do
 // anything) — this __only__ needs bumping again if the caching *strategy*
 // changes, not for every deploy.
-const CACHE = 'wts-v17';
+const CACHE = 'wts-v18';
 
 // Only pages that genuinely need to work with no/spotty connectivity.
 const PRECACHE = [
@@ -22,9 +22,13 @@ const PRECACHE = [
 ];
 
 // Always fetch the network first for these — falling back to cache only if
-// actually offline. Everything else stays cache-first.
+// actually offline. Everything else stays cache-first. The giveaway
+// controller/display pages iterate fast and have zero offline requirement
+// (they need a live connection anyway, for SSE), so a browser that cached an
+// old copy before a fix shipped would otherwise never see the update.
 const NETWORK_FIRST_PATHS = new Set([
     '/', '/dashboard.html', '/login.html', '/settings.html', '/register.html',
+    '/giveaway.html', '/giveaway-display.html',
 ]);
 
 self.addEventListener('install', e => {
