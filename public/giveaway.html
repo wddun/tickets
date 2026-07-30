@@ -129,26 +129,55 @@
             position: relative; display: flex; flex-direction: column; align-items: center;
             padding: 10px 0 22px;
         }
-        .wheel-pointer {
-            width: 0; height: 0; z-index: 5; margin-bottom: -6px;
-            border-left: 16px solid transparent; border-right: 16px solid transparent;
-            border-top: 26px solid var(--accent);
-            filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
+        .wheel-pointer-mount {
+            display: flex; flex-direction: column; align-items: center;
+            z-index: 6; margin-bottom: -9px;
         }
+        .wheel-pointer-pivot {
+            width: 15px; height: 15px; border-radius: 50%;
+            background: radial-gradient(circle at 32% 28%, #fff 0%, var(--accent) 55%, #6b5300 100%);
+            box-shadow: 0 2px 3px rgba(0,0,0,0.55), 0 0 0 2px rgba(0,0,0,0.35);
+            margin-bottom: -4px; position: relative; z-index: 2;
+        }
+        .wheel-pointer {
+            width: 26px; height: 32px;
+            background: linear-gradient(165deg, #fff 0%, var(--accent) 32%, #6b5300 100%);
+            clip-path: polygon(4% 0%, 96% 0%, 50% 100%);
+            filter: drop-shadow(0 4px 5px rgba(0,0,0,0.6));
+            transform-origin: 50% 4px;
+        }
+        @keyframes pointerFlick {
+            0%   { transform: rotate(0deg); }
+            32%  { transform: rotate(-26deg); }
+            68%  { transform: rotate(9deg); }
+            100% { transform: rotate(0deg); }
+        }
+        .wheel-pointer.flick { animation: pointerFlick 0.16s cubic-bezier(0.34, 1.56, 0.64, 1); }
 
         .wheel-disc-wrap {
             position: relative; width: min(88vw, 380px); aspect-ratio: 1;
             border-radius: 50%;
+            box-shadow:
+                0 0 0 5px rgba(0,0,0,0.55),
+                0 0 0 9px var(--accent),
+                0 0 0 11px rgba(0,0,0,0.4),
+                0 24px 55px rgba(0,0,0,0.6);
+        }
+        .wheel-disc-wrap::after {
+            content: ''; position: absolute; inset: 0; border-radius: 50%;
+            background: radial-gradient(circle at 34% 24%, rgba(255,255,255,0.4), transparent 55%),
+                        radial-gradient(circle at 70% 82%, rgba(0,0,0,0.25), transparent 60%);
+            mix-blend-mode: overlay; pointer-events: none;
         }
         canvas#wheelCanvas {
             width: 100%; height: 100%; border-radius: 50%;
-            transition: transform 0s;
             will-change: transform;
         }
         .wheel-hub {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
             width: 15%; aspect-ratio: 1; border-radius: 50%;
-            background: var(--accent); box-shadow: 0 0 0 5px #1a1f3c, 0 0 0 8px var(--accent);
+            background: radial-gradient(circle at 35% 28%, #fff 0%, var(--accent) 45%, #6b5300 100%);
+            box-shadow: 0 0 0 5px #1a1f3c, 0 0 0 8px var(--accent), inset 0 -3px 5px rgba(0,0,0,0.4), inset 0 2px 3px rgba(255,255,255,0.5);
         }
 
         /* ── Vertical reel (slot-machine style) ── */
@@ -156,11 +185,15 @@
             display: none;
             position: relative; width: min(88vw, 320px); height: 320px;
             border-radius: 18px; overflow: hidden;
-            background: rgba(255,255,255,0.05);
-            border: 2px solid var(--accent-soft);
+            background: linear-gradient(180deg, #0d0d10, #050506 50%, #0d0d10);
+            box-shadow:
+                inset 0 0 34px rgba(0,0,0,0.65),
+                0 0 0 3px rgba(0,0,0,0.55),
+                0 0 0 6px var(--accent-soft),
+                0 20px 44px rgba(0,0,0,0.6);
         }
         .wheel-stage.style-reel .reel-wrap { display: block; }
-        .wheel-stage.style-reel .wheel-pointer,
+        .wheel-stage.style-reel .wheel-pointer-mount,
         .wheel-stage.style-reel .wheel-disc-wrap { display: none; }
         .reel-strip { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
         .reel-item {
@@ -168,12 +201,20 @@
             font-size: 20px; font-weight: 700; color: rgba(255,255,255,0.85);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 18px;
             font-family: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, sans-serif;
+            text-shadow: 0 2px 3px rgba(0,0,0,0.5);
         }
         .reel-highlight {
             position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
             height: 64px; z-index: 2; pointer-events: none;
             border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
             background: var(--accent-soft);
+            box-shadow: 0 0 16px 0 var(--accent-soft);
+            transition: background 0.08s, box-shadow 0.08s;
+        }
+        .reel-highlight.flash { background: var(--accent); box-shadow: 0 0 26px 4px var(--accent); }
+        .reel-sheen {
+            position: absolute; left: -20%; right: -20%; top: 0; height: 40%; z-index: 3; pointer-events: none;
+            background: linear-gradient(180deg, rgba(255,255,255,0.14), transparent);
         }
         .reel-fade-top, .reel-fade-bottom {
             position: absolute; left: 0; right: 0; height: 90px; z-index: 3; pointer-events: none;
@@ -375,14 +416,18 @@
         <div class="name-ticker" id="nameTicker"></div>
 
         <div class="wheel-stage" id="wheelStage">
-            <div class="wheel-pointer"></div>
+            <div class="wheel-pointer-mount">
+                <div class="wheel-pointer-pivot"></div>
+                <div class="wheel-pointer" id="wheelPointer"></div>
+            </div>
             <div class="wheel-disc-wrap">
                 <canvas id="wheelCanvas" width="600" height="600"></canvas>
                 <div class="wheel-hub"></div>
             </div>
             <div class="reel-wrap">
                 <div class="reel-strip" id="reelStrip"></div>
-                <div class="reel-highlight"></div>
+                <div class="reel-highlight" id="reelHighlight"></div>
+                <div class="reel-sheen"></div>
                 <div class="reel-fade-top"></div>
                 <div class="reel-fade-bottom"></div>
             </div>
@@ -434,7 +479,6 @@ let spinning = false;
 let pendingWinners = [];   // entrant objects currently shown in the overlay
 let currentRotation = 0;
 let manuallyExcluded = new Set();
-let tickerTimer = null;
 
 const customization = {
     theme: 'gold',
@@ -699,21 +743,76 @@ function buildReelSequence(winnerEntrant) {
     return { sequence, targetIndex: sequence.length - 1 };
 }
 
-// ── Name ticker (readable even at 500+ entrants) ──────────────
+// ── Spin physics: quick spin-up, long natural deceleration ────
+// p = normalized elapsed time [0,1] → normalized distance traveled [0,1].
+// Spends ~9% of the duration accelerating, then eases out like friction
+// slowing a real wheel/reel — this is what gives the "natural speed up
+// and slow down" feel instead of a flat ease-out the whole time.
+const SPIN_UP_FRACTION = 0.09;
+const SPIN_UP_DISTANCE = 0.15;
+function spinEase(p) {
+    if (p <= SPIN_UP_FRACTION) {
+        const q = p / SPIN_UP_FRACTION;
+        return SPIN_UP_DISTANCE * q * q;
+    }
+    const q = (p - SPIN_UP_FRACTION) / (1 - SPIN_UP_FRACTION);
+    return SPIN_UP_DISTANCE + (1 - SPIN_UP_DISTANCE) * (1 - Math.pow(1 - q, 4));
+}
+// Ticker swap interval as a function of the same normalized time — fast
+// (down to ~22ms, a real "high refresh rate" flicker) at cruise speed,
+// slow at the very start and end so it visibly speeds up and eases down
+// in lockstep with the wheel/reel itself.
+function tickerIntervalForT(p) {
+    if (p <= SPIN_UP_FRACTION) {
+        const q = p / SPIN_UP_FRACTION;
+        return 130 - (130 - 22) * q;
+    }
+    const q = (p - SPIN_UP_FRACTION) / (1 - SPIN_UP_FRACTION);
+    return 22 + (320 - 22) * Math.pow(q, 3);
+}
+
+// ── Name ticker (readable even at 500+ entrants) ────────────────
+let tickerNames = [];
+let tickerIdx = 0;
+let tickerLastSwapMs = 0;
 function startTicker() {
     const el = document.getElementById('nameTicker');
     if (!pool.length) return;
     el.classList.add('show');
-    let i = 0;
-    const names = shuffled(pool).map(reelLabel);
-    tickerTimer = setInterval(() => {
-        el.textContent = names[i % names.length];
-        i++;
-    }, 90);
+    tickerNames = shuffled(pool).map(reelLabel);
+    tickerIdx = 0;
+    tickerLastSwapMs = -Infinity;
+    el.textContent = tickerNames[0];
 }
 function stopTicker() {
-    clearInterval(tickerTimer);
     document.getElementById('nameTicker').classList.remove('show');
+}
+function updateTicker(p, elapsedMs) {
+    const interval = tickerIntervalForT(p);
+    if (elapsedMs - tickerLastSwapMs < interval) return;
+    tickerLastSwapMs = elapsedMs;
+    tickerIdx++;
+    if (tickerIdx >= tickerNames.length) {
+        tickerNames = shuffled(pool).map(reelLabel);
+        tickerIdx = 0;
+    }
+    document.getElementById('nameTicker').textContent = tickerNames[tickerIdx];
+}
+
+// ── Tactile feedback on each wedge/item that passes ─────────────
+function flickPointer() {
+    const el = document.getElementById('wheelPointer');
+    el.classList.remove('flick');
+    void el.offsetWidth;
+    el.classList.add('flick');
+}
+function flashHighlight() {
+    const el = document.getElementById('reelHighlight');
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+    clearTimeout(flashHighlight._t);
+    flashHighlight._t = setTimeout(() => el.classList.remove('flash'), 90);
 }
 
 // ── Sound (synthesized — no audio assets) ──────────────────────
@@ -753,19 +852,6 @@ function playWinChime() {
             osc.start(t0); osc.stop(t0 + 0.42);
         });
     } catch (_) {}
-}
-function scheduleSpinTicks(durationMs) {
-    if (!customization.sound) return;
-    let delay = 60;
-    let elapsed = 0;
-    function tick() {
-        if (elapsed >= durationMs) return;
-        playTick();
-        delay = Math.min(delay * 1.12, 400);
-        elapsed += delay;
-        setTimeout(tick, delay);
-    }
-    tick();
 }
 
 // ── Confetti (lightweight, no library) ─────────────────────────
@@ -834,27 +920,25 @@ function spinClassic(picked) {
     const jitter = (Math.random() - 0.5) * segDeg * 0.6;
     const extraSpins = 5;
     const targetMod = ((-(centerDeg + jitter)) % 360 + 360) % 360;
-    const finalRotation = currentRotation - (currentRotation % 360) + extraSpins * 360 + targetMod;
+    const baseRotation = currentRotation;
+    const totalRotation = extraSpins * 360 + targetMod - (currentRotation % 360);
 
     const canvas = document.getElementById('wheelCanvas');
     const duration = 3.8 * SPEED_MULT[customization.speed];
-    canvas.style.transition = `transform ${duration}s cubic-bezier(0.12, 0.67, 0.1, 1)`;
 
     broadcastSpin({ style: 'classic', durationSec: duration, poolNames: pool.map(reelLabel), winIdx, prizeLabel: document.getElementById('prizeInput').value.trim() });
     startTicker();
-    scheduleSpinTicks(duration * 1000);
 
-    // A backgrounded/throttled tab can fail to fire transitionend at all —
-    // fall back to a timer so the spin always resolves instead of leaving
-    // spinning=true (and the Spin button disabled) stuck forever.
+    let lastTickCount = 0;
     let settled = false;
+    const startTime = performance.now();
+    let rafId;
     const finish = () => {
         if (settled) return;
         settled = true;
-        canvas.removeEventListener('transitionend', finish);
-        clearTimeout(fallbackTimer);
-        canvas.style.transition = 'transform 0s';
-        currentRotation = finalRotation;
+        cancelAnimationFrame(rafId);
+        currentRotation = baseRotation + totalRotation;
+        canvas.style.transform = `rotate(${currentRotation}deg)`;
         spinning = false;
         stopTicker();
         pendingWinners = picked;
@@ -863,12 +947,25 @@ function spinClassic(picked) {
         showWinnerOverlay(pendingWinners);
         updateSpinButton();
     };
-    canvas.addEventListener('transitionend', finish);
-    const fallbackTimer = setTimeout(finish, duration * 1000 + 500);
-    // Force a reflow so the transition reliably applies before changing transform
-    void canvas.offsetWidth;
-    currentRotation = finalRotation;
-    canvas.style.transform = `rotate(${finalRotation}deg)`;
+    const frame = (now) => {
+        const p = Math.min((now - startTime) / (duration * 1000), 1);
+        const delta = spinEase(p) * totalRotation;
+        canvas.style.transform = `rotate(${baseRotation + delta}deg)`;
+        updateTicker(p, now - startTime);
+        const tickCount = Math.floor(Math.abs(delta) / segDeg);
+        if (tickCount > lastTickCount) {
+            lastTickCount = tickCount;
+            flickPointer();
+            playTick();
+        }
+        if (p < 1) rafId = requestAnimationFrame(frame);
+        else finish();
+    };
+    rafId = requestAnimationFrame(frame);
+    // A backgrounded/throttled tab can stall rAF entirely — fall back to a
+    // timer so the spin always resolves instead of leaving spinning=true
+    // (and the Spin button disabled) stuck forever.
+    setTimeout(finish, duration * 1000 + 800);
 }
 
 function spinReel(picked) {
@@ -877,13 +974,10 @@ function spinReel(picked) {
     const { sequence, targetIndex } = buildReelSequence(primary);
 
     strip.innerHTML = sequence.map(e => `<div class="reel-item">${esc(reelLabel(e))}</div>`).join('');
-    strip.style.transition = 'transform 0s';
     strip.style.transform = 'translateY(0px)';
-    void strip.offsetHeight; // force reflow before animating
 
     const targetOffset = -(targetIndex * REEL_ITEM_H + REEL_ITEM_H / 2) + REEL_WINDOW_H / 2;
     const duration = 4.2 * SPEED_MULT[customization.speed];
-    strip.style.transition = `transform ${duration}s cubic-bezier(0.1, 0.7, 0.15, 1)`;
 
     broadcastSpin({
         style: 'reel', durationSec: duration,
@@ -892,14 +986,16 @@ function spinReel(picked) {
         prizeLabel: document.getElementById('prizeInput').value.trim(),
     });
     startTicker();
-    scheduleSpinTicks(duration * 1000);
 
+    let lastTickCount = 0;
     let settled = false;
+    const startTime = performance.now();
+    let rafId;
     const finish = () => {
         if (settled) return;
         settled = true;
-        strip.removeEventListener('transitionend', finish);
-        clearTimeout(fallbackTimer);
+        cancelAnimationFrame(rafId);
+        strip.style.transform = `translateY(${targetOffset}px)`;
         spinning = false;
         stopTicker();
         pendingWinners = picked;
@@ -908,9 +1004,22 @@ function spinReel(picked) {
         showWinnerOverlay(pendingWinners);
         updateSpinButton();
     };
-    strip.addEventListener('transitionend', finish);
-    const fallbackTimer = setTimeout(finish, duration * 1000 + 500);
-    strip.style.transform = `translateY(${targetOffset}px)`;
+    const frame = (now) => {
+        const p = Math.min((now - startTime) / (duration * 1000), 1);
+        const offset = spinEase(p) * targetOffset;
+        strip.style.transform = `translateY(${offset}px)`;
+        updateTicker(p, now - startTime);
+        const tickCount = Math.floor(Math.abs(offset) / REEL_ITEM_H);
+        if (tickCount > lastTickCount) {
+            lastTickCount = tickCount;
+            flashHighlight();
+            playTick();
+        }
+        if (p < 1) rafId = requestAnimationFrame(frame);
+        else finish();
+    };
+    rafId = requestAnimationFrame(frame);
+    setTimeout(finish, duration * 1000 + 800);
 }
 
 // ── Winner overlay ───────────────────────────────────────────

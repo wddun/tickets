@@ -41,28 +41,62 @@
 
         .wheel-disc-wrap {
             position: relative; width: min(70vh, 60vw); aspect-ratio: 1; border-radius: 50%; display: none;
+            box-shadow:
+                0 0 0 5px rgba(0,0,0,0.55),
+                0 0 0 9px var(--accent),
+                0 0 0 11px rgba(0,0,0,0.4),
+                0 30px 70px rgba(0,0,0,0.65);
         }
         .wheel-disc-wrap.show { display: block; }
-        canvas#wheelCanvas { width: 100%; height: 100%; border-radius: 50%; will-change: transform; }
-        .wheel-pointer {
-            width: 0; height: 0; margin-bottom: -1.4vh; z-index: 5;
-            border-left: 3vh solid transparent; border-right: 3vh solid transparent;
-            border-top: 5vh solid var(--accent);
-            filter: drop-shadow(0 3px 5px rgba(0,0,0,0.5));
-            display: none;
+        .wheel-disc-wrap::after {
+            content: ''; position: absolute; inset: 0; border-radius: 50%;
+            background: radial-gradient(circle at 34% 24%, rgba(255,255,255,0.4), transparent 55%),
+                        radial-gradient(circle at 70% 82%, rgba(0,0,0,0.25), transparent 60%);
+            mix-blend-mode: overlay; pointer-events: none;
         }
-        .wheel-pointer.show { display: block; }
+        canvas#wheelCanvas { width: 100%; height: 100%; border-radius: 50%; will-change: transform; }
+        .wheel-pointer-mount {
+            display: none; flex-direction: column; align-items: center;
+            z-index: 6; margin-bottom: -1.6vh;
+        }
+        .wheel-pointer-mount.show { display: flex; }
+        .wheel-pointer-pivot {
+            width: 2.6vh; height: 2.6vh; border-radius: 50%;
+            background: radial-gradient(circle at 32% 28%, #fff 0%, var(--accent) 55%, #6b5300 100%);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.55), 0 0 0 3px rgba(0,0,0,0.35);
+            margin-bottom: -0.7vh; position: relative; z-index: 2;
+        }
+        .wheel-pointer {
+            width: 4.6vh; height: 5.6vh;
+            background: linear-gradient(165deg, #fff 0%, var(--accent) 32%, #6b5300 100%);
+            clip-path: polygon(4% 0%, 96% 0%, 50% 100%);
+            filter: drop-shadow(0 5px 7px rgba(0,0,0,0.6));
+            transform-origin: 50% 6%;
+        }
+        @keyframes pointerFlick {
+            0%   { transform: rotate(0deg); }
+            32%  { transform: rotate(-26deg); }
+            68%  { transform: rotate(9deg); }
+            100% { transform: rotate(0deg); }
+        }
+        .wheel-pointer.flick { animation: pointerFlick 0.16s cubic-bezier(0.34, 1.56, 0.64, 1); }
         .wheel-hub {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
             width: 15%; aspect-ratio: 1; border-radius: 50%;
-            background: var(--accent); box-shadow: 0 0 0 6px #000, 0 0 0 10px var(--accent);
+            background: radial-gradient(circle at 35% 28%, #fff 0%, var(--accent) 45%, #6b5300 100%);
+            box-shadow: 0 0 0 6px #000, 0 0 0 10px var(--accent), inset 0 -3px 6px rgba(0,0,0,0.4), inset 0 2px 4px rgba(255,255,255,0.5);
         }
 
         .reel-wrap {
             display: none;
             position: relative; width: min(70vw, 520px); height: min(56vh, 460px);
             border-radius: 24px; overflow: hidden;
-            background: rgba(255,255,255,0.05); border: 3px solid var(--accent-soft);
+            background: linear-gradient(180deg, #0d0d10, #050506 50%, #0d0d10);
+            box-shadow:
+                inset 0 0 40px rgba(0,0,0,0.65),
+                0 0 0 4px rgba(0,0,0,0.55),
+                0 0 0 8px var(--accent-soft),
+                0 26px 60px rgba(0,0,0,0.65);
         }
         .reel-wrap.show { display: block; }
         .reel-strip { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
@@ -71,12 +105,20 @@
             font-size: clamp(24px, 3.4vw, 42px); font-weight: 800; color: rgba(255,255,255,0.85);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 24px;
             font-family: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, sans-serif;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
         }
         .reel-highlight {
             position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
             z-index: 2; pointer-events: none;
             border-top: 3px solid var(--accent); border-bottom: 3px solid var(--accent);
             background: var(--accent-soft);
+            box-shadow: 0 0 22px 0 var(--accent-soft);
+            transition: background 0.08s, box-shadow 0.08s;
+        }
+        .reel-highlight.flash { background: var(--accent); box-shadow: 0 0 34px 6px var(--accent); }
+        .reel-sheen {
+            position: absolute; left: -20%; right: -20%; top: 0; height: 40%; z-index: 3; pointer-events: none;
+            background: linear-gradient(180deg, rgba(255,255,255,0.14), transparent);
         }
         .reel-fade-top, .reel-fade-bottom {
             position: absolute; left: 0; right: 0; height: 22%; z-index: 3; pointer-events: none;
@@ -103,7 +145,10 @@
 <div class="idle-msg" id="idleMsg">Get ready…</div>
 <div class="name-ticker" id="nameTicker"></div>
 
-<div class="wheel-pointer" id="wheelPointer"></div>
+<div class="wheel-pointer-mount" id="wheelPointerMount">
+    <div class="wheel-pointer-pivot"></div>
+    <div class="wheel-pointer" id="wheelPointer"></div>
+</div>
 <div class="wheel-disc-wrap" id="wheelDiscWrap">
     <canvas id="wheelCanvas" width="900" height="900"></canvas>
     <div class="wheel-hub"></div>
@@ -111,6 +156,7 @@
 <div class="reel-wrap" id="reelWrap">
     <div class="reel-strip" id="reelStrip"></div>
     <div class="reel-highlight" id="reelHighlight"></div>
+    <div class="reel-sheen"></div>
     <div class="reel-fade-top"></div>
     <div class="reel-fade-bottom"></div>
 </div>
@@ -126,7 +172,6 @@ const sessionId = new URLSearchParams(location.search).get('session');
 if (!sessionId) document.body.innerHTML = '<div class="idle-msg">Missing session — open this link from the giveaway page\'s Present panel.</div>';
 
 const WHEEL_PALETTE = ['#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b'];
-let tickerTimer = null;
 
 function esc(s) {
     const d = document.createElement('div');
@@ -136,37 +181,84 @@ function esc(s) {
 
 function setIdle() {
     document.getElementById('idleMsg').style.display = 'block';
-    document.getElementById('wheelPointer').classList.remove('show');
+    document.getElementById('wheelPointerMount').classList.remove('show');
     document.getElementById('wheelDiscWrap').classList.remove('show');
     document.getElementById('reelWrap').classList.remove('show');
     document.getElementById('winnerWrap').classList.remove('show');
     stopTicker();
 }
 
+// ── Spin physics — must match giveaway.html exactly so the two screens
+// land in visual sync (quick spin-up, long natural deceleration).
+const SPIN_UP_FRACTION = 0.09;
+const SPIN_UP_DISTANCE = 0.15;
+function spinEase(p) {
+    if (p <= SPIN_UP_FRACTION) {
+        const q = p / SPIN_UP_FRACTION;
+        return SPIN_UP_DISTANCE * q * q;
+    }
+    const q = (p - SPIN_UP_FRACTION) / (1 - SPIN_UP_FRACTION);
+    return SPIN_UP_DISTANCE + (1 - SPIN_UP_DISTANCE) * (1 - Math.pow(1 - q, 4));
+}
+function tickerIntervalForT(p) {
+    if (p <= SPIN_UP_FRACTION) {
+        const q = p / SPIN_UP_FRACTION;
+        return 130 - (130 - 22) * q;
+    }
+    const q = (p - SPIN_UP_FRACTION) / (1 - SPIN_UP_FRACTION);
+    return 22 + (320 - 22) * Math.pow(q, 3);
+}
+
+let tickerNames = [];
+let tickerIdx = 0;
+let tickerLastSwapMs = 0;
 function startTicker(names) {
     const el = document.getElementById('nameTicker');
     if (!names.length) return;
     el.classList.add('show');
-    let i = 0;
-    tickerTimer = setInterval(() => { el.textContent = names[i % names.length]; i++; }, 90);
+    tickerNames = names;
+    tickerIdx = 0;
+    tickerLastSwapMs = -Infinity;
+    el.textContent = tickerNames[0];
 }
 function stopTicker() {
-    clearInterval(tickerTimer);
     document.getElementById('nameTicker').classList.remove('show');
+}
+function updateTicker(p, elapsedMs) {
+    const interval = tickerIntervalForT(p);
+    if (elapsedMs - tickerLastSwapMs < interval) return;
+    tickerLastSwapMs = elapsedMs;
+    tickerIdx = (tickerIdx + 1) % tickerNames.length;
+    document.getElementById('nameTicker').textContent = tickerNames[tickerIdx];
+}
+
+function flickPointer() {
+    const el = document.getElementById('wheelPointer');
+    el.classList.remove('flick');
+    void el.offsetWidth;
+    el.classList.add('flick');
+}
+function flashHighlight() {
+    const el = document.getElementById('reelHighlight');
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+    clearTimeout(flashHighlight._t);
+    flashHighlight._t = setTimeout(() => el.classList.remove('flash'), 90);
 }
 
 function runClassicSpin(payload) {
     document.getElementById('idleMsg').style.display = 'none';
-    document.getElementById('wheelPointer').classList.add('show');
+    document.getElementById('wheelPointerMount').classList.add('show');
     document.getElementById('wheelDiscWrap').classList.add('show');
     document.getElementById('reelWrap').classList.remove('show');
     document.getElementById('winnerWrap').classList.remove('show');
-    startTicker(payload.poolNames || []);
+    const names = payload.poolNames || [];
+    startTicker(names);
 
     const canvas = document.getElementById('wheelCanvas');
     const ctx = canvas.getContext('2d');
     const size = canvas.width, cx = size / 2, cy = size / 2, radius = size / 2 - 8;
-    const names = payload.poolNames || [];
     const n = Math.max(names.length, 1);
     const seg = (Math.PI * 2) / n;
     const showLabels = names.length > 0 && names.length <= 50;
@@ -191,32 +283,44 @@ function runClassicSpin(payload) {
     const centerDeg = payload.winIdx * segDeg + segDeg / 2;
     const extraSpins = 5;
     const targetMod = ((-centerDeg) % 360 + 360) % 360;
-    const finalRotation = extraSpins * 360 + targetMod;
+    const totalRotation = extraSpins * 360 + targetMod;
 
-    canvas.style.transition = 'transform 0s';
     canvas.style.transform = 'rotate(0deg)';
-    void canvas.offsetWidth;
-    canvas.style.transition = `transform ${payload.durationSec}s cubic-bezier(0.12, 0.67, 0.1, 1)`;
-    canvas.style.transform = `rotate(${finalRotation}deg)`;
 
+    let lastTickCount = 0;
     let settled = false;
+    const startTime = performance.now();
+    let rafId;
     const finish = () => {
         if (settled) return;
         settled = true;
+        cancelAnimationFrame(rafId);
+        canvas.style.transform = `rotate(${totalRotation}deg)`;
         stopTicker();
         showWinner(names[payload.winIdx], payload.prizeLabel);
     };
-    canvas.addEventListener('transitionend', finish, { once: true });
-    setTimeout(finish, payload.durationSec * 1000 + 500);
+    const frame = (now) => {
+        const p = Math.min((now - startTime) / (payload.durationSec * 1000), 1);
+        const delta = spinEase(p) * totalRotation;
+        canvas.style.transform = `rotate(${delta}deg)`;
+        updateTicker(p, now - startTime);
+        const tickCount = Math.floor(Math.abs(delta) / segDeg);
+        if (tickCount > lastTickCount) { lastTickCount = tickCount; flickPointer(); }
+        if (p < 1) rafId = requestAnimationFrame(frame);
+        else finish();
+    };
+    rafId = requestAnimationFrame(frame);
+    setTimeout(finish, payload.durationSec * 1000 + 800);
 }
 
 function runReelSpin(payload) {
     document.getElementById('idleMsg').style.display = 'none';
-    document.getElementById('wheelPointer').classList.remove('show');
+    document.getElementById('wheelPointerMount').classList.remove('show');
     document.getElementById('wheelDiscWrap').classList.remove('show');
     document.getElementById('reelWrap').classList.add('show');
     document.getElementById('winnerWrap').classList.remove('show');
-    startTicker(payload.sequenceNames || []);
+    const names = payload.sequenceNames || [];
+    startTicker(names);
 
     const wrap = document.getElementById('reelWrap');
     const strip = document.getElementById('reelStrip');
@@ -228,24 +332,35 @@ function runReelSpin(payload) {
     const itemH = payload.itemHeight * scale;
     highlight.style.height = itemH + 'px';
 
-    strip.innerHTML = (payload.sequenceNames || []).map(name => `<div class="reel-item" style="height:${itemH}px;">${esc(name)}</div>`).join('');
-    strip.style.transition = 'transform 0s';
+    strip.innerHTML = names.map(name => `<div class="reel-item" style="height:${itemH}px;">${esc(name)}</div>`).join('');
     strip.style.transform = 'translateY(0px)';
-    void strip.offsetHeight;
 
     const targetOffset = -(payload.targetIndex * itemH + itemH / 2) + wrapH / 2;
-    strip.style.transition = `transform ${payload.durationSec}s cubic-bezier(0.1, 0.7, 0.15, 1)`;
-    strip.style.transform = `translateY(${targetOffset}px)`;
 
+    let lastTickCount = 0;
     let settled = false;
+    const startTime = performance.now();
+    let rafId;
     const finish = () => {
         if (settled) return;
         settled = true;
+        cancelAnimationFrame(rafId);
+        strip.style.transform = `translateY(${targetOffset}px)`;
         stopTicker();
-        showWinner(payload.sequenceNames[payload.targetIndex], payload.prizeLabel);
+        showWinner(names[payload.targetIndex], payload.prizeLabel);
     };
-    strip.addEventListener('transitionend', finish, { once: true });
-    setTimeout(finish, payload.durationSec * 1000 + 500);
+    const frame = (now) => {
+        const p = Math.min((now - startTime) / (payload.durationSec * 1000), 1);
+        const offset = spinEase(p) * targetOffset;
+        strip.style.transform = `translateY(${offset}px)`;
+        updateTicker(p, now - startTime);
+        const tickCount = Math.floor(Math.abs(offset) / itemH);
+        if (tickCount > lastTickCount) { lastTickCount = tickCount; flashHighlight(); }
+        if (p < 1) rafId = requestAnimationFrame(frame);
+        else finish();
+    };
+    rafId = requestAnimationFrame(frame);
+    setTimeout(finish, payload.durationSec * 1000 + 800);
 }
 
 function showWinner(name, prizeLabel) {
