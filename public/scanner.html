@@ -1587,6 +1587,9 @@ let scanCardTimer = null;
 
 // Full-screen colored flash — auto-dismisses after 3s, tap also dismisses
 function showFlash(data) {
+    // Hold off a service-worker update reload while a result is on screen, so
+    // an update can never blank the answer someone is reading at the door.
+    window.__swHoldReload = true;
     const status = data.status || 'error';
     const overlay = document.getElementById('resultOverlay');
     overlay.style.background = OVERLAY_COLORS[status] || OVERLAY_COLORS.error;
@@ -1733,6 +1736,7 @@ function openExitConfirm(data) {
 }
 
 function closeResult() {
+    window.__swHoldReload = false;
     clearTimeout(flashTimer);
     clearTimeout(exitConfirmTimer);
     exitConfirmTimer = null;
@@ -2169,9 +2173,9 @@ function dismissIOSBanner() {
     localStorage.setItem('ios-banner-dismissed', '1');
 }
 
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js');
-}
+// Registration and update handling live in sw-register.js — see the note
+// there about why a plain register() leaves installs stuck on old builds.
 </script>
+    <script src="/sw-register.js"></script>
 </body>
 </html>
