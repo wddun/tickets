@@ -8,14 +8,44 @@
 // the page comes back to the foreground, and reloads once the new worker takes
 // over.
 //
-// ?fresh=1 is the escape hatch: it unregisters every worker and deletes every
-// cache, then reloads clean. Hand that link to anyone stuck on an old build.
+// ?fresh=1 is the escape hatch, and it is safe to leave on every generated
+// link because it is conditional: it only wipes anything when this client is
+// actually running a pre-network-first worker.
+//
+// Telling the two apart is easy — the old worker has no message handler at
+// all, so it can never answer a version ping. A modern worker replies, and we
+// strip the parameter and carry on without touching the cache. That matters:
+// unconditionally purging on every open would throw away the offline copy the
+// door depends on, right at the moment someone is opening the scanner, and on
+// a bad venue connection they'd have neither cache nor network.
 (function () {
     if (!('serviceWorker' in navigator)) return;
 
     var url = new URL(window.location.href);
 
-    if (url.searchParams.has('fresh')) {
+    function stripFreshFromHistory() {
+        url.searchParams.delete('fresh');
+        try { window.history.replaceState({}, '', url.toString()); } catch (e) {}
+    }
+
+    // Resolves true when a modern worker (one that answers) is in control.
+    function hasModernWorker() {
+        return new Promise(function (resolve) {
+            var sw = navigator.serviceWorker.controller;
+            if (!sw) return resolve(false);
+            var done = false;
+            var ch = new MessageChannel();
+            ch.port1.onmessage = function (e) {
+                if (done) return;
+                done = true;
+                resolve(!!(e.data && e.data.type === 'version'));
+            };
+            try { sw.postMessage({ type: 'get-version' }, [ch.port2]); } catch (e) { return resolve(false); }
+            setTimeout(function () { if (!done) { done = true; resolve(false); } }, 600);
+        });
+    }
+
+    function purgeAndReload() {
         url.searchParams.delete('fresh');
         Promise.all([
             navigator.serviceWorker.getRegistrations().then(function (rs) {
@@ -28,9 +58,23 @@
             // replace() so the cleanup URL doesn't sit in history and re-run.
             window.location.replace(url.toString());
         });
-        return;
     }
 
+    if (url.searchParams.has('fresh')) {
+        hasModernWorker().then(function (modern) {
+            if (modern) {
+                // Already self-updating: nothing to clear, no reload, no flash.
+                stripFreshFromHistory();
+                start();
+            } else {
+                purgeAndReload();
+            }
+        });
+        return;
+    }
+    start();
+
+    function start() {
     // Has a worker ever controlled this page? Reloading for the *first* claim
     // would be a pointless flash on a first visit (or right after ?fresh=1,
     // which leaves the page briefly uncontrolled), but every claim after that
@@ -95,4 +139,5 @@
             if (document.visibilityState === 'visible') check();
         });
     }).catch(function () {});
+    }
 })();

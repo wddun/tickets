@@ -55,9 +55,17 @@ self.addEventListener('activate', e => {
     })());
 });
 
-// Lets a page force a waiting worker to take over immediately.
 self.addEventListener('message', e => {
-    if (e.data && e.data.type === 'skip-waiting') self.skipWaiting();
+    if (!e.data) return;
+    // Lets a page force a waiting worker to take over immediately.
+    if (e.data.type === 'skip-waiting') self.skipWaiting();
+    // Answers ?fresh=1's "are you a modern worker?" ping. The pre-network-first
+    // worker had no message handler at all and so can never reply — that
+    // silence is exactly how the page tells the two apart and decides whether
+    // a cache purge is actually warranted.
+    if (e.data.type === 'get-version' && e.ports && e.ports[0]) {
+        e.ports[0].postMessage({ type: 'version', cache: CACHE });
+    }
 });
 
 function isDocumentRequest(request, url) {

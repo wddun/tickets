@@ -4727,8 +4727,13 @@ app.post('/api/scan-link/exit', (req, res) => {
     res.json({ success: true });
 });
 
+// fresh=1 rides along on every scan link, including ones already printed on a
+// QR code or shared months ago — adding it here rather than to the emitted URL
+// means the link people copy stays clean and old links get it for free. It is
+// a no-op for a client already on a self-updating worker (see sw-register.js);
+// it only does anything for one still stuck on the old cache-first build.
 app.get('/scan/:token', (req, res) => {
-    res.redirect(`/scanner.html?scanToken=${encodeURIComponent(req.params.token)}`);
+    res.redirect(`/scanner.html?scanToken=${encodeURIComponent(req.params.token)}&fresh=1`);
 });
 
 // Confirm reentry check-out — no session required (scanner/display support
@@ -6501,7 +6506,7 @@ app.get('/api/display/token/:eventId', requireAuthOrScanLink, async (req, res) =
         stmt.events.setDisplayToken.run(tok, eventId);
         event = rowToEvent(stmt.events.byId.get(eventId));
     }
-    res.json({ token: event.displayToken, url: `${BASE_URL}/display.html?token=${event.displayToken}` });
+    res.json({ token: event.displayToken, url: `${BASE_URL}/display.html?token=${event.displayToken}&fresh=1` });
 });
 
 // QR code PNG for the display URL (used by web scanner settings page)
@@ -6516,7 +6521,7 @@ app.get('/api/display/qr/:eventId', requireAuthOrScanLink, async (req, res) => {
         event = rowToEvent(stmt.events.byId.get(eventId));
     }
     const pair = req.query.pair || '';
-    const url = `${BASE_URL}/display.html?token=${event.displayToken}${pair ? `&pair=${encodeURIComponent(pair)}` : ''}`;
+    const url = `${BASE_URL}/display.html?token=${event.displayToken}${pair ? `&pair=${encodeURIComponent(pair)}` : ''}&fresh=1`;
     try {
         const png = await QRCode.toBuffer(url, { width: 400, margin: 2 });
         res.set('Content-Type', 'image/png').set('Cache-Control', 'no-cache').send(png);
@@ -6531,7 +6536,7 @@ app.post('/api/display/token/:eventId/rotate', requireAuthOrScanLink, async (req
     if (!requestEventCapabilities(req, eventId).length) return res.status(403).json({ error: 'Not authorized' });
     const tok = crypto.randomBytes(24).toString('hex');
     stmt.events.setDisplayToken.run(tok, eventId);
-    res.json({ token: tok, url: `${BASE_URL}/display.html?token=${tok}` });
+    res.json({ token: tok, url: `${BASE_URL}/display.html?token=${tok}&fresh=1` });
 });
 
 // Event info for display page (public — display token is the auth)
