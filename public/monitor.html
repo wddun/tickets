@@ -1001,13 +1001,14 @@
             });
             const data = r.ok ? await r.json() : null;
             const notifForm = document.getElementById(`notify-${pairToken}`);
-            if (data && data.delivered > 0) {
+            if (data && (data.delivered > 0 || data.pushed > 0)) {
                 if (notifForm) notifForm.classList.remove('open');
                 if (msgEl) msgEl.value = '';
                 const sentCard = document.getElementById(`card-${pairToken}`);
                 if (sentCard) { sentCard.style.outline = '3px solid #6366f1'; setTimeout(() => sentCard.style.outline = '', 1200); }
             } else {
                 // Scanner is in the registry but its SSE channel is not active
+                // and it has no push token on file — nothing could deliver it.
                 const errEl = notifForm?.querySelector('.notify-err');
                 if (errEl) { errEl.textContent = 'Scanner offline — notification not delivered.'; errEl.style.display = 'block'; setTimeout(() => errEl.style.display = 'none', 4000); }
             }

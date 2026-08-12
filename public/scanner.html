@@ -1177,7 +1177,10 @@ async function initScanLinkMode(scanToken, opts = {}) {
     document.getElementById('eventPicker').classList.remove('show');
     document.getElementById('gateScanCancelWrap').style.display = 'none';
     qrScanReturnTo = null;
-    currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, source: 'link' };
+    // scanToken is kept on currentEvent (not just used to resolve the link)
+    // so every subsequent /api/validate and /api/checkout call can prove
+    // this device holds a real, still-valid scan-link token for this event.
+    currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, source: 'link', scanLinkToken: scanToken };
     playEnteringAnimation(currentEvent, { showExitButton: true });
     ensureCameraRunning();
     initScannerChannel();
@@ -1251,6 +1254,14 @@ function getScannerDeviceName() {
 
 function getSelectedEventId() {
     return currentEvent ? currentEvent.eventId : null;
+}
+
+// The server requires proof of authorization on every validate/checkout
+// call: a live session, or a real scan-link token. Session cookies go along
+// automatically (same-origin fetch); this only needs to add the scan-link
+// token when that's how this device got onto the event.
+function getScanLinkToken() {
+    return (currentEvent && currentEvent.source === 'link') ? currentEvent.scanLinkToken : undefined;
 }
 
 function sendHeartbeat() {
@@ -1680,7 +1691,7 @@ async function confirmCheckout() {
         await fetch('/api/checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: pendingCheckoutToken, pairToken: SCANNER_PAIR_TOKEN }),
+            body: JSON.stringify({ token: pendingCheckoutToken, pairToken: SCANNER_PAIR_TOKEN, scanLinkToken: getScanLinkToken() }),
             signal: controller.signal
         });
     } catch (_) {}
@@ -1741,10 +1752,15 @@ function onScanSuccess(decodedText) {
         headers: { 'Content-Type': 'application/json' },
         // eventId lets the server reject a ticket that's valid for a
         // *different* event than the one currently selected on this scanner.
-        body: JSON.stringify({ token, pairToken: SCANNER_PAIR_TOKEN, eventId: getSelectedEventId() })
+        body: JSON.stringify({ token, pairToken: SCANNER_PAIR_TOKEN, eventId: getSelectedEventId(), scanLinkToken: getScanLinkToken() })
     })
-    .then(r => r.json())
-    .then(data => {
+    .then(r => r.json().then(data => ({ status: r.status, data })))
+    .then(({ status, data }) => {
+        if (status === 401) {
+            playSound('error');
+            showFlash({ status: 'error', name: 'Not signed in — reload and sign in or rescan the event QR code.' });
+            return;
+        }
         data._token = token;
         const isSuccess = data.status === 'valid' || data.status === 'reentry_enter';
         const sound = isSuccess ? 'success' : data.status === 'reentry_exit' ? 'checkout' : 'error';

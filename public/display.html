@@ -210,7 +210,7 @@
                         await fetch('/api/checkout', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ registrationId: data.registrationId })
+                            body: JSON.stringify({ registrationId: data.registrationId, displayToken: token })
                         });
                         setIdle();
                     } catch (e) {

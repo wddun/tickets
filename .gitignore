@@ -15,3 +15,5 @@ public/uploads/
 db-migrated.flag
 .claude/worktrees/
 screenshot.png
+pass-cache/
+.DS_Store

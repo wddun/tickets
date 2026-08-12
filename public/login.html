@@ -141,8 +141,11 @@
             try {
                 const r = await fetch('/api/auth/me', { cache: 'no-store' });
                 if (r.ok) {
+                    const user = (await r.json()).user;
                     const next = new URLSearchParams(window.location.search).get('next');
-                    window.location.replace((next && next.startsWith('/')) ? next : '/dashboard.html');
+                    // Redirect to dashboard only if admin, otherwise home
+                    const defaultPage = user.isAdmin ? '/dashboard.html' : '/';
+                    window.location.replace((next && next.startsWith('/')) ? next : defaultPage);
                     return;
                 }
             } catch {}
@@ -203,7 +206,10 @@
                     showTotpState(data.pendingToken);
                 } else if (data.success) {
                     const next = new URLSearchParams(window.location.search).get('next');
-                    window.location.href = (next && next.startsWith('/')) ? next : '/dashboard.html';
+                    const userR = await fetch('/api/auth/me', { cache: 'no-store' });
+                    const isAdmin = userR.ok ? (await userR.json()).user.isAdmin : false;
+                    const defaultPage = isAdmin ? '/dashboard.html' : '/';
+                    window.location.href = (next && next.startsWith('/')) ? next : defaultPage;
                 } else {
                     alert('Error: ' + data.error);
                 }
