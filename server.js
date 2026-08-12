@@ -1626,7 +1626,29 @@ app.post('/api/auth/resend-verify', loginLimiter, async (req, res) => {
 });
 
 app.get('/api/auth/me', (req, res) => {
-    if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
+    if (!req.session.userId) {
+        // Door staff on a scan link have no account, but they are a caller —
+        // report the scoped identity so the scanner and check-in list can tell
+        // the difference between "not signed in" and "signed in as nobody".
+        const scoped = sessionScanLink(req);
+        if (scoped) {
+            const event = rowToEvent(stmt.events.byId.get(scoped.eventId));
+            // Enough for the scanner to rebuild its locked-event state when
+            // the page is reopened without the token in the URL — coming back
+            // from the check-in list, mainly.
+            return res.json({
+                user: null,
+                scanLink: {
+                    eventId: scoped.eventId,
+                    eventName: event ? event.name : '',
+                    color: event ? event.color : null,
+                    allowReentry: event ? event.allowReentry : false,
+                    capabilities: SCAN_LINK_CAPABILITIES.slice(),
+                },
+            });
+        }
+        return res.status(401).json({ error: 'Not logged in' });
+    }
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user.email === process.env.ADMIN_EMAIL;
     // hasRooms tells the login page whether to land this user on the dashboard
@@ -1991,6 +2013,46 @@ function userEventCapabilities(userId, eventId) {
 
 function userHasEventCapability(userId, eventId, capability) {
     return userEventCapabilities(userId, eventId).includes(capability);
+}
+
+// ── Scan-link sessions (no-login door staff) ───────────────────────────────
+//
+// Opening a scan link puts a scoped identity on the session: one event, a
+// fixed set of capabilities, no user account. It lets door staff work the
+// check-in list and put a display on screen without an account, while staying
+// far short of what a real collaborator can do — no editing the event, no
+// emailing attendees, no exports, no access management.
+const SCAN_LINK_CAPABILITIES = ['checkin', 'undo_checkin'];
+
+// The session's scan link, re-validated on every use so revoking the link (or
+// deleting the event) takes effect immediately rather than at session expiry.
+function sessionScanLink(req) {
+    const scoped = req.session?.scanLink;
+    if (!scoped?.token) return null;
+    const link = stmt.scannerLinks.byToken.get(scoped.token);
+    if (!link || link.eventId !== scoped.eventId) return null;
+    if (!stmt.events.byId.get(link.eventId)) return null;
+    return { linkId: link.id, eventId: link.eventId, token: link.token };
+}
+
+// What the caller may do to this event, whoever they are — a signed-in user
+// or a scan link. Use this (not userHasEventCapability) on any route that
+// no-login door staff are meant to reach.
+function requestEventCapabilities(req, eventId) {
+    if (req.session?.userId) return userEventCapabilities(req.session.userId, eventId);
+    const scoped = sessionScanLink(req);
+    if (scoped && scoped.eventId === eventId) return SCAN_LINK_CAPABILITIES.slice();
+    return [];
+}
+
+function requestHasCapability(req, eventId, capability) {
+    return requestEventCapabilities(req, eventId).includes(capability);
+}
+
+// Like requireAuth, but a scan-link session counts as a caller too.
+function requireAuthOrScanLink(req, res, next) {
+    if (req.session?.userId || sessionScanLink(req)) return next();
+    return res.status(401).json({ error: 'Unauthorized' });
 }
 
 // True when the user can see the event at all — any capability is enough.
@@ -3164,7 +3226,20 @@ function withUserCapabilities(userId) {
 // admin grants authority over every event, but other people's events are not
 // the admin's own rooms and shouldn't clutter their list. The admin reaches
 // everything else through /api/admin/all-rooms instead.
-app.get('/api/events', requireAuth, (req, res) => {
+app.get('/api/events', requireAuthOrScanLink, (req, res) => {
+    // A scan-link session has exactly one event, with the link's capabilities.
+    if (!req.session.userId) {
+        const scoped = sessionScanLink(req);
+        const event = scoped && rowToEvent(stmt.events.byId.get(scoped.eventId));
+        if (!event) return res.json([]);
+        return res.json([{
+            ...event,
+            capabilities: SCAN_LINK_CAPABILITIES.slice(),
+            fullAccess: false,
+            isOwner: false,
+        }]);
+    }
+
     const withAccess = withUserCapabilities(req.session.userId);
     const owned = stmt.events.byUserId.all(req.session.userId).map(rowToEvent);
     const seen = new Set(owned.map(e => e.id));
@@ -3383,8 +3458,8 @@ app.patch('/api/event/:id', requireAuth, async (req, res) => {
     res.json({ success: true, customFields: cleaned });
 });
 
-app.get('/api/event/:id/tickets', requireAuth, (req, res) => {
-    if (!stmt.events.byId.get(req.params.id) || !userHasEventAccess(req.session.userId, req.params.id)) {
+app.get('/api/event/:id/tickets', requireAuthOrScanLink, (req, res) => {
+    if (!stmt.events.byId.get(req.params.id) || !requestEventCapabilities(req, req.params.id).length) {
         return res.status(401).json({ error: 'Unauthorized or not found' });
     }
     const tickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
@@ -4319,7 +4394,7 @@ app.get('/api/tickets/export-csv', requireAuth, async (req, res) => {
 
 // API: Validate QR Code
 // Manual check-in by registrationId (marks all tickets in the group)
-app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
+app.post('/api/checkin/:registrationId', requireAuthOrScanLink, async (req, res) => {
     const { registrationId } = req.params;
 
     let tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
@@ -4331,6 +4406,12 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     if (!tickets.length) {
         log('checkin', `[ERR] FAILED — no ticket/registration found for id: ${registrationId}  by: ${req.session.userId}`);
         return res.status(404).json({ error: 'Not found' });
+    }
+
+    // This route had no per-event check at all, so any signed-in account could
+    // check in a ticket for an event it has nothing to do with.
+    if (!requestHasCapability(req, tickets[0].eventId, 'checkin')) {
+        return res.status(403).json({ error: 'Not authorized to check in for this event' });
     }
 
     const checkinEvent = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
@@ -4371,7 +4452,7 @@ app.post('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     pushWalletIfChanged(tickets, checkinEvent).catch(() => { });
 });
 
-app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
+app.delete('/api/checkin/:registrationId', requireAuthOrScanLink, async (req, res) => {
     const { registrationId } = req.params;
 
     let tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
@@ -4383,8 +4464,8 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     if (!tickets.length) return res.status(404).json({ error: 'Not found' });
 
     const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
-    if (!event || !userHasEventCapability(req.session.userId, event.id, 'undo_checkin')) {
-        return res.status(403).json({ error: 'Only full-access collaborators, owners, or admins can undo check-ins' });
+    if (!event || !requestHasCapability(req, event.id, 'undo_checkin')) {
+        return res.status(403).json({ error: 'You do not have permission to undo check-ins for this event' });
     }
 
     const uncheckinNow = new Date().toISOString();
@@ -4622,13 +4703,28 @@ app.get('/api/scanner-links/:token', (req, res) => {
     stmt.scannerLinks.touchLastUsed.run(new Date().toISOString(), link.id);
     if (req.session.userId && req.session.userId !== event.userId) {
         stmt.scannerAccess.insert.run(nanoid(10), req.session.userId, event.id, new Date().toISOString());
+    } else if (!req.session.userId) {
+        // Scope this session to the one event behind the link, so the rest of
+        // the scanner (check-in list, undo, door display) works without a
+        // login instead of only /api/validate.
+        req.session.scanLink = { token: link.token, eventId: event.id };
     }
     res.json({
         eventId: event.id,
         eventName: event.name,
         color: event.color,
         allowReentry: event.allowReentry,
+        capabilities: req.session.userId
+            ? userEventCapabilities(req.session.userId, event.id)
+            : SCAN_LINK_CAPABILITIES.slice(),
     });
+});
+
+// Hand back the scan link — used when door staff leave scan-link mode, so the
+// scoped grant doesn't linger on the session.
+app.post('/api/scan-link/exit', (req, res) => {
+    if (req.session) req.session.scanLink = null;
+    res.json({ success: true });
 });
 
 app.get('/scan/:token', (req, res) => {
@@ -5427,6 +5523,10 @@ app.get('/api/event/:id/access', requireAuth, (req, res) => {
 // session and no scan-link) keep scanning.
 function scannerAuthorized(req, eventId) {
     if (req.session?.userId) return true;
+    // A scan link opened in this session counts as proof for that one event,
+    // the same as passing its token in the body.
+    const scoped = sessionScanLink(req);
+    if (scoped && scoped.eventId === eventId) return true;
     const linkToken = req.body?.scanLinkToken;
     if (linkToken) {
         const link = stmt.scannerLinks.byToken.get(linkToken);
@@ -6391,9 +6491,9 @@ function broadcastToDisplayToken(displayToken, payload) {
 }
 
 // Generate or retrieve display token (auth required — only event owner/access)
-app.get('/api/display/token/:eventId', requireAuth, async (req, res) => {
+app.get('/api/display/token/:eventId', requireAuthOrScanLink, async (req, res) => {
     const { eventId } = req.params;
-    if (!userHasEventAccess(req.session.userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
+    if (!requestEventCapabilities(req, eventId).length) return res.status(403).json({ error: 'Not authorized' });
     let event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.displayToken) {
@@ -6405,9 +6505,9 @@ app.get('/api/display/token/:eventId', requireAuth, async (req, res) => {
 });
 
 // QR code PNG for the display URL (used by web scanner settings page)
-app.get('/api/display/qr/:eventId', requireAuth, async (req, res) => {
+app.get('/api/display/qr/:eventId', requireAuthOrScanLink, async (req, res) => {
     const { eventId } = req.params;
-    if (!userHasEventAccess(req.session.userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
+    if (!requestEventCapabilities(req, eventId).length) return res.status(403).json({ error: 'Not authorized' });
     let event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.displayToken) {
@@ -6426,9 +6526,9 @@ app.get('/api/display/qr/:eventId', requireAuth, async (req, res) => {
 });
 
 // Regenerate display token (invalidates old links)
-app.post('/api/display/token/:eventId/rotate', requireAuth, async (req, res) => {
+app.post('/api/display/token/:eventId/rotate', requireAuthOrScanLink, async (req, res) => {
     const { eventId } = req.params;
-    if (!userHasEventAccess(req.session.userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
+    if (!requestEventCapabilities(req, eventId).length) return res.status(403).json({ error: 'Not authorized' });
     const tok = crypto.randomBytes(24).toString('hex');
     stmt.events.setDisplayToken.run(tok, eventId);
     res.json({ token: tok, url: `${BASE_URL}/display.html?token=${tok}` });

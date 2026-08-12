@@ -363,17 +363,27 @@ let filteredAttendees = [];
 let sheetRegId = null;
 let accessError = false;
 let lockedEventId = null;
+let isScanLink = false;
 
-function currentEventFullAccess() {
+// Undo is its own permission — someone can hold it without holding everything
+// else, so ask for the capability rather than for blanket full access.
+function canUndoCurrentEvent() {
     const ev = events.find(e => e.id === lockedEventId);
-    return !!(ev && ev.fullAccess);
+    if (!ev) return false;
+    if (Array.isArray(ev.capabilities)) return ev.capabilities.includes('undo_checkin');
+    return !!ev.fullAccess;
 }
 
 // ── Init ──────────────────────────────────────────────────
 (async () => {
+    // Two kinds of caller reach this list: a signed-in user, and no-login door
+    // staff on a scan link (whose session is scoped to a single event). Both
+    // come back 200 from /api/auth/me — only a stranger gets bounced.
     try {
         const r = await fetch('/api/auth/me');
         if (!r.ok) { window.location.href = '/'; return; }
+        const me = await r.json();
+        isScanLink = !me.user && !!me.scanLink;
     } catch (_) { window.location.href = '/'; return; }
 
     // Manual check-in only ever operates on whatever event the Scanner tab
@@ -505,7 +515,7 @@ function buildPersonRow(a) {
 
     // Undo is only for full-access collaborators/owners/admins — a
     // view-only check-in helper can check people in but can't reverse it.
-    const undoBtn = (!noDone && currentEventFullAccess())
+    const undoBtn = (!noDone && canUndoCurrentEvent())
         ? `<button class="row-undo-btn" onclick="undoPerson(event,'${escAttr(a.registrationId)}')">Undo</button>`
         : '';
 

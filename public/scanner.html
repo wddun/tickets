@@ -831,14 +831,20 @@
         <button class="dp-rotate-btn" id="dpRotateBtn" onclick="rotateDisplayToken()">Regenerate Link</button>
 
         <div class="settings-section-label" style="margin-top:16px;">Scanning</div>
-        <button class="settings-nav-row" onclick="openEventPicker()">
+        <button class="settings-nav-row" id="settingsSwitchEventRow" onclick="openEventPicker()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
             Switch Event
             <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
         </button>
 
-        <div class="settings-section-label">Account</div>
-        <button class="settings-nav-row" onclick="openAccountSettings()">
+        <button class="settings-nav-row" id="settingsExitScanLink" style="display:none;" onclick="exitScanLinkMode()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Leave This Event
+            <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
+        </button>
+
+        <div class="settings-section-label" id="settingsAccountLabel">Account</div>
+        <button class="settings-nav-row" id="settingsAccountRow" onclick="openAccountSettings()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             Account Settings
             <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
@@ -935,6 +941,9 @@ const SCANNER_PAIR_TOKEN = getScannerPairToken();
 let isLoggedIn      = false;
 let currentUser     = null;
 let events          = [];
+// What a no-login scan link is allowed to do on its event, as reported by the
+// server when the link resolved. Empty when signed in or not in link mode.
+let scanLinkCapabilities = [];
 let lastScannedRegistrationId = null;
 let lastScannedToken  = null;
 let lastScanTs        = 0;
@@ -995,7 +1004,12 @@ function lockToEvent(event) {
 }
 
 function exitScanLinkMode() {
-    location.href = '/scanner.html';
+    // Drop the scoped grant server-side too, so leaving actually gives up the
+    // event rather than leaving it on the session.
+    localStorage.removeItem('selectedEventId');
+    fetch('/api/scan-link/exit', { method: 'POST' })
+        .catch(() => {})
+        .finally(() => { location.href = '/scanner.html'; });
 }
 
 // ── Init ──────────────────────────────────────────────────
@@ -1006,18 +1020,29 @@ function exitScanLinkMode() {
         return;
     }
 
+    let resumableScanLink = null;
     try {
         const r = await fetch('/api/auth/me');
         if (r.ok) {
-            isLoggedIn = true;
             const data = await r.json();
-            currentUser = data.user;
+            if (data.user) {
+                isLoggedIn = true;
+                currentUser = data.user;
+            } else if (data.scanLink) {
+                // Scan-link session with no token in the URL — this is a
+                // return trip from the check-in list or display settings.
+                resumableScanLink = data.scanLink;
+            }
         }
     } catch (_) {}
 
+    if (resumableScanLink) {
+        resumeScanLinkMode(resumableScanLink);
+        return;
+    }
+
     if (isLoggedIn) {
-        document.getElementById('tabBar').style.display = 'flex';
-        document.body.classList.add('has-tab-bar');
+        showTabBar();
         await loadEvents();
         const savedId = localStorage.getItem('selectedEventId');
         const savedEvent = events.find(e => e.id === savedId);
@@ -1181,11 +1206,57 @@ async function initScanLinkMode(scanToken, opts = {}) {
     // so every subsequent /api/validate and /api/checkout call can prove
     // this device holds a real, still-valid scan-link token for this event.
     currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, source: 'link', scanLinkToken: scanToken };
+    scanLinkCapabilities = link.capabilities || [];
+    // Resolving the link also scoped the session to this event server-side, so
+    // the check-in list and door display work here the same as when signed in.
+    // The event is stashed where checkin.html looks for it.
+    localStorage.setItem('selectedEventId', link.eventId);
+    showTabBar({ scanLink: true });
     playEnteringAnimation(currentEvent, { showExitButton: true });
     ensureCameraRunning();
     initScannerChannel();
     requestNotificationPermission();
     return true;
+}
+
+// Re-enter scan-link mode from the session alone, with no token in the URL.
+// Authorization rides on the session here (the server accepts it as proof for
+// this one event), so there's no scanLinkToken to put on currentEvent.
+function resumeScanLinkMode(scanLink) {
+    document.getElementById('anonGate').classList.remove('show');
+    document.getElementById('eventPicker').classList.remove('show');
+    currentEvent = {
+        eventId: scanLink.eventId,
+        eventName: scanLink.eventName,
+        color: scanLink.color,
+        allowReentry: scanLink.allowReentry,
+        source: 'link',
+    };
+    scanLinkCapabilities = scanLink.capabilities || [];
+    localStorage.setItem('selectedEventId', scanLink.eventId);
+    showTabBar({ scanLink: true });
+    playEnteringAnimation(currentEvent, { showExitButton: true });
+    ensureCameraRunning();
+    initScannerChannel();
+    if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
+}
+
+// The bottom tab bar (Scanner / Check-In / Settings). Scan-link door staff get
+// it too, minus the rows that need an account — switching events and account
+// settings both belong to a signed-in user, not to a link scoped to one event.
+function showTabBar({ scanLink = false } = {}) {
+    document.getElementById('tabBar').style.display = 'flex';
+    document.body.classList.add('has-tab-bar');
+    if (scanLink) {
+        document.getElementById('settingsSwitchEventRow').style.display = 'none';
+        document.getElementById('settingsAccountLabel').style.display = 'none';
+        document.getElementById('settingsAccountRow').style.display = 'none';
+        document.getElementById('settingsExitScanLink').style.display = '';
+        // Undo lives on the check-in list; hide the tab if the link can't do it.
+        if (!scanLinkCapabilities.includes('checkin')) {
+            document.getElementById('tabList').style.display = 'none';
+        }
+    }
 }
 
 // ── Session expiry watcher ────────────────────────────────
@@ -2008,10 +2079,13 @@ function loadDisplayQR() {
 
     subtitle.textContent = currentEvent ? currentEvent.eventName : '';
 
-    if (!eventId || !isLoggedIn) {
+    // A scan link is scoped to one event server-side, so door staff can put a
+    // display on screen without an account — same as a signed-in user.
+    const canUseDisplay = isLoggedIn || currentEvent?.source === 'link';
+    if (!eventId || !canUseDisplay) {
         placeholder.textContent = isLoggedIn
             ? 'Switch to an event above first'
-            : 'Sign in to use display mode';
+            : 'Sign in or open a scan link to use display mode';
         placeholder.style.display = 'flex';
         wrap.style.display = 'none';
         copyRow.style.display = 'none';

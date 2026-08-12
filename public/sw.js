@@ -8,9 +8,15 @@
 // public registration page). Bumping the cache name here forces every
 // existing installation to drop its old cache on next activate (skipWaiting
 // + clients.claim already make that happen without the user needing to do
-// anything) — this __only__ needs bumping again if the caching *strategy*
-// changes, not for every deploy.
-const CACHE = 'wts-v18';
+// anything).
+//
+// Bump this whenever a file in PRECACHE below actually changes. Those are
+// served cache-first on purpose (they have to work at the door with no
+// connectivity), which means an installed scanner keeps running the copy it
+// already has until the cache name changes — a deploy alone will not reach
+// it. v19: scanner.html and checkin.html gained the tab bar for no-login
+// scan links, and an install stuck on v18 would never show it.
+const CACHE = 'wts-v19';
 
 // Only pages that genuinely need to work with no/spotty connectivity.
 const PRECACHE = [
