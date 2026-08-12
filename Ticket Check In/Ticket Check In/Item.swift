@@ -82,4 +82,9 @@ struct ScannerLinkInfo: Codable {
     let eventName: String
     let color: String?
     let allowReentry: Bool?
+    // Not part of the server response — set locally (see resolveScannerLink)
+    // to the token this info was resolved from, then persisted alongside the
+    // rest so every later validate/checkout call can prove this device holds
+    // a real scan-link token for this event.
+    var token: String? = nil
 }

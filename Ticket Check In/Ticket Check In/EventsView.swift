@@ -24,14 +24,20 @@ struct AttendeeGroup: Identifiable {
 
 // MARK: - Manual Check-In Tab
 
-/// Shows the attendee list for whichever event the Scanner tab is currently
-/// locked to — no event browsing here, and no "back to all events" nav,
-/// since the scanner's own Switch Event picker is the only way to change
-/// that (see ScannerView's banner / EventPickerSheet).
+/// Shows the attendee list for whichever event is currently selected —
+/// selection is shared with the Scanner tab via lastSelectedEventData, but
+/// can also be changed right here via the event picker instead of only
+/// through the Scanner tab's top bar.
 struct ManualCheckInView: View {
     var switchToScanner: () -> Void = {}
     @StateObject private var api = APIService.shared
     @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
+    @AppStorage("scanLinkEventData") private var scanLinkEventData: Data = Data()
+    // Set when the selected event turns out to be unreachable on this
+    // account (switched accounts, or access was revoked) — see the matching
+    // check in ScannerView, which shares the same lastSelectedEventData.
+    @State private var accessIssue: EventAccessIssue?
+    @State private var showEventPicker = false
 
     private var currentEvent: Event? {
         guard !lastSelectedEventData.isEmpty else { return nil }
@@ -43,35 +49,97 @@ struct ManualCheckInView: View {
             if !api.isAuthenticated {
                 LoginView(switchToScanner: switchToScanner)
             } else if let event = currentEvent {
-                if #available(iOS 16, *) {
-                    NavigationStack { AttendeesView(event: event) }
+                if let issue = accessIssue {
+                    accessIssueState(issue)
+                } else if #available(iOS 16, *) {
+                    NavigationStack { AttendeesView(event: event, switchEvent: { showEventPicker = true }) }
                 } else {
-                    NavigationView { AttendeesView(event: event) }
+                    NavigationView { AttendeesView(event: event, switchEvent: { showEventPicker = true }) }
                 }
             } else {
                 noEventState
             }
         }
-        .task { await api.checkAuth() }
+        .task { await verifyAccess() }
+        .sheet(isPresented: $showEventPicker) {
+            EventPickerSheet(
+                onSelectEvent: { event in
+                    scanLinkEventData = Data() // leaving link mode, if any
+                    lastSelectedEventData = (try? JSONEncoder().encode(event)) ?? Data()
+                    accessIssue = nil
+                },
+                onScanLink: { info in
+                    scanLinkEventData = (try? JSONEncoder().encode(info)) ?? Data()
+                    switchToScanner()
+                }
+            )
+        }
+    }
+
+    private func verifyAccess() async {
+        await api.checkAuth()
+        guard api.isAuthenticated, let event = currentEvent else {
+            accessIssue = nil
+            return
+        }
+        let events = (try? await api.getEvents()) ?? []
+        accessIssue = events.contains(where: { $0.id == event.id }) ? nil : .noAccess(eventName: event.name)
+    }
+
+    @ViewBuilder
+    private func accessIssueState(_ issue: EventAccessIssue) -> some View {
+        if #available(iOS 17, *) {
+            ContentUnavailableView {
+                Label(issue.title, systemImage: "exclamationmark.shield.fill")
+            } description: {
+                Text(issue.message)
+            } actions: {
+                Button(issue.primaryButtonLabel) { switchAccount() }
+                    .buttonStyle(.borderedProminent)
+                Button("Switch Event") { showEventPicker = true }
+            }
+        } else {
+            VStack(spacing: 14) {
+                Image(systemName: "exclamationmark.shield.fill").font(.largeTitle).foregroundStyle(.orange)
+                Text(issue.title).font(.headline)
+                Text(issue.message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Button(issue.primaryButtonLabel) { switchAccount() }
+                    .buttonStyle(.borderedProminent)
+                Button("Switch Event") { showEventPicker = true }
+            }
+        }
+    }
+
+    private func switchAccount() {
+        Task { try? await api.logout() }
     }
 
     @ViewBuilder
     private var noEventState: some View {
         if #available(iOS 17, *) {
-            ContentUnavailableView(
-                "No Event Selected",
-                systemImage: "qrcode.viewfinder",
-                description: Text("Pick an event from the Scanner tab to check people in here.")
-            )
+            ContentUnavailableView {
+                Label("No Event Selected", systemImage: "qrcode.viewfinder")
+            } description: {
+                Text("Pick an event to check people in here.")
+            } actions: {
+                Button("Select Event") { showEventPicker = true }
+                    .buttonStyle(.borderedProminent)
+            }
         } else {
-            VStack(spacing: 8) {
+            VStack(spacing: 14) {
                 Image(systemName: "qrcode.viewfinder").font(.largeTitle)
                 Text("No Event Selected").font(.headline)
-                Text("Pick an event from the Scanner tab to check people in here.")
+                Text("Pick an event to check people in here.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
+                Button("Select Event") { showEventPicker = true }
+                    .buttonStyle(.borderedProminent)
             }
         }
     }
@@ -331,6 +399,7 @@ struct ScanLinkEntrySheet: View {
 
 struct AttendeesView: View {
     let event: Event
+    var switchEvent: () -> Void = {}
     @StateObject private var api = APIService.shared
     @State private var tickets: [Ticket] = []
     @State private var isLoading = false
@@ -405,6 +474,14 @@ struct AttendeesView: View {
         .navigationTitle(event.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    switchEvent()
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+                .accessibilityLabel("Switch Event")
+            }
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
                     showNotifSettings = true

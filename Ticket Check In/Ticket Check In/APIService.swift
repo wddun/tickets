@@ -197,7 +197,8 @@ class APIService: ObservableObject {
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
-        guard let info = try? JSONDecoder().decode(ScannerLinkInfo.self, from: data) else { throw APIError.decodingError }
+        guard var info = try? JSONDecoder().decode(ScannerLinkInfo.self, from: data) else { throw APIError.decodingError }
+        info.token = token
         return info
     }
 
@@ -216,7 +217,7 @@ class APIService: ObservableObject {
     // eventId is the event currently selected on this scanner — the server
     // rejects a ticket as invalid if it actually belongs to a different event,
     // so one organizer's ticket can't be waved through at another's door.
-    func validateTicket(token: String, pairToken: String? = nil, eventId: String? = nil) async throws -> ValidateResponse {
+    func validateTicket(token: String, pairToken: String? = nil, eventId: String? = nil, scanLinkToken: String? = nil) async throws -> ValidateResponse {
         guard let url = URL(string: "\(baseURL)/api/validate") else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -224,6 +225,7 @@ class APIService: ObservableObject {
         var body: [String: String] = ["token": token]
         if let pt = pairToken, !pt.isEmpty { body["pairToken"] = pt }
         if let eventId, !eventId.isEmpty { body["eventId"] = eventId }
+        if let scanLinkToken, !scanLinkToken.isEmpty { body["scanLinkToken"] = scanLinkToken }
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)
@@ -260,23 +262,29 @@ class APIService: ObservableObject {
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
 
-    func confirmCheckout(token: String, pairToken: String) async throws {
+    func confirmCheckout(token: String, pairToken: String, scanLinkToken: String? = nil, displayToken: String? = nil) async throws {
         guard let url = URL(string: "\(baseURL)/api/checkout") else { throw APIError.invalidURL }
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["token": token, "pairToken": pairToken])
+        var body = ["token": token, "pairToken": pairToken]
+        if let scanLinkToken, !scanLinkToken.isEmpty { body["scanLinkToken"] = scanLinkToken }
+        if let displayToken, !displayToken.isEmpty { body["displayToken"] = displayToken }
+        request.httpBody = try JSONEncoder().encode(body)
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
     }
 
-    func confirmCheckoutByRegistrationId(_ registrationId: String, pairToken: String) async throws {
+    func confirmCheckoutByRegistrationId(_ registrationId: String, pairToken: String, scanLinkToken: String? = nil, displayToken: String? = nil) async throws {
         guard let url = URL(string: "\(baseURL)/api/checkout") else { throw APIError.invalidURL }
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["registrationId": registrationId, "pairToken": pairToken])
+        var body = ["registrationId": registrationId, "pairToken": pairToken]
+        if let scanLinkToken, !scanLinkToken.isEmpty { body["scanLinkToken"] = scanLinkToken }
+        if let displayToken, !displayToken.isEmpty { body["displayToken"] = displayToken }
+        request.httpBody = try JSONEncoder().encode(body)
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
@@ -361,14 +369,19 @@ class APIService: ObservableObject {
 
         let device = UIDevice.current
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let pushEnabled = await NotificationManager.shared.isAuthorized()
         var body: [String: String] = [
             "pairToken":   pairToken,
             "platform":    "ios-app",
             "deviceName":  device.name,
             "osVersion":   "\(device.systemName) \(device.systemVersion)",
             "appVersion":  appVersion,
+            "pushEnabled": pushEnabled ? "true" : "false",
         ]
         if let eid = eventId { body["eventId"] = eid }
+        // Lets the server push a real notification to this exact device when
+        // the app isn't open to receive the in-app banner over SSE.
+        if let token = NotificationManager.shared.deviceToken { body["pushToken"] = token }
         request.httpBody = try? JSONEncoder().encode(body)
         _ = try? await session.data(for: request)
     }

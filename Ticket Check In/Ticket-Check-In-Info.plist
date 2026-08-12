@@ -4,5 +4,10 @@
 <dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Used to pair with a nearby display screen to show scan results.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+	</array>
 </dict>
 </plist>

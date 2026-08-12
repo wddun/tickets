@@ -22,7 +22,21 @@ struct OnboardingView: View {
             icon: "qrcode.viewfinder",
             useLogo: false,
             title: "Scan Tickets",
-            body: "Point the camera at any ticket QR code. You'll get instant audio and haptic feedback for valid, already-used, or invalid tickets.",
+            body: "Point the camera at any ticket QR code for instant audio and haptic feedback. Tap any recent scan at the bottom to see full details, including custom fields.",
+            buttonLabel: "Next"
+        ),
+        OnboardingPage(
+            icon: "calendar",
+            useLogo: false,
+            title: "Pick Your Event",
+            body: "Tap Events to choose which one you're scanning for — tap anywhere on a row to switch. Or share a scan link from the dashboard so others can scan without needing an account.",
+            buttonLabel: "Next"
+        ),
+        OnboardingPage(
+            icon: "tv",
+            useLogo: false,
+            title: "Pair a Door Display",
+            body: "Turn any nearby phone or tablet into a live door display. Find it under Settings → Display Setup — pair over Bluetooth or by scanning a QR code, no extra app needed.",
             buttonLabel: "Next"
         ),
         OnboardingPage(

@@ -16,6 +16,26 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         super.init()
     }
 
+    /// This device's raw APNs token, if registration has completed. Reported
+    /// in scanner heartbeats so the server can push directly to this device
+    /// even when it isn't tied to a logged-in user account (e.g. a PIN-only
+    /// scanner session).
+    var deviceToken: String? {
+        UserDefaults.standard.string(forKey: tokenKey)
+    }
+
+    /// Read-only check — unlike requestAuthorization(), never prompts.
+    /// Used to report this device's push status in scanner heartbeats so
+    /// admin can see (in the Monitor tab) which devices don't have
+    /// notifications enabled and nudge them in person.
+    func isAuthorized() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: return true
+        default: return false
+        }
+    }
+
     func requestAuthorization() async -> Bool {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         switch settings.authorizationStatus {

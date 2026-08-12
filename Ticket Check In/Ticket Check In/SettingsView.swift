@@ -13,6 +13,8 @@ struct SettingsView: View {
     @State private var isSigningOut = false
     @State private var isDeleting = false
     @State private var actionError: String?
+    @State private var showDashboard = false
+    @State private var showLogin = false
     @State private var notifStatus: UNAuthorizationStatus = .notDetermined
     // How long the full-screen scan result stays up — a per-device
     // preference read directly by ScannerView via the same AppStorage key.
@@ -25,6 +27,22 @@ struct SettingsView: View {
     var body: some View {
         NavigationView {
             List {
+                // MARK: - Display & Pairing
+                Section("Display & Pairing") {
+                    Button {
+                        showDisplaySetup = true
+                    } label: {
+                        HStack {
+                            Label("Display Setup", systemImage: "tv")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                }
+
                 // MARK: - Account
                 Section("Account") {
                     if api.isAuthenticated, let user = api.currentUser {
@@ -46,6 +64,12 @@ struct SettingsView: View {
                             Text(error)
                                 .font(.footnote)
                                 .foregroundStyle(.red)
+                        }
+
+                        Button {
+                            showDashboard = true
+                        } label: {
+                            Label("Open Web Dashboard", systemImage: "safari")
                         }
 
                         Button(role: .destructive) {
@@ -74,16 +98,25 @@ struct SettingsView: View {
                         }
                         .disabled(isSigningOut || isDeleting)
                     } else {
-                        HStack(spacing: 14) {
-                            Image(systemName: "person.crop.circle.badge.questionmark")
-                                .font(.system(size: 38))
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Not signed in")
-                                    .font(.system(size: 15, weight: .medium))
-                                Text("Sign in on the Events tab")
-                                    .font(.caption)
+                        Button {
+                            showLogin = true
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: "person.crop.circle.badge.questionmark")
+                                    .font(.system(size: 38))
                                     .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Not signed in")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(.primary)
+                                    Text("Tap to sign in")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
                             }
                         }
                         .padding(.vertical, 4)
@@ -131,22 +164,6 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // MARK: - Display & Pairing
-                Section("Display & Pairing") {
-                    Button {
-                        showDisplaySetup = true
-                    } label: {
-                        HStack {
-                            Label("Display Setup", systemImage: "tv")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .foregroundStyle(.primary)
-                    }
-                }
-
                 // MARK: - About
                 Section("About") {
                     HStack {
@@ -163,11 +180,20 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .task { await api.checkAuth() }
             .task { await refreshNotifStatus() }
+            .onChange(of: api.isAuthenticated) { authenticated in
+                if authenticated { showLogin = false }
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 Task { await refreshNotifStatus() }
             }
             .sheet(isPresented: $showDisplaySetup) {
                 DisplaySetupView(bluetooth: BluetoothManager.shared)
+            }
+            .sheet(isPresented: $showDashboard) {
+                DashboardWebSheet()
+            }
+            .sheet(isPresented: $showLogin) {
+                LoginView(switchToScanner: { showLogin = false })
             }
             .confirmationDialog("Delete Account", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                 Button("Delete Account", role: .destructive) {

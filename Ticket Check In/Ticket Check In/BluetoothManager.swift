@@ -66,6 +66,10 @@ class BluetoothManager: NSObject, ObservableObject {
     private var connectedPeripheral: CBPeripheral?
     private var writeCharacteristic: CBCharacteristic?
     private var notifyCharacteristic: CBMutableCharacteristic?
+    // The display we last connected to — used to reconnect automatically
+    // when it's rediscovered after a drop, instead of making the operator
+    // reopen Display Setup and tap it again.
+    private var lastConnectedPeripheralId: UUID?
 
     // MARK: - Public API
 
@@ -92,6 +96,7 @@ class BluetoothManager: NSObject, ObservableObject {
         guard let central = centralManager else { return }
         bleState = .connecting
         connectedPeripheral = display.peripheral
+        lastConnectedPeripheralId = display.peripheral.identifier
         display.peripheral.delegate = self
         central.stopScan()
         central.connect(display.peripheral, options: nil)
@@ -121,17 +126,17 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     /// Send a check-in command from display to scanner phone.
-    func sendCheckInCommand() {
+    func sendCheckInCommand(registrationId: String?) {
         guard role == .display, let char = notifyCharacteristic else { return }
-        let cmd = BLEScanResult(status: "checkin_cmd", name: "", firstName: nil, eventName: nil, registrationId: nil)
+        let cmd = BLEScanResult(status: "checkin_cmd", name: "", firstName: nil, eventName: nil, registrationId: registrationId)
         guard let data = try? JSONEncoder().encode(cmd) else { return }
         peripheralManager?.updateValue(data, for: char, onSubscribedCentrals: nil)
     }
 
     /// Send a check-out command from display to scanner phone.
-    func sendCheckoutCommand() {
+    func sendCheckoutCommand(registrationId: String?) {
         guard role == .display, let char = notifyCharacteristic else { return }
-        let cmd = BLEScanResult(status: "checkout_cmd", name: "", firstName: nil, eventName: nil, registrationId: nil)
+        let cmd = BLEScanResult(status: "checkout_cmd", name: "", firstName: nil, eventName: nil, registrationId: registrationId)
         guard let data = try? JSONEncoder().encode(cmd) else { return }
         peripheralManager?.updateValue(data, for: char, onSubscribedCentrals: nil)
     }
@@ -161,6 +166,7 @@ class BluetoothManager: NSObject, ObservableObject {
         writeCharacteristic = nil
         notifyCharacteristic = nil
         connectedDisplayName = nil
+        lastConnectedPeripheralId = nil
     }
 }
 
@@ -268,6 +274,16 @@ extension BluetoothManager: CBCentralManagerDelegate {
         let id = peripheral.identifier
         if !discoveredDisplays.contains(where: { $0.id == id }) {
             discoveredDisplays.append(DiscoveredDisplay(id: id, peripheral: peripheral))
+        }
+        // Reconnect automatically to the display we were just paired with —
+        // don't make the operator reopen Display Setup and tap it again
+        // every time the link drops.
+        if id == lastConnectedPeripheralId, bleState == .scanning {
+            bleState = .connecting
+            connectedPeripheral = peripheral
+            peripheral.delegate = self
+            central.stopScan()
+            central.connect(peripheral, options: nil)
         }
     }
 

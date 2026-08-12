@@ -119,10 +119,10 @@ struct ScannerView: View {
         .onChange(of: bluetooth.receivedResult) { result in
             if let result = result {
                 if result.status == "checkout_cmd" {
-                    handleConfirmCheckout()
+                    handleConfirmCheckout(registrationId: result.registrationId)
                     bluetooth.receivedResult = nil
                 } else if result.status == "checkin_cmd" {
-                    handleCheckInCommand()
+                    handleCheckInCommand(registrationId: result.registrationId)
                     bluetooth.receivedResult = nil
                 }
             }
@@ -156,7 +156,7 @@ struct ScannerView: View {
         if let result = scanResult, result.status == .reentryExitPrompt {
             ScanResultOverlay(
                 result: result,
-                onConfirmCheckout: handleConfirmCheckout,
+                onConfirmCheckout: { handleConfirmCheckout() },
                 onCancel: dismissExitOverlay
             )
             .transition(.opacity)
@@ -321,7 +321,7 @@ struct ScannerView: View {
         Task {
             do {
                 if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
-                let response = try await APIService.shared.validateTicket(token: token, pairToken: scannerPairToken, eventId: selectedEventId())
+                let response = try await APIService.shared.validateTicket(token: token, pairToken: scannerPairToken, eventId: selectedEventId(), scanLinkToken: scanLinkEvent?.token)
                 await MainActor.run { showResult(for: response, token: token) }
             } catch {
                 await MainActor.run {
@@ -396,32 +396,46 @@ struct ScannerView: View {
         }
     }
 
-    private func handleConfirmCheckout() {
-        guard let token = pendingCheckoutToken else { dismissExitOverlay(); return }
+    private func handleConfirmCheckout(registrationId: String? = nil) {
+        // Prefer the registrationId round-tripped from a display-initiated
+        // command — it's stable even if this phone has scanned something
+        // else since the exit prompt first appeared. Fall back to the local
+        // pending token for a checkout confirmed directly on this phone.
+        let rid = registrationId ?? lastRegistrationId
+        let token = pendingCheckoutToken
+        guard rid != nil || token != nil else { dismissExitOverlay(); return }
         exitOverlayAutoTask?.cancel()
         let captured = scanResult
         Task {
-            try? await APIService.shared.confirmCheckout(token: token, pairToken: scannerPairToken)
-            await MainActor.run {
-                CheckInFeedback.shared.success()
-                let ble = BLEScanResult(
-                    status: "checked_out",
-                    name: captured?.name ?? "Guest",
-                    firstName: captured?.firstName,
-                    eventName: captured?.eventName,
-                    registrationId: lastRegistrationId
-                )
-                BluetoothManager.shared.sendScanResult(ble)
-                let checkoutResult = ScanResult(
-                    status: .checkedOut,
-                    title: "Checked Out",
-                    name: captured?.name ?? "Guest",
-                    firstName: captured?.firstName,
-                    eventName: captured?.eventName,
-                    customFields: captured?.customFields
-                )
-                dismissExitOverlay()
-                showBanner(checkoutResult)
+            do {
+                if let rid {
+                    try await APIService.shared.confirmCheckoutByRegistrationId(rid, pairToken: scannerPairToken, scanLinkToken: scanLinkEvent?.token)
+                } else if let token {
+                    try await APIService.shared.confirmCheckout(token: token, pairToken: scannerPairToken, scanLinkToken: scanLinkEvent?.token)
+                }
+                await MainActor.run {
+                    CheckInFeedback.shared.success()
+                    let ble = BLEScanResult(
+                        status: "checked_out",
+                        name: captured?.name ?? "Guest",
+                        firstName: captured?.firstName,
+                        eventName: captured?.eventName,
+                        registrationId: rid
+                    )
+                    BluetoothManager.shared.sendScanResult(ble)
+                    let checkoutResult = ScanResult(
+                        status: .checkedOut,
+                        title: "Checked Out",
+                        name: captured?.name ?? "Guest",
+                        firstName: captured?.firstName,
+                        eventName: captured?.eventName,
+                        customFields: captured?.customFields
+                    )
+                    dismissExitOverlay()
+                    showBanner(checkoutResult)
+                }
+            } catch {
+                await MainActor.run { CheckInFeedback.shared.error() }
             }
         }
     }
@@ -442,16 +456,21 @@ struct ScannerView: View {
         pendingCheckoutToken = nil
     }
 
-    private func handleCheckInCommand() {
-        // Find the token or registrationId from recentScans or somehow?
-        // Wait, on scanner phone, checkin command from display means the last scanned ticket that was used should be checked back in.
-        guard lastScannedToken != nil else { return }
+    private func handleCheckInCommand(registrationId: String? = nil) {
+        guard let rid = registrationId ?? lastRegistrationId else { return }
         Task {
-            if let rid = lastRegistrationId {
-                try? await APIService.shared.checkIn(registrationId: rid)
-            }
-            await MainActor.run {
-                CheckInFeedback.shared.success()
+            do {
+                try await APIService.shared.checkIn(registrationId: rid)
+                await MainActor.run {
+                    CheckInFeedback.shared.success()
+                    // Name/event are left blank — the display already knows
+                    // them from the result it's confirming and fills them
+                    // back in itself.
+                    let ble = BLEScanResult(status: "checked_back_in", name: "", firstName: nil, eventName: nil, registrationId: rid)
+                    BluetoothManager.shared.sendScanResult(ble)
+                }
+            } catch {
+                await MainActor.run { CheckInFeedback.shared.error() }
             }
         }
     }
@@ -767,10 +786,18 @@ struct EventPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var events: [Event] = []
     @State private var isLoading = false
+    // True until the initial checkAuth() resolves — isAuthenticated defaults
+    // to false at app launch and nothing guarantees it's been checked yet by
+    // the time this sheet opens (e.g. opened from the Scanner tab before
+    // ever visiting Manual Check-In or Settings), so trusting the flag as-is
+    // could hide "Your Events" for an actually-signed-in user.
+    @State private var isCheckingAuth = true
     @State private var codeInput = ""
     @State private var codeError: String?
     @State private var codeLoading = false
     @State private var showQRScan = false
+    @State private var showDashboard = false
+    @State private var showLogin = false
 
     var body: some View {
         if #available(iOS 16, *) {
@@ -783,7 +810,22 @@ struct EventPickerSheet: View {
     @ViewBuilder
     private var sheetContent: some View {
         List {
-            if api.isAuthenticated {
+            if isCheckingAuth {
+                Section {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Checking sign-in…").foregroundStyle(.secondary)
+                    }
+                }
+            } else if api.isAuthenticated {
+                Section {
+                    Button {
+                        showDashboard = true
+                    } label: {
+                        Label("Open Web Dashboard", systemImage: "safari")
+                    }
+                }
+
                 Section("Your Events") {
                     if isLoading && events.isEmpty {
                         ProgressView()
@@ -805,6 +847,14 @@ struct EventPickerSheet: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
+                    }
+                }
+            } else {
+                Section {
+                    Button {
+                        showLogin = true
+                    } label: {
+                        Label("Sign In to See Your Events", systemImage: "person.crop.circle")
                     }
                 }
             }
@@ -841,15 +891,36 @@ struct EventPickerSheet: View {
                 Button("Cancel") { dismiss() }
             }
         }
-        .task {
-            guard api.isAuthenticated else { return }
-            isLoading = true
-            events = (try? await api.getEvents()) ?? []
-            isLoading = false
+        .task { await refreshAuthAndEvents() }
+        .onChange(of: api.isAuthenticated) { authenticated in
+            if authenticated {
+                showLogin = false
+                Task { await loadEvents() }
+            }
         }
         .sheet(isPresented: $showQRScan) {
             QuickScanSheet { scanned in submitCode(scanned) }
         }
+        .sheet(isPresented: $showDashboard) {
+            DashboardWebSheet()
+        }
+        .sheet(isPresented: $showLogin) {
+            LoginView(switchToScanner: { showLogin = false })
+        }
+    }
+
+    private func refreshAuthAndEvents() async {
+        isCheckingAuth = true
+        await api.checkAuth()
+        isCheckingAuth = false
+        await loadEvents()
+    }
+
+    private func loadEvents() async {
+        guard api.isAuthenticated else { return }
+        isLoading = true
+        events = (try? await api.getEvents()) ?? []
+        isLoading = false
     }
 
     private func colorFromHex(_ hex: String?) -> Color? {

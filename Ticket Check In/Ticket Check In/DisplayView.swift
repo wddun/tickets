@@ -35,6 +35,10 @@ struct DisplayView: View {
     @State private var sseScanned: Int = 0
     @State private var sseClient: SSEDisplayClient? = nil
     @State private var showQRScanner = false
+    // The event's real displayToken, parsed from the connect URL — proves to
+    // the server this device is a legitimate paired display, not a stale
+    // cached page with no credentials at all.
+    @State private var sseDisplayToken: String? = nil
 
     enum DisplayMode: String, CaseIterable {
         case bluetooth = "Bluetooth"
@@ -297,12 +301,15 @@ struct DisplayView: View {
         guard let rid = displayRegistrationId else { return }
         if displayMode == .internet {
             try? await APIService.shared.checkIn(registrationId: rid)
+            await MainActor.run {
+                withAnimation { showResult = false }
+                resultBg = .black
+            }
         } else {
-            BluetoothManager.shared.sendCheckInCommand()
-        }
-        await MainActor.run {
-            withAnimation { showResult = false }
-            resultBg = .black
+            // Don't hide the result yet — wait for the "checked_back_in"
+            // confirmation to arrive back over BLE once the scanner phone's
+            // check-in call actually completes.
+            BluetoothManager.shared.sendCheckInCommand(registrationId: rid)
         }
     }
 
@@ -333,15 +340,18 @@ struct DisplayView: View {
                         if displayMode == .internet {
                             Task {
                                 if let rid = displayRegistrationId {
-                                    try? await APIService.shared.confirmCheckoutByRegistrationId(rid, pairToken: scannerPairToken)
+                                    try? await APIService.shared.confirmCheckoutByRegistrationId(rid, pairToken: scannerPairToken, displayToken: sseDisplayToken)
                                 }
                                 await MainActor.run {
                                     withAnimation { showCheckoutConfirm = false; showResult = false; resultBg = .black }
                                 }
                             }
                         } else {
-                            BluetoothManager.shared.sendCheckoutCommand()
-                            withAnimation { showCheckoutConfirm = false; showResult = false; resultBg = .black }
+                            // Don't hide the result yet — wait for the
+                            // "checked_out" confirmation to arrive back over
+                            // BLE once the scanner phone's call completes.
+                            BluetoothManager.shared.sendCheckoutCommand(registrationId: displayRegistrationId)
+                            withAnimation { showCheckoutConfirm = false }
                         }
                     }
                     .font(.system(size: 16, weight: .bold))
@@ -358,10 +368,11 @@ struct DisplayView: View {
     private func resultIcon(_ result: BLEScanResult) -> some View {
         let name: String = {
             switch result.status {
-            case "valid", "reentry_enter", "checked_out": return "checkmark.circle.fill"
-            case "used":                                  return "exclamationmark.circle.fill"
-            case "reentry_exit":                          return "door.left.hand.open"
-            default:                                      return "xmark.circle.fill"
+            case "valid", "reentry_enter":          return "checkmark.circle.fill"
+            case "checked_out", "checked_back_in":  return "arrow.uturn.left.circle.fill"
+            case "used":                            return "exclamationmark.circle.fill"
+            case "reentry_exit":                    return "door.left.hand.open"
+            default:                                return "xmark.circle.fill"
             }
         }()
         Image(systemName: name)
@@ -371,21 +382,23 @@ struct DisplayView: View {
 
     private func resultLabel(_ result: BLEScanResult) -> String {
         switch result.status {
-        case "valid":          return "Checked In"
-        case "reentry_enter":  return "Welcome Back"
-        case "checked_out":    return "Checked Out"
-        case "used":           return "Already Checked In"
-        case "reentry_exit":   return "Ready to Check Out"
-        default:               return "Invalid Ticket"
+        case "valid":           return "Checked In"
+        case "reentry_enter":   return "Welcome Back"
+        case "checked_out":     return "Checked Out"
+        case "checked_back_in": return "Checked Back In"
+        case "used":            return "Already Checked In"
+        case "reentry_exit":    return "Ready to Check Out"
+        default:                return "Invalid Ticket"
         }
     }
 
     private func resultBackground(_ result: BLEScanResult) -> Color {
         switch result.status {
-        case "valid", "reentry_enter", "checked_out": return Color(red: 0.07, green: 0.53, blue: 0.25)
-        case "used":                   return Color(red: 0.75, green: 0.37, blue: 0.06)
-        case "reentry_exit":           return Color(red: 0.18, green: 0.38, blue: 0.75)
-        default:                       return Color(red: 0.72, green: 0.12, blue: 0.12)
+        case "valid", "reentry_enter":         return Color(red: 0.07, green: 0.53, blue: 0.25)
+        case "checked_out", "checked_back_in": return Color(red: 0.15, green: 0.39, blue: 0.92)
+        case "used":                            return Color(red: 0.75, green: 0.37, blue: 0.06)
+        case "reentry_exit":                    return Color(red: 0.18, green: 0.38, blue: 0.75)
+        default:                                return Color(red: 0.72, green: 0.12, blue: 0.12)
         }
     }
 
@@ -394,12 +407,26 @@ struct DisplayView: View {
     private func displayResult(_ result: BLEScanResult) {
         dismissTask?.cancel()
         showCheckoutConfirm = false
-        currentResult = result
-        displayRegistrationId = result.registrationId
-        resultBg = resultBackground(result)
+        // "checked_back_in"/"checked_out" confirmations sent back after a
+        // display-initiated command may not carry name/event — the display
+        // already knows them from the result being confirmed, so keep those
+        // instead of showing a blank name.
+        let isConfirmation = result.status == "checked_back_in" || result.status == "checked_out"
+        let merged = (isConfirmation && result.name.isEmpty && currentResult != nil)
+            ? BLEScanResult(
+                status: result.status,
+                name: currentResult!.name,
+                firstName: currentResult!.firstName,
+                eventName: currentResult!.eventName,
+                registrationId: result.registrationId ?? currentResult!.registrationId
+              )
+            : result
+        currentResult = merged
+        displayRegistrationId = merged.registrationId
+        resultBg = resultBackground(merged)
         withAnimation { showResult = true }
         // For reentry_exit, don't auto-dismiss — needs manual checkout action
-        guard result.status != "reentry_exit" else { return }
+        guard merged.status != "reentry_exit" else { return }
         dismissTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
@@ -422,6 +449,7 @@ struct DisplayView: View {
               let token = components.queryItems?.first(where: { $0.name == "token" })?.value,
               !token.isEmpty else { return }
         let pair = components.queryItems?.first(where: { $0.name == "pair" })?.value ?? ""
+        sseDisplayToken = token
 
         sseState = .connecting
         let client = SSEDisplayClient()
