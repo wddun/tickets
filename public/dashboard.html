@@ -1096,6 +1096,107 @@
             opacity: 0.8;
         }
 
+        .access-item-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .access-actions {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .access-edit-btn {
+            background: #eef2ff;
+            color: #4338ca;
+            border: none;
+            padding: 5px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .access-edit-btn:hover { opacity: 0.85; }
+
+        .role-badge {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            vertical-align: middle;
+        }
+
+        .role-badge.owner  { background: #1a1f3c; color: #fff; }
+        .role-badge.full   { background: #dcfce7; color: #15803d; }
+        .role-badge.view   { background: #e0e7ff; color: #4338ca; }
+        .role-badge.custom { background: #fef3c7; color: #b45309; }
+
+        /* Capability checklist, shared by the "add person" form and the
+           per-person editor that opens under an existing collaborator. */
+        .cap-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 2px 14px;
+            margin: 10px 0 12px;
+        }
+
+        .cap-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 7px 0;
+            cursor: pointer;
+        }
+
+        .cap-option input { margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+        .cap-option.disabled { opacity: 0.45; cursor: not-allowed; }
+        .cap-option.disabled input { cursor: not-allowed; }
+        .cap-option-label { font-size: 13px; font-weight: 600; color: #333; line-height: 1.3; }
+        .cap-option-hint { font-size: 11px; color: #8a8f98; line-height: 1.35; }
+
+        .cap-editor {
+            background: #f8f9fc;
+            border: 1px solid #e5e8f0;
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin: 4px 0 12px;
+        }
+
+        .cap-editor-presets {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 4px;
+        }
+
+        .cap-preset-btn {
+            background: #fff;
+            border: 1px solid #dde3ed;
+            color: #475569;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .cap-preset-btn:hover { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
+
+        .admin-room-owner {
+            font-size: 12px;
+            font-weight: 700;
+            color: #475569;
+            padding: 14px 0 6px;
+            border-bottom: 1px solid #eef0f4;
+            margin-bottom: 4px;
+        }
+
         .link-box {
             background: #f4f5f8;
             border: 1px solid #dde3ed;
@@ -2591,7 +2692,13 @@
         async function loadEvents() {
             const [r, rc] = await Promise.all([fetch('/api/events'), fetch('/api/events/counts')]);
             if (!r.ok) return;
-            events = await r.json();
+            const fresh = await r.json();
+            // A room the admin opened from the overview isn't in /api/events —
+            // that's the point — so carry it across the refresh rather than
+            // yanking it out from under an open view.
+            const freshIds = new Set(fresh.map(e => e.id));
+            const adminViewed = events.filter(e => e._adminView && !freshIds.has(e.id));
+            events = [...fresh, ...adminViewed];
             if (rc.ok) {
                 const counts = await rc.json();
                 events.forEach(e => {
@@ -2634,6 +2741,7 @@
                     <div class="event-card-name">${esc(e.name)}</div>
                     <div class="event-card-meta">${fmtDateRange(e.time, e.endTime)}</div>
                     <div class="event-card-meta event-card-location">${esc(e.location?.name || '')}</div>
+                    ${e._adminView ? `<div class="event-card-meta" style="color:#b45309;font-weight:600;">Viewing as admin${e.owner?.email ? ' — owned by ' + esc(e.owner.email) : ''}</div>` : ''}
                     ${total > 0 ? `<span class="event-card-badge${allDone ? ' all-clear' : ''}">${scanned}/${total} checked in</span>` : ''}
                 </div>
             </div>
@@ -4026,60 +4134,7 @@
                 }
 
                 const data = await res.json();
-
-                let linkHtml = '';
-                if (data.linkUrl) {
-                    linkHtml = `
-                        <div class="link-box">
-                            <label>Sharing Link</label>
-                            <div style="display:flex;gap:8px;">
-                                <input type="text" value="${esc(data.linkUrl)}" readonly onclick="this.select()">
-                                <button class="btn btn-primary btn-sm tap-target-sm" onclick="copySettingsLink('${esc(data.linkUrl)}')">Copy</button>
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    linkHtml = `
-                        <div class="settings-empty" style="padding:10px 0;text-align:left;margin-bottom:10px;">
-                            No sharing link generated yet. Use the Google Sheet menu to generate one.
-                        </div>
-                    `;
-                }
-
-                let accessHtml = `
-                    <hr class="settings-divider">
-                    <div class="settings-subhead">Share with user</div>
-                    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
-                        <input type="email" id="shareEmail" placeholder="User email" autocomplete="email" style="flex:1;min-width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;" />
-                        <select id="sharePermission" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
-                            <option value="view">View / Check-in</option>
-                            <option value="full">Full Access</option>
-                        </select>
-                        <button class="btn btn-primary" onclick="shareRoom('${eventId}')">Share</button>
-                    </div>
-                `;
-                if (data.access && data.access.length > 0) {
-                    accessHtml += `
-                        <div class="settings-subhead">Users with access</div>
-                        <div>
-                            ${data.access.map(a => `
-                                <div class="access-item">
-                                    <div class="access-avatar">${getInitials(a.email)}</div>
-                                    <div class="access-info">
-                                        <div class="access-email">${esc(a.email)} <span style="font-weight:normal;color:#888;font-size:11px;">(${a.permission === 'full' ? 'Full Access' : 'View only'})</span></div>
-                                        <div class="access-date">Linked ${fmtDate(a.claimedAt)}</div>
-                                    </div>
-                                    <button class="revoke-btn" onclick="revokeAccess('${a.id}', '${eventId}')">Revoke</button>
-                                </div>
-                            `).join('')}
-                        </div>
-                    `;
-                } else {
-                    accessHtml += `
-                        <div class="settings-subhead">Users with access</div>
-                        <div class="settings-empty">No users have been added yet.</div>
-                    `;
-                }
+                const accessHtml = renderAccessSection(eventId, data);
 
                 const devices = await loadPushDevices(eventId);
                 const pushHtml = devices === null
@@ -4091,7 +4146,7 @@
                 document.getElementById('settingsContent').innerHTML =
                     `<div class="settings-section dirty-scope" id="tab-general" data-tab="tab-general">${renderGeneralSection(eventId)}</div>` +
                     `<div class="settings-section dirty-scope" id="tab-fields" data-tab="tab-fields">${cfHtml}</div>` +
-                    `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div><div class="settings-hint">Control who can view or manage this event, and audit what's changed.</div>${linkHtml}${accessHtml}${auditHtml}</div>` +
+                    `<div class="settings-section" id="tab-access"><div class="modal-section-title">Access & Sharing</div><div class="settings-hint">Control who can view or manage this event, and audit what's changed.</div>${accessHtml}${auditHtml}</div>` +
                     `<div class="settings-section" id="tab-notifications"><div class="modal-section-title">Notifications</div><div class="settings-hint">Reach attendees by push notification, or automatically remind them before the event.</div>${pushHtml}${reminderHtml}</div>` +
                     `<div class="settings-section" id="tab-email">${emailTemplateHtml}</div>` +
                     `<div class="settings-section dirty-scope" id="tab-registration" data-tab="tab-registration">${renderRegistrationSection(eventId)}</div>` +
@@ -4188,6 +4243,174 @@
             } catch (err) {
                 showToast(err.message || 'Failed to send push.');
                 if (btn) { btn.textContent = 'Send Push'; btn.disabled = false; }
+            }
+        }
+
+        // ── Access & Sharing ──────────────────────────────────────────────────
+        //
+        // The capability catalog, presets and per-person grants all come from
+        // GET /api/event/:id/access, so the server stays the single source of
+        // truth for what permissions exist. Cached per event ID here so the
+        // permission editors can re-read it without another round trip.
+        const accessDataByEvent = {};
+
+        const ROLE_LABELS = { owner: 'Owner', full: 'Full access', view: 'Check-in only', custom: 'Custom' };
+
+        function roleBadge(role) {
+            return `<span class="role-badge ${role}">${ROLE_LABELS[role] || role}</span>`;
+        }
+
+        // One checklist of capabilities. `scope` namespaces the input IDs so
+        // the add-person form and any number of open per-person editors can
+        // coexist on the page without colliding.
+        function renderCapabilityGrid(eventId, scope, selected) {
+            const data = accessDataByEvent[eventId];
+            if (!data) return '';
+            const chosen = new Set(selected || []);
+            return `<div class="cap-grid" id="capGrid-${scope}">
+                ${data.capabilityCatalog.map(c => {
+                    // Only a real owner may delegate the ability to manage
+                    // access — the server enforces this too.
+                    const locked = c.key === 'manage_access' && !data.canGrantManageAccess;
+                    return `
+                    <label class="cap-option${locked ? ' disabled' : ''}"${locked ? ' title="Only the event owner can grant this"' : ''}>
+                        <input type="checkbox" class="cap-check" data-scope="${esc(scope)}" value="${esc(c.key)}"
+                               ${chosen.has(c.key) ? 'checked' : ''} ${locked ? 'disabled' : ''}>
+                        <span>
+                            <span class="cap-option-label">${esc(c.label)}</span>
+                            <span class="cap-option-hint" style="display:block;">${esc(c.hint)}</span>
+                        </span>
+                    </label>`;
+                }).join('')}
+            </div>`;
+        }
+
+        function readCapabilityGrid(scope) {
+            return [...document.querySelectorAll(`.cap-check[data-scope="${scope}"]:checked`)].map(el => el.value);
+        }
+
+        function applyCapabilityPreset(eventId, scope, preset) {
+            const data = accessDataByEvent[eventId];
+            if (!data) return;
+            const wanted = new Set(preset === 'none' ? [] : (data.rolePresets[preset] || []));
+            document.querySelectorAll(`.cap-check[data-scope="${scope}"]`).forEach(el => {
+                if (!el.disabled) el.checked = wanted.has(el.value);
+            });
+        }
+
+        function renderAccessSection(eventId, data) {
+            accessDataByEvent[eventId] = data;
+
+            const linkNote = data.linkUrl ? '' : `
+                <div class="settings-empty" style="padding:10px 0;text-align:left;margin-bottom:10px;">
+                    Sharing with someone will create the sharing link automatically.
+                </div>`;
+
+            const rows = (data.access || []).map(a => {
+                if (a.isOwner) {
+                    return `
+                        <div class="access-item">
+                            <div class="access-item-row">
+                                <div class="access-avatar">${getInitials(a.email)}</div>
+                                <div class="access-info">
+                                    <div class="access-email">${esc(a.email)}${a.isSelf ? ' <span style="font-weight:normal;color:#888;font-size:11px;">(you)</span>' : ''} ${roleBadge('owner')}</div>
+                                    <div class="access-date">Owns this event — full control, cannot be changed here</div>
+                                </div>
+                            </div>
+                        </div>`;
+                }
+                const capSummary = a.capabilities.length
+                    ? data.capabilityCatalog.filter(c => a.capabilities.includes(c.key)).map(c => c.label).join(', ')
+                    : 'No permissions';
+                return `
+                    <div class="access-item">
+                        <div class="access-item-row">
+                            <div class="access-avatar">${getInitials(a.email)}</div>
+                            <div class="access-info">
+                                <div class="access-email">${esc(a.email)}${a.isSelf ? ' <span style="font-weight:normal;color:#888;font-size:11px;">(you)</span>' : ''} ${roleBadge(a.role)}</div>
+                                <div class="access-date">${esc(capSummary)}</div>
+                                <div class="access-date">Added ${fmtDate(a.claimedAt)}${a.grantedByEmail ? ' by ' + esc(a.grantedByEmail) : ''}</div>
+                            </div>
+                            <div class="access-actions">
+                                <button class="access-edit-btn" onclick="toggleAccessEditor('${eventId}', '${a.id}')">Edit</button>
+                                <button class="revoke-btn" onclick="revokeAccess('${a.id}', '${eventId}')">Revoke</button>
+                            </div>
+                        </div>
+                        <div id="accessEditor-${a.id}" style="display:none;">
+                            <div class="cap-editor">
+                                <div class="cap-editor-presets">
+                                    <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'edit-${a.id}', 'view')">Check-in only</button>
+                                    <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'edit-${a.id}', 'full')">Full access</button>
+                                    <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'edit-${a.id}', 'none')">Clear all</button>
+                                </div>
+                                ${renderCapabilityGrid(eventId, 'edit-' + a.id, a.capabilities)}
+                                <div style="display:flex;gap:8px;">
+                                    <button class="btn btn-primary btn-sm" onclick="saveAccessPermissions('${eventId}', '${a.id}')">Save permissions</button>
+                                    <button class="btn btn-sm" onclick="toggleAccessEditor('${eventId}', '${a.id}')">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+
+            return `
+                ${linkNote}
+                ${data.linkUrl ? `
+                    <div class="link-box">
+                        <label>Sharing Link</label>
+                        <div style="display:flex;gap:8px;">
+                            <input type="text" value="${esc(data.linkUrl)}" readonly onclick="this.select()">
+                            <button class="btn btn-primary btn-sm tap-target-sm" onclick="copySettingsLink('${esc(data.linkUrl)}')">Copy</button>
+                        </div>
+                    </div>` : ''}
+
+                <div class="settings-subhead">People with access</div>
+                <div>${rows}</div>
+
+                <hr class="settings-divider">
+                <div class="settings-subhead">Add someone</div>
+                <div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+                    <input type="email" id="shareEmail" placeholder="User email" autocomplete="email" style="flex:1;min-width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;" />
+                    <button class="btn btn-primary" onclick="shareRoom('${eventId}')">Share</button>
+                </div>
+                <div class="settings-hint" style="margin-bottom:2px;">Pick exactly what they can do. They need an account already.</div>
+                <div class="cap-editor">
+                    <div class="cap-editor-presets">
+                        <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'new', 'view')">Check-in only</button>
+                        <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'new', 'full')">Full access</button>
+                        <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'new', 'none')">Clear all</button>
+                    </div>
+                    ${renderCapabilityGrid(eventId, 'new', data.rolePresets.view)}
+                </div>
+            `;
+        }
+
+        function toggleAccessEditor(eventId, accessId) {
+            const el = document.getElementById(`accessEditor-${accessId}`);
+            if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function saveAccessPermissions(eventId, accessId) {
+            const capabilities = readCapabilityGrid('edit-' + accessId);
+            if (!capabilities.length) {
+                showToast('Pick at least one permission, or revoke access instead.');
+                return;
+            }
+            try {
+                const res = await fetch(`/api/sheet/access/${accessId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ capabilities })
+                });
+                const d = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    showToast('Permissions updated.');
+                    await loadAccessData(eventId);
+                } else {
+                    showToast(d.error || 'Failed to update permissions.');
+                }
+            } catch (err) {
+                showToast('Network error while updating permissions.');
             }
         }
 
@@ -5722,17 +5945,39 @@
             document.body.classList.add('event-selected');
 
             try {
-                const r = await fetch('/api/admin/metrics');
+                const [r, rr] = await Promise.all([
+                    fetch('/api/admin/metrics'),
+                    fetch('/api/admin/all-rooms'),
+                ]);
                 const d = await r.json();
-                renderAdminOverview(d);
+                const rooms = rr.ok ? await rr.json() : { rooms: [], users: [] };
+                renderAdminOverview(d, rooms);
             } catch (_) {
                 document.getElementById('eventDetail').innerHTML = '<div style="padding:24px;color:#c00;">Failed to load overview.</div>';
             }
         }
 
-        function renderAdminOverview(d) {
+        // Opens a room the admin doesn't personally hold. Those rooms are
+        // deliberately absent from the sidebar, so pull the event in on demand
+        // before handing off to the normal event view.
+        async function openRoomAsAdmin(eventId) {
+            if (!events.find(e => e.id === eventId)) {
+                try {
+                    const r = await fetch(`/api/event/${eventId}/context`);
+                    if (!r.ok) return showToast('Could not open that room.');
+                    const ev = await r.json();
+                    // Flagged so renderSidebar can mark it as somebody else's.
+                    events.push({ ...ev, _adminView: true });
+                } catch (_) {
+                    return showToast('Could not open that room.');
+                }
+            }
+            await selectEvent(eventId);
+        }
+
+        function renderAdminOverview(d, roomData) {
             const eventRows = d.events.map(e => `
-                <tr style="cursor:pointer;" onclick="selectEvent('${e.id}')">
+                <tr style="cursor:pointer;" onclick="openRoomAsAdmin('${e.id}')">
                     <td>
                         <div style="display:flex;align-items:center;gap:8px;">
                             <span style="width:10px;height:10px;border-radius:50%;background:${esc(e.color||'#6366f1')};flex-shrink:0;display:inline-block;"></span>
@@ -5772,6 +6017,74 @@
                             <tbody>${eventRows}</tbody>
                         </table>
                     </div>
+                    ${renderAdminRoomsByOwner(roomData)}
+                    ${renderAdminUsers(roomData)}
+                </div>
+            `;
+        }
+
+        // Every room on the instance, grouped by the account that owns it.
+        // This is where the admin reaches other people's rooms — they stay out
+        // of the sidebar, which lists only rooms the admin actually holds.
+        function renderAdminRoomsByOwner(roomData) {
+            const rooms = roomData?.rooms || [];
+            if (!rooms.length) return '';
+
+            const byOwner = new Map();
+            for (const r of rooms) {
+                if (!byOwner.has(r.owner.email)) byOwner.set(r.owner.email, []);
+                byOwner.get(r.owner.email).push(r);
+            }
+            const groups = [...byOwner.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+            return `
+                <div class="metrics-section-title" style="margin-top:28px;">All Rooms by Owner</div>
+                <div class="settings-hint" style="margin-bottom:6px;">
+                    Rooms other people own. They stay out of your own room list — open one here when you need to.
+                </div>
+                ${groups.map(([ownerEmail, list]) => `
+                    <div class="admin-room-owner">${esc(ownerEmail)} &middot; ${list.length} room${list.length === 1 ? '' : 's'}</div>
+                    ${list.map(r => `
+                        <div class="access-item">
+                            <div class="access-item-row">
+                                <span style="width:10px;height:10px;border-radius:50%;background:${esc(r.event.color || '#6366f1')};flex-shrink:0;display:inline-block;"></span>
+                                <div class="access-info">
+                                    <div class="access-email">${esc(r.event.name)}${r.isMine ? ' <span style="font-weight:normal;color:#888;font-size:11px;">(in your rooms)</span>' : ''}</div>
+                                    <div class="access-date">
+                                        ${r.ticketCount} ticket${r.ticketCount === 1 ? '' : 's'}
+                                        ${r.collaborators.length ? ' &middot; shared with ' + r.collaborators.map(c => esc(c.email)).join(', ') : ' &middot; not shared'}
+                                    </div>
+                                </div>
+                                <div class="access-actions">
+                                    <button class="access-edit-btn" onclick="openRoomAsAdmin('${r.event.id}')">Open</button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                `).join('')}
+            `;
+        }
+
+        function renderAdminUsers(roomData) {
+            const users = roomData?.users || [];
+            if (!users.length) return '';
+            return `
+                <div class="metrics-section-title" style="margin-top:28px;">All Users</div>
+                <div style="overflow-x:auto;">
+                    <table class="admin-events-table">
+                        <thead><tr><th>Email</th><th>Verified</th><th>Owns</th><th>Shared with them</th><th>Joined</th></tr></thead>
+                        <tbody>
+                            ${users.map(u => `
+                                <tr>
+                                    <td style="font-weight:600;">${esc(u.email)}</td>
+                                    <td style="color:${u.emailVerified ? '#10b981' : '#b45309'};font-weight:600;">${u.emailVerified ? 'Yes' : 'No'}</td>
+                                    <td>${u.ownedRooms}</td>
+                                    <td>${u.sharedRooms}</td>
+                                    <td style="color:#888;">${u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
                 </div>
             `;
         }
@@ -6385,13 +6698,17 @@
         }
 
         async function shareRoom(eventId) {
-            const email = document.getElementById('shareEmail').value;
-            const permission = document.getElementById('sharePermission').value;
+            const email = document.getElementById('shareEmail').value.trim();
             if (!email) return;
+            const capabilities = readCapabilityGrid('new');
+            if (!capabilities.length) {
+                showToast('Pick at least one permission to grant.');
+                return;
+            }
             const r = await fetch('/api/sheet/share', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ eventId, email, permission })
+                body: JSON.stringify({ eventId, email, capabilities })
             });
             const data = await r.json();
             if (r.ok) {

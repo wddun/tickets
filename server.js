@@ -1897,33 +1897,124 @@ app.get('/api/admin/audit-log', requireAdmin, (req, res) => {
     res.json({ entries, total });
 });
 
-function userHasEventAccess(userId, eventId) {
-    const user = rowToUser(stmt.users.byId.get(userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (isAdmin) return true;
-    const event = rowToEvent(stmt.events.byId.get(eventId));
-    if (!event) return false;
-    if (event.userId === userId) return true;
-    if (stmt.scannerAccess.byUserAndEvent.get(userId, eventId)) return true;
-    const myAccess = stmt.sheetAccess.byUserId.all(userId);
-    return myAccess.some(a => {
-        const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
-        return link && link.eventId === eventId;
-    });
+// ── Granular per-collaborator permissions ──────────────────────────────────
+//
+// A share used to be one of two things: 'view' (can check people in) or
+// 'full' (can do everything the owner can). That's now the preset layer over
+// a real capability list, so an owner can hand out, say, refunds and exports
+// without also handing over the ability to delete the event.
+//
+// Order matters — it's the order capabilities render in the sharing UI.
+const CAPABILITIES = [
+    { key: 'checkin',          label: 'Check attendees in',       hint: 'Scan tickets and check people in at the door.' },
+    { key: 'undo_checkin',     label: 'Undo check-ins',           hint: 'Reverse a check-in that was made by mistake.' },
+    { key: 'manage_tickets',   label: 'Manage registrations',     hint: 'Add, edit, and remove attendees.' },
+    { key: 'email_attendees',  label: 'Email and notify',         hint: 'Send confirmations, bulk email, reminders, and push.' },
+    { key: 'manage_event',     label: 'Edit event settings',      hint: 'Change event details, custom fields, and scanner links.' },
+    { key: 'manage_waitlist',  label: 'Manage the waitlist',      hint: 'Promote or remove people waiting for a spot.' },
+    { key: 'manage_discounts', label: 'Manage discount codes',    hint: 'Create, edit, and delete discount codes.' },
+    { key: 'manage_payments',  label: 'View orders and refund',   hint: 'See paid orders and issue refunds through Stripe.' },
+    { key: 'export_data',      label: 'Export attendee data',     hint: 'Download CSVs and use the event API key.' },
+    { key: 'manage_access',    label: 'Manage who has access',    hint: 'Share the event with others and change their permissions.' },
+    { key: 'delete_event',     label: 'Delete the event',         hint: 'Permanently delete the event and everything in it.' },
+];
+const CAPABILITY_KEYS = CAPABILITIES.map(c => c.key);
+// The two legacy roles, expressed as capability lists. 'view' has always meant
+// "can check people in but not undo it", so that's exactly what it maps to.
+const ROLE_CAPABILITIES = {
+    view: ['checkin'],
+    full: CAPABILITY_KEYS.slice(),
+};
+
+function normalizeCapabilities(list) {
+    if (!Array.isArray(list)) return null;
+    const seen = new Set(list.filter(c => CAPABILITY_KEYS.includes(c)));
+    // Anything that implies being at the door implies being able to check in,
+    // otherwise a grant like "undo check-ins" would be unusable on its own.
+    if (seen.has('undo_checkin')) seen.add('checkin');
+    return CAPABILITY_KEYS.filter(k => seen.has(k));
 }
 
-function userHasEventFullAccess(userId, eventId) {
+// The capability list a sheetAccess row actually grants. Rows written before
+// the capabilities column existed have NULL there and fall back to their role.
+function capabilitiesForAccessRow(access) {
+    if (!access) return [];
+    if (access.capabilities) {
+        try {
+            const parsed = normalizeCapabilities(JSON.parse(access.capabilities));
+            if (parsed) return parsed;
+        } catch { /* fall through to the role below */ }
+    }
+    return ROLE_CAPABILITIES[access.permission === 'full' ? 'full' : 'view'].slice();
+}
+
+// The role label to show for a grant: one of the two presets when the
+// capability list matches it exactly, otherwise 'custom'.
+function roleForCapabilities(caps) {
+    const key = caps.slice().sort().join(',');
+    if (key === ROLE_CAPABILITIES.full.slice().sort().join(',')) return 'full';
+    if (key === ROLE_CAPABILITIES.view.slice().sort().join(',')) return 'view';
+    return 'custom';
+}
+
+// Everything a user can do on an event. Admin and owner get the lot; a scan
+// link grants check-in only; a share grants whatever its row says.
+function userEventCapabilities(userId, eventId) {
     const user = rowToUser(stmt.users.byId.get(userId));
     const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (isAdmin) return true;
     const event = rowToEvent(stmt.events.byId.get(eventId));
-    if (!event) return false;
-    if (event.userId === userId) return true;
-    const myAccess = stmt.sheetAccess.byUserId.all(userId);
-    return myAccess.some(a => {
+    if (!event) return [];
+    // The admin keeps authority over every event — they just don't have those
+    // events listed as theirs (see /api/events and /api/my-rooms).
+    if (isAdmin || event.userId === userId) return CAPABILITY_KEYS.slice();
+
+    const caps = new Set();
+    if (stmt.scannerAccess.byUserAndEvent.get(userId, eventId)) caps.add('checkin');
+    for (const a of stmt.sheetAccess.byUserId.all(userId)) {
         const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
-        return link && link.eventId === eventId && a.permission === 'full';
-    });
+        if (!link || link.eventId !== eventId) continue;
+        for (const c of capabilitiesForAccessRow(a)) caps.add(c);
+    }
+    return CAPABILITY_KEYS.filter(k => caps.has(k));
+}
+
+function userHasEventCapability(userId, eventId, capability) {
+    return userEventCapabilities(userId, eventId).includes(capability);
+}
+
+// True when the user can see the event at all — any capability is enough.
+function userHasEventAccess(userId, eventId) {
+    return userEventCapabilities(userId, eventId).length > 0;
+}
+
+// Retained for the handful of places that genuinely mean "can do everything
+// here", and for the `fullAccess` flag the dashboard and iOS app already read.
+function userHasEventFullAccess(userId, eventId) {
+    const caps = userEventCapabilities(userId, eventId);
+    return CAPABILITY_KEYS.every(k => caps.includes(k));
+}
+
+// True when this user owns the event outright (or is the admin), as opposed to
+// holding a share on it. Used to decide who may hand out `manage_access`.
+function userOwnsEvent(userId, eventId) {
+    const user = rowToUser(stmt.users.byId.get(userId));
+    if (user && user.email === process.env.ADMIN_EMAIL) return true;
+    const event = rowToEvent(stmt.events.byId.get(eventId));
+    return !!(event && event.userId === userId);
+}
+
+// The event IDs this user has been given personally: owned outright, shared
+// with them, or reached through a scan link. Deliberately does NOT special-case
+// the admin — the admin's own room list is just their rooms, and everyone
+// else's live behind the separate admin overview.
+function personalEventIdsForUser(userId) {
+    const ids = new Set(stmt.events.byUserId.all(userId).map(e => e.id));
+    for (const a of stmt.sheetAccess.byUserId.all(userId)) {
+        const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
+        if (link && link.eventId) ids.add(link.eventId);
+    }
+    for (const a of stmt.scannerAccess.byUserId.all(userId)) ids.add(a.eventId);
+    return ids;
 }
 
 app.get('/api/event/:id/push-subscription', requireAuth, (req, res) => {
@@ -1953,7 +2044,7 @@ app.patch('/api/event/:id/push-subscription', requireAuth, async (req, res) => {
 
 app.get('/api/event/:id/push-devices', requireAuth, (req, res) => {
     const eventId = req.params.id;
-    if (!userHasEventFullAccess(req.session.userId, eventId)) {
+    if (!userHasEventCapability(req.session.userId, eventId, 'email_attendees')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
     const subs = stmt.pushSubscriptions.byEventEnabled.all(eventId);
@@ -1969,7 +2060,7 @@ app.get('/api/event/:id/push-devices', requireAuth, (req, res) => {
 
 app.post('/api/event/:id/push-send', requireAuth, async (req, res) => {
     const eventId = req.params.id;
-    if (!userHasEventFullAccess(req.session.userId, eventId)) {
+    if (!userHasEventCapability(req.session.userId, eventId, 'email_attendees')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
     const event = rowToEvent(stmt.events.byId.get(eventId));
@@ -2081,10 +2172,7 @@ app.post('/api/register', async (req, res) => {
 app.put('/api/event/:id/public-registration', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    const isOwner = event.userId === req.session.userId;
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
 
     const enabled = req.body.enabled === true || req.body.enabled === 'true';
     stmt.events.setPublicRegistration.run(enabled ? 1 : 0, req.params.id);
@@ -2322,10 +2410,7 @@ app.post('/api/stripe/webhook', async (req, res) => {
 app.put('/api/event/:id/at-door', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    const isOwner = event.userId === req.session.userId;
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
 
     const enabled = req.body.enabled === true || req.body.enabled === 'true';
     stmt.events.setAtDoorEnabled.run(enabled ? 1 : 0, req.params.id);
@@ -2369,7 +2454,7 @@ app.get('/api/event/:id/discount-codes', requireAuth, (req, res) => {
 
 app.post('/api/event/:id/discount-codes', requireAuth, (req, res) => {
     const eventId = req.params.id;
-    if (!userHasEventFullAccess(req.session.userId, eventId)) {
+    if (!userHasEventCapability(req.session.userId, eventId, 'manage_discounts')) {
         return res.status(403).json({ error: 'Only the event owner can manage discount codes' });
     }
     const event = rowToEvent(stmt.events.byId.get(eventId));
@@ -2396,7 +2481,7 @@ app.post('/api/event/:id/discount-codes', requireAuth, (req, res) => {
 app.patch('/api/discount-codes/:id', requireAuth, (req, res) => {
     const discountCode = rowToDiscountCode(stmt.discountCodes.byId.get(req.params.id));
     if (!discountCode) return res.status(404).json({ error: 'Discount code not found' });
-    if (!userHasEventFullAccess(req.session.userId, discountCode.eventId)) {
+    if (!userHasEventCapability(req.session.userId, discountCode.eventId, 'manage_discounts')) {
         return res.status(403).json({ error: 'Only the event owner can manage discount codes' });
     }
     const active = req.body.active === true || req.body.active === 'true';
@@ -2408,7 +2493,7 @@ app.patch('/api/discount-codes/:id', requireAuth, (req, res) => {
 app.delete('/api/discount-codes/:id', requireAuth, (req, res) => {
     const discountCode = rowToDiscountCode(stmt.discountCodes.byId.get(req.params.id));
     if (!discountCode) return res.status(404).json({ error: 'Discount code not found' });
-    if (!userHasEventFullAccess(req.session.userId, discountCode.eventId)) {
+    if (!userHasEventCapability(req.session.userId, discountCode.eventId, 'manage_discounts')) {
         return res.status(403).json({ error: 'Only the event owner can manage discount codes' });
     }
     stmt.discountCodes.deleteById.run(req.params.id);
@@ -2498,7 +2583,7 @@ app.get('/api/waitlist/entry/:id', (req, res) => {
 app.put('/api/event/:id/waitlist-enabled', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
     const enabled = req.body.enabled === true || req.body.enabled === 'true';
     stmt.events.setWaitlistEnabled.run(enabled ? 1 : 0, req.params.id);
     logAudit(req, { eventId: event.id, action: enabled ? 'waitlist.enabled' : 'waitlist.disabled' });
@@ -2511,7 +2596,7 @@ app.put('/api/event/:id/waitlist-enabled', requireAuth, (req, res) => {
 app.put('/api/event/:id/skip-confirmation-emails', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
     const enabled = req.body.enabled === true || req.body.enabled === 'true';
     stmt.events.setSkipConfirmationEmails.run(enabled ? 1 : 0, req.params.id);
     logAudit(req, { eventId: event.id, action: enabled ? 'skipConfirmationEmails.enabled' : 'skipConfirmationEmails.disabled' });
@@ -2523,7 +2608,7 @@ app.put('/api/event/:id/skip-confirmation-emails', requireAuth, (req, res) => {
 app.put('/api/event/:id/shuttle-link-enabled', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
     const enabled = req.body.enabled === true || req.body.enabled === 'true';
     stmt.events.setShuttleLinkEnabled.run(enabled ? 1 : 0, req.params.id);
     logAudit(req, { eventId: event.id, action: enabled ? 'shuttlelink.enabled' : 'shuttlelink.disabled' });
@@ -2537,7 +2622,7 @@ app.put('/api/event/:id/shuttle-link-enabled', requireAuth, (req, res) => {
 app.put('/api/event/:id/wallet-lock-screen-enabled', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
     const enabled = req.body.enabled === true || req.body.enabled === 'true';
     stmt.events.setWalletLockScreenEnabled.run(enabled ? 1 : 0, req.params.id);
     logAudit(req, { eventId: event.id, action: enabled ? 'wallet_lock_screen.enabled' : 'wallet_lock_screen.disabled' });
@@ -2573,7 +2658,7 @@ app.post('/api/event/:id/waitlist', async (req, res) => {
 app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
     const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
     if (!entry) return res.status(404).json({ error: 'Waitlist entry not found' });
-    if (!userHasEventFullAccess(req.session.userId, entry.eventId)) {
+    if (!userHasEventCapability(req.session.userId, entry.eventId, 'manage_waitlist')) {
         return res.status(403).json({ error: 'Only the event owner can manage the waitlist' });
     }
     const event = rowToEvent(stmt.events.byId.get(entry.eventId));
@@ -2619,7 +2704,7 @@ app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
 app.delete('/api/waitlist/:id', requireAuth, (req, res) => {
     const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
     if (!entry) return res.status(404).json({ error: 'Waitlist entry not found' });
-    if (!userHasEventFullAccess(req.session.userId, entry.eventId)) {
+    if (!userHasEventCapability(req.session.userId, entry.eventId, 'manage_waitlist')) {
         return res.status(403).json({ error: 'Only the event owner can manage the waitlist' });
     }
     stmt.waitlist.deleteById.run(req.params.id);
@@ -2631,8 +2716,8 @@ app.delete('/api/waitlist/:id', requireAuth, (req, res) => {
 
 app.get('/api/event/:id/orders', requireAuth, (req, res) => {
     const eventId = req.params.id;
-    if (!userHasEventAccess(req.session.userId, eventId)) {
-        return res.status(403).json({ error: 'You do not have access to this event' });
+    if (!userHasEventCapability(req.session.userId, eventId, 'manage_payments')) {
+        return res.status(403).json({ error: 'You do not have permission to view orders for this event' });
     }
     res.json(stmt.orders.byEventId.all(eventId));
 });
@@ -2641,7 +2726,7 @@ app.post('/api/orders/:id/refund', requireAuth, async (req, res) => {
     if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
     const order = stmt.orders.byId.get(req.params.id);
     if (!order) return res.status(404).json({ error: 'Order not found' });
-    if (!userHasEventFullAccess(req.session.userId, order.eventId)) {
+    if (!userHasEventCapability(req.session.userId, order.eventId, 'manage_payments')) {
         return res.status(403).json({ error: 'Only the event owner can issue refunds' });
     }
     if (order.status === 'refunded') return res.status(400).json({ error: 'Already refunded' });
@@ -3042,29 +3127,76 @@ app.post('/api/ticket-status', (req, res) => {
     res.json(result);
 });
 
-app.get('/api/events', requireAuth, (req, res) => {
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    // Tells clients (dashboard, iOS, checkin.html) whether this user can undo
-    // a check-in on this event — owner, admin, or a 'full' sheetAccess grant.
-    // View-only collaborators can check people in but not undo it.
-    const withAccess = (e) => ({ ...e, fullAccess: userHasEventFullAccess(req.session.userId, e.id) });
-    if (isAdmin) return res.json(stmt.events.all.all().map(rowToEvent).map(withAccess));
+// Decorates an event with what the current user may actually do to it, so the
+// dashboard, iOS app and checkin.html can hide controls they'd only get a 403
+// from. `fullAccess` is kept for older clients that read just that flag.
+function withUserCapabilities(userId) {
+    return (e) => {
+        const capabilities = userEventCapabilities(userId, e.id);
+        return {
+            ...e,
+            capabilities,
+            fullAccess: CAPABILITY_KEYS.every(k => capabilities.includes(k)),
+            isOwner: e.userId === userId,
+        };
+    };
+}
 
-    const myAccess = stmt.sheetAccess.byUserId.all(req.session.userId);
-    const linkedEventIds = new Set(
-        myAccess.map(a => {
-            const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
-            return link ? link.eventId : null;
-        }).filter(Boolean)
-    );
-    // Events reached via a scanner-link QR while signed in — same idea as a
-    // sheetAccess grant, just without any Google Sheets involvement.
-    for (const a of stmt.scannerAccess.byUserId.all(req.session.userId)) linkedEventIds.add(a.eventId);
-    const userEvents = stmt.events.byUserId.all(req.session.userId).map(rowToEvent);
-    const linkedEvents = [...linkedEventIds].map(id => rowToEvent(stmt.events.byId.get(id))).filter(Boolean);
-    const seen = new Set(userEvents.map(e => e.id));
-    res.json([...userEvents, ...linkedEvents.filter(e => !seen.has(e.id))].map(withAccess));
+// The rooms that belong to *you*: owned, shared with you, or reached via a
+// scan link. Deliberately the same for the admin as for anyone else — being
+// admin grants authority over every event, but other people's events are not
+// the admin's own rooms and shouldn't clutter their list. The admin reaches
+// everything else through /api/admin/all-rooms instead.
+app.get('/api/events', requireAuth, (req, res) => {
+    const withAccess = withUserCapabilities(req.session.userId);
+    const owned = stmt.events.byUserId.all(req.session.userId).map(rowToEvent);
+    const seen = new Set(owned.map(e => e.id));
+    const shared = [...personalEventIdsForUser(req.session.userId)]
+        .filter(id => !seen.has(id))
+        .map(id => rowToEvent(stmt.events.byId.get(id)))
+        .filter(Boolean);
+    res.json([...owned, ...shared].map(withAccess));
+});
+
+// Admin-only overview: every room on the instance, grouped by who owns it,
+// with the collaborators on each. This is where "see all users and their
+// rooms" lives — separate from the admin's own room list above.
+app.get('/api/admin/all-rooms', requireAdmin, (req, res) => {
+    const mine = personalEventIdsForUser(req.session.userId);
+    const rooms = stmt.events.all.all().map(rowToEvent).map(event => {
+        const owner = rowToUser(stmt.users.byId.get(event.userId));
+        const link = stmt.sheetLinks.byEventId.get(event.id);
+        const collaborators = link
+            ? stmt.sheetAccess.byLinkId.all(link.id)
+                .filter(a => a.userId !== event.userId)
+                .map(a => {
+                    const u = rowToUser(stmt.users.byId.get(a.userId));
+                    const capabilities = capabilitiesForAccessRow(a);
+                    return { id: a.id, userId: a.userId, email: u ? u.email : 'Unknown', role: roleForCapabilities(capabilities), capabilities, claimedAt: a.claimedAt };
+                })
+            : [];
+        return {
+            event,
+            owner: { userId: event.userId, email: owner ? owner.email : 'Unknown' },
+            collaborators,
+            ticketCount: stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0,
+            // Lets the UI mark which of these already show up under "My rooms".
+            isMine: mine.has(event.id),
+        };
+    });
+
+    // Everyone with an account, so the admin can see who exists even if they
+    // hold no rooms at all.
+    const users = stmt.users.all.all().map(rowToUser).map(u => ({
+        id: u.id,
+        email: u.email,
+        emailVerified: !!u.emailVerified,
+        createdAt: u.createdAt,
+        ownedRooms: rooms.filter(r => r.owner.userId === u.id).length,
+        sharedRooms: rooms.filter(r => r.collaborators.some(c => c.userId === u.id)).length,
+    })).sort((a, b) => a.email.localeCompare(b.email));
+
+    res.json({ rooms, users });
 });
 
 app.post('/api/events', requireAuth, async (req, res) => {
@@ -3097,24 +3229,11 @@ app.post('/api/events', requireAuth, async (req, res) => {
 });
 
 app.get('/api/events/counts', requireAuth, (req, res) => {
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    let userEvents;
-    if (isAdmin) {
-        userEvents = stmt.events.all.all().map(rowToEvent);
-    } else {
-        const myAccess = stmt.sheetAccess.byUserId.all(req.session.userId);
-        const linkedEventIds = new Set(
-            myAccess.map(a => {
-                const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
-                return link ? link.eventId : null;
-            }).filter(Boolean)
-        );
-        const owned = stmt.events.byUserId.all(req.session.userId).map(rowToEvent);
-        const linked = [...linkedEventIds].map(id => rowToEvent(stmt.events.byId.get(id))).filter(Boolean);
-        const seen = new Set(owned.map(e => e.id));
-        userEvents = [...owned, ...linked.filter(e => !seen.has(e.id))];
-    }
+    // Scoped exactly like /api/events — the admin's counts cover their own
+    // rooms, not everyone else's.
+    const userEvents = [...personalEventIdsForUser(req.session.userId)]
+        .map(id => rowToEvent(stmt.events.byId.get(id)))
+        .filter(Boolean);
     const counts = {};
     userEvents.forEach(e => {
         const tickets = stmt.tickets.byEventId.all(e.id);
@@ -3131,6 +3250,22 @@ app.get('/api/event/:id', (req, res) => {
         event.ticketsRemaining = Math.max(0, event.capacity - registered);
     }
     res.json(event);
+});
+
+// One event decorated with the caller's capabilities, for opening a room that
+// isn't in their own list — the admin reaching into someone else's room from
+// the admin overview, mainly.
+app.get('/api/event/:id/context', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventAccess(req.session.userId, event.id)) {
+        return res.status(403).json({ error: 'You do not have access to this event' });
+    }
+    const owner = rowToUser(stmt.users.byId.get(event.userId));
+    res.json({
+        ...withUserCapabilities(req.session.userId)(event),
+        owner: { userId: event.userId, email: owner ? owner.email : 'Unknown' },
+    });
 });
 
 // Calendar invite for an event. Public on purpose: it's linked from ticket
@@ -3152,9 +3287,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (!isAdmin && event.userId !== req.session.userId) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -3222,9 +3355,7 @@ app.patch('/api/event/:id', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    if (!isAdmin && event.userId !== req.session.userId) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -3249,7 +3380,7 @@ app.get('/api/event/:id/tickets', requireAuth, (req, res) => {
 app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!userHasEventFullAccess(req.session.userId, event.id)) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -3348,10 +3479,10 @@ app.post('/api/giveaway/broadcast/:sessionId', requireAuth, (req, res) => {
 
 // Delete an event
 app.delete('/api/event/:id', requireAuth, async (req, res) => {
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
-    if (!event || (!isAdmin && event.userId !== req.session.userId)) {
+    // Still a 404 rather than a 403: someone with no access at all shouldn't
+    // learn whether the event exists.
+    if (!event || !userHasEventCapability(req.session.userId, event.id, 'delete_event')) {
         return res.status(404).json({ error: 'Event not found' });
     }
 
@@ -3376,11 +3507,8 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
 app.delete('/api/events/bulk', requireAuth, async (req, res) => {
     const { eventIds } = req.body;
     if (!Array.isArray(eventIds) || !eventIds.length) return res.status(400).json({ error: 'eventIds required' });
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const allEvents = stmt.events.all.all().map(rowToEvent);
     const allowed = new Set(
-        allEvents.filter(e => eventIds.includes(e.id) && (isAdmin || e.userId === req.session.userId)).map(e => e.id)
+        eventIds.filter(id => userHasEventCapability(req.session.userId, id, 'delete_event'))
     );
     const bulkDelete = db.transaction(() => {
         for (const eventId of allowed) {
@@ -3407,8 +3535,6 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
 app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
     const { registrationIds } = req.body;
     if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
 
     const allowedRegistrationIds = new Set();
     const eventIdsForRegs = new Set();
@@ -3420,9 +3546,7 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
     for (const eventId of eventIdsForRegs) {
         const event = rowToEvent(stmt.events.byId.get(eventId));
         if (!event) continue;
-        const link = stmt.sheetLinks.byEventId.get(eventId);
-        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-        if (isAdmin || event.userId === req.session.userId || (access && access.permission === 'full')) {
+        if (userHasEventCapability(req.session.userId, eventId, 'manage_tickets')) {
             for (const regId of registrationIds) {
                 const tickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket).filter(t => t.eventId === eventId);
                 for (const t of tickets) allowedRegistrationIds.add(t.registrationId);
@@ -3457,12 +3581,8 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = stmt.sheetLinks.byEventId.get(event.id);
-    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
 
-    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_tickets')) {
         return res.status(403).json({ error: 'Not authorized to create tickets' });
     }
 
@@ -3549,11 +3669,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(queryTicket.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = stmt.sheetLinks.byEventId.get(event.id);
-    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_tickets')) {
         return res.status(403).json({ error: 'Not authorized to edit tickets' });
     }
 
@@ -3679,11 +3795,7 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = stmt.sheetLinks.byEventId.get(event.id);
-    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -3726,11 +3838,7 @@ app.post('/api/ticket/:id/direct-email', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = stmt.sheetLinks.byEventId.get(event.id);
-    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -3766,11 +3874,7 @@ app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = stmt.sheetLinks.byEventId.get(event.id);
-    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -3846,11 +3950,7 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
     if (!event) return res.status(404).send('Event not found');
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = stmt.sheetLinks.byEventId.get(event.id);
-    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
         return res.status(403).send('Not authorized');
     }
 
@@ -3937,8 +4037,6 @@ app.get('/api/tickets/bulk-preview', requireAuth, async (req, res) => {
     const rawIds = (req.query.regIds || '').split(',').map(s => s.trim()).filter(Boolean);
     if (!rawIds.length) return res.status(400).send('No registration IDs provided');
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
 
     const sections = [];
     for (const regId of rawIds) {
@@ -3949,9 +4047,7 @@ app.get('/api/tickets/bulk-preview', requireAuth, async (req, res) => {
         const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
         if (!event) continue;
 
-        const link = stmt.sheetLinks.byEventId.get(event.id);
-        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) continue;
+        if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) continue;
 
         const actualCount = groupTickets.length;
         const qrBlocks = groupTickets.map((t, i) => `
@@ -4041,8 +4137,6 @@ app.post('/api/checkin/bulk', requireAuth, async (req, res) => {
     const { registrationIds } = req.body;
     if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const now = new Date().toISOString();
     let checkedIn = 0;
     const touchedEventIds = new Map();
@@ -4052,9 +4146,7 @@ app.post('/api/checkin/bulk', requireAuth, async (req, res) => {
         if (!tickets.length) continue;
         const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
         if (!event) continue;
-        const link = stmt.sheetLinks.byEventId.get(event.id);
-        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission === 'view')) continue;
+        if (!userHasEventCapability(req.session.userId, event.id, 'checkin')) continue;
 
         let eventCheckedIn = 0;
         db.transaction(() => {
@@ -4096,7 +4188,7 @@ app.delete('/api/checkin/bulk', requireAuth, async (req, res) => {
         if (!tickets.length) continue;
         const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
         if (!event) continue;
-        if (!userHasEventFullAccess(req.session.userId, event.id)) continue;
+        if (!userHasEventCapability(req.session.userId, event.id, 'undo_checkin')) continue;
 
         let eventCleared = 0;
         db.transaction(() => {
@@ -4126,8 +4218,6 @@ app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
         return res.status(503).json({ error: 'Email not configured' });
     }
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     let sent = 0, failed = 0;
 
     for (const regId of registrationIds) {
@@ -4136,9 +4226,7 @@ app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
         const ticket = groupTickets[0];
         const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
         if (!event) continue;
-        const link = stmt.sheetLinks.byEventId.get(event.id);
-        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) continue;
+        if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) continue;
 
         const actualCount = groupTickets.length;
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
@@ -4174,8 +4262,6 @@ app.get('/api/tickets/export-csv', requireAuth, async (req, res) => {
     const rawIds = (req.query.regIds || '').split(',').map(s => s.trim()).filter(Boolean);
     if (!rawIds.length) return res.status(400).send('No registration IDs provided');
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
 
     const rows = [];
     const customFieldKeys = new Set();
@@ -4186,9 +4272,7 @@ app.get('/api/tickets/export-csv', requireAuth, async (req, res) => {
         const ticket = groupTickets[0];
         const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
         if (!event) continue;
-        const link = stmt.sheetLinks.byEventId.get(event.id);
-        const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-        if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) continue;
+        if (!userHasEventCapability(req.session.userId, event.id, 'export_data')) continue;
 
         Object.keys(ticket.customFields || {}).forEach(k => customFieldKeys.add(k));
         rows.push({ ticket, groupTickets, event });
@@ -4280,7 +4364,7 @@ app.delete('/api/checkin/:registrationId', requireAuth, async (req, res) => {
     if (!tickets.length) return res.status(404).json({ error: 'Not found' });
 
     const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
-    if (!event || !userHasEventFullAccess(req.session.userId, event.id)) {
+    if (!event || !userHasEventCapability(req.session.userId, event.id, 'undo_checkin')) {
         return res.status(403).json({ error: 'Only full-access collaborators, owners, or admins can undo check-ins' });
     }
 
@@ -4459,7 +4543,7 @@ app.post('/api/ticket-check', validateLimiter, (req, res) => {
 app.post('/api/event/:id/scanner-links', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!userHasEventFullAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Forbidden' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
     const label = (req.body.label || '').trim();
     const link = { id: nanoid(10), eventId: event.id, token: nanoid(24), label, createdBy: req.session.userId, createdAt: new Date().toISOString() };
     stmt.scannerLinks.insert.run(link.id, link.eventId, link.token, link.label, link.createdBy, link.createdAt);
@@ -4498,7 +4582,7 @@ app.get('/api/scanner-links/:id/qr', requireAuth, async (req, res) => {
 app.delete('/api/scanner-links/:id', requireAuth, (req, res) => {
     const link = stmt.scannerLinks.byId.get(req.params.id);
     if (!link) return res.status(404).json({ error: 'Link not found' });
-    if (!userHasEventFullAccess(req.session.userId, link.eventId)) return res.status(403).json({ error: 'Forbidden' });
+    if (!userHasEventCapability(req.session.userId, link.eventId, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
     stmt.scannerLinks.deleteById.run(link.id);
     logAudit(req, { eventId: link.eventId, action: 'scannerlink.revoked', details: { label: link.label } });
     res.json({ success: true });
@@ -5228,58 +5312,86 @@ app.post('/api/auth/signup-for-link', async (req, res) => {
 });
 
 // My Rooms — get all rooms/events the current user has access to
+// Rooms shared with this user. Same scoping rule as /api/events: the admin
+// sees the rooms they were actually given, not every room on the instance.
 app.get('/api/my-rooms', requireAuth, (req, res) => {
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-
-    if (isAdmin) {
-        const rooms = stmt.events.all.all().map(rowToEvent).map(event => {
-            const link = stmt.sheetLinks.byEventId.get(event.id);
-            const accessEntries = link
-                ? stmt.sheetAccess.byLinkId.all(link.id).map(a => {
-                    const u = rowToUser(stmt.users.byId.get(a.userId));
-                    return { id: a.id, email: u ? u.email : 'Unknown', claimedAt: a.claimedAt };
-                })
-                : [];
-            return { event, sheetLink: link || null, access: accessEntries, isAdmin: true };
-        });
-        return res.json(rooms);
-    }
-
-    const myAccess = stmt.sheetAccess.byUserId.all(req.session.userId);
-    const rooms = myAccess.map(access => {
+    const rooms = stmt.sheetAccess.byUserId.all(req.session.userId).map(access => {
         const link = stmt.sheetLinks.byId.get(access.sheetLinkId);
         if (!link) return null;
         const event = link.eventId ? rowToEvent(stmt.events.byId.get(link.eventId)) : null;
-        return { event, sheetLink: link, accessId: access.id, claimedAt: access.claimedAt };
+        if (!event) return null;
+        const owner = rowToUser(stmt.users.byId.get(event.userId));
+        return {
+            event,
+            sheetLink: link,
+            accessId: access.id,
+            claimedAt: access.claimedAt,
+            owner: { userId: event.userId, email: owner ? owner.email : 'Unknown' },
+            capabilities: capabilitiesForAccessRow(access),
+            role: roleForCapabilities(capabilitiesForAccessRow(access)),
+        };
     }).filter(Boolean);
 
     res.json(rooms);
 });
 
-// Get access entries for a specific event (for settings cog in dashboard)
+// Get access entries for a specific event (for settings cog in dashboard).
+// Always includes the owner as the first row so it's obvious who the event
+// belongs to — theirs is the one grant nobody can edit or revoke.
 app.get('/api/event/:id/access', requireAuth, (req, res) => {
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
-    const link = stmt.sheetLinks.byEventId.get(req.params.id);
-
-    let hasAccess = false;
-    if (isAdmin || (event && event.userId === req.session.userId)) hasAccess = true;
-    else if (link) {
-        const myAccess = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
-        if (myAccess && myAccess.permission === 'full') hasAccess = true;
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_access')) {
+        return res.status(403).json({ error: 'You do not have permission to manage access for this event' });
     }
 
-    if (!hasAccess) return res.status(403).json({ error: 'Admin access required' });
-    if (!link) return res.json({ access: [], linkUrl: null });
+    const owner = rowToUser(stmt.users.byId.get(event.userId));
+    const ownerEntry = {
+        id: null,
+        userId: event.userId,
+        email: owner ? owner.email : 'Unknown',
+        claimedAt: event.createdAt || null,
+        role: 'owner',
+        capabilities: CAPABILITY_KEYS.slice(),
+        isOwner: true,
+        isSelf: event.userId === req.session.userId,
+        grantedByEmail: null,
+    };
 
-    const accessEntries = stmt.sheetAccess.byLinkId.all(link.id).map(a => {
-        const u = rowToUser(stmt.users.byId.get(a.userId));
-        return { id: a.id, email: u ? u.email : 'Unknown', claimedAt: a.claimedAt, permission: a.permission || 'view' };
+    const link = stmt.sheetLinks.byEventId.get(req.params.id);
+    const shared = link
+        ? stmt.sheetAccess.byLinkId.all(link.id)
+            // The owner can also hold a stale share row on their own event;
+            // showing it twice would just be confusing.
+            .filter(a => a.userId !== event.userId)
+            .map(a => {
+                const u = rowToUser(stmt.users.byId.get(a.userId));
+                const grantedBy = a.grantedBy ? rowToUser(stmt.users.byId.get(a.grantedBy)) : null;
+                const capabilities = capabilitiesForAccessRow(a);
+                return {
+                    id: a.id,
+                    userId: a.userId,
+                    email: u ? u.email : 'Unknown',
+                    claimedAt: a.claimedAt,
+                    role: roleForCapabilities(capabilities),
+                    capabilities,
+                    isOwner: false,
+                    isSelf: a.userId === req.session.userId,
+                    grantedByEmail: grantedBy ? grantedBy.email : null,
+                };
+            })
+        : [];
+
+    res.json({
+        access: [ownerEntry, ...shared],
+        owner: { userId: event.userId, email: ownerEntry.email },
+        linkUrl: link ? BASE_URL + '/link/' + link.token : null,
+        capabilityCatalog: CAPABILITIES,
+        rolePresets: ROLE_CAPABILITIES,
+        // Only a real owner (or the admin) may delegate the power to hand out
+        // access, so the UI can grey that checkbox out for everyone else.
+        canGrantManageAccess: userOwnsEvent(req.session.userId, event.id),
     });
-
-    res.json({ access: accessEntries, linkUrl: BASE_URL + '/link/' + link.token });
 });
 
 // True when the session user may manage this event: admin, owner, or a
@@ -5814,14 +5926,38 @@ app.delete('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
     res.json({ success: true });
 });
 
+// Resolve what a share request is actually asking for. `capabilities` wins
+// when present; otherwise the legacy `permission` role is expanded. Returns
+// null when the request names no capability we recognise.
+function resolveRequestedGrant({ permission, capabilities }) {
+    const explicit = normalizeCapabilities(capabilities);
+    if (explicit && explicit.length) return { role: roleForCapabilities(explicit), capabilities: explicit };
+    if (permission === 'full' || permission === 'view') {
+        const caps = ROLE_CAPABILITIES[permission].slice();
+        return { role: permission, capabilities: caps };
+    }
+    return null;
+}
+
 app.post('/api/sheet/share', requireAuth, async (req, res) => {
-    const { eventId, email, permission } = req.body;
-    if (!eventId || !email || !permission) return res.status(400).json({ error: 'Missing fields' });
+    const { eventId, email, permission, capabilities } = req.body;
+    if (!eventId || !email) return res.status(400).json({ error: 'Missing fields' });
 
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_access')) {
+        return res.status(403).json({ error: 'Permission denied to share room' });
+    }
+
+    const grant = resolveRequestedGrant({ permission, capabilities });
+    if (!grant) return res.status(400).json({ error: 'Select at least one permission to grant' });
+    // Only a real owner can pass on the right to manage access; a collaborator
+    // who merely holds `manage_access` can't mint more people like themselves.
+    if (grant.capabilities.includes('manage_access') && !userOwnsEvent(req.session.userId, event.id)) {
+        return res.status(403).json({ error: 'Only the event owner can grant permission to manage access' });
+    }
 
     let link = stmt.sheetLinks.byEventId.get(eventId);
     if (!link) {
@@ -5830,25 +5966,22 @@ app.post('/api/sheet/share', requireAuth, async (req, res) => {
         link = newLink;
     }
 
-    const myAccess = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
-    if (!isAdmin && event.userId !== req.session.userId && (!myAccess || myAccess.permission !== 'full')) {
-        return res.status(403).json({ error: 'Permission denied to share room' });
-    }
-
     const targetUser = rowToUser(stmt.users.byEmail.get(email.toLowerCase()));
     if (!targetUser) return res.status(404).json({ error: 'User ' + email + ' does not have an account. They must register first.' });
     if (targetUser.id === req.session.userId) return res.status(400).json({ error: 'Cannot share with yourself' });
+    if (targetUser.id === event.userId) return res.status(400).json({ error: 'That user already owns this event' });
 
+    const capsJson = JSON.stringify(grant.capabilities);
     const existingAccess = stmt.sheetAccess.byLinkAndUser.get(link.id, targetUser.id);
     if (existingAccess) {
-        stmt.sheetAccess.setPermission.run(permission, link.id, targetUser.id);
+        stmt.sheetAccess.setGrant.run(grant.role, capsJson, link.id, targetUser.id);
     } else {
-        stmt.sheetAccess.insert.run(nanoid(10), targetUser.id, link.id, new Date().toISOString(), permission);
+        stmt.sheetAccess.insert.run(nanoid(10), targetUser.id, link.id, new Date().toISOString(), grant.role, capsJson, req.session.userId);
     }
-    logAudit(req, { eventId: event.id, action: 'access.granted', details: { email: targetUser.email, permission } });
+    logAudit(req, { eventId: event.id, action: 'access.granted', details: { email: targetUser.email, permission: grant.role, capabilities: grant.capabilities } });
 
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
-        const permissionLabel = permission === 'full' ? 'full' : 'view';
+        const permissionLabel = grant.role === 'full' ? 'full' : grant.role === 'view' ? 'view' : 'custom';
         sendEmail({
             to: targetUser.email,
             fromName: `Tickets - ${event.name}`,
@@ -5870,21 +6003,49 @@ app.post('/api/sheet/share', requireAuth, async (req, res) => {
     res.json({ success: true, message: 'Access granted' });
 });
 
-// Revoke access to a room
-app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-
+// Change an existing collaborator's permissions without having to revoke and
+// re-share them.
+app.patch('/api/sheet/access/:id', requireAuth, (req, res) => {
     const access = stmt.sheetAccess.byId.get(req.params.id);
     if (!access) return res.status(404).json({ error: 'Access entry not found' });
 
     const link = stmt.sheetLinks.byId.get(access.sheetLinkId);
     const event = link && link.eventId ? rowToEvent(stmt.events.byId.get(link.eventId)) : null;
-    const myAccess = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    const isOwner = event && event.userId === req.session.userId;
-    const hasFull = myAccess && myAccess.permission === 'full';
+    if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!isAdmin && access.userId !== req.session.userId && !isOwner && !hasFull) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_access')) {
+        return res.status(403).json({ error: 'You do not have permission to manage access for this event' });
+    }
+    // Nobody edits their own grant — that's the one way to quietly promote
+    // yourself past what the owner gave you.
+    if (access.userId === req.session.userId && !userOwnsEvent(req.session.userId, event.id)) {
+        return res.status(403).json({ error: 'You cannot change your own permissions' });
+    }
+
+    const grant = resolveRequestedGrant(req.body || {});
+    if (!grant) return res.status(400).json({ error: 'Select at least one permission to grant' });
+    if (grant.capabilities.includes('manage_access') && !userOwnsEvent(req.session.userId, event.id)) {
+        return res.status(403).json({ error: 'Only the event owner can grant permission to manage access' });
+    }
+
+    stmt.sheetAccess.setGrantById.run(grant.role, JSON.stringify(grant.capabilities), access.id);
+    const targetUser = rowToUser(stmt.users.byId.get(access.userId));
+    logAudit(req, { eventId: event.id, action: 'access.updated', details: { email: targetUser?.email, permission: grant.role, capabilities: grant.capabilities } });
+    res.json({ success: true, role: grant.role, capabilities: grant.capabilities });
+});
+
+// Revoke access to a room
+app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
+    const access = stmt.sheetAccess.byId.get(req.params.id);
+    if (!access) return res.status(404).json({ error: 'Access entry not found' });
+
+    const link = stmt.sheetLinks.byId.get(access.sheetLinkId);
+    const event = link && link.eventId ? rowToEvent(stmt.events.byId.get(link.eventId)) : null;
+
+    // Anyone may hand back their own access; removing someone else needs the
+    // permission to manage access on that event.
+    const removingSelf = access.userId === req.session.userId;
+    if (!removingSelf && !(event && userHasEventCapability(req.session.userId, event.id, 'manage_access'))) {
         return res.status(403).json({ error: 'Not authorized to revoke others' });
     }
 
@@ -5946,11 +6107,7 @@ function buildReminderHtml(event, customMessage) {
 app.get('/api/event/:id/reminder', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = stmt.sheetLinks.byEventId.get(event.id);
-    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
     res.json({
@@ -5965,11 +6122,7 @@ app.get('/api/event/:id/reminder', requireAuth, async (req, res) => {
 app.put('/api/event/:id/reminder', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = stmt.sheetLinks.byEventId.get(event.id);
-    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
         return res.status(403).json({ error: 'Not authorized' });
     }
     const { enabled, message, hoursBefore } = req.body;
@@ -5984,11 +6137,9 @@ app.put('/api/event/:id/reminder', requireAuth, async (req, res) => {
 app.get('/api/event/:id/reminder/preview', requireAuth, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).send('Event not found');
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const link = stmt.sheetLinks.byEventId.get(event.id);
     const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    if (!isAdmin && event.userId !== req.session.userId && (!access || access.permission !== 'full')) {
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
         return res.status(403).send('Not authorized');
     }
     res.type('html').send(buildReminderHtml(event, event.reminderMessage));
@@ -6238,24 +6389,16 @@ app.get('/api/display/stream/:token', (req, res) => {
 
 app.get('/api/monitor/stream', requireAuth, async (req, res) => {
     const userId = req.session.userId;
-    const user = rowToUser(stmt.users.byId.get(userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
     const { eventId } = req.query;
 
+    // Naming one event still works for any event the user can reach (the
+    // admin included); the unfiltered firehose is scoped to their own rooms.
     let eventIds;
     if (eventId) {
         if (!userHasEventAccess(userId, eventId)) return res.status(403).json({ error: 'Not authorized' });
         eventIds = new Set([eventId]);
     } else {
-        const allEvents = isAdmin ? stmt.events.all.all().map(rowToEvent) : stmt.events.byUserId.all(userId).map(rowToEvent);
-        if (!isAdmin) {
-            const myAccess = stmt.sheetAccess.byUserId.all(userId);
-            for (const a of myAccess) {
-                const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
-                if (link?.eventId) allEvents.push(rowToEvent(stmt.events.byId.get(link.eventId)));
-            }
-        }
-        eventIds = new Set(allEvents.filter(Boolean).map(e => e.id));
+        eventIds = personalEventIdsForUser(userId);
     }
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -6285,22 +6428,8 @@ app.get('/api/monitor/stream', requireAuth, async (req, res) => {
 // ── Monitor bootstrap: list all known scanners ─────────────────────────────────
 app.get('/api/monitor/scanners', requireAuth, async (req, res) => {
     const userId = req.session.userId;
-    const user = rowToUser(stmt.users.byId.get(userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-
-    let userEvents = isAdmin ? stmt.events.all.all().map(rowToEvent) : stmt.events.byUserId.all(userId).map(rowToEvent);
-    if (!isAdmin) {
-        const myAccess = stmt.sheetAccess.byUserId.all(userId);
-        for (const a of myAccess) {
-            const link = stmt.sheetLinks.byId.get(a.sheetLinkId);
-            if (link?.eventId) {
-                const ev = rowToEvent(stmt.events.byId.get(link.eventId));
-                if (ev && !userEvents.find(e => e.id === ev.id)) userEvents.push(ev);
-            }
-        }
-    }
-
-    const userEventIds = new Set(userEvents.map(e => e.id));
+    const userEventIds = personalEventIdsForUser(userId);
+    const userEvents = [...userEventIds].map(id => rowToEvent(stmt.events.byId.get(id))).filter(Boolean);
 
     // Hydrate scannerRegistry; filter to events this user can see
     const scannerList = [...scannerRegistry.values()].filter(s =>
@@ -6410,14 +6539,7 @@ app.post('/api/monitor/notify', requireAuth, async (req, res) => {
     if (!message) return res.status(400).json({ error: 'message is required' });
 
     const userId = req.session.userId;
-    const user = rowToUser(stmt.users.byId.get(userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-
-    const userEventIds = new Set(
-        isAdmin
-            ? stmt.events.all.all().map(e => e.id)
-            : stmt.events.byUserId.all(userId).map(e => e.id)
-    );
+    const userEventIds = personalEventIdsForUser(userId);
 
     const payload = { type: 'notification', title, message, sentAt: new Date().toISOString() };
     let notified = 0;
@@ -6461,11 +6583,7 @@ app.get('/api/event/:id/metrics', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    const isAdmin = user && user.email === process.env.ADMIN_EMAIL;
-    const link = stmt.sheetLinks.byEventId.get(event.id);
-    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
-    if (!isAdmin && event.userId !== req.session.userId && !access) {
+    if (!userHasEventAccess(req.session.userId, event.id)) {
         return res.status(403).json({ error: 'Not authorized' });
     }
 

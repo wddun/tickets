@@ -214,6 +214,13 @@ try { db.exec(`ALTER TABLE orders ADD COLUMN discountAmount INTEGER DEFAULT 0`);
 try { db.exec(`ALTER TABLE orders ADD COLUMN refundedAt TEXT`); } catch {}
 try { db.exec(`ALTER TABLE orders ADD COLUMN refundAmount INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE events ADD COLUMN waitlistEnabled INTEGER DEFAULT 0`); } catch {}
+// Per-collaborator capability list (JSON array of capability keys). NULL means
+// the grant predates granular permissions — the server derives the capability
+// set from the older `permission` column ('view' or 'full') instead, so every
+// existing share keeps behaving exactly as it did before this column existed.
+try { db.exec(`ALTER TABLE sheetAccess ADD COLUMN capabilities TEXT`); } catch {}
+// Who granted this access, for the "shared by" line in the access list.
+try { db.exec(`ALTER TABLE sheetAccess ADD COLUMN grantedBy TEXT`); } catch {}
 // Shuttle linking: lets an external system (a linked shuttle/bus app room)
 // read-only check tickets for this event via /api/ticket-check, using the
 // same ticket the rider already has — without ever touching used_at. Only
@@ -608,8 +615,10 @@ export const stmt = {
         byUserId: db.prepare('SELECT * FROM sheetAccess WHERE userId=?'),
         byLinkAndUser: db.prepare('SELECT * FROM sheetAccess WHERE sheetLinkId=? AND userId=?'),
         countByLinkId: db.prepare('SELECT COUNT(*) as cnt FROM sheetAccess WHERE sheetLinkId=?'),
-        insert: db.prepare(`INSERT INTO sheetAccess (id, userId, sheetLinkId, claimedAt, permission) VALUES (?,?,?,?,?)`),
+        insert: db.prepare(`INSERT INTO sheetAccess (id, userId, sheetLinkId, claimedAt, permission, capabilities, grantedBy) VALUES (?,?,?,?,?,?,?)`),
         setPermission: db.prepare(`UPDATE sheetAccess SET permission=? WHERE sheetLinkId=? AND userId=?`),
+        setGrant: db.prepare(`UPDATE sheetAccess SET permission=?, capabilities=? WHERE sheetLinkId=? AND userId=?`),
+        setGrantById: db.prepare(`UPDATE sheetAccess SET permission=?, capabilities=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM sheetAccess WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM sheetAccess WHERE userId=?`),
     },
