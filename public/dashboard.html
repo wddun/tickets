@@ -1039,9 +1039,12 @@
             margin-bottom: 10px;
         }
 
+        /* Column, not a row: each entry stacks its summary row above the
+           permission editor that expands underneath it. .access-item-row
+           carries the horizontal layout. */
         .access-item {
             display: flex;
-            align-items: center;
+            flex-direction: column;
             gap: 10px;
             padding: 10px 0;
             border-bottom: 1px solid #f4f5f7;
@@ -4314,14 +4317,38 @@
                                 <div class="access-avatar">${getInitials(a.email)}</div>
                                 <div class="access-info">
                                     <div class="access-email">${esc(a.email)}${a.isSelf ? ' <span style="font-weight:normal;color:#888;font-size:11px;">(you)</span>' : ''} ${roleBadge('owner')}</div>
-                                    <div class="access-date">Owns this event — full control, cannot be changed here</div>
+                                    <div class="access-date">Owns this event — full control, and the only role that can hand it over</div>
                                 </div>
+                                ${data.canTransferOwnership ? `
+                                    <div class="access-actions">
+                                        <button class="access-edit-btn" onclick="toggleTransferOwnership()">Transfer</button>
+                                    </div>` : ''}
                             </div>
+                            ${data.canTransferOwnership ? `
+                                <div id="transferOwnerBox" style="display:none;">
+                                    <div class="cap-editor">
+                                        <div class="settings-hint" style="margin:0 0 8px;">
+                                            Hand this event to another account. They get full control, including who can access it.
+                                            ${esc(a.email)} stays on as a full-access collaborator and can be removed afterwards.
+                                        </div>
+                                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                            <input type="email" id="transferOwnerEmail" placeholder="New owner's email" autocomplete="email"
+                                                   style="flex:1;min-width:170px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                                            <button class="btn btn-primary btn-sm" onclick="transferOwnership('${eventId}')">Transfer ownership</button>
+                                            <button class="btn btn-sm" onclick="toggleTransferOwnership()">Cancel</button>
+                                        </div>
+                                    </div>
+                                </div>` : ''}
                         </div>`;
                 }
-                const capSummary = a.capabilities.length
-                    ? data.capabilityCatalog.filter(c => a.capabilities.includes(c.key)).map(c => c.label).join(', ')
-                    : 'No permissions';
+                // Listing all eleven for a full-access grant is just noise —
+                // the badge already says it. Spell them out only when the set
+                // is custom and the badge alone doesn't tell you anything.
+                const capSummary = !a.capabilities.length
+                    ? 'No permissions'
+                    : a.role === 'full' ? 'Everything except owning the event'
+                    : a.role === 'view' ? 'Scan tickets and check people in'
+                    : data.capabilityCatalog.filter(c => a.capabilities.includes(c.key)).map(c => c.label).join(', ');
                 return `
                     <div class="access-item">
                         <div class="access-item-row">
@@ -4388,6 +4415,39 @@
         function toggleAccessEditor(eventId, accessId) {
             const el = document.getElementById(`accessEditor-${accessId}`);
             if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function toggleTransferOwnership() {
+            const el = document.getElementById('transferOwnerBox');
+            if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function transferOwnership(eventId) {
+            const email = document.getElementById('transferOwnerEmail').value.trim();
+            if (!email) return;
+            const ev = events.find(e => e.id === eventId);
+            const confirmed = await confirmDialog(
+                `Transfer ownership of "${ev ? ev.name : 'this event'}" to ${email}? ` +
+                `They will get full control, including the ability to remove your access.`
+            );
+            if (!confirmed) return;
+            try {
+                const res = await fetch(`/api/event/${eventId}/transfer-ownership`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const d = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    showToast(`Ownership transferred to ${d.owner.email}.`);
+                    await loadEvents();
+                    await loadAccessData(eventId);
+                } else {
+                    showToast(d.error || 'Failed to transfer ownership.');
+                }
+            } catch (err) {
+                showToast('Network error while transferring ownership.');
+            }
         }
 
         async function saveAccessPermissions(eventId, accessId) {

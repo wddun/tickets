@@ -599,6 +599,7 @@ export const stmt = {
         insert: db.prepare(`INSERT INTO sheetLinks (id, token, spreadsheetId, sheetName, eventId, createdAt, apiKey) VALUES (?,?,?,?,?,?,?)`),
         update: db.prepare(`UPDATE sheetLinks SET eventId=?, sheetName=? WHERE id=?`),
         setApiKey: db.prepare(`UPDATE sheetLinks SET apiKey=? WHERE id=?`),
+        deleteByEventId: db.prepare(`DELETE FROM sheetLinks WHERE eventId=?`),
     },
     scannerLinks: {
         byToken: db.prepare('SELECT * FROM scannerLinks WHERE token=?'),
@@ -621,6 +622,7 @@ export const stmt = {
         setGrantById: db.prepare(`UPDATE sheetAccess SET permission=?, capabilities=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM sheetAccess WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM sheetAccess WHERE userId=?`),
+        deleteByLinkId: db.prepare(`DELETE FROM sheetAccess WHERE sheetLinkId=?`),
     },
     scannerAccess: {
         byUserId: db.prepare('SELECT * FROM scannerAccess WHERE userId=?'),

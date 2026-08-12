@@ -143,8 +143,9 @@
                 if (r.ok) {
                     const user = (await r.json()).user;
                     const next = new URLSearchParams(window.location.search).get('next');
-                    // Redirect to dashboard only if admin, otherwise home
-                    const defaultPage = user.isAdmin ? '/dashboard.html' : '/';
+                    // Anyone with a room to manage lands on the dashboard;
+                    // everyone else has nothing to see there, so go home.
+                    const defaultPage = user.hasRooms ? '/dashboard.html' : '/';
                     window.location.replace((next && next.startsWith('/')) ? next : defaultPage);
                     return;
                 }
@@ -207,8 +208,8 @@
                 } else if (data.success) {
                     const next = new URLSearchParams(window.location.search).get('next');
                     const userR = await fetch('/api/auth/me', { cache: 'no-store' });
-                    const isAdmin = userR.ok ? (await userR.json()).user.isAdmin : false;
-                    const defaultPage = isAdmin ? '/dashboard.html' : '/';
+                    const hasRooms = userR.ok ? (await userR.json()).user.hasRooms : false;
+                    const defaultPage = hasRooms ? '/dashboard.html' : '/';
                     window.location.href = (next && next.startsWith('/')) ? next : defaultPage;
                 } else {
                     alert('Error: ' + data.error);

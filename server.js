@@ -1276,10 +1276,18 @@ app.use(session({
 // unconditionally — static file matches short-circuit the pipeline, so this
 // must run first (scanner is PIN-protected itself, so excluded).
 app.get('/admin.html', (req, res) => res.redirect('/dashboard.html'));
+// The dashboard is for anyone who actually has a room to manage — the event's
+// owner, someone it was shared with, or the admin. Every API it calls is
+// scoped to the caller, so a collaborator opening this page sees only their
+// own rooms; the admin-only panels inside it are hidden client-side and
+// enforced by requireAdmin server-side. Someone with no rooms at all has
+// nothing to show, so they go back to the public site.
 app.get('/dashboard.html', (req, res, next) => {
     if (!req.session.userId) return res.redirect('/login.html');
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    if (!user || user.email !== process.env.ADMIN_EMAIL) return res.redirect('/login.html');
+    if (!user) return res.redirect('/login.html');
+    const isAdmin = user.email === process.env.ADMIN_EMAIL;
+    if (!isAdmin && personalEventIdsForUser(req.session.userId).size === 0) return res.redirect('/');
     next();
 });
 app.use(express.static('public', { extensions: ['html'] }));
@@ -1621,7 +1629,10 @@ app.get('/api/auth/me', (req, res) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user.email === process.env.ADMIN_EMAIL;
-    res.json({ user: { id: user.id, email: user.email, isAdmin, createdAt: user.createdAt } });
+    // hasRooms tells the login page whether to land this user on the dashboard
+    // or the public site — it's the same test the /dashboard.html guard uses.
+    const hasRooms = isAdmin || personalEventIdsForUser(user.id).size > 0;
+    res.json({ user: { id: user.id, email: user.email, isAdmin, hasRooms, createdAt: user.createdAt } });
 });
 
 
@@ -1835,9 +1846,7 @@ app.post('/api/account/password', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-app.get('/api/admin/logs', requireAuth, (req, res) => {
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    if (!user || user.email !== process.env.ADMIN_EMAIL) return res.status(403).json({ error: 'Forbidden' });
+app.get('/api/admin/logs', requireAdmin, (req, res) => {
     res.json(logBuffer);
 });
 
@@ -1876,14 +1885,16 @@ app.post('/api/push/register', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-const requireAdmin = (req, res, next) => {
+// Declared as a function, not a const, so routes registered earlier in the
+// file can reference it without hitting the temporal dead zone.
+function requireAdmin(req, res, next) {
     if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
     if (!user || user.email !== process.env.ADMIN_EMAIL) {
         return res.status(403).json({ error: 'Admin access required' });
     }
     next();
-};
+}
 
 // System-wide audit trail (admin only).
 app.get('/api/admin/audit-log', requireAdmin, (req, res) => {
@@ -2014,6 +2025,12 @@ function personalEventIdsForUser(userId) {
         if (link && link.eventId) ids.add(link.eventId);
     }
     for (const a of stmt.scannerAccess.byUserId.all(userId)) ids.add(a.eventId);
+    // Grants can outlive the event they point at (older deletions didn't clean
+    // up sheetLinks/sheetAccess). Drop the dead ones so callers that just count
+    // this set — the dashboard guard, hasRooms — aren't fooled by a ghost.
+    for (const id of ids) {
+        if (!stmt.events.byId.get(id)) ids.delete(id);
+    }
     return ids;
 }
 
@@ -3491,6 +3508,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.pushSubscriptions.deleteByEventId.run(req.params.id);
         stmt.scannerLinks.deleteByEventId.run(req.params.id);
         stmt.scannerAccess.deleteByEventId.run(req.params.id);
+        deleteEventSharing(req.params.id);
         const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
         if (watcher) {
             stmt.sheetWatcherSeen.deleteByWatcherId.run(watcher.id);
@@ -3516,6 +3534,7 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
             stmt.pushSubscriptions.deleteByEventId.run(eventId);
             stmt.scannerLinks.deleteByEventId.run(eventId);
             stmt.scannerAccess.deleteByEventId.run(eventId);
+            deleteEventSharing(eventId);
             const watcher = stmt.sheetWatchers.byEventId.get(eventId);
             if (watcher) {
                 stmt.sheetWatcherSeen.deleteByWatcherId.run(watcher.id);
@@ -5391,6 +5410,8 @@ app.get('/api/event/:id/access', requireAuth, (req, res) => {
         // Only a real owner (or the admin) may delegate the power to hand out
         // access, so the UI can grey that checkbox out for everyone else.
         canGrantManageAccess: userOwnsEvent(req.session.userId, event.id),
+        // Same test — handing the event to someone else is an owner-only act.
+        canTransferOwnership: userOwnsEvent(req.session.userId, event.id),
     });
 });
 
@@ -5926,6 +5947,86 @@ app.delete('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
     res.json({ success: true });
 });
 
+// Tear down an event's sharing rows. Deleting an event used to leave these
+// behind, so a revoked-by-deletion collaborator kept a grant pointing at an
+// event that no longer existed.
+function deleteEventSharing(eventId) {
+    for (const link of [stmt.sheetLinks.byEventId.get(eventId)].filter(Boolean)) {
+        stmt.sheetAccess.deleteByLinkId.run(link.id);
+    }
+    stmt.sheetLinks.deleteByEventId.run(eventId);
+}
+
+// Sharing hangs off a sheetLink, which an event may not have yet (it only
+// exists once someone shares or connects a sheet). Create one on demand.
+function ensureSheetLink(event) {
+    const existing = stmt.sheetLinks.byEventId.get(event.id);
+    if (existing) return existing;
+    const link = { id: nanoid(10), token: nanoid(20), spreadsheetId: 'manual', sheetName: event.name, eventId: event.id, createdAt: new Date().toISOString(), apiKey: nanoid(24) };
+    stmt.sheetLinks.insert.run(link.id, link.token, link.spreadsheetId, link.sheetName, link.eventId, link.createdAt, link.apiKey);
+    return link;
+}
+
+// Hand an event to another account. Only a real owner (or the admin) can do
+// this, since it's the one action that takes control away from the person who
+// has it. The outgoing owner keeps a full-capability share rather than being
+// locked out of their own event — they can be revoked afterwards like anyone.
+app.post('/api/event/:id/transfer-ownership', requireAuth, (req, res) => {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: 'email is required' });
+
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userOwnsEvent(req.session.userId, event.id)) {
+        return res.status(403).json({ error: 'Only the event owner can transfer ownership' });
+    }
+
+    const target = rowToUser(stmt.users.byEmail.get(String(email).toLowerCase()));
+    if (!target) return res.status(404).json({ error: 'User ' + email + ' does not have an account. They must register first.' });
+    if (target.id === event.userId) return res.status(400).json({ error: 'That user already owns this event' });
+
+    const previousOwner = rowToUser(stmt.users.byId.get(event.userId));
+    const link = ensureSheetLink(event);
+
+    db.transaction(() => {
+        stmt.events.setOwner.run(target.id, event.id);
+        // The new owner's old share row is now redundant — ownership already
+        // grants everything, and leaving it would show them twice.
+        const targetShare = stmt.sheetAccess.byLinkAndUser.get(link.id, target.id);
+        if (targetShare) stmt.sheetAccess.deleteById.run(targetShare.id);
+        // Keep the outgoing owner in the room with full permissions.
+        if (previousOwner) {
+            const caps = JSON.stringify(ROLE_CAPABILITIES.full);
+            const existing = stmt.sheetAccess.byLinkAndUser.get(link.id, previousOwner.id);
+            if (existing) stmt.sheetAccess.setGrant.run('full', caps, link.id, previousOwner.id);
+            else stmt.sheetAccess.insert.run(nanoid(10), previousOwner.id, link.id, new Date().toISOString(), 'full', caps, req.session.userId);
+        }
+    })();
+
+    logAudit(req, { eventId: event.id, action: 'event.ownership_transferred', details: { from: previousOwner?.email, to: target.email } });
+    log('event-settings', `[owner] Ownership transferred — event: ${event.name}  from: ${previousOwner?.email}  to: ${target.email}  by: ${req.session.userId}`);
+
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        sendEmail({
+            to: target.email,
+            fromName: `Tickets - ${event.name}`,
+            replyTo: REPLY_TO_EMAIL,
+            subject: `You now own ${event.name}`,
+            html: `
+                <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
+                    <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
+                    <h2 style="color:#1a1f3c;margin:0 0 8px;">You've been given ownership</h2>
+                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 12px;"><strong>${previousOwner?.email || 'An administrator'}</strong> transferred ownership of <strong>${event.name}</strong> to you. You now have full control of the event, including who else can access it.</p>
+                    <div style="text-align:center;margin:28px 0 8px;">
+                        <a href="${BASE_URL}/login.html" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Open the dashboard</a>
+                    </div>
+                </div>`,
+        }).catch(() => {});
+    }
+
+    res.json({ success: true, owner: { userId: target.id, email: target.email } });
+});
+
 // Resolve what a share request is actually asking for. `capabilities` wins
 // when present; otherwise the legacy `permission` role is expanded. Returns
 // null when the request names no capability we recognise.
@@ -5959,12 +6060,7 @@ app.post('/api/sheet/share', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Only the event owner can grant permission to manage access' });
     }
 
-    let link = stmt.sheetLinks.byEventId.get(eventId);
-    if (!link) {
-        const newLink = { id: nanoid(10), token: nanoid(20), spreadsheetId: 'manual', sheetName: event.name, eventId: event.id, createdAt: new Date().toISOString(), apiKey: nanoid(24) };
-        stmt.sheetLinks.insert.run(newLink.id, newLink.token, newLink.spreadsheetId, newLink.sheetName, newLink.eventId, newLink.createdAt, newLink.apiKey);
-        link = newLink;
-    }
+    const link = ensureSheetLink(event);
 
     const targetUser = rowToUser(stmt.users.byEmail.get(email.toLowerCase()));
     if (!targetUser) return res.status(404).json({ error: 'User ' + email + ' does not have an account. They must register first.' });
@@ -6634,12 +6730,7 @@ app.get('/api/event/:id/metrics', requireAuth, (req, res) => {
 
 // ── Admin Overview Metrics ───────────────────────────────────────────────────
 
-app.get('/api/admin/metrics', requireAuth, (req, res) => {
-    const user = rowToUser(stmt.users.byId.get(req.session.userId));
-    if (!user || user.email !== process.env.ADMIN_EMAIL) {
-        return res.status(403).json({ error: 'Admin only' });
-    }
-
+app.get('/api/admin/metrics', requireAdmin, (req, res) => {
     const allEvents = stmt.events.all.all().map(rowToEvent);
     let totalTickets = 0, totalScanned = 0, totalWallet = 0, totalEmailOpens = 0;
 
