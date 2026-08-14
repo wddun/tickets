@@ -457,11 +457,25 @@ export function rowToTicket(row) {
     };
 }
 
+// Events saved without a location used to get the literal string 'Venue' as
+// their location name, which then read as a real venue everywhere downstream —
+// tickets, wallet passes, the public registration page. The write paths no
+// longer do this, but those rows are still in the database, so strip the
+// placeholder on the way out instead of rewriting people's data. A name an
+// organiser actually typed is left alone.
+function normalizeEventLocation(location) {
+    if (!location) return location;
+    if (typeof location.name === 'string' && location.name.trim().toLowerCase() === 'venue') {
+        return { ...location, name: '' };
+    }
+    return location;
+}
+
 export function rowToEvent(row) {
     if (!row) return null;
     return {
         ...row,
-        location: row.location ? JSON.parse(row.location) : null,
+        location: normalizeEventLocation(row.location ? JSON.parse(row.location) : null),
         allowReentry: !!row.allowReentry,
         allowPublicRegistration: !!row.allowPublicRegistration,
         ticketPrice: row.ticketPrice || 0,

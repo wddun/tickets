@@ -399,9 +399,25 @@ function eventCalendarWindow(event) {
     return { start, end };
 }
 
+// The event's venue, or nothing at all.
+//
+// Events created or edited without a location used to have their name written
+// as the literal string 'Venue' (see /api/sheet/create-event and PUT
+// /api/event/:id, which no longer do this). Downstream that placeholder read
+// as a real venue, so tickets, wallet passes and reminder emails for an event
+// with no location announced one called "Venue". Those rows are still in the
+// database, so treat the placeholder as absent on the way out rather than
+// rewriting people's data. Anything genuinely typed by an organiser — "TBD"
+// included — is left alone, because they meant to say it.
+function eventVenue(event) {
+    let name = (event?.location?.name || '').trim();
+    const address = (event?.location?.address || '').trim();
+    if (name.toLowerCase() === 'venue') name = '';
+    return { name, address, hasAny: !!(name || address) };
+}
+
 function eventLocationLine(event) {
-    const name = event?.location?.name || '';
-    const address = event?.location?.address || '';
+    const { name, address } = eventVenue(event);
     if (name && address && name !== address) return `${name}, ${address}`;
     return name || address || '';
 }
@@ -711,8 +727,7 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
           <td style="padding:5px 0 5px 8px;font-size:14px;color:#374151;">${dateStr}</td>
         </tr>` : '';
 
-    const locName = event.location?.name || '';
-    const locAddress = event.location?.address || '';
+    const { name: locName, address: locAddress } = eventVenue(event);
     const mapsQuery = encodeURIComponent(locAddress || locName);
     const googleMapsUrl = mapsQuery ? `https://www.google.com/maps/search/?api=1&query=${mapsQuery}` : null;
     const appleMapsUrl  = mapsQuery ? `https://maps.apple.com/?q=${mapsQuery}` : null;
@@ -2395,7 +2410,7 @@ app.post('/api/checkout/:eventId', async (req, res) => {
                 currency: 'usd',
                 product_data: {
                     name: `${event.name} — Ticket`,
-                    description: [event.location?.name, dateLabel].filter(Boolean).join(' · ') || undefined,
+                    description: [eventVenue(event).name, dateLabel].filter(Boolean).join(' · ') || undefined,
                     images: event.imageUrl ? [`${BASE_URL}${event.imageUrl}`] : [],
                 },
                 unit_amount: finalAmount,
@@ -3142,7 +3157,9 @@ app.post('/api/sheet/create-event', async (req, res) => {
         imageUrl,
         scannerPin: Math.floor(100000 + Math.random() * 900000).toString(),
         location: {
-            name: locationName || address || 'Venue',
+            // No placeholder: an event with no venue must stay empty, or it
+            // shows up as a venue literally called "Venue" on tickets.
+            name: locationName || address || '',
             address: address || '',
             lat: parseFloat(lat) || 0,
             lng: parseFloat(lng) || 0
@@ -3416,7 +3433,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     const newColor = color || event.color;
     const newCapacity = capacityRaw !== undefined ? (parseInt(capacityRaw) || null) : event.capacity;
     const newLocation = {
-        name: locationName || event.location?.name || 'Venue',
+        name: locationName || event.location?.name || '',
         address: locationAddress || event.location?.address || '',
         lat: parseFloat(lat) || event.location?.lat || 37.33182,
         lng: parseFloat(lng) || event.location?.lng || -122.03118,
@@ -4091,7 +4108,7 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
 <p style="color:#888;margin:0 0 16px;">Registered ${formatEventDateTime(groupTickets[0].created_at, event, { withWeekday: false, dateOnly: true })}</p>
 <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
 <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
-<p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
+${(() => { const v = eventVenue(event); return v.hasAny ? `<p style="color:#555;margin:0 0 4px;">📍 ${v.name}${v.name && v.address ? ' — ' : ''}${v.address}</p>` : ''; })()}
 ${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${formatEventDateRange(event, { withWeekday: false })}</p>` : ''}
 ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
 ${qrBlocks}
@@ -4165,7 +4182,7 @@ app.get('/api/tickets/bulk-preview', requireAuth, async (req, res) => {
     <p style="color:#888;margin:0 0 16px;">Registered ${formatEventDateTime(ticket.created_at, event, { withWeekday: false, dateOnly: true })}</p>
     <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
     <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
-    <p style="color:#555;margin:0 0 4px;">📍 ${event.location?.name || ''}${event.location?.address ? ' — ' + event.location.address : ''}</p>
+    ${(() => { const v = eventVenue(event); return v.hasAny ? `<p style="color:#555;margin:0 0 4px;">📍 ${v.name}${v.name && v.address ? ' — ' : ''}${v.address}</p>` : ''; })()}
     ${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${formatEventDateRange(event, { withWeekday: false })}</p>` : ''}
     ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
     ${qrBlocks}
@@ -5023,8 +5040,7 @@ async function generatePassBuffer(ticket, event) {
     }
 
     // Auxiliary row: Location (two lines)
-    const locName = event.location?.name || '';
-    const locAddress = event.location?.address || '';
+    const { name: locName, address: locAddress } = eventVenue(event);
     // Front: venue name, or just the street portion of the address
     const frontLoc = locName || (locAddress ? locAddress.split(',')[0].trim() : null);
     if (frontLoc) {
@@ -6284,9 +6300,13 @@ function buildReminderHtml(event, customMessage) {
                 ${event.time ? `<tr><td style="padding-bottom:8px;">
                   <p style="color:#555;margin:0;font-size:14px;"><span style="font-weight:600;">Date & Time:</span><br>${formatEventDateRange(event)}</p>
                 </td></tr>` : ''}
-                <tr><td>
-                  <p style="color:#555;margin:0;font-size:14px;"><span style="font-weight:600;">Location:</span><br>${event.location?.name || 'TBD'}${event.location?.address ? '<br>' + event.location.address : ''}</p>
-                </td></tr>
+                ${(() => {
+                    const venue = eventVenue(event);
+                    if (!venue.hasAny) return '';
+                    return `<tr><td>
+                  <p style="color:#555;margin:0;font-size:14px;"><span style="font-weight:600;">Location:</span><br>${venue.name}${venue.name && venue.address ? '<br>' : ''}${venue.address}</p>
+                </td></tr>`;
+                })()}
               </table>
             </div>
 

@@ -17,3 +17,4 @@ db-migrated.flag
 screenshot.png
 pass-cache/
 .DS_Store
+public/.DS_Store
