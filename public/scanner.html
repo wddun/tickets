@@ -212,17 +212,6 @@
         }
         .slb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
         .slb-name { font-size: 13px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .slb-exit {
-            background: none;
-            border: none;
-            color: rgba(255,255,255,0.5);
-            font-size: 13px;
-            font-weight: 700;
-            cursor: pointer;
-            padding: 0 0 0 6px;
-            flex-shrink: 0;
-        }
-
         /* ── Full-screen event picker (logged-in users) ── */
         #eventPicker {
             position: fixed;
@@ -498,6 +487,16 @@
         }
         .settings-nav-row:active { opacity: 0.6; }
         .settings-nav-chevron { opacity: 0.3; flex-shrink: 0; margin-left: auto; }
+        /* Same shape as a nav row, but states a fact rather than offering an
+           action — used where an affordance would strand the person. */
+        .settings-hint-row {
+            display: flex; align-items: flex-start; gap: 12px;
+            width: 100%; max-width: 360px;
+            background: rgba(255,255,255,0.05); border-radius: 12px;
+            padding: 14px 16px; color: rgba(255,255,255,0.65);
+            font-size: 13px; line-height: 1.45; text-align: left;
+        }
+        .settings-hint-row strong { color: #fff; font-weight: 600; }
         .settings-card {
             width: 100%; max-width: 360px;
             background: rgba(255,255,255,0.07); border-radius: 14px; overflow: hidden;
@@ -668,7 +667,6 @@
     <div class="slb-pill">
         <span class="slb-dot" id="slbDot"></span>
         <span class="slb-name" id="slbName"></span>
-        <button id="scanLinkExitBtn" class="slb-exit" onclick="exitScanLinkMode()" style="display:none;" aria-label="Exit scan link">&times;</button>
     </div>
 </div>
 
@@ -837,11 +835,14 @@
             <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
         </button>
 
-        <button class="settings-nav-row" id="settingsExitScanLink" style="display:none;" onclick="exitScanLinkMode()">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            Leave This Event
-            <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
-        </button>
+        <!-- Scan-link mode has no way out on purpose: leaving would strand door
+             staff on a sign-in gate they can't get past. Switching events is
+             done by scanning another event's QR, which the scanner already
+             recognises — this just says so, since nothing else would. -->
+        <div class="settings-hint-row" id="settingsScanLinkLocked" style="display:none;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <span>This device is locked to <strong id="settingsLockedEventName"></strong>. To switch, scan another event's QR code from the Scanner tab.</span>
+        </div>
 
         <div class="settings-section-label" id="settingsAccountLabel">Account</div>
         <button class="settings-nav-row" id="settingsAccountRow" onclick="openAccountSettings()">
@@ -969,22 +970,39 @@ function getEventColor(ev) { return (ev && ev.color) || '#c4294a'; }
 // Full-screen "Entering [Event]" flash, then a persistent banner naming the
 // event — used both when a scan link resolves and when a logged-in user
 // selects/switches events, so the two modes feel like the same product.
+//
+// The flash means "you have just entered this event", so it only plays when
+// the event actually changes. Check-In and Settings are separate pages, so
+// every trip to one and back re-ran this and replayed the animation for an
+// event you never left; sessionStorage is per-tab and survives those
+// navigations, which is exactly the scope of "am I already in this event".
 function playEnteringAnimation(ev, opts = {}) {
     const color = getEventColor(ev);
+    const banner = document.getElementById('scanLinkBanner');
+    document.getElementById('slbDot').style.background = color;
+    document.getElementById('slbName').textContent = ev.eventName;
+
+    let alreadyInside = false;
+    try {
+        alreadyInside = sessionStorage.getItem('enteredEventId') === ev.eventId;
+        sessionStorage.setItem('enteredEventId', ev.eventId);
+    } catch (_) { /* private mode — just play it */ }
+
+    if (alreadyInside && !opts.force) {
+        banner.classList.add('show');
+        return;
+    }
+
     document.getElementById('sleIcon').style.background = color;
     document.getElementById('sleEventName').textContent = ev.eventName;
     const enterOverlay = document.getElementById('scanLinkEnterOverlay');
     enterOverlay.classList.remove('fade-out');
     enterOverlay.classList.add('show');
 
-    document.getElementById('slbDot').style.background = color;
-    document.getElementById('slbName').textContent = ev.eventName;
-    document.getElementById('scanLinkExitBtn').style.display = opts.showExitButton ? 'inline' : 'none';
-
     setTimeout(() => {
         enterOverlay.classList.add('fade-out');
         setTimeout(() => enterOverlay.classList.remove('show', 'fade-out'), 400);
-        document.getElementById('scanLinkBanner').classList.add('show');
+        banner.classList.add('show');
     }, 1000);
 }
 
@@ -997,19 +1015,10 @@ function lockToEvent(event) {
     displayQREventId = null;
     document.getElementById('eventPicker').classList.remove('show');
     document.getElementById('anonGate').classList.remove('show');
-    playEnteringAnimation(currentEvent, { showExitButton: false });
+    playEnteringAnimation(currentEvent);
     ensureCameraRunning();
     initScannerChannel();
     requestNotificationPermission();
-}
-
-function exitScanLinkMode() {
-    // Drop the scoped grant server-side too, so leaving actually gives up the
-    // event rather than leaving it on the session.
-    localStorage.removeItem('selectedEventId');
-    fetch('/api/scan-link/exit', { method: 'POST' })
-        .catch(() => {})
-        .finally(() => { location.href = '/scanner.html'; });
 }
 
 // ── Init ──────────────────────────────────────────────────
@@ -1212,7 +1221,7 @@ async function initScanLinkMode(scanToken, opts = {}) {
     // The event is stashed where checkin.html looks for it.
     localStorage.setItem('selectedEventId', link.eventId);
     showTabBar({ scanLink: true });
-    playEnteringAnimation(currentEvent, { showExitButton: true });
+    playEnteringAnimation(currentEvent);
     ensureCameraRunning();
     initScannerChannel();
     requestNotificationPermission();
@@ -1235,7 +1244,7 @@ function resumeScanLinkMode(scanLink) {
     scanLinkCapabilities = scanLink.capabilities || [];
     localStorage.setItem('selectedEventId', scanLink.eventId);
     showTabBar({ scanLink: true });
-    playEnteringAnimation(currentEvent, { showExitButton: true });
+    playEnteringAnimation(currentEvent);
     ensureCameraRunning();
     initScannerChannel();
     if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
@@ -1251,7 +1260,8 @@ function showTabBar({ scanLink = false } = {}) {
         document.getElementById('settingsSwitchEventRow').style.display = 'none';
         document.getElementById('settingsAccountLabel').style.display = 'none';
         document.getElementById('settingsAccountRow').style.display = 'none';
-        document.getElementById('settingsExitScanLink').style.display = '';
+        document.getElementById('settingsScanLinkLocked').style.display = 'flex';
+        document.getElementById('settingsLockedEventName').textContent = currentEvent ? currentEvent.eventName : 'this event';
         // Undo lives on the check-in list; hide the tab if the link can't do it.
         if (!scanLinkCapabilities.includes('checkin')) {
             document.getElementById('tabList').style.display = 'none';
