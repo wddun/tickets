@@ -346,6 +346,8 @@
             el.textContent = message;
             el.style.display = 'block';
             el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            // Pull fresh numbers so the counter agrees with what just happened.
+            fetchAvailability().then(a => { if (a) { renderAvailability(a); applySoldOutState(a); } });
         }
 
         // Already registered from this browser: say so before they fill the
@@ -380,6 +382,48 @@
                     : 'Updating live');
             }
             box?.classList.add('show');
+        }
+
+        // Sold-out is a live condition, not a fact fixed at page load: an
+        // organiser can raise the capacity, or a hold can lapse, while someone
+        // is sitting on this page. This runs on every availability refresh so
+        // the banner and the button both follow, instead of leaving a stale
+        // "Sold out" over a form that would now work.
+        function applySoldOutState(a) {
+            if (!a || a.capacity == null || claimToken) return;
+            const el = document.getElementById('ticketsLeft');
+            const btn = document.getElementById('submitBtn');
+            // Holding a spot means it isn't sold out as far as this visitor is
+            // concerned, whatever the headline number says.
+            const shutOut = a.soldOut && !holdToken;
+
+            if (!shutOut) {
+                el.style.display = 'none';
+                isFullWaitlistable = false;
+                btn.disabled = false;
+                btn.textContent = eventTicketPrice > 0
+                    ? `Buy Ticket — $${(eventTicketPrice / 100).toFixed(2)}`
+                    : 'Get My Ticket';
+                return;
+            }
+
+            el.style.display = 'block';
+            if (a.waitlistEnabled) {
+                isFullWaitlistable = true;
+                btn.disabled = false;
+                btn.textContent = 'Join Waitlist';
+                el.textContent = "Sold out — join the waitlist below and we'll email you if a spot opens up.";
+                el.style.background = 'var(--warning-bg)';
+                el.style.borderColor = '#fcd34d';
+                el.style.color = 'var(--warning-text)';
+            } else {
+                isFullWaitlistable = false;
+                el.textContent = 'Sold out';
+                btn.disabled = true;
+                el.style.background = 'var(--danger-soft-bg)';
+                el.style.borderColor = 'var(--danger-soft-border)';
+                el.style.color = 'var(--danger-soft-text)';
+            }
         }
 
         async function fetchAvailability() {
@@ -438,6 +482,10 @@
                     document.getElementById('formView').style.display = 'block';
                     startHoldTimers();
                     renderAvailability({ ...d, registered: d.issued });
+                    // We demonstrably have a spot, so any leftover sold-out
+                    // banner from before is wrong — clear it immediately
+                    // rather than waiting for the next poll.
+                    applySoldOutState({ ...d, registered: d.issued, soldOut: false });
                     return true;
                 }
 
@@ -533,7 +581,10 @@
                 // Say so rather than leave a countdown running on a spot that
                 // no longer exists.
                 if (holdToken && a.holdStillValid === false) { onHoldLost(a); return; }
-                if (document.getElementById('formView').style.display !== 'none') renderAvailability(a);
+                if (document.getElementById('formView').style.display !== 'none') {
+                    renderAvailability(a);
+                    applySoldOutState(a);
+                }
             };
             refresh();
             setInterval(refresh, 6000);
@@ -576,27 +627,13 @@
                 // (see the waitlist-promotion flow) — always let them through
                 // the normal buy/register flow regardless of what capacity
                 // looks like for everyone else; the backend enforces this.
-                // The live counter above already says how many are left and
-                // keeps saying it as the number moves, so this badge is only
-                // for the one thing the counter can't express: the door is
-                // shut, and here's what to do about it.
-                if (event.capacity && event.ticketsRemaining != null && !claimToken && event.ticketsRemaining === 0) {
-                    const el = document.getElementById('ticketsLeft');
-                    el.style.display = 'block';
-                    if (event.waitlistEnabled) {
-                        isFullWaitlistable = true;
-                        document.getElementById('submitBtn').textContent = 'Join Waitlist';
-                        el.textContent = "Sold out — join the waitlist below and we'll email you if a spot opens up.";
-                        el.style.background = 'var(--warning-bg)';
-                        el.style.borderColor = '#fcd34d';
-                        el.style.color = 'var(--warning-text)';
-                    } else {
-                        el.textContent = 'Sold out';
-                        document.getElementById('submitBtn').disabled = true;
-                        el.style.background = 'var(--danger-soft-bg)';
-                        el.style.borderColor = 'var(--danger-soft-border)';
-                        el.style.color = 'var(--danger-soft-text)';
-                    }
+                if (event.capacity && !claimToken) {
+                    applySoldOutState({
+                        capacity: event.capacity,
+                        remaining: event.ticketsRemaining,
+                        soldOut: event.ticketsRemaining === 0,
+                        waitlistEnabled: event.waitlistEnabled,
+                    });
                 }
             } catch {
                 alert('Event not found or has been removed.');
@@ -701,10 +738,10 @@
                         showSuccess(data.ticket, data.qr);
                     } else if (data.waitlisted) {
                         showWaitlisted(data);
-                    } else if (res.status === 409 && data.reason) {
-                        showSignupBlocked(data.error);
+                    } else if (data.reason || data.error) {
+                        showSignupBlocked(data.error || 'Could not start checkout.');
                     } else {
-                        alert('Error: ' + (data.error || 'Could not create checkout session.'));
+                        alert('Could not create checkout session. Please try again.');
                     }
                 } else {
                     const res  = await fetch('/api/register', {
@@ -717,10 +754,14 @@
                         showSuccess(data.ticket, data.qr);
                     } else if (data.waitlisted) {
                         showWaitlisted(data);
-                    } else if (res.status === 409 && data.reason) {
-                        showSignupBlocked(data.error);
+                    } else if (data.reason || data.error) {
+                        // Every refusal the server can give — sold out, filled
+                        // up mid-signup, duplicate email, device already used —
+                        // is shown in the page rather than an alert the person
+                        // has to dismiss before they can read the form again.
+                        showSignupBlocked(data.error || 'That registration could not be completed.');
                     } else {
-                        alert('Error: ' + data.error);
+                        alert('Something went wrong. Please try again.');
                     }
                 }
             } catch { alert('Connection error. Please try again.'); }
