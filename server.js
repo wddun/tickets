@@ -2314,6 +2314,61 @@ function purgeStaleHolds() {
     try { stmt.seatHolds.purgeStale.run(new Date().toISOString()); } catch (_) {}
 }
 
+// ── Signup limits ──────────────────────────────────────────────────────────
+//
+// Three independent restrictions an organiser can put on public registration.
+// All default off (or, for multiple registrations, on) so existing events keep
+// behaving exactly as they did.
+
+// Nothing on this server parses cookies, and the only one we set is this
+// marker, so a small reader beats pulling in cookie-parser.
+function readCookie(req, name) {
+    const raw = req.headers?.cookie;
+    if (!raw) return null;
+    for (const part of raw.split(';')) {
+        const idx = part.indexOf('=');
+        if (idx === -1) continue;
+        if (part.slice(0, idx).trim() === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    }
+    return null;
+}
+
+const deviceCookieName = (eventId) => `wtsreg_${eventId}`;
+
+// A browser-level marker, not an identity. Clearing cookies, a private window
+// or a second phone all defeat it — it stops the same person casually
+// registering twice, and nothing more. Worth being honest about in the UI.
+function deviceAlreadyRegistered(req, eventId) {
+    return readCookie(req, deviceCookieName(eventId)) === '1';
+}
+
+function markDeviceRegistered(res, eventId) {
+    res.cookie(deviceCookieName(eventId), '1', {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 180 * 24 * 60 * 60 * 1000,
+    });
+}
+
+function emailAlreadyRegistered(eventId, email) {
+    if (!email) return false;
+    return !!stmt.tickets.byEventAndEmail.get(eventId, String(email).trim().toLowerCase());
+}
+
+// The one place that decides whether this visitor may register at all, so the
+// hold endpoint, the free path and checkout can't drift apart. Returns null
+// when they're clear, or `{ code, error }` describing the refusal.
+function signupBlockReason(req, event, email) {
+    if (event.oneRegistrationPerDevice && deviceAlreadyRegistered(req, event.id)) {
+        return { code: 'device_already_registered', error: 'This device has already registered for this event.' };
+    }
+    if (email && event.blockDuplicateEmails && emailAlreadyRegistered(event.id, email)) {
+        return { code: 'email_already_registered', error: 'That email address is already registered for this event.' };
+    }
+    return null;
+}
+
 // The single source of truth for "is there room?". Issued tickets, live holds
 // and unclaimed waitlist offers all occupy a seat.
 function eventSeatUsage(eventId) {
@@ -2350,6 +2405,12 @@ app.post('/api/event/:id/hold', (req, res) => {
     if (!event.allowPublicRegistration) {
         return res.status(403).json({ error: 'Registration is not open for this event' });
     }
+
+    // Same door check as registration, applied up front — being told "you've
+    // already registered" after filling in a form is the thing this whole
+    // hold mechanism exists to avoid.
+    const blocked = signupBlockReason(req, event, null);
+    if (blocked) return res.status(409).json({ granted: false, reason: blocked.code, error: blocked.error, ...eventSeatUsage(event.id) });
 
     const qty = Math.max(1, Math.min(20, parseInt(req.body?.quantity, 10) || 1));
     const existingToken = (req.body?.holdToken || '').trim();
@@ -2401,27 +2462,54 @@ app.post('/api/event/:id/hold/release', (req, res) => {
     res.json({ success: true });
 });
 
-// Live availability for the public registration page.
+// Live availability for the public registration page. Answers from the
+// caller's point of view: pass your own holdToken and your seat is not counted
+// against you, and you're told whether that seat is still good.
 app.get('/api/event/:id/availability', (req, res) => {
     purgeStaleHolds();
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     const usage = eventSeatUsage(event.id);
+
+    const token = (req.query.holdToken || '').trim();
+    const hold = token ? stmt.seatHolds.byToken.get(token) : null;
+    const mine = hold && hold.eventId === event.id && hold.status === 'active'
+        && hold.expiresAt > new Date().toISOString() ? hold.quantity : 0;
+
+    // A hold only means something while issued tickets alone leave room for
+    // it. Other paths (manual add, sheet import, door sales) can fill the
+    // event out from under a holder, and telling them they still have a spot
+    // when they don't is worse than telling them they lost it.
+    const holdStillValid = usage.capacity ? (mine > 0 && usage.issued + mine <= usage.capacity) : !!mine;
+
     res.json({
         capacity: usage.capacity,
         registered: usage.issued,
-        remaining: usage.remaining,
-        soldOut: usage.soldOut,
+        // Seats free to someone who isn't already holding one — a holder
+        // shouldn't see "none left" while looking at their own reserved spot.
+        remaining: usage.capacity ? Math.max(0, usage.capacity - usage.taken + mine) : null,
+        soldOut: usage.capacity ? (usage.taken - mine) >= usage.capacity : false,
         unlimited: usage.unlimited,
         // Someone else is mid-signup — worth showing so a visitor understands
         // why the count moved without a ticket being issued.
-        holding: usage.held,
+        holding: Math.max(0, usage.held - mine),
+        holdStillValid,
         waitlistEnabled: !!event.waitlistEnabled,
         registrationOpen: !!event.allowPublicRegistration,
     });
 });
 
-// Turns a hold into a seat. Returns true when the caller may proceed: either
+// Explains a refusal in terms the person reading it can act on — "at
+// capacity" is confusing when the tickets aren't actually issued yet.
+function heldSeatMessage(usage, wanted = 1) {
+    const base = `Event is at capacity (${usage.capacity} max, ${usage.issued} registered`;
+    if (usage.held > 0) {
+        return `${base}, ${usage.held} being filled in right now). Those held spots are released automatically if they aren't completed.`;
+    }
+    return `${base})${wanted > 1 ? ` — not enough room for ${wanted}` : ''}.`;
+}
+
+// Turns a hold into a seat. Returns ok when the caller may proceed: either
 // they presented a live hold, or there was room anyway.
 function consumeHoldOrCheckRoom(event, holdToken, quantity = 1) {
     if (!event.capacity) return { ok: true };
@@ -2430,6 +2518,17 @@ function consumeHoldOrCheckRoom(event, holdToken, quantity = 1) {
     const holdValid = hold && hold.eventId === event.id && hold.status === 'active' && hold.expiresAt > nowIso;
 
     if (holdValid) {
+        // A hold is a promise, but it can't be honoured past the point where
+        // honouring it oversells the event. Tickets issued through paths that
+        // don't reserve seats — a manual add, a sheet import, a door sale —
+        // can fill the event out from under a hold. Issue the ticket anyway
+        // and the event goes over capacity, which is the one outcome nobody
+        // can undo, so refuse and say plainly what happened.
+        const usage = eventSeatUsage(event.id);
+        if (usage.issued + quantity > usage.capacity) {
+            stmt.seatHolds.setStatus.run('released', holdToken);
+            return { ok: false, usage, filledUnderHold: true };
+        }
         stmt.seatHolds.setStatus.run('consumed', holdToken);
         return { ok: true, usedHold: true };
     }
@@ -2454,6 +2553,9 @@ app.post('/api/register', async (req, res) => {
         return res.status(403).json({ error: 'Registration is not open for this event' });
     }
 
+    const blockedHere = signupBlockReason(req, event, email);
+    if (blockedHere) return res.status(409).json({ error: blockedHere.error, reason: blockedHere.code });
+
     // Presenting a live hold guarantees the seat that was set aside when this
     // form was opened; without one this still falls back to a capacity check,
     // so a direct API call can't slip past.
@@ -2462,7 +2564,12 @@ app.post('/api/register', async (req, res) => {
         if (event.waitlistEnabled) {
             return res.json(await joinWaitlist(event, name, email));
         }
-        return res.status(400).json({ error: 'This event is sold out' });
+        return res.status(400).json({
+            error: seat.filledUnderHold
+                ? 'This event filled up while you were signing up, so the spot that was being held for you is no longer available.'
+                : 'This event is sold out',
+            reason: seat.filledUnderHold ? 'filled_under_hold' : 'sold_out',
+        });
     }
 
     const nameParts = name.trim().split(/\s+/);
@@ -2497,6 +2604,9 @@ app.post('/api/register', async (req, res) => {
     }
 
     log('register', `[public] New registration — name: ${name}  email: ${email}  event: ${event.name}`);
+    // Marks this browser so "one registration per device" can recognise it
+    // later. Only set on success, so a failed attempt doesn't lock anyone out.
+    if (event.oneRegistrationPerDevice) markDeviceRegistered(res, event.id);
     res.json({ success: true, ticket: { token, registrationId }, qr: qrDataUrl });
 });
 
@@ -2604,6 +2714,14 @@ app.post('/api/checkout/:eventId', async (req, res) => {
     // capacity gate. Everyone else must still fit — counting issued tickets,
     // live holds and outstanding waitlist offers.
     const paidHoldToken = (req.body?.holdToken || '').trim();
+
+    // A claim link is a seat the organiser already promised to this person, so
+    // it isn't subject to the general signup limits.
+    if (!claimEntry) {
+        const blockedPaid = signupBlockReason(req, event, cleanEmail);
+        if (blockedPaid) return res.status(409).json({ error: blockedPaid.error, reason: blockedPaid.code });
+    }
+
     if (event.capacity && !claimEntry) {
         const usage = eventSeatUsage(event.id);
         const heldByCaller = paidHoldToken ? stmt.seatHolds.byToken.get(paidHoldToken) : null;
@@ -2690,6 +2808,13 @@ app.get('/api/stripe/session/:sessionId', async (req, res) => {
     let qr = null;
     if (ticket) {
         try { qr = await QRCode.toDataURL(`ticket:${ticket.token}`); } catch {}
+    }
+    // The paid path completes in the webhook, which has no browser to set a
+    // cookie on — this poll from the success page is the first chance to mark
+    // the device, and only once the order is actually fulfilled.
+    if (order.status === 'fulfilled' && order.eventId) {
+        const paidEvent = rowToEvent(stmt.events.byId.get(order.eventId));
+        if (paidEvent?.oneRegistrationPerDevice) markDeviceRegistered(res, paidEvent.id);
     }
     res.json({
         status: order.status,
@@ -2792,8 +2917,13 @@ app.post('/api/event/:eventId/at-door-register', requireAuth, async (req, res) =
     if (event.ticketPrice) return res.status(400).json({ error: 'This event is paid — share the registration QR code instead' });
 
     if (event.capacity) {
-        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
-        if (registered >= event.capacity) return res.status(400).json({ error: 'This event is sold out' });
+        // Counts seats people are holding mid-signup, not just issued tickets —
+        // otherwise a door sale silently takes a spot already promised to
+        // someone part-way through the online form, and the event oversells.
+        const usage = eventSeatUsage(event.id);
+        if (usage.taken >= usage.capacity) {
+            return res.status(400).json({ error: heldSeatMessage(usage) });
+        }
     }
 
     const { name, email } = req.body;
@@ -3148,7 +3278,8 @@ app.post('/api/register-bulk', async (req, res) => {
     // poller are both synchronous per row), so re-querying `registered` on
     // every call naturally waitlists overflow rows in sheet order.
     if (!isResend && event.capacity) {
-        const registered = stmt.tickets.countByEventId.get(event.id).cnt;
+        const usage = eventSeatUsage(event.id);
+        const registered = usage.taken;
         if (registered + count > event.capacity) {
             if (event.waitlistEnabled) {
                 const result = await joinWaitlist(event, `${firstName} ${lastName}`, email, shouldSendAdminEmail(req.body.sendEmail, event));
@@ -3636,6 +3767,9 @@ app.get('/api/event/:id', (req, res) => {
     }
     // Lets the public registration page style itself without a second request.
     event.themeStyle = themeForEvent(event);
+    // So the form can hide "Register Another Person" and warn about a repeat
+    // signup before the visitor fills anything in.
+    event.deviceAlreadyRegistered = event.oneRegistrationPerDevice && deviceAlreadyRegistered(req, event.id);
     res.json(event);
 });
 
@@ -3645,6 +3779,21 @@ app.get('/api/registration-themes', (req, res) => {
         key: t.key, label: t.label, description: t.description,
         useEventColor: !!t.useEventColor, dark: !!t.dark, vars: t.vars,
     })));
+});
+
+app.put('/api/event/:id/registration-limits', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+    const b = req.body || {};
+    const allowMultiple = b.allowMultipleRegistrations !== false;
+    const perDevice = b.oneRegistrationPerDevice === true;
+    const blockDupes = b.blockDuplicateEmails === true;
+    stmt.events.setRegistrationLimits.run(allowMultiple ? 1 : 0, perDevice ? 1 : 0, blockDupes ? 1 : 0, event.id);
+    logAudit(req, { eventId: event.id, action: 'event.registration_limits_changed', details: { allowMultiple, perDevice, blockDupes } });
+    res.json({ success: true, allowMultipleRegistrations: allowMultiple, oneRegistrationPerDevice: perDevice, blockDuplicateEmails: blockDupes });
 });
 
 app.put('/api/event/:id/theme', requireAuth, (req, res) => {
@@ -4003,9 +4152,9 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     const count = Math.max(1, parseInt(ticketCount) || 1);
 
     if (event.capacity) {
-        const registered = stmt.tickets.countByEventId.get(event.id).cnt;
-        if (registered + count > event.capacity) {
-            return res.status(409).json({ error: `Event is at capacity (${event.capacity} tickets max, ${registered} registered)` });
+        const usage = eventSeatUsage(event.id);
+        if (usage.taken + count > usage.capacity) {
+            return res.status(409).json({ error: heldSeatMessage(usage, count) });
         }
     }
     const registrationId = nanoid(10);

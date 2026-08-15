@@ -2393,6 +2393,7 @@
                 if (pub) await setPublicRegistration(id, pub.checked);
                 if (atDoor) await setAtDoorEnabled(id, atDoor.checked);
                 if (skipEmails) await setSkipConfirmationEmails(id, skipEmails.checked);
+                await saveRegistrationLimits(id);
             },
             'tab-waitlist': async (id) => {
                 const wl = document.getElementById('waitlistToggle');
@@ -4726,6 +4727,9 @@
             const enabled = !!ev?.allowPublicRegistration;
             const atDoor  = !!ev?.atDoorEnabled;
             const skipEmails = !!ev?.skipConfirmationEmails;
+            const allowMultiple = ev?.allowMultipleRegistrations !== false;
+            const perDevice = !!ev?.oneRegistrationPerDevice;
+            const blockDupes = !!ev?.blockDuplicateEmails;
             const isPaid  = !!ev?.ticketPrice;
             const regUrl = `${location.origin}/register.html?id=${eventId}`;
             const atDoorDesc = isPaid
@@ -4772,6 +4776,33 @@
                     <div>
                         <div class="settings-toggle-title">Skip Confirmation Emails</div>
                         <div class="settings-toggle-desc">Default to not emailing a ticket when you manually add, CSV-import, or Google Sheets-import someone for this event — useful for giveaways where you don't want everyone entered getting an email. Doesn't affect public self-registration, checkout receipts, or waitlist notifications. Can still be overridden per-import.</div>
+                    </div>
+                </label>
+
+                <hr class="settings-divider">
+                <div class="settings-subhead">Signup Limits</div>
+                <div class="settings-hint" style="margin-bottom:10px;">
+                    How many times one person can sign up through the public link. These only apply to public registration — staff adding people manually is never restricted.
+                </div>
+                <label class="settings-toggle">
+                    <input type="checkbox" id="allowMultipleToggle" ${allowMultiple ? 'checked' : ''}>
+                    <div>
+                        <div class="settings-toggle-title">Allow Registering Several People</div>
+                        <div class="settings-toggle-desc">Shows a "Register Another Person" button after someone gets their ticket, so one person can sign up a whole group. Turn off to let each visitor register once per visit.</div>
+                    </div>
+                </label>
+                <label class="settings-toggle">
+                    <input type="checkbox" id="blockDupeEmailToggle" ${blockDupes ? 'checked' : ''}>
+                    <div>
+                        <div class="settings-toggle-title">One Registration Per Email</div>
+                        <div class="settings-toggle-desc">Refuses an email address that already has a ticket for this event, with a message saying so. Catches the same person signing up twice, and accidental double submissions.</div>
+                    </div>
+                </label>
+                <label class="settings-toggle">
+                    <input type="checkbox" id="perDeviceToggle" ${perDevice ? 'checked' : ''}>
+                    <div>
+                        <div class="settings-toggle-title">One Registration Per Device</div>
+                        <div class="settings-toggle-desc">Remembers the browser that registered and turns it away next time, before the form is shown. This is a deterrent, not a lock — clearing cookies, a private window, or a second phone all get around it. Pair it with the email limit above for anything that matters.</div>
                     </div>
                 </label>
 
@@ -4829,6 +4860,30 @@
             const n = s.match(/\d+/g);
             if (!n || n.length < 3) return '#6366f1';
             return '#' + n.slice(0, 3).map(x => parseInt(x, 10).toString(16).padStart(2, '0')).join('');
+        }
+
+        async function saveRegistrationLimits(eventId) {
+            const multi = document.getElementById('allowMultipleToggle');
+            const device = document.getElementById('perDeviceToggle');
+            const dupes = document.getElementById('blockDupeEmailToggle');
+            if (!multi && !device && !dupes) return;
+            const body = {
+                allowMultipleRegistrations: multi ? multi.checked : true,
+                oneRegistrationPerDevice: device ? device.checked : false,
+                blockDuplicateEmails: dupes ? dupes.checked : false,
+            };
+            try {
+                const r = await fetch(`/api/event/${eventId}/registration-limits`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) { showToast('Could not save signup limits.'); return; }
+                const ev = events.find(e => e.id === eventId);
+                if (ev) Object.assign(ev, body);
+            } catch {
+                showToast('Network error while saving signup limits.');
+            }
         }
 
         async function chooseTheme(eventId, theme) {

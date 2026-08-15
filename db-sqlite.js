@@ -247,6 +247,12 @@ try { db.exec(`ALTER TABLE sheetAccess ADD COLUMN grantedBy TEXT`); } catch {}
 // Visual theme for the public registration page (see REGISTRATION_THEMES in
 // server.js). NULL means the default.
 try { db.exec(`ALTER TABLE events ADD COLUMN theme TEXT`); } catch {}
+// Signup limits for public registration. Defaults preserve the old behaviour:
+// one person could register any number of people, from any device, with any
+// email — including one already used.
+try { db.exec(`ALTER TABLE events ADD COLUMN allowMultipleRegistrations INTEGER DEFAULT 1`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN oneRegistrationPerDevice INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN blockDuplicateEmails INTEGER DEFAULT 0`); } catch {}
 // Shuttle linking: lets an external system (a linked shuttle/bus app room)
 // read-only check tickets for this event via /api/ticket-check, using the
 // same ticket the rider already has — without ever touching used_at. Only
@@ -508,6 +514,11 @@ export function rowToEvent(row) {
         atDoorEnabled: !!row.atDoorEnabled,
         reminderEnabled: !!row.reminderEnabled,
         waitlistEnabled: !!row.waitlistEnabled,
+        // Default to the historical behaviour when the column predates this:
+        // several registrations per person were always allowed.
+        allowMultipleRegistrations: row.allowMultipleRegistrations === null || row.allowMultipleRegistrations === undefined ? true : !!row.allowMultipleRegistrations,
+        oneRegistrationPerDevice: !!row.oneRegistrationPerDevice,
+        blockDuplicateEmails: !!row.blockDuplicateEmails,
         shuttleLinkEnabled: !!row.shuttleLinkEnabled,
         skipConfirmationEmails: !!row.skipConfirmationEmails,
         walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
@@ -565,6 +576,7 @@ export const stmt = {
         setReminder: db.prepare(`UPDATE events SET reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=? WHERE id=?`),
         setCustomFields: db.prepare(`UPDATE events SET customFields=? WHERE id=?`),
         setTheme: db.prepare(`UPDATE events SET theme=? WHERE id=?`),
+        setRegistrationLimits: db.prepare(`UPDATE events SET allowMultipleRegistrations=?, oneRegistrationPerDevice=?, blockDuplicateEmails=? WHERE id=?`),
         setImageUrl: db.prepare(`UPDATE events SET imageUrl=? WHERE id=?`),
         setPublicRegistration: db.prepare(`UPDATE events SET allowPublicRegistration=? WHERE id=?`),
         setTicketPrice: db.prepare(`UPDATE events SET ticketPrice=? WHERE id=?`),
@@ -589,6 +601,7 @@ export const stmt = {
         firstByRegistrationIdOrId: db.prepare('SELECT * FROM tickets WHERE registrationId = ? OR id = ? LIMIT 1'),
         byEventId: db.prepare('SELECT * FROM tickets WHERE eventId = ?'),
         countByEventId: db.prepare('SELECT COUNT(*) as cnt FROM tickets WHERE eventId = ?'),
+        byEventAndEmail: db.prepare('SELECT * FROM tickets WHERE eventId = ? AND lower(email) = ? LIMIT 1'),
         insert: db.prepare(`INSERT INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at, email_opened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
         updateInfo: db.prepare(`UPDATE tickets SET name=?, firstName=?, lastName=?, email=?, customFields=? WHERE id=?`),
         checkIn: db.prepare(`UPDATE tickets SET used_at=?, updated_at=? WHERE id=?`),

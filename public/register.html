@@ -203,6 +203,7 @@
                     <span id="holdText">Your spot is held</span>
                     <span class="hold-timer" id="holdTimer"></span>
                 </div>
+                <div id="signupBlocked" style="display:none;margin:14px 0 2px;padding:11px 13px;border-radius:calc(var(--rt-radius) / 1.6);background:var(--warning-bg);border:1px solid #fcd34d;font-size:13px;font-weight:600;color:var(--warning-text);"></div>
                 <form id="registerForm" style="margin-top:24px;">
                     <div class="form-group">
                         <label for="firstName">First Name</label>
@@ -274,7 +275,7 @@
                     <a id="appleWalletLink" href="#" class="wallet-link">
                         <img src="/apple-wallet-badge.png" alt="Add to Apple Wallet">
                     </a>
-                    <button class="btn-outline" onclick="window.location.href = window.location.pathname + '?id=' + eventId">Register Another Person</button>
+                    <button class="btn-outline" id="registerAnotherBtn" onclick="window.location.href = window.location.pathname + '?id=' + eventId">Register Another Person</button>
                 </div>
             </div>
         </div>
@@ -340,6 +341,23 @@
             }
         }
 
+        function showSignupBlocked(message) {
+            const el = document.getElementById('signupBlocked');
+            el.textContent = message;
+            el.style.display = 'block';
+            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+
+        // Already registered from this browser: say so before they fill the
+        // form in again, and take the form away rather than let them retype it.
+        function applyDeviceLock(event) {
+            if (!event.deviceAlreadyRegistered) return false;
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('holdBar').classList.remove('show');
+            showSignupBlocked('You have already registered for this event on this device.');
+            return true;
+        }
+
         function fmtClock(ms) {
             const s = Math.max(0, Math.round(ms / 1000));
             return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -366,7 +384,8 @@
 
         async function fetchAvailability() {
             try {
-                const r = await fetch(`/api/event/${eventId}/availability`, { cache: 'no-store' });
+                const qs = holdToken ? `?holdToken=${encodeURIComponent(holdToken)}` : '';
+                const r = await fetch(`/api/event/${eventId}/availability${qs}`, { cache: 'no-store' });
                 if (!r.ok) return null;
                 return await r.json();
             } catch { return null; }
@@ -472,6 +491,24 @@
             }, 5000);
         }
 
+        // Our held spot was overtaken by tickets issued elsewhere.
+        function onHoldLost(a) {
+            stopHoldTimers();
+            holdToken = null;
+            document.getElementById('holdBar').classList.remove('show');
+            const form = document.getElementById('registerForm');
+            if (a.waitlistEnabled) {
+                isFullWaitlistable = true;
+                document.getElementById('submitBtn').textContent = 'Join Waitlist';
+                document.getElementById('submitBtn').disabled = false;
+                showSignupBlocked('This event filled up while you were signing up. You can join the waitlist and we will email you if a spot opens.');
+            } else {
+                if (form) form.style.display = 'none';
+                showSignupBlocked('This event filled up while you were signing up, so the spot being held for you is no longer available.');
+            }
+            renderAvailability(a);
+        }
+
         function releaseHold() {
             if (!holdToken) return;
             const body = JSON.stringify({ holdToken });
@@ -491,6 +528,11 @@
             const refresh = async () => {
                 const a = await fetchAvailability();
                 if (!a) return;
+                // The event can fill from other directions — a manual add, a
+                // sheet import, a door sale — none of which respect this hold.
+                // Say so rather than leave a countdown running on a spot that
+                // no longer exists.
+                if (holdToken && a.holdStillValid === false) { onHoldLost(a); return; }
                 if (document.getElementById('formView').style.display !== 'none') renderAvailability(a);
             };
             refresh();
@@ -574,6 +616,12 @@
         }
 
         function showSuccess(ticket, qr) {
+            // The organiser can limit each person to a single signup, in which
+            // case offering "register another" would just lead to a refusal.
+            const again = document.getElementById('registerAnotherBtn');
+            if (again && loadedEvent && loadedEvent.allowMultipleRegistrations === false) {
+                again.style.display = 'none';
+            }
             document.getElementById('formView').style.display      = 'none';
             document.getElementById('processingView').style.display = 'none';
             document.getElementById('successView').style.display   = 'block';
@@ -614,6 +662,9 @@
                 if (!loadedEvent) return;
                 const open = loadedEvent.allowPublicRegistration || claimToken;
                 if (!open) return;
+                // A device already used for this event never gets a hold or a
+                // form — the check happens before anything is asked of them.
+                if (applyDeviceLock(loadedEvent)) return;
                 startAvailabilityPolling();
                 // A claim link already has a seat reserved server-side, so it
                 // skips the hold entirely.
@@ -650,6 +701,8 @@
                         showSuccess(data.ticket, data.qr);
                     } else if (data.waitlisted) {
                         showWaitlisted(data);
+                    } else if (res.status === 409 && data.reason) {
+                        showSignupBlocked(data.error);
                     } else {
                         alert('Error: ' + (data.error || 'Could not create checkout session.'));
                     }
@@ -664,6 +717,8 @@
                         showSuccess(data.ticket, data.qr);
                     } else if (data.waitlisted) {
                         showWaitlisted(data);
+                    } else if (res.status === 409 && data.reason) {
+                        showSignupBlocked(data.error);
                     } else {
                         alert('Error: ' + data.error);
                     }
