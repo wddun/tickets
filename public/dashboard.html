@@ -3894,7 +3894,10 @@
                     if (subtitle) subtitle.textContent = ev.name;
                 }
                 renderSidebar();
-                // No success toast here — see saveEventCustomFields for why.
+                // Normally silent (see saveEventCustomFields), but lowering
+                // capacity under people who are mid-signup costs them their
+                // spot — that shouldn't happen without the organiser knowing.
+                if (updated.capacityWarning) showToast(updated.capacityWarning);
                 clearSettingsDirty('tab-general');
             } else {
                 const d = await r2.json();

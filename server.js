@@ -3285,7 +3285,7 @@ app.post('/api/register-bulk', async (req, res) => {
                 const result = await joinWaitlist(event, `${firstName} ${lastName}`, email, shouldSendAdminEmail(req.body.sendEmail, event));
                 return res.json(result);
             }
-            return res.status(409).json({ error: `Event is at capacity (${event.capacity} tickets max, ${registered} registered)` });
+            return res.status(409).json({ error: heldSeatMessage(usage, count) });
         }
     }
 
@@ -3889,6 +3889,22 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
         lng: parseFloat(lng) || event.location?.lng || -122.03118,
     };
 
+    // Lowering capacity is the one remaining way a spot already promised to
+    // someone mid-signup can be taken away — every ticket-issuing path now
+    // counts held seats, but the organiser can still shrink the event out from
+    // under them. It's their event, so this goes through; it just doesn't go
+    // through silently.
+    let capacityWarning = null;
+    if (newCapacity && newCapacity !== event.capacity) {
+        const before = eventSeatUsage(event.id);
+        const stranded = Math.max(0, (before.issued + before.held) - newCapacity);
+        if (stranded > 0 && before.held > 0) {
+            const affected = Math.min(stranded, before.held);
+            capacityWarning = `${affected} ${affected === 1 ? 'person is' : 'people are'} part-way through signing up and will lose their spot at this capacity. They'll be told the event filled up.`;
+            logAudit(req, { eventId: event.id, action: 'capacity.lowered_over_holds', details: { from: event.capacity, to: newCapacity, affected } });
+        }
+    }
+
     stmt.events.update.run(newName, newTime, newEndTime, newColor, imageUrl, allowReentry ? 1 : 0, newCapacity, JSON.stringify(newLocation), req.params.id);
     if (isValidTimeZone(timezone)) stmt.events.setTimezone.run(timezone, req.params.id);
 
@@ -3903,7 +3919,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     const eventTickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
     pushWalletIfChanged(eventTickets, updated).catch(() => {});
 
-    res.json(updated);
+    res.json(capacityWarning ? { ...updated, capacityWarning } : updated);
 });
 
 // Update event custom field definitions
