@@ -416,6 +416,94 @@ function eventVenue(event) {
     return { name, address, hasAny: !!(name || address) };
 }
 
+// ── Registration page themes ───────────────────────────────────────────────
+//
+// Presets for the public registration page, defined once here so the picker in
+// the dashboard and the page itself can never disagree about what a theme is.
+// Each is a small palette plus a couple of shape decisions; the event's own
+// accent colour still wins when the theme says `useEventColor`.
+const REGISTRATION_THEMES = [
+    {
+        key: 'classic',
+        label: 'Classic',
+        description: 'Clean and neutral. Uses your event colour as the accent.',
+        useEventColor: true,
+        vars: {
+            bg: '#f3f4f6', surface: '#ffffff', text: '#111827', muted: '#6b7280',
+            accent: '#4f46e5', accentText: '#ffffff', border: '#e5e7eb',
+            radius: '14px', headerHeight: '150px', font: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        },
+    },
+    {
+        key: 'professional',
+        label: 'Professional',
+        description: 'Restrained navy and slate. Good for conferences and corporate events.',
+        useEventColor: false,
+        vars: {
+            bg: '#eef1f6', surface: '#ffffff', text: '#0f172a', muted: '#64748b',
+            accent: '#1e3a8a', accentText: '#ffffff', border: '#dbe2ec',
+            radius: '8px', headerHeight: '140px', font: "'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif",
+        },
+    },
+    {
+        key: 'fun',
+        label: 'Fun',
+        description: 'Bright and rounded, with a warm gradient header.',
+        useEventColor: false,
+        vars: {
+            bg: '#fff7ed', surface: '#ffffff', text: '#1f2937', muted: '#78716c',
+            accent: '#ea580c', accentText: '#ffffff', border: '#fed7aa',
+            radius: '22px', headerHeight: '170px', font: "'Trebuchet MS', -apple-system, BlinkMacSystemFont, sans-serif",
+            headerGradient: 'linear-gradient(135deg, #fb923c, #f43f5e 55%, #a855f7)',
+        },
+    },
+    {
+        key: 'midnight',
+        label: 'Midnight',
+        description: 'Dark background with a bright accent. Suits nightlife and concerts.',
+        useEventColor: true,
+        dark: true,
+        vars: {
+            bg: '#0b0f1a', surface: '#151b2b', text: '#f8fafc', muted: '#94a3b8',
+            accent: '#38bdf8', accentText: '#0b0f1a', border: '#243049',
+            radius: '16px', headerHeight: '170px', font: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        },
+    },
+    {
+        key: 'garden',
+        label: 'Garden',
+        description: 'Soft greens and cream. Fits weddings, brunches and daytime events.',
+        useEventColor: false,
+        vars: {
+            bg: '#f2f7f0', surface: '#ffffff', text: '#1f2a24', muted: '#6b7d70',
+            accent: '#3f7d5a', accentText: '#ffffff', border: '#d9e6dc',
+            radius: '18px', headerHeight: '160px', font: "Georgia, 'Times New Roman', serif",
+        },
+    },
+];
+const REGISTRATION_THEME_KEYS = REGISTRATION_THEMES.map(t => t.key);
+const DEFAULT_REGISTRATION_THEME = 'classic';
+
+function themeForEvent(event) {
+    const key = REGISTRATION_THEME_KEYS.includes(event?.theme) ? event.theme : DEFAULT_REGISTRATION_THEME;
+    const theme = REGISTRATION_THEMES.find(t => t.key === key);
+    const vars = { ...theme.vars };
+    // The event's own colour is the organiser's choice, so it takes precedence
+    // over the preset's accent wherever the preset allows it.
+    if (theme.useEventColor && event?.color) vars.accent = normalizeCssColor(event.color) || vars.accent;
+    return { key: theme.key, label: theme.label, dark: !!theme.dark, vars };
+}
+
+// "rgb(99, 102, 241)" → "#6366f1"; passes hex through untouched.
+function normalizeCssColor(raw) {
+    if (!raw) return null;
+    const s = String(raw).trim();
+    if (s.startsWith('#')) return s;
+    const nums = s.match(/\d+/g);
+    if (!nums || nums.length < 3) return null;
+    return '#' + nums.slice(0, 3).map(n => Math.max(0, Math.min(255, parseInt(n, 10))).toString(16).padStart(2, '0')).join('');
+}
+
 function eventLocationLine(event) {
     const { name, address } = eventVenue(event);
     if (name && address && name !== address) return `${name}, ${address}`;
@@ -2204,9 +2292,158 @@ app.get('/api/track/open/:registrationId', async (req, res) => {
     }
 });
 
+// ── Seat holds ─────────────────────────────────────────────────────────────
+//
+// Capacity used to be checked only at submit, which meant ten people could
+// fill in the form for four spots and six of them were told "sold out" after
+// typing everything in. On a paid event it was worse: all ten could reach
+// Stripe and pay, because the webhook issues the ticket without re-checking.
+//
+// A hold is a short-lived claim taken when the form is opened. Held seats
+// count as occupied, so the eleventh person is turned away *before* filling
+// anything in, and nobody pays for a seat that isn't there.
+
+// How long a hold survives without being refreshed. Long enough to fill in a
+// form unhurried; short enough that abandoned tabs free their seat quickly.
+// The page refreshes its hold well inside this.
+const SEAT_HOLD_MS = 8 * 60 * 1000;
+// Checkout needs longer — the person is on Stripe's page, off ours.
+const SEAT_HOLD_CHECKOUT_MS = 25 * 60 * 1000;
+
+function purgeStaleHolds() {
+    try { stmt.seatHolds.purgeStale.run(new Date().toISOString()); } catch (_) {}
+}
+
+// The single source of truth for "is there room?". Issued tickets, live holds
+// and unclaimed waitlist offers all occupy a seat.
+function eventSeatUsage(eventId) {
+    const event = rowToEvent(stmt.events.byId.get(eventId));
+    if (!event) return null;
+    const nowIso = new Date().toISOString();
+    const issued = stmt.tickets.countByEventId.get(eventId)?.cnt ?? 0;
+    const held = event.capacity ? (stmt.seatHolds.countActive.get(eventId, nowIso)?.cnt ?? 0) : 0;
+    const claimed = event.capacity ? (stmt.waitlist.countActiveClaims.get(eventId, nowIso)?.cnt ?? 0) : 0;
+    const capacity = event.capacity || null;
+    const taken = issued + held + claimed;
+    return {
+        capacity,
+        issued,
+        held,
+        claimed,
+        taken,
+        // Only what a stranger should see: how many seats are left, and whether
+        // the door is shut. Never leaks the hold/claim breakdown publicly.
+        remaining: capacity ? Math.max(0, capacity - taken) : null,
+        soldOut: capacity ? taken >= capacity : false,
+        unlimited: !capacity,
+    };
+}
+
+// Take (or refresh) a hold. Refreshing an existing token never consumes a
+// second seat, so a page that reloads mid-form keeps the one it already had.
+// Responds with `granted` (did *you* get a seat) — deliberately not `held`,
+// which is the number of seats other people are holding.
+app.post('/api/event/:id/hold', (req, res) => {
+    purgeStaleHolds();
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!event.allowPublicRegistration) {
+        return res.status(403).json({ error: 'Registration is not open for this event' });
+    }
+
+    const qty = Math.max(1, Math.min(20, parseInt(req.body?.quantity, 10) || 1));
+    const existingToken = (req.body?.holdToken || '').trim();
+    const nowIso = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + SEAT_HOLD_MS).toISOString();
+
+    // No capacity means no scarcity to manage — say so and skip the bookkeeping.
+    if (!event.capacity) {
+        return res.json({ granted: true, unlimited: true, holdToken: null, ...eventSeatUsage(event.id) });
+    }
+
+    const existing = existingToken ? stmt.seatHolds.byToken.get(existingToken) : null;
+    if (existing && existing.eventId === event.id && existing.status === 'active' && existing.expiresAt > nowIso) {
+        // Growing an existing hold still has to fit.
+        if (qty > existing.quantity) {
+            const usage = eventSeatUsage(event.id);
+            if (usage.taken - existing.quantity + qty > usage.capacity) {
+                return res.status(409).json({ granted: false, reason: 'not_enough_room', ...usage });
+            }
+        }
+        stmt.seatHolds.touch.run(expiresAt, qty, existingToken);
+        return res.json({ granted: true, holdToken: existingToken, expiresAt, ...eventSeatUsage(event.id) });
+    }
+
+    const usage = eventSeatUsage(event.id);
+    if (usage.taken + qty > usage.capacity) {
+        return res.status(409).json({
+            granted: false,
+            reason: usage.issued >= usage.capacity ? 'sold_out' : 'all_held',
+            waitlistEnabled: !!event.waitlistEnabled,
+            ...usage,
+        });
+    }
+
+    const token = nanoid(20);
+    stmt.seatHolds.insert.run(nanoid(10), event.id, token, qty, 'active', null, nowIso, expiresAt);
+    res.json({ granted: true, holdToken: token, expiresAt, ...eventSeatUsage(event.id) });
+});
+
+// Give a seat back — sent when the form is closed or abandoned.
+app.post('/api/event/:id/hold/release', (req, res) => {
+    const token = (req.body?.holdToken || '').trim();
+    if (token) {
+        const hold = stmt.seatHolds.byToken.get(token);
+        if (hold && hold.eventId === req.params.id && hold.status === 'active') {
+            stmt.seatHolds.setStatus.run('released', token);
+        }
+    }
+    res.json({ success: true });
+});
+
+// Live availability for the public registration page.
+app.get('/api/event/:id/availability', (req, res) => {
+    purgeStaleHolds();
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const usage = eventSeatUsage(event.id);
+    res.json({
+        capacity: usage.capacity,
+        registered: usage.issued,
+        remaining: usage.remaining,
+        soldOut: usage.soldOut,
+        unlimited: usage.unlimited,
+        // Someone else is mid-signup — worth showing so a visitor understands
+        // why the count moved without a ticket being issued.
+        holding: usage.held,
+        waitlistEnabled: !!event.waitlistEnabled,
+        registrationOpen: !!event.allowPublicRegistration,
+    });
+});
+
+// Turns a hold into a seat. Returns true when the caller may proceed: either
+// they presented a live hold, or there was room anyway.
+function consumeHoldOrCheckRoom(event, holdToken, quantity = 1) {
+    if (!event.capacity) return { ok: true };
+    const nowIso = new Date().toISOString();
+    const hold = holdToken ? stmt.seatHolds.byToken.get(holdToken) : null;
+    const holdValid = hold && hold.eventId === event.id && hold.status === 'active' && hold.expiresAt > nowIso;
+
+    if (holdValid) {
+        stmt.seatHolds.setStatus.run('consumed', holdToken);
+        return { ok: true, usedHold: true };
+    }
+
+    // No hold (or it lapsed): fall back to the plain capacity test, so a
+    // direct API call or an expired form still can't oversell.
+    const usage = eventSeatUsage(event.id);
+    if (usage.taken + quantity > usage.capacity) return { ok: false, usage };
+    return { ok: true, usedHold: false };
+}
+
 // Public self-registration — creates a free ticket and emails it
 app.post('/api/register', async (req, res) => {
-    const { name, email, eventId } = req.body;
+    const { name, email, eventId, holdToken } = req.body;
     if (!name || !email || !eventId) {
         return res.status(400).json({ error: 'Name, email, and event are required' });
     }
@@ -2217,14 +2454,15 @@ app.post('/api/register', async (req, res) => {
         return res.status(403).json({ error: 'Registration is not open for this event' });
     }
 
-    if (event.capacity) {
-        const count = stmt.tickets.byEventId.all(eventId).length;
-        if (count >= event.capacity) {
-            if (event.waitlistEnabled) {
-                return res.json(await joinWaitlist(event, name, email));
-            }
-            return res.status(400).json({ error: 'This event is sold out' });
+    // Presenting a live hold guarantees the seat that was set aside when this
+    // form was opened; without one this still falls back to a capacity check,
+    // so a direct API call can't slip past.
+    const seat = consumeHoldOrCheckRoom(event, holdToken);
+    if (!seat.ok) {
+        if (event.waitlistEnabled) {
+            return res.json(await joinWaitlist(event, name, email));
         }
+        return res.status(400).json({ error: 'This event is sold out' });
     }
 
     const nameParts = name.trim().split(/\s+/);
@@ -2362,13 +2600,16 @@ app.post('/api/checkout/:eventId', async (req, res) => {
         }
     }
 
+    // A promoted waitlist entry already has a seat set aside, so it skips the
+    // capacity gate. Everyone else must still fit — counting issued tickets,
+    // live holds and outstanding waitlist offers.
+    const paidHoldToken = (req.body?.holdToken || '').trim();
     if (event.capacity && !claimEntry) {
-        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
-        // Active (unexpired, unclaimed) reservations count as occupied seats
-        // too, so someone else can't take a spot that was already promised
-        // to a promoted waitlist entry still inside its claim window.
-        const reserved = stmt.waitlist.countActiveClaims.get(event.id, new Date().toISOString())?.cnt ?? 0;
-        if (registered + reserved >= event.capacity) {
+        const usage = eventSeatUsage(event.id);
+        const heldByCaller = paidHoldToken ? stmt.seatHolds.byToken.get(paidHoldToken) : null;
+        const callerHoldsSeat = heldByCaller && heldByCaller.eventId === event.id
+            && heldByCaller.status === 'active' && heldByCaller.expiresAt > new Date().toISOString();
+        if (!callerHoldsSeat && usage.taken >= usage.capacity) {
             if (event.waitlistEnabled) {
                 return res.json(await joinWaitlist(event, name, email));
             }
@@ -2419,10 +2660,20 @@ app.post('/api/checkout/:eventId', async (req, res) => {
         }],
         mode: 'payment',
         customer_email: cleanEmail,
-        metadata: { eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail, discountCodeId: discountCodeId || '', waitlistId: claimEntry?.id || '' },
+        metadata: { eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail, discountCodeId: discountCodeId || '', waitlistId: claimEntry?.id || '', holdToken: paidHoldToken || '' },
         success_url: `${BASE_URL}/register.html?session={CHECKOUT_SESSION_ID}&id=${event.id}`,
         cancel_url: `${BASE_URL}/register.html?id=${event.id}`,
     });
+
+    // Keep the seat held while they're away on Stripe's page, and tie the hold
+    // to the session so the webhook can turn it into the ticket. Without this
+    // the hold would lapse mid-payment and the seat could be sold twice.
+    if (event.capacity && paidHoldToken) {
+        const hold = stmt.seatHolds.byToken.get(paidHoldToken);
+        if (hold && hold.eventId === event.id && hold.status === 'active') {
+            stmt.seatHolds.bindSession.run(session.id, new Date(Date.now() + SEAT_HOLD_CHECKOUT_MS).toISOString(), paidHoldToken);
+        }
+    }
 
     stmt.orders.insert.run(nanoid(8), session.id, event.id, null, cleanName, cleanEmail, finalAmount, 'usd', 'pending', new Date().toISOString(), discountCodeId, discountAmount);
     log('stripe', `[checkout] Session created — name: ${cleanName}  event: ${event.name}  amount: ${finalAmount}${discountCodeId ? ` (discount: ${discountAmount})` : ''}`);
@@ -2467,6 +2718,27 @@ app.post('/api/stripe/webhook', async (req, res) => {
 
         const existing = stmt.orders.bySessionId.get(session.id);
         if (existing?.status === 'fulfilled') return res.json({ received: true });
+
+        // Release the seat this payment was holding, so it isn't counted twice
+        // once the ticket exists. The hold is looked up by session rather than
+        // by token so it works even if the metadata was trimmed.
+        const paidHold = stmt.seatHolds.bySessionId.get(session.id)
+            || (session.metadata?.holdToken ? stmt.seatHolds.byToken.get(session.metadata.holdToken) : null);
+        if (paidHold && paidHold.status === 'active') stmt.seatHolds.setStatus.run('consumed', paidHold.token);
+
+        // Backstop: this route issued tickets with no capacity check at all, so
+        // a paid event could be oversold outright. A payment that arrives with
+        // no hold behind it and no room left is logged rather than silently
+        // seated — the money is already taken, so refusing here would be worse
+        // than seating them, but the organiser needs to know.
+        const capEvent = rowToEvent(stmt.events.byId.get(eventId));
+        if (capEvent?.capacity && !paidHold && !waitlistId) {
+            const usage = eventSeatUsage(eventId);
+            if (usage.issued >= usage.capacity) {
+                log('stripe', `[webhook] OVER CAPACITY — paid with no seat hold: ${buyerEmail}  event: ${capEvent.name}  issued: ${usage.issued}/${usage.capacity}  session: ${session.id}`);
+                logAudit(req, { eventId, action: 'capacity.exceeded', details: { email: buyerEmail, sessionId: session.id, issued: usage.issued, capacity: usage.capacity } });
+            }
+        }
 
         const issued = await issueTicketForPayment({ eventId, buyerName, buyerEmail });
         if (!issued) return res.json({ received: true });
@@ -3355,10 +3627,39 @@ app.get('/api/event/:id', (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (event.capacity) {
-        const registered = stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0;
-        event.ticketsRemaining = Math.max(0, event.capacity - registered);
+        const usage = eventSeatUsage(event.id);
+        // Held seats count as gone: showing them as available is what let ten
+        // people start filling in a form for four spots.
+        event.ticketsRemaining = usage.remaining;
+        event.seatsHeld = usage.held;
+        event.soldOut = usage.soldOut;
     }
+    // Lets the public registration page style itself without a second request.
+    event.themeStyle = themeForEvent(event);
     res.json(event);
+});
+
+// The theme catalog, for the picker in the dashboard.
+app.get('/api/registration-themes', (req, res) => {
+    res.json(REGISTRATION_THEMES.map(t => ({
+        key: t.key, label: t.label, description: t.description,
+        useEventColor: !!t.useEventColor, dark: !!t.dark, vars: t.vars,
+    })));
+});
+
+app.put('/api/event/:id/theme', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+    const theme = req.body?.theme;
+    if (!REGISTRATION_THEME_KEYS.includes(theme)) {
+        return res.status(400).json({ error: 'Unknown theme' });
+    }
+    stmt.events.setTheme.run(theme, event.id);
+    logAudit(req, { eventId: event.id, action: 'event.theme_changed', details: { theme } });
+    res.json({ success: true, theme, themeStyle: themeForEvent({ ...event, theme }) });
 });
 
 // One event decorated with the caller's capabilities, for opening a room that
@@ -3600,6 +3901,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.pushSubscriptions.deleteByEventId.run(req.params.id);
         stmt.scannerLinks.deleteByEventId.run(req.params.id);
         stmt.scannerAccess.deleteByEventId.run(req.params.id);
+        stmt.seatHolds.deleteByEventId.run(req.params.id);
         deleteEventSharing(req.params.id);
         const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
         if (watcher) {
@@ -3626,6 +3928,7 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
             stmt.pushSubscriptions.deleteByEventId.run(eventId);
             stmt.scannerLinks.deleteByEventId.run(eventId);
             stmt.scannerAccess.deleteByEventId.run(eventId);
+            stmt.seatHolds.deleteByEventId.run(eventId);
             deleteEventSharing(eventId);
             const watcher = stmt.sheetWatchers.byEventId.get(eventId);
             if (watcher) {

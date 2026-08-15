@@ -62,6 +62,113 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* ── Theme ──────────────────────────────────────────────────────────
+           Every value below is overwritten from the event's themeStyle at load
+           (see REGISTRATION_THEMES in server.js). These defaults only cover
+           the flash before that lands. */
+        :root {
+            --rt-bg: #f3f4f6; --rt-surface: #ffffff; --rt-text: #111827;
+            --rt-muted: #6b7280; --rt-accent: #4f46e5; --rt-accent-text: #ffffff;
+            --rt-border: #e5e7eb; --rt-radius: 14px; --rt-header-h: 150px;
+            --rt-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --rt-header-bg: none;
+        }
+        body.themed { background: var(--rt-bg); color: var(--rt-text); font-family: var(--rt-font); }
+        body.themed .card {
+            background: var(--rt-surface); border: 1px solid var(--rt-border);
+            border-radius: var(--rt-radius); color: var(--rt-text); overflow: hidden;
+        }
+        body.themed .event-name { color: var(--rt-text); }
+        body.themed .event-meta { color: var(--rt-muted); }
+        body.themed label { color: var(--rt-text); }
+        body.themed input {
+            background: var(--rt-surface); color: var(--rt-text);
+            border: 1.5px solid var(--rt-border); border-radius: calc(var(--rt-radius) / 2);
+        }
+        body.themed input:focus { border-color: var(--rt-accent); outline: none; }
+        body.themed button[type="submit"] {
+            background: var(--rt-accent); color: var(--rt-accent-text);
+            border: none; border-radius: calc(var(--rt-radius) / 2); font-weight: 700;
+        }
+        body.themed button[type="submit"]:disabled { opacity: .55; }
+        body.themed .price-badge { background: var(--rt-accent); color: var(--rt-accent-text); }
+        body.themed .btn-outline {
+            background: transparent; color: var(--rt-text);
+            border: 1.5px solid var(--rt-border); border-radius: calc(var(--rt-radius) / 2);
+        }
+        body.themed .success-box { background: transparent; border: none; }
+        body.themed .success-title { color: var(--rt-text); }
+        body.themed .success-sub { color: var(--rt-muted); }
+        body.themed .processing-spinner { border-color: var(--rt-border); border-top-color: var(--rt-accent); }
+        /* Chrome outside the card follows the theme too, or a dark theme ends
+           up with light-theme links floating underneath it. */
+        body.themed .nav a { color: var(--rt-accent); }
+        body.themed .wts-footer { color: var(--rt-muted); }
+        body.themed .wts-footer img { filter: var(--rt-footer-filter, none); }
+
+        /* Banner / logo across the top of the card */
+        .event-banner {
+            display: none; width: 100%; height: var(--rt-header-h);
+            background: var(--rt-header-bg, var(--rt-accent));
+            background-size: cover; background-position: center;
+            margin: -1px -1px 18px; width: calc(100% + 2px);
+        }
+        .event-banner.show { display: block; }
+
+        /* ── Live availability ── */
+        .avail {
+            display: none; margin: 14px 0 4px;
+            border: 1px solid var(--rt-border); border-radius: calc(var(--rt-radius) / 1.6);
+            padding: 12px 14px; background: color-mix(in srgb, var(--rt-accent) 6%, transparent);
+        }
+        .avail.show { display: block; }
+        .avail-top {
+            display: flex; align-items: baseline; justify-content: space-between;
+            gap: 10px; margin-bottom: 8px;
+        }
+        .avail-count { font-size: 15px; font-weight: 800; color: var(--rt-text); }
+        .avail-left { font-size: 13px; font-weight: 700; color: var(--rt-accent); }
+        .avail-bar {
+            height: 7px; border-radius: 99px; overflow: hidden;
+            background: color-mix(in srgb, var(--rt-text) 12%, transparent);
+        }
+        .avail-fill {
+            height: 100%; width: 0%; border-radius: 99px;
+            background: var(--rt-accent); transition: width .5s ease;
+        }
+        .avail-note { font-size: 12px; color: var(--rt-muted); margin-top: 7px; }
+        .avail-live {
+            display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+            background: #10b981; margin-right: 5px; vertical-align: middle;
+            animation: availPulse 2s ease-in-out infinite;
+        }
+        @keyframes availPulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+        /* ── Seat hold ── */
+        .hold-bar {
+            display: none; align-items: center; gap: 9px;
+            margin: 12px 0 2px; padding: 10px 13px;
+            border-radius: calc(var(--rt-radius) / 1.6);
+            background: color-mix(in srgb, #10b981 12%, transparent);
+            border: 1px solid color-mix(in srgb, #10b981 35%, transparent);
+            font-size: 13px; font-weight: 600; color: var(--rt-text);
+        }
+        .hold-bar.show { display: flex; }
+        .hold-bar.expiring {
+            background: color-mix(in srgb, #f59e0b 15%, transparent);
+            border-color: color-mix(in srgb, #f59e0b 45%, transparent);
+        }
+        .hold-timer { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 800; }
+
+        .queue-box { text-align: center; padding: 30px 20px; }
+        .queue-title { font-size: 19px; font-weight: 800; color: var(--rt-text); margin-bottom: 8px; }
+        .queue-sub { font-size: 14px; color: var(--rt-muted); line-height: 1.5; margin-bottom: 18px; }
+        .queue-spinner {
+            width: 34px; height: 34px; margin: 0 auto 16px;
+            border: 3px solid var(--rt-border); border-top-color: var(--rt-accent);
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+
         @media (max-width: 480px) {
             .container { padding: 16px 12px 32px; }
         }
@@ -71,11 +178,30 @@
     <div class="container">
         <div class="card">
             <div id="formView">
+                <div class="event-banner" id="eventBanner"></div>
                 <div class="event-header">
                     <div class="event-name" id="eventTitle">Loading…</div>
                     <div class="event-meta" id="eventDesc"></div>
                     <div id="priceBadge" style="display:none;" class="price-badge"></div>
                     <div id="ticketsLeft" style="display:none;margin-top:10px;padding:7px 12px;background:var(--warning-bg);border:1px solid #fcd34d;border-radius:8px;font-size:13px;font-weight:600;color:var(--warning-text);"></div>
+                </div>
+
+                <!-- Live signup counter — refreshes on its own so a visitor can
+                     see spots going while they decide. -->
+                <div class="avail" id="availBox">
+                    <div class="avail-top">
+                        <span class="avail-count" id="availCount"></span>
+                        <span class="avail-left" id="availLeft"></span>
+                    </div>
+                    <div class="avail-bar"><div class="avail-fill" id="availFill"></div></div>
+                    <div class="avail-note" id="availNote"><span class="avail-live"></span>Updating live</div>
+                </div>
+
+                <!-- The spot this visitor is holding while they fill the form in -->
+                <div class="hold-bar" id="holdBar">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span id="holdText">Your spot is held</span>
+                    <span class="hold-timer" id="holdTimer"></span>
                 </div>
                 <form id="registerForm" style="margin-top:24px;">
                     <div class="form-group">
@@ -106,6 +232,26 @@
                 <div class="success-box">
                     <div class="success-title">Registration is closed</div>
                     <div class="success-sub">This event isn't accepting new registrations right now.</div>
+                </div>
+            </div>
+
+            <!-- Every remaining spot is currently being filled in by someone
+                 else. Better to say so up front than to let a visitor type
+                 everything in and lose the race at submit. -->
+            <div id="queueView" style="display:none;">
+                <div class="queue-box">
+                    <div class="queue-spinner"></div>
+                    <div class="queue-title" id="queueTitle">Every spot is being filled in right now</div>
+                    <div class="queue-sub" id="queueSub"></div>
+                    <div class="avail" id="queueAvail" style="display:block;text-align:left;">
+                        <div class="avail-top">
+                            <span class="avail-count" id="queueCount"></span>
+                            <span class="avail-left" id="queueLeft"></span>
+                        </div>
+                        <div class="avail-bar"><div class="avail-fill" id="queueFill"></div></div>
+                        <div class="avail-note"><span class="avail-live"></span>Checking for a free spot…</div>
+                    </div>
+                    <button class="btn-outline" id="queueWaitlistBtn" style="display:none;margin-top:16px;">Join the waitlist instead</button>
                 </div>
             </div>
 
@@ -148,12 +294,217 @@
 
         let eventTicketPrice = 0;
         let isFullWaitlistable = false;
+        let loadedEvent = null;
+
+        // ── Seat hold ───────────────────────────────────────────────────────
+        // Capacity used to be checked only at submit, so ten people could fill
+        // in the form for four spots and six were told "sold out" after typing
+        // everything in. The page now claims a spot up front and shows how long
+        // it's good for; if none is free, it says so before asking for anything.
+        let holdToken = null;
+        let holdExpiresAt = 0;
+        let holdTicker = null;
+        let holdRefresher = null;
+        const HOLD_REFRESH_MS = 90 * 1000;
+
+        function applyTheme(style) {
+            if (!style || !style.vars) return;
+            const root = document.documentElement.style;
+            const v = style.vars;
+            const set = (k, val) => { if (val) root.setProperty(k, val); };
+            set('--rt-bg', v.bg);          set('--rt-surface', v.surface);
+            set('--rt-text', v.text);      set('--rt-muted', v.muted);
+            set('--rt-accent', v.accent);  set('--rt-accent-text', v.accentText);
+            set('--rt-border', v.border);  set('--rt-radius', v.radius);
+            set('--rt-header-h', v.headerHeight); set('--rt-font', v.font);
+            // A gradient header is the theme's own; otherwise the banner falls
+            // back to the accent so an event with no image still looks styled.
+            set('--rt-header-bg', v.headerGradient || v.accent);
+            // The footer logo is dark artwork; invert it on a dark theme so it
+            // doesn't disappear into the background.
+            if (style.dark) root.setProperty('--rt-footer-filter', 'invert(1) brightness(1.6)');
+            document.body.classList.add('themed');
+            const meta = document.querySelector('meta[name="theme-color"]');
+            if (meta && v.accent) meta.setAttribute('content', v.accent);
+        }
+
+        function renderBanner(event) {
+            const el = document.getElementById('eventBanner');
+            // An uploaded image is the banner; without one the theme's header
+            // colour/gradient still gives the card a top edge worth looking at.
+            if (event.imageUrl) {
+                el.style.backgroundImage = `url('${event.imageUrl}')`;
+                el.classList.add('show');
+            } else if (event.themeStyle?.vars?.headerGradient) {
+                el.classList.add('show');
+            }
+        }
+
+        function fmtClock(ms) {
+            const s = Math.max(0, Math.round(ms / 1000));
+            return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+        }
+
+        function renderAvailability(a, prefix = 'avail') {
+            const box = document.getElementById(prefix === 'avail' ? 'availBox' : 'queueAvail');
+            if (!a || a.unlimited || a.capacity == null) { if (box) box.classList.remove('show'); return; }
+            const taken = Math.min(a.registered, a.capacity);
+            document.getElementById(prefix + 'Count').textContent =
+                `${taken} of ${a.capacity} signed up`;
+            document.getElementById(prefix + 'Left').textContent =
+                a.remaining === 0 ? 'None left' : `${a.remaining} left`;
+            document.getElementById(prefix + 'Fill').style.width =
+                Math.round((taken / a.capacity) * 100) + '%';
+            if (prefix === 'avail') {
+                const note = document.getElementById('availNote');
+                note.innerHTML = '<span class="avail-live"></span>' + (a.holding > 0
+                    ? `Updating live · ${a.holding} ${a.holding === 1 ? 'person is' : 'people are'} signing up now`
+                    : 'Updating live');
+            }
+            box?.classList.add('show');
+        }
+
+        async function fetchAvailability() {
+            try {
+                const r = await fetch(`/api/event/${eventId}/availability`, { cache: 'no-store' });
+                if (!r.ok) return null;
+                return await r.json();
+            } catch { return null; }
+        }
+
+        function stopHoldTimers() {
+            clearInterval(holdTicker); holdTicker = null;
+            clearInterval(holdRefresher); holdRefresher = null;
+        }
+
+        function startHoldTimers() {
+            stopHoldTimers();
+            const bar = document.getElementById('holdBar');
+            const timer = document.getElementById('holdTimer');
+            bar.classList.add('show');
+            const tick = () => {
+                const left = holdExpiresAt - Date.now();
+                timer.textContent = fmtClock(left);
+                bar.classList.toggle('expiring', left < 120000);
+                if (left <= 0) {
+                    stopHoldTimers();
+                    holdToken = null;
+                    document.getElementById('holdText').textContent = 'Your spot has been released';
+                    timer.textContent = '';
+                    // Try to take it back; if someone else got it, show the queue.
+                    acquireHold();
+                }
+            };
+            tick();
+            holdTicker = setInterval(tick, 1000);
+            holdRefresher = setInterval(() => { if (holdToken) acquireHold({ refresh: true }); }, HOLD_REFRESH_MS);
+        }
+
+        // Claims a spot, or shows the queue view when there isn't one free.
+        async function acquireHold({ refresh = false } = {}) {
+            try {
+                const r = await fetch(`/api/event/${eventId}/hold`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ holdToken: holdToken || undefined }),
+                });
+                const d = await r.json();
+
+                if (r.ok && d.granted) {
+                    if (d.unlimited) return true;      // no capacity, nothing to hold
+                    holdToken = d.holdToken;
+                    holdExpiresAt = new Date(d.expiresAt).getTime();
+                    document.getElementById('holdText').textContent = 'Your spot is held for';
+                    document.getElementById('queueView').style.display = 'none';
+                    document.getElementById('formView').style.display = 'block';
+                    startHoldTimers();
+                    renderAvailability({ ...d, registered: d.issued });
+                    return true;
+                }
+
+                if (r.status === 409 && !refresh) showQueue(d);
+                return false;
+            } catch {
+                return false;
+            }
+        }
+
+        let queuePoller = null;
+        function showQueue(d) {
+            stopHoldTimers();
+            holdToken = null;
+            document.getElementById('formView').style.display = 'none';
+            document.getElementById('queueView').style.display = 'block';
+
+            const soldOut = d.reason === 'sold_out';
+            document.getElementById('queueTitle').textContent = soldOut
+                ? 'This event is full'
+                : 'Every spot is being filled in right now';
+            document.getElementById('queueSub').textContent = soldOut
+                ? 'All tickets have been claimed.'
+                : `${d.held} ${d.held === 1 ? 'person is' : 'people are'} part-way through signing up for the last ${d.remaining === 0 ? '' : d.remaining + ' '}spot${d.held === 1 ? '' : 's'}. If any of them don't finish, a spot frees up automatically — this page will let you in the moment one does.`;
+
+            renderAvailability({ ...d, registered: d.issued }, 'queue');
+
+            if (d.waitlistEnabled) {
+                const btn = document.getElementById('queueWaitlistBtn');
+                btn.style.display = 'inline-block';
+                btn.onclick = () => {
+                    // The waitlist path doesn't need a held seat — let them in
+                    // to the form, which will submit as a waitlist join.
+                    isFullWaitlistable = true;
+                    document.getElementById('queueView').style.display = 'none';
+                    document.getElementById('formView').style.display = 'block';
+                    document.getElementById('submitBtn').textContent = 'Join Waitlist';
+                    document.getElementById('submitBtn').disabled = false;
+                };
+            }
+
+            // Keep watching — a spot can free up the second someone abandons.
+            clearInterval(queuePoller);
+            queuePoller = setInterval(async () => {
+                const a = await fetchAvailability();
+                if (a) renderAvailability(a, 'queue');
+                if (a && a.remaining > 0) {
+                    const got = await acquireHold();
+                    if (got) { clearInterval(queuePoller); queuePoller = null; }
+                }
+            }, 5000);
+        }
+
+        function releaseHold() {
+            if (!holdToken) return;
+            const body = JSON.stringify({ holdToken });
+            // sendBeacon so the release still goes out as the tab closes.
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon(`/api/event/${eventId}/hold/release`, new Blob([body], { type: 'application/json' }));
+            } else {
+                fetch(`/api/event/${eventId}/hold/release`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+            }
+            holdToken = null;
+        }
+        window.addEventListener('pagehide', releaseHold);
+
+        // Live counter, independent of the hold so it keeps ticking on the
+        // form, the queue view and the sold-out state alike.
+        function startAvailabilityPolling() {
+            const refresh = async () => {
+                const a = await fetchAvailability();
+                if (!a) return;
+                if (document.getElementById('formView').style.display !== 'none') renderAvailability(a);
+            };
+            refresh();
+            setInterval(refresh, 6000);
+        }
 
         async function loadEvent() {
             try {
                 const res   = await fetch(`/api/event/${eventId}`);
                 if (!res.ok) throw new Error();
                 const event = await res.json();
+                loadedEvent = event;
+                applyTheme(event.themeStyle);
+                renderBanner(event);
                 document.getElementById('eventTitle').textContent = event.name;
                 const eventDateStr = event.time
                     ? new Date(event.time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
@@ -183,29 +534,26 @@
                 // (see the waitlist-promotion flow) — always let them through
                 // the normal buy/register flow regardless of what capacity
                 // looks like for everyone else; the backend enforces this.
-                if (event.capacity && event.ticketsRemaining != null && !claimToken) {
-                    const left = event.ticketsRemaining;
-                    const lowCount = left < 20;
-                    const lowPct   = left / event.capacity < 0.20;
-                    if (lowCount || lowPct) {
-                        const el = document.getElementById('ticketsLeft');
-                        el.textContent = left === 0 ? 'Sold out' : `Only ${left} ticket${left === 1 ? '' : 's'} left`;
-                        el.style.display = 'block';
-                        if (left === 0) {
-                            if (event.waitlistEnabled) {
-                                isFullWaitlistable = true;
-                                document.getElementById('submitBtn').textContent = 'Join Waitlist';
-                                el.textContent = "Sold out — join the waitlist below and we'll email you if a spot opens up.";
-                                el.style.background = 'var(--warning-bg)';
-                                el.style.borderColor = '#fcd34d';
-                                el.style.color = 'var(--warning-text)';
-                            } else {
-                                document.getElementById('submitBtn').disabled = true;
-                                el.style.background = 'var(--danger-soft-bg)';
-                                el.style.borderColor = 'var(--danger-soft-border)';
-                                el.style.color = 'var(--danger-soft-text)';
-                            }
-                        }
+                // The live counter above already says how many are left and
+                // keeps saying it as the number moves, so this badge is only
+                // for the one thing the counter can't express: the door is
+                // shut, and here's what to do about it.
+                if (event.capacity && event.ticketsRemaining != null && !claimToken && event.ticketsRemaining === 0) {
+                    const el = document.getElementById('ticketsLeft');
+                    el.style.display = 'block';
+                    if (event.waitlistEnabled) {
+                        isFullWaitlistable = true;
+                        document.getElementById('submitBtn').textContent = 'Join Waitlist';
+                        el.textContent = "Sold out — join the waitlist below and we'll email you if a spot opens up.";
+                        el.style.background = 'var(--warning-bg)';
+                        el.style.borderColor = '#fcd34d';
+                        el.style.color = 'var(--warning-text)';
+                    } else {
+                        el.textContent = 'Sold out';
+                        document.getElementById('submitBtn').disabled = true;
+                        el.style.background = 'var(--danger-soft-bg)';
+                        el.style.borderColor = 'var(--danger-soft-border)';
+                        el.style.color = 'var(--danger-soft-text)';
                     }
                 }
             } catch {
@@ -258,9 +606,19 @@
         }
 
         if (sessionId) {
+            // Coming back from Stripe — the seat is already spoken for by the
+            // session, so don't claim another one.
             loadEvent().then(() => pollSession(sessionId));
         } else {
-            loadEvent();
+            loadEvent().then(() => {
+                if (!loadedEvent) return;
+                const open = loadedEvent.allowPublicRegistration || claimToken;
+                if (!open) return;
+                startAvailabilityPolling();
+                // A claim link already has a seat reserved server-side, so it
+                // skips the hold entirely.
+                if (loadedEvent.capacity && !claimToken) acquireHold();
+            });
         }
 
         document.getElementById('registerForm').onsubmit = async e => {
@@ -281,7 +639,7 @@
                     const res  = await fetch(`/api/checkout/${eventId}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, email, claimToken: claimToken || undefined })
+                        body: JSON.stringify({ name, email, claimToken: claimToken || undefined, holdToken: holdToken || undefined })
                     });
                     const data = await res.json();
                     if (data.url) {
@@ -299,7 +657,7 @@
                     const res  = await fetch('/api/register', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, email, eventId })
+                        body: JSON.stringify({ name, email, eventId, holdToken: holdToken || undefined })
                     });
                     const data = await res.json();
                     if (data.success) {

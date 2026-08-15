@@ -1191,6 +1191,32 @@
 
         .cap-preset-btn:hover { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
 
+        /* ── Registration theme picker ── */
+        .theme-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+        .theme-card {
+            display: flex; flex-direction: column; gap: 0;
+            border: 2px solid #e5e8f0; border-radius: 12px;
+            background: #fff; padding: 0; overflow: hidden;
+            cursor: pointer; text-align: left; font-family: inherit;
+        }
+        .theme-card:hover { border-color: #c7d2fe; }
+        .theme-card.selected { border-color: #4338ca; }
+        .theme-swatch { display: block; height: 34px; width: 100%; }
+        .theme-body {
+            display: block; padding: 9px 10px 11px;
+            border-top: 1px solid transparent; border-bottom: 1px solid #eee;
+        }
+        .theme-line { display: block; height: 5px; border-radius: 3px; margin-bottom: 5px; width: 82%; }
+        .theme-line.short { width: 55%; }
+        .theme-btn { display: block; height: 11px; border-radius: 4px; width: 62%; margin-top: 8px; }
+        .theme-name { display: block; padding: 8px 10px 2px; font-size: 12px; font-weight: 700; color: #333; }
+        .theme-desc { display: block; padding: 0 10px 10px; font-size: 11px; color: #8a8f98; line-height: 1.35; }
+
         .admin-room-owner {
             font-size: 12px;
             font-weight: 700;
@@ -4133,6 +4159,7 @@
                         `<div class="settings-section" id="tab-api">${await renderApiSection(eventId)}</div>` +
                         `<div class="settings-section" id="tab-danger">${renderDangerZoneSection(eventId)}</div>`;
                     togglePushDeviceList();
+                    renderThemePicker(eventId);
                     return;
                 }
 
@@ -4159,6 +4186,7 @@
                     `<div class="settings-section" id="tab-api">${await renderApiSection(eventId)}</div>` +
                     `<div class="settings-section" id="tab-danger">${renderDangerZoneSection(eventId)}</div>`;
                 togglePushDeviceList();
+                renderThemePicker(eventId);
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
             }
@@ -4746,7 +4774,79 @@
                         <div class="settings-toggle-desc">Default to not emailing a ticket when you manually add, CSV-import, or Google Sheets-import someone for this event — useful for giveaways where you don't want everyone entered getting an email. Doesn't affect public self-registration, checkout receipts, or waitlist notifications. Can still be overridden per-import.</div>
                     </div>
                 </label>
+
+                <hr class="settings-divider">
+                <div class="settings-subhead">Registration Page Look</div>
+                <div class="settings-hint" style="margin-bottom:10px;">
+                    How the public registration page is styled. The event image (set under General) becomes the banner across the top.
+                </div>
+                <div class="theme-grid" id="themeGrid" data-event="${eventId}">
+                    <div class="settings-empty" style="grid-column:1/-1;">Loading themes…</div>
+                </div>
             `;
+        }
+
+        // ── Registration page themes ────────────────────────────────────────
+        // The catalog comes from the server so the swatches here can never
+        // drift from what the registration page actually renders.
+        let _themeCatalog = null;
+
+        async function renderThemePicker(eventId) {
+            const grid = document.getElementById('themeGrid');
+            if (!grid || grid.dataset.event !== eventId) return;
+            try {
+                if (!_themeCatalog) _themeCatalog = await (await fetch('/api/registration-themes')).json();
+            } catch {
+                grid.innerHTML = '<div class="settings-empty" style="grid-column:1/-1;">Could not load themes.</div>';
+                return;
+            }
+            const ev = events.find(e => e.id === eventId);
+            const current = ev?.theme || 'classic';
+            grid.innerHTML = _themeCatalog.map(t => {
+                // Mirror the server's rule: a theme that defers to the event's
+                // colour previews with that colour, not the preset's.
+                const accent = t.useEventColor && ev?.color ? cssColorToHex(ev.color) : t.vars.accent;
+                const header = t.vars.headerGradient || accent;
+                return `
+                <button type="button" class="theme-card${t.key === current ? ' selected' : ''}"
+                        data-theme="${esc(t.key)}" onclick="chooseTheme('${eventId}','${esc(t.key)}')">
+                    <span class="theme-swatch" style="background:${esc(header)};"></span>
+                    <span class="theme-body" style="background:${esc(t.vars.surface)};border-color:${esc(t.vars.border)};">
+                        <span class="theme-line" style="background:${esc(t.vars.text)};opacity:.75;"></span>
+                        <span class="theme-line short" style="background:${esc(t.vars.muted)};opacity:.6;"></span>
+                        <span class="theme-btn" style="background:${esc(accent)};"></span>
+                    </span>
+                    <span class="theme-name">${esc(t.label)}${t.key === current ? ' ✓' : ''}</span>
+                    <span class="theme-desc">${esc(t.description)}</span>
+                </button>`;
+            }).join('');
+        }
+
+        function cssColorToHex(raw) {
+            if (!raw) return '#6366f1';
+            const s = String(raw).trim();
+            if (s.startsWith('#')) return s;
+            const n = s.match(/\d+/g);
+            if (!n || n.length < 3) return '#6366f1';
+            return '#' + n.slice(0, 3).map(x => parseInt(x, 10).toString(16).padStart(2, '0')).join('');
+        }
+
+        async function chooseTheme(eventId, theme) {
+            try {
+                const r = await fetch(`/api/event/${eventId}/theme`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ theme })
+                });
+                const d = await r.json();
+                if (!r.ok) { showToast(d.error || 'Could not save theme.'); return; }
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.theme = theme;
+                renderThemePicker(eventId);
+                showToast('Theme updated.');
+            } catch {
+                showToast('Network error while saving the theme.');
+            }
         }
 
         // ── Sheet Watcher condition builder ─────────────────────────────────

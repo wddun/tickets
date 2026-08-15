@@ -184,6 +184,29 @@ CREATE TABLE IF NOT EXISTS waitlist (
 CREATE INDEX IF NOT EXISTS idx_waitlist_eventId ON waitlist(eventId);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_waitlist_event_email ON waitlist(eventId, email);
 
+-- Seat holds: a short-lived claim on a spot, taken when someone opens the
+-- public registration form for a capacity-limited event and released when they
+-- finish, cancel, or run out of time. Without these, capacity is only checked
+-- at submit — so ten people can fill in the form for four spots and six of
+-- them get "sold out" after typing everything in, and on a paid event all ten
+-- can reach Stripe and pay, because the webhook issues tickets without
+-- re-checking capacity.
+CREATE TABLE IF NOT EXISTS seatHolds (
+    id TEXT PRIMARY KEY,
+    eventId TEXT NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    -- active: occupying a seat. consumed: became a real ticket. released:
+    -- given back. Only 'active' rows that haven't expired count toward capacity.
+    status TEXT NOT NULL DEFAULT 'active',
+    sessionId TEXT,
+    createdAt TEXT NOT NULL,
+    expiresAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_seatHolds_eventId ON seatHolds(eventId);
+CREATE INDEX IF NOT EXISTS idx_seatHolds_token ON seatHolds(token);
+CREATE INDEX IF NOT EXISTS idx_seatHolds_sessionId ON seatHolds(sessionId);
+
 -- No-login scanner access: anyone holding the token can scan/check in tickets
 -- for exactly this one event (nothing else — no dashboard, no other events).
 -- Multiple links per event so each staffer/device can be named and revoked
@@ -221,6 +244,9 @@ try { db.exec(`ALTER TABLE events ADD COLUMN waitlistEnabled INTEGER DEFAULT 0`)
 try { db.exec(`ALTER TABLE sheetAccess ADD COLUMN capabilities TEXT`); } catch {}
 // Who granted this access, for the "shared by" line in the access list.
 try { db.exec(`ALTER TABLE sheetAccess ADD COLUMN grantedBy TEXT`); } catch {}
+// Visual theme for the public registration page (see REGISTRATION_THEMES in
+// server.js). NULL means the default.
+try { db.exec(`ALTER TABLE events ADD COLUMN theme TEXT`); } catch {}
 // Shuttle linking: lets an external system (a linked shuttle/bus app room)
 // read-only check tickets for this event via /api/ticket-check, using the
 // same ticket the rider already has — without ever touching used_at. Only
@@ -538,6 +564,7 @@ export const stmt = {
         setReminderSentAt: db.prepare(`UPDATE events SET reminderSentAt=? WHERE id=?`),
         setReminder: db.prepare(`UPDATE events SET reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=? WHERE id=?`),
         setCustomFields: db.prepare(`UPDATE events SET customFields=? WHERE id=?`),
+        setTheme: db.prepare(`UPDATE events SET theme=? WHERE id=?`),
         setImageUrl: db.prepare(`UPDATE events SET imageUrl=? WHERE id=?`),
         setPublicRegistration: db.prepare(`UPDATE events SET allowPublicRegistration=? WHERE id=?`),
         setTicketPrice: db.prepare(`UPDATE events SET ticketPrice=? WHERE id=?`),
@@ -700,6 +727,19 @@ export const stmt = {
         setClaim: db.prepare(`UPDATE waitlist SET status='notified', notifiedAt=?, claimToken=?, claimExpiresAt=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM waitlist WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM waitlist WHERE eventId=?`),
+    },
+    seatHolds: {
+        byToken: db.prepare('SELECT * FROM seatHolds WHERE token=?'),
+        bySessionId: db.prepare('SELECT * FROM seatHolds WHERE sessionId=?'),
+        // Only unexpired active holds occupy a seat.
+        countActive: db.prepare(`SELECT COALESCE(SUM(quantity),0) as cnt FROM seatHolds WHERE eventId=? AND status='active' AND expiresAt>?`),
+        insert: db.prepare(`INSERT INTO seatHolds (id, eventId, token, quantity, status, sessionId, createdAt, expiresAt) VALUES (?,?,?,?,?,?,?,?)`),
+        touch: db.prepare(`UPDATE seatHolds SET expiresAt=?, quantity=? WHERE token=?`),
+        setStatus: db.prepare(`UPDATE seatHolds SET status=? WHERE token=?`),
+        bindSession: db.prepare(`UPDATE seatHolds SET sessionId=?, expiresAt=? WHERE token=?`),
+        deleteByEventId: db.prepare(`DELETE FROM seatHolds WHERE eventId=?`),
+        // Housekeeping so the table doesn't grow without bound.
+        purgeStale: db.prepare(`DELETE FROM seatHolds WHERE expiresAt<? AND status!='consumed'`),
     },
     sheetWatchers: {
         byId: db.prepare('SELECT * FROM sheetWatchers WHERE id=?'),
