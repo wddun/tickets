@@ -5,7 +5,14 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export const db = new Database(path.join(__dirname, 'tickets.db'));
+// TICKETS_DB lets a test run (or a throwaway sandbox) point at its own
+// database file instead of the real one. Unset everywhere else, so normal
+// runs are unchanged.
+const DB_FILE = process.env.TICKETS_DB
+    ? path.resolve(process.env.TICKETS_DB)
+    : path.join(__dirname, 'tickets.db');
+
+export const db = new Database(DB_FILE);
 
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');

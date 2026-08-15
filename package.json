@@ -6,7 +6,9 @@
     "type": "module",
     "scripts": {
         "start": "node server.js",
-        "dev": "node --watch server.js"
+        "dev": "node --watch server.js",
+        "test": "node --test --test-concurrency=4 \"test/*.test.js\"",
+        "test:watch": "node --test --watch \"test/*.test.js\""
     },
     "dependencies": {
         "@aws-sdk/client-ses": "^3.1014.0",

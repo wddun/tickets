@@ -77,7 +77,30 @@
       "Bash(pip3 show *)",
       "Bash(git rm *)",
       "Bash(scp \"/Users/will/Downloads/AuthKey_S8C3NV756N.p8\" ubuntu:/opt/tickets/certs/AuthKey_S8C3NV756N.p8)",
-      "WebFetch(domain:willstechsupport.com)"
+      "WebFetch(domain:willstechsupport.com)",
+      "Bash(nslookup -type=TXT willstechsupport.com 8.8.8.8)",
+      "Bash(nslookup -type=CNAME default._domainkey.willstechsupport.com 8.8.8.8)",
+      "Bash(nslookup -type=TXT _dmarc.willstechsupport.com 8.8.8.8)",
+      "Bash(pm2 status *)",
+      "Bash(scp /Users/will/Documents/tickets/server.js ubuntu:/opt/tickets/server.js)",
+      "Bash(scp /Users/will/Documents/tickets/db-sqlite.js ubuntu:/opt/tickets/db-sqlite.js)",
+      "Bash(scp /Users/will/Documents/tickets/public/register.html ubuntu:/opt/tickets/public/register.html)",
+      "Bash(scp \"ubuntu:/opt/tickets/tickets.db\" /Users/will/Documents/tickets/tickets.db.prod)",
+      "Bash(scp \"ubuntu:/opt/tickets/tickets.db-shm\" /Users/will/Documents/tickets/tickets.db-shm.prod)",
+      "Bash(scp \"ubuntu:/opt/tickets/tickets.db-wal\" /Users/will/Documents/tickets/tickets.db-wal.prod)",
+      "Bash(scp \"ubuntu:/tmp/tickets-sessions.tar.gz\" /tmp/tickets-sessions.tar.gz)",
+      "Bash(tar -xzf /tmp/tickets-sessions.tar.gz -C /Users/will/Documents/tickets/)",
+      "Bash(scp \"ubuntu:/tmp/tickets-passes.tar.gz\" /tmp/tickets-passes.tar.gz)",
+      "Bash(tar -xzf /tmp/tickets-passes.tar.gz -C /Users/will/Documents/tickets/)",
+      "Bash(scp \"ubuntu:/tmp/tickets-backup.tar.gz\" /tmp/tickets-backup.tar.gz)",
+      "Bash(curl -s -X POST http://localhost:3030/api/auth/signup -H 'Content-Type: application/json' -d '{\"email\":\"admin@localtest.dev\",\"password\":\"testpass123\",\"name\":\"Test Admin\"}' -c /tmp/tickets-cookie.txt -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(rsync -avz --checksum /Users/will/Documents/tickets/public/index.html ubuntu:/opt/tickets/public/)",
+      "Bash(grep -v \"^$\")",
+      "Bash(grep -A5 \"res.json\\({ success: true, user:\" server.js)",
+      "Bash(rsync -avz --checksum /Users/will/Documents/tickets/public/login.html ubuntu:/opt/tickets/public/)",
+      "Bash(rsync -avz --checksum /Users/will/Documents/tickets/server.js /Users/will/Documents/tickets/public/dashboard.html ubuntu:/opt/tickets/ ubuntu:/opt/tickets/public/)",
+      "Bash(rsync -avz --checksum /Users/will/Documents/tickets/server.js ubuntu:/opt/tickets/)",
+      "Bash(rsync -avz --checksum /Users/will/Documents/tickets/public/dashboard.html ubuntu:/opt/tickets/public/)"
     ]
   }
 }

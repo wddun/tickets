@@ -1979,6 +1979,19 @@
         .badge-converted { background: #d1fae5; color: #065f46; }
         .badge-active { background: #d1fae5; color: #065f46; }
         .badge-inactive { background: #f1f5f9; color: #64748b; }
+        .beta-callout {
+            margin-top: 10px;
+            padding: 11px 13px;
+            background: #f5f3ff;
+            border: 1px solid #ddd6fe;
+            border-left: 3px solid #8b5cf6;
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #4c4066;
+        }
+        .beta-callout strong { color: #5b21b6; }
+        .beta-callout a { color: #6d28d9; font-weight: 600; }
         .beta-pill {
             display: inline-block;
             background: linear-gradient(135deg, #6366f1, #8b5cf6);
@@ -3811,7 +3824,14 @@
                         <input type="number" min="0" step="0.01" inputmode="decimal" id="editEventTicketPrice" placeholder="0.00" value="${ev.ticketPrice ? (ev.ticketPrice / 100).toFixed(2) : ''}"
                             style="width:100%;padding:8px 8px 8px 24px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
                     </div>
-                    <div style="font-size:11px;color:#aaa;margin-top:4px;">Requires Stripe keys in .env and public registration enabled</div>
+                    <div class="beta-callout">
+                        <strong>Paid ticketing is a beta, testing-only feature.</strong>
+                        Charging for tickets needs your own Stripe account connected to this system first —
+                        setting a price here on its own won't collect any money, and checkout will fail for
+                        your attendees. Email
+                        <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a>
+                        to have your Stripe account connected. Leave this blank or 0 to keep the event free.
+                    </div>
                 </div>
             `;
         }
@@ -3850,6 +3870,22 @@
             const allowReentry = document.getElementById('editEventAllowReentry').checked;
             const capacity = document.getElementById('editEventCapacity').value;
             const ticketPrice = document.getElementById('editEventTicketPrice').value;
+
+            // Turning a free event into a paid one is the point where someone
+            // finds out the hard way that payments are still beta — the price
+            // saves fine, but nothing can actually be charged until their own
+            // Stripe account is connected. Say so before it's saved, not after
+            // an attendee hits a dead checkout. Only on the free -> paid
+            // transition, so editing an already-paid event isn't nagged.
+            const priceCents = Math.round(Math.max(0, parseFloat(ticketPrice) || 0) * 100);
+            const wasFree = !(events.find(e => e.id === id)?.ticketPrice);
+            if (priceCents > 0 && wasFree) {
+                const ok = await confirmDialog(
+                    'Paid ticketing is in beta and is a testing-only feature. Your attendees cannot be charged until your own Stripe account has been connected to this system — email support@willstechsupport.com to set that up. Save this price anyway?',
+                    { title: 'Paid tickets are in beta', confirmText: 'Save price', danger: false }
+                );
+                if (!ok) return;
+            }
 
             const fd = new FormData();
             fd.append('name', name);
@@ -5891,6 +5927,11 @@
                 <div class="modal-section-title">Payments<span class="beta-pill">BETA</span></div>
                 <div class="settings-hint">
                     Orders placed for this event through Stripe Checkout. Refunds go back to the original payment method.
+                </div>
+                <div class="beta-callout" style="margin-bottom:14px;">
+                    <strong>Testing only.</strong> Payments are still in beta. To take real money you need your own
+                    Stripe account connected to this system — email
+                    <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a> to get set up.
                 </div>
                 <div id="paymentsRows">${rows}</div>
             `;

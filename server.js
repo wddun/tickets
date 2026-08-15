@@ -222,7 +222,27 @@ function buildRawMimeEmail({ from, to, replyTo, subject, html, text, attachments
     return lines.join('\r\n');
 }
 
+// EMAIL_SINK diverts every outgoing email to a JSONL file instead of SES.
+// It exists for the test suite: a test run must never send real mail, and
+// asserting on what would have been sent is the only way to cover the email
+// content itself. Unset in production, where this whole branch is dead.
+const EMAIL_SINK = process.env.EMAIL_SINK || null;
+function sinkEmail(payload) {
+    try {
+        fs.appendFileSync(EMAIL_SINK, JSON.stringify({ ...payload, at: new Date().toISOString() }) + '\n');
+    } catch (err) {
+        console.warn('[email-sink] write failed:', err.message);
+    }
+}
+
 async function sendEmail({ to, subject, html, registrationId, fromName, replyTo, attachments = [] }) {
+    if (EMAIL_SINK) {
+        sinkEmail({
+            to, subject, html, registrationId, fromName, replyTo,
+            attachments: attachments.map(a => ({ filename: a.filename, cid: a.cid, contentType: a.contentType }))
+        });
+        return { MessageId: 'sink-' + nanoid(8) };
+    }
     const task = emailChain.then(() => new Promise(r => setTimeout(r, SES_INTERVAL_MS))).then(async () => {
         // Append legitimacy footer to every email
         const footer = `<div style="text-align:center; margin-top:40px; padding-top:24px; border-top:1px solid #e5e7eb; font-size:12px; color:#6b7280;">
@@ -1361,7 +1381,9 @@ app.get('/sw.js', (req, res) => {
 });
 app.use(session({
     store: new FileStore({
-        path: './sessions',
+        // SESSIONS_DIR lets a test run keep its sessions in a throwaway
+        // directory instead of the real one. Unset in normal runs.
+        path: process.env.SESSIONS_DIR || './sessions',
         retries: 0
     }),
     secret: process.env.SESSION_SECRET || (() => { throw new Error('SESSION_SECRET env var is required'); })(),
@@ -1411,7 +1433,15 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
     }]);
 });
 
-const loginLimiter = rateLimit({
+// Rate limiting is real protection in production but makes an automated
+// test run flaky the moment it logs in eleven times, so the suite turns it
+// off with DISABLE_RATE_LIMITS=1. The limiter tests deliberately boot a
+// server without that flag, so the limits themselves still get exercised.
+const rateLimitsOff = process.env.DISABLE_RATE_LIMITS === '1';
+const passThrough = (req, res, next) => next();
+const makeLimiter = (opts) => rateLimitsOff ? passThrough : rateLimit(opts);
+
+const loginLimiter = makeLimiter({
     windowMs: 15 * 60 * 1000,
     max: 10,
     standardHeaders: true,
@@ -1419,7 +1449,7 @@ const loginLimiter = rateLimit({
     message: { error: 'Too many login attempts. Please try again later.' }
 });
 
-const forgotPasswordLimiter = rateLimit({
+const forgotPasswordLimiter = makeLimiter({
     windowMs: 15 * 60 * 1000,
     max: 5,
     standardHeaders: true,
@@ -1427,7 +1457,7 @@ const forgotPasswordLimiter = rateLimit({
     message: { error: 'Too many password reset requests. Please try again later.' }
 });
 
-const validateLimiter = rateLimit({
+const validateLimiter = makeLimiter({
     windowMs: 60 * 1000,
     max: 240,
     standardHeaders: true,
@@ -1436,7 +1466,9 @@ const validateLimiter = rateLimit({
 });
 
 // Create pass-cache directory for pre-generated .pkpass files
-const passCacheDir = path.resolve(__dirname, 'pass-cache');
+const passCacheDir = process.env.PASS_CACHE_DIR
+    ? path.resolve(process.env.PASS_CACHE_DIR)
+    : path.resolve(__dirname, 'pass-cache');
 fs.mkdirSync(passCacheDir, { recursive: true });
 
 // Backfill scannerPin on any events that don't have one yet
@@ -2552,6 +2584,13 @@ app.post('/api/register', async (req, res) => {
     if (!event.allowPublicRegistration) {
         return res.status(403).json({ error: 'Registration is not open for this event' });
     }
+    // This is the free-ticket path. /api/checkout/:eventId refuses a free
+    // event and points here; without the matching refusal in this direction,
+    // posting straight to this route hands out a paid event's tickets for
+    // nothing, Stripe never involved.
+    if (event.ticketPrice > 0) {
+        return res.status(400).json({ error: 'This event is paid — use the checkout link to buy a ticket' });
+    }
 
     const blockedHere = signupBlockReason(req, event, email);
     if (blockedHere) return res.status(409).json({ error: blockedHere.error, reason: blockedHere.code });
@@ -2687,7 +2726,10 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
 
 // Create a Checkout Session for a paid ticket
 app.post('/api/checkout/:eventId', async (req, res) => {
-    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+    // Paid ticketing is beta: an organiser can set a price without a Stripe
+    // account existing behind it, and the first person to notice is whoever
+    // tries to buy. Say what's actually wrong and who fixes it.
+    if (!stripe) return res.status(503).json({ error: 'Ticket sales are not connected for this event yet. The organiser needs to have a Stripe account connected (support@willstechsupport.com) before tickets can be sold.' });
     const { name, email, discountCode, claimToken } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
 
@@ -3219,7 +3261,7 @@ app.get('/api/event/:id/orders', requireAuth, (req, res) => {
 });
 
 app.post('/api/orders/:id/refund', requireAuth, async (req, res) => {
-    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+    if (!stripe) return res.status(503).json({ error: 'Stripe is not connected yet — email support@willstechsupport.com to connect your Stripe account.' });
     const order = stmt.orders.byId.get(req.params.id);
     if (!order) return res.status(404).json({ error: 'Order not found' });
     if (!userHasEventCapability(req.session.userId, order.eventId, 'manage_payments')) {
@@ -3770,6 +3812,11 @@ app.get('/api/event/:id', (req, res) => {
     // So the form can hide "Register Another Person" and warn about a repeat
     // signup before the visitor fills anything in.
     event.deviceAlreadyRegistered = event.oneRegistrationPerDevice && deviceAlreadyRegistered(req, event.id);
+    // This route is public — the registration page reads it with no session.
+    // The scanner PIN is a door credential and has no business travelling to
+    // anyone who merely knows an event id; callers with real access get it
+    // from /api/events, which is authenticated.
+    if (!req.session.userId || !userHasEventAccess(req.session.userId, event.id)) delete event.scannerPin;
     res.json(event);
 });
 
@@ -3883,8 +3930,12 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     const newColor = color || event.color;
     const newCapacity = capacityRaw !== undefined ? (parseInt(capacityRaw) || null) : event.capacity;
     const newLocation = {
-        name: locationName || event.location?.name || '',
-        address: locationAddress || event.location?.address || '',
+        // An empty field that was actually sent means "clear this", the same
+        // way time/endTime treat it. Falling back to the stored value made a
+        // venue impossible to remove once set — the organiser could only ever
+        // replace it, so a venue typed in by mistake stayed on every ticket.
+        name: locationName !== undefined ? String(locationName).trim() : (event.location?.name || ''),
+        address: locationAddress !== undefined ? String(locationAddress).trim() : (event.location?.address || ''),
         lat: parseFloat(lat) || event.location?.lat || 37.33182,
         lng: parseFloat(lng) || event.location?.lng || -122.03118,
     };
@@ -6011,7 +6062,11 @@ app.get('/api/event/:id/access', requireAuth, (req, res) => {
 // which is exactly what let a stale cached scanner.html page (with no live
 // session and no scan-link) keep scanning.
 function scannerAuthorized(req, eventId) {
-    if (req.session?.userId) return true;
+    // Having *an* account was treated as proof for *every* event, so any
+    // signed-in user could check in (or check out) an attendee at an event
+    // they have nothing to do with. A session only counts when it actually
+    // carries check-in rights here.
+    if (req.session?.userId) return userHasEventCapability(req.session.userId, eventId, 'checkin');
     // A scan link opened in this session counts as proof for that one event,
     // the same as passing its token in the body.
     const scoped = sessionScanLink(req);
