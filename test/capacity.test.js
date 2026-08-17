@@ -63,6 +63,28 @@ describe('taking a hold', () => {
         assert.equal(mine.holdStillValid, true);
     });
 
+    test('an availability answer is only ever about the token it was asked for', async () => {
+        // The page polls this endpoint continuously, and the answer says
+        // "holdStillValid: false" whenever the caller didn't present a live
+        // hold — including when they presented none at all. That is correct
+        // here and a trap for the page: the first poll goes out before the
+        // hold exists, so a page that treats any such answer as "your hold is
+        // gone" tells someone looking at an empty event that it filled up.
+        const ev = await eventWithSeats(250);
+        const { holder, holdToken } = await holderOnLastSeat(ev);
+
+        const asked = (await holder.get(`/api/event/${ev.id}/availability?holdToken=${holdToken}`)).body;
+        assert.equal(asked.holdStillValid, true);
+        assert.equal(asked.remaining, 250, 'the holder is not charged for their own seat');
+        assert.equal(asked.holding, 0, 'their own hold is not "someone else signing up"');
+
+        const notAsked = (await holder.get(`/api/event/${ev.id}/availability`)).body;
+        assert.equal(notAsked.holdStillValid, false, 'no token presented means no hold to confirm');
+        assert.equal(notAsked.registered, 0);
+        assert.equal(notAsked.remaining, 249);
+        assert.equal(notAsked.holding, 1);
+    });
+
     test('an uncapped event grants without bookkeeping', async () => {
         const ev = await createEvent(owner.client, { publicRegistration: true });
         const r = await visitor().post(`/api/event/${ev.id}/hold`, {});

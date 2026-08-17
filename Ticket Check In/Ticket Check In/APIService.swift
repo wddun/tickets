@@ -61,6 +61,8 @@ private enum Keychain {
 enum APIError: Error, LocalizedError {
     case invalidURL
     case httpError(Int)
+    /// The server explained the refusal in its own words — show that, not a status code.
+    case serverMessage(String)
     case decodingError
     case unauthorized
     case unknown
@@ -69,11 +71,28 @@ enum APIError: Error, LocalizedError {
         switch self {
         case .invalidURL: return "Invalid URL"
         case .httpError(let code): return "HTTP error \(code)"
+        case .serverMessage(let message): return message
         case .decodingError: return "Failed to decode response"
         case .unauthorized: return "Not logged in"
         case .unknown: return "Unknown error"
         }
     }
+}
+
+/// Every refusal from this API is `{ "error": "..." }`, and those messages are
+/// written for the person holding the phone — "Event is at capacity (4 max,
+/// 3 registered, 1 being filled in right now)" tells door staff what to do
+/// next, where "HTTP error 400" does not. Falls back to the status code when
+/// the body isn't the shape we expect.
+private struct ServerErrorBody: Decodable { let error: String? }
+
+private func apiError(from data: Data, status: Int) -> APIError {
+    if let body = try? JSONDecoder().decode(ServerErrorBody.self, from: data),
+       let message = body.error,
+       !message.isEmpty {
+        return .serverMessage(message)
+    }
+    return .httpError(status)
 }
 
 @MainActor
@@ -135,10 +154,14 @@ class APIService: ObservableObject {
         let body = ["email": email, "password": password]
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        // 401 stays as-is: the login screen already turns it into "Incorrect
+        // email or password." Everything else carries the server's wording —
+        // "Please verify your email before logging in" is the one people
+        // actually hit, and a bare 403 explains nothing.
         if http.statusCode == 401 { throw APIError.unauthorized }
-        if http.statusCode != 200 { throw APIError.httpError(http.statusCode) }
+        if http.statusCode != 200 { throw apiError(from: data, status: http.statusCode) }
 
         let user = try await getCurrentUser()
         currentUser = user
@@ -345,7 +368,11 @@ class APIService: ObservableObject {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
         if http.statusCode == 401 { throw APIError.unauthorized }
-        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+        // A door sale is refused for reasons staff can act on — the event is
+        // at capacity, someone is mid-signup on the last seat, at-door sales
+        // aren't enabled, it's a paid event. AtDoorView shows this straight
+        // through to them.
+        guard http.statusCode == 200 else { throw apiError(from: data, status: http.statusCode) }
         guard let obj = try? JSONDecoder().decode(AtDoorRegisterResponse.self, from: data) else { throw APIError.decodingError }
         return obj
     }

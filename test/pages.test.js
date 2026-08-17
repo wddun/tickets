@@ -171,6 +171,29 @@ describe('generated links carry ?fresh=1', () => {
     });
 });
 
+describe('the registration page', () => {
+    const register = readPublic('register.html');
+
+    test('only retires a seat hold on an answer that asked about that hold', async () => {
+        // Availability polls and the hold request race on page load, and the
+        // hold can be replaced while a poll is in flight. Acting on a stale
+        // answer told visitors that an empty event had filled up while they
+        // were signing up.
+        assert.match(register, /askedForHoldToken/,
+            'availability answers must record which hold token they were asked about');
+        assert.match(register, /a\.askedForHoldToken === holdToken/,
+            'the hold-lost check must ignore answers about a different (or no) token');
+    });
+
+    test('claims the seat before the counter starts polling', async () => {
+        const init = register.slice(register.indexOf('if (applyDeviceLock(loadedEvent)) return;'));
+        const holdAt = init.indexOf('acquireHold()');
+        const pollAt = init.indexOf('startAvailabilityPolling()');
+        assert.ok(holdAt !== -1 && pollAt !== -1, 'expected both calls during page init');
+        assert.ok(holdAt < pollAt, 'polling before the hold exists makes the first reading wrong');
+    });
+});
+
 describe('the scanner page', () => {
     const scanner = readPublic('scanner.html');
 

@@ -427,11 +427,20 @@
         }
 
         async function fetchAvailability() {
+            // Stamp each answer with the token it was actually asked about.
+            // The first poll goes out before the hold exists, and the hold can
+            // be replaced while a poll is in flight — either way the answer
+            // says "no valid hold" simply because it was never asked about the
+            // one we now have. Acting on that told people sitting in front of
+            // an empty event that it had filled up.
+            const askedFor = holdToken;
             try {
-                const qs = holdToken ? `?holdToken=${encodeURIComponent(holdToken)}` : '';
+                const qs = askedFor ? `?holdToken=${encodeURIComponent(askedFor)}` : '';
                 const r = await fetch(`/api/event/${eventId}/availability${qs}`, { cache: 'no-store' });
                 if (!r.ok) return null;
-                return await r.json();
+                const a = await r.json();
+                a.askedForHoldToken = askedFor;
+                return a;
             } catch { return null; }
         }
 
@@ -580,7 +589,11 @@
                 // sheet import, a door sale — none of which respect this hold.
                 // Say so rather than leave a countdown running on a spot that
                 // no longer exists.
-                if (holdToken && a.holdStillValid === false) { onHoldLost(a); return; }
+                // Only an answer about the token we still hold can retire it.
+                if (holdToken && a.askedForHoldToken === holdToken && a.holdStillValid === false) {
+                    onHoldLost(a);
+                    return;
+                }
                 if (document.getElementById('formView').style.display !== 'none') {
                     renderAvailability(a);
                     applySoldOutState(a);
@@ -695,17 +708,19 @@
             // session, so don't claim another one.
             loadEvent().then(() => pollSession(sessionId));
         } else {
-            loadEvent().then(() => {
+            loadEvent().then(async () => {
                 if (!loadedEvent) return;
                 const open = loadedEvent.allowPublicRegistration || claimToken;
                 if (!open) return;
                 // A device already used for this event never gets a hold or a
                 // form — the check happens before anything is asked of them.
                 if (applyDeviceLock(loadedEvent)) return;
+                // Claim the seat before the counter starts polling, so the
+                // first reading already knows about this visitor's own hold
+                // instead of counting it against them. A claim link already
+                // has a seat reserved server-side, so it skips the hold.
+                if (loadedEvent.capacity && !claimToken) await acquireHold();
                 startAvailabilityPolling();
-                // A claim link already has a seat reserved server-side, so it
-                // skips the hold entirely.
-                if (loadedEvent.capacity && !claimToken) acquireHold();
             });
         }
 
