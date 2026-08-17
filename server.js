@@ -6228,6 +6228,20 @@ function sheetHostAllowed(url) {
     } catch { return false; }
 }
 
+// A CSV export request to docs.google.com redirects to a per-file CDN host
+// under googleusercontent.com to actually serve the bytes (e.g.
+// doc-08-4o-sheets.googleusercontent.com) — that is Google's own
+// infrastructure, not an open redirect, so it's allowed as a landing spot
+// even though it's never an allowed *starting* URL.
+function sheetRedirectAllowed(url) {
+    try {
+        const u = new URL(url);
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+        const host = u.hostname.toLowerCase();
+        return SHEET_ALLOWED_HOSTS.has(host) || host.endsWith('.googleusercontent.com');
+    } catch { return false; }
+}
+
 function sheetCsvUrl(shareUrl) {
     if (!/^https?:\/\//i.test(shareUrl)) return null;
     if (!sheetHostAllowed(shareUrl)) return null;
@@ -6255,7 +6269,7 @@ async function fetchSheetRows(csvUrl) {
     }
     // Google redirects export links around its own hosts; anything that lands
     // somewhere else is not a sheet and its body is not ours to hand back.
-    if (resp.url && !sheetHostAllowed(resp.url)) {
+    if (resp.url && !sheetRedirectAllowed(resp.url)) {
         throw new Error('That link redirected somewhere that is not Google Sheets.');
     }
     if (!resp.ok) throw new Error(`Sheet fetch failed (HTTP ${resp.status}) — is the sheet shared as "Anyone with the link"?`);
