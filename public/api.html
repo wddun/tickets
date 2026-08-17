@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API | WTS Tickets</title>
+    <meta name="theme-color" content="#1a1f3c">
+    <meta name="description" content="Connect a WTS Tickets event to anything that can make a web request.">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --ink: #1e293b; --muted: #64748b; --line: #e2e8f0;
+            --accent: #6366f1; --navy: #1a1f3c; --code-bg: #0f172a;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f4f5f8; color: var(--ink);
+            -webkit-font-smoothing: antialiased; line-height: 1.6;
+        }
+        nav {
+            background: var(--navy); height: 52px; display: flex; align-items: center;
+            justify-content: space-between; padding: 0 20px; position: sticky; top: 0; z-index: 10;
+        }
+        nav a { color: #fff; text-decoration: none; font-size: 14px; }
+        nav .brand { font-weight: 800; letter-spacing: -0.3px; }
+
+        .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 96px; display: flex; gap: 40px; }
+        aside { width: 210px; flex-shrink: 0; position: sticky; top: 84px; align-self: flex-start; max-height: calc(100vh - 110px); overflow-y: auto; }
+        aside a { display: block; padding: 5px 0; color: var(--muted); text-decoration: none; font-size: 13px; }
+        aside a:hover { color: var(--accent); }
+        aside .grp { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: #94a3b8; margin: 16px 0 4px; font-weight: 700; }
+        main { flex: 1; min-width: 0; }
+
+        h1 { font-size: 32px; letter-spacing: -0.7px; margin-bottom: 8px; }
+        h2 { font-size: 22px; letter-spacing: -0.4px; margin: 44px 0 12px; padding-top: 8px; }
+        h3 { font-size: 16px; margin: 26px 0 8px; }
+        p, li { color: #334155; margin-bottom: 12px; }
+        ul, ol { padding-left: 22px; }
+        .lede { font-size: 17px; color: var(--muted); margin-bottom: 28px; }
+
+        code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+               background: #eef2ff; color: #3730a3; padding: 1px 5px; border-radius: 4px; }
+        pre { background: var(--code-bg); color: #e2e8f0; padding: 16px 18px; border-radius: 10px;
+              overflow-x: auto; margin-bottom: 16px; font-size: 13px; line-height: 1.55; }
+        pre code { background: none; color: inherit; padding: 0; font-size: 13px; }
+
+        table { width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 14px; }
+        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+        th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); }
+        td code { white-space: nowrap; }
+
+        .note { background: #fff; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+                border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; }
+        .note.warn { border-left-color: #f59e0b; background: #fffbeb; }
+        .note strong { color: var(--navy); }
+
+        .ep { display: flex; align-items: baseline; gap: 10px; margin: 22px 0 6px; flex-wrap: wrap; }
+        .verb { font-size: 11px; font-weight: 800; letter-spacing: 0.6px; padding: 3px 8px; border-radius: 5px; color: #fff; }
+        .get { background: #0284c7; } .post { background: #16a34a; }
+        .patch { background: #ca8a04; } .delete { background: #dc2626; }
+        .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; font-weight: 600; }
+        .scope { font-size: 11px; color: var(--muted); background: #f1f5f9; padding: 2px 7px; border-radius: 20px; }
+
+        footer { border-top: 1px solid var(--line); padding: 24px 20px; text-align: center; color: var(--muted); font-size: 13px; }
+        @media (max-width: 860px) { aside { display: none; } .wrap { padding-top: 24px; } }
+    </style>
+</head>
+<body>
+<nav>
+    <a href="/" class="brand">WTS Tickets</a>
+    <a href="/support.html">Support</a>
+</nav>
+
+<div class="wrap">
+<aside>
+    <div class="grp">Start</div>
+    <a href="#overview">Overview</a>
+    <a href="#keys">Getting a key</a>
+    <a href="#auth">Authentication</a>
+    <a href="#scopes">Scopes</a>
+    <a href="#errors">Errors</a>
+    <a href="#limits">Rate limits</a>
+    <div class="grp">Reference</div>
+    <a href="#me">Key info</a>
+    <a href="#event">Event</a>
+    <a href="#registrations">Registrations</a>
+    <a href="#door">Check-in &amp; scanning</a>
+    <a href="#waitlist">Waitlist</a>
+    <a href="#orders">Orders</a>
+    <a href="#audit">Audit log</a>
+    <div class="grp">Recipes</div>
+    <a href="#recipes">Worked examples</a>
+</aside>
+
+<main>
+    <h1>WTS Tickets API</h1>
+    <p class="lede">
+        Connect an event to anything that can make an HTTP request — a spreadsheet, a CRM, a Slack
+        bot, a turnstile, your own website. Everything the dashboard does to registrations, this can do too.
+    </p>
+
+    <h2 id="overview">Overview</h2>
+    <p>
+        The base URL is <code>https://tickets.willstechsupport.com</code>. Every endpoint lives under
+        <code>/api/v1</code>, speaks JSON, and expects an API key.
+    </p>
+    <p>
+        <strong>A key belongs to exactly one event.</strong> No request names an event — the key decides
+        which one, and nothing a caller sends can widen that. So a key you paste into a third-party tool
+        can only ever touch the one event you made it for, and if it leaks, that is the whole blast radius.
+    </p>
+
+    <div class="note">
+        <strong>Two ideas worth knowing before you start.</strong>
+        A <em>registration</em> is one person and the tickets issued to them together — book three seats
+        and that is one registration with three tickets, each with its own QR code. A <em>scope</em> is one
+        permission, drawn from the same list used when sharing an event with a colleague.
+    </div>
+
+    <h2 id="keys">Getting a key</h2>
+    <ol>
+        <li>Open the event in the dashboard and go to <strong>Settings → API</strong>.</li>
+        <li>Give the key a name describing what will use it — you will thank yourself later.</li>
+        <li>Tick only the permissions that thing actually needs.</li>
+        <li>Copy the key. <strong>It is shown once and never again</strong> — only a hash is stored, so it
+            cannot be looked up later. Lost a key? Revoke it and make another.</li>
+    </ol>
+    <p>
+        Keys look like <code>wts_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code>. Treat one like a password: it is
+        a bearer credential, so anyone holding it can do what it allows. Keep it server-side. Never put it
+        in a web page, a mobile app, or a public repository.
+    </p>
+
+    <div class="note">
+        <strong>A key is never stronger than the person who made it.</strong> Its permissions are
+        re-checked against that account's current access on every request. If their access to the event is
+        reduced, the key narrows to match; if it is removed, the key stops working. You cannot create a key
+        that can do more than you can.
+    </div>
+
+    <h2 id="auth">Authentication</h2>
+    <p>Send the key as a bearer token:</p>
+<pre><code>curl https://tickets.willstechsupport.com/api/v1/me \
+  -H "Authorization: Bearer wts_your_key_here"</code></pre>
+    <p>
+        If your tool can only set a plain header, <code>X-API-Key: wts_your_key_here</code> works
+        identically. Start with <code>/api/v1/me</code> — it tells you which event the key is for and
+        what it may do, and needs no scope.
+    </p>
+
+    <h2 id="scopes">Scopes</h2>
+    <p>Each endpoint needs one scope. Give a key the fewest it can do its job with.</p>
+    <table>
+        <thead><tr><th>Scope</th><th>Lets the key</th></tr></thead>
+        <tbody>
+            <tr><td><code>checkin</code></td><td>Read the event, its registrations and availability; check people in; scan tickets</td></tr>
+            <tr><td><code>undo_checkin</code></td><td>Reverse a check-in</td></tr>
+            <tr><td><code>manage_tickets</code></td><td>Create, edit and delete registrations</td></tr>
+            <tr><td><code>email_attendees</code></td><td>Send a ticket by email when creating a registration</td></tr>
+            <tr><td><code>manage_waitlist</code></td><td>Read the waitlist and promote from it</td></tr>
+            <tr><td><code>manage_payments</code></td><td>Read orders</td></tr>
+            <tr><td><code>manage_event</code></td><td>Read the audit log</td></tr>
+            <tr><td><code>export_data</code></td><td>Bulk export of attendee data</td></tr>
+        </tbody>
+    </table>
+    <p>
+        Sharing an event with other people is deliberately <em>not</em> available to a key. Granting
+        someone access stays something a person does while signed in.
+    </p>
+
+    <h2 id="errors">Errors</h2>
+    <p>Every failure is a JSON object with a stable machine-readable <code>code</code> and a message meant for a human.</p>
+<pre><code>{
+  "error": {
+    "code": "missing_scope",
+    "message": "This key does not have the \"manage_waitlist\" scope for this event."
+  }
+}</code></pre>
+    <table>
+        <thead><tr><th>Status</th><th>Code</th><th>Means</th></tr></thead>
+        <tbody>
+            <tr><td>400</td><td><code>invalid_request</code></td><td>Something is missing or malformed. The message says what.</td></tr>
+            <tr><td>401</td><td><code>missing_key</code> / <code>invalid_key</code></td><td>No key sent, or it is unknown or revoked.</td></tr>
+            <tr><td>403</td><td><code>missing_scope</code></td><td>The key is valid but lacks the scope this endpoint needs.</td></tr>
+            <tr><td>404</td><td><code>not_found</code></td><td>No such thing <em>on this event</em>. Ids belonging to other events read as not found.</td></tr>
+            <tr><td>409</td><td><code>sold_out</code></td><td>The event is full. Seats held by people mid-signup count as taken.</td></tr>
+            <tr><td>429</td><td><code>rate_limited</code></td><td>Slow down — see below.</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="limits">Rate limits</h2>
+    <p>
+        300 requests per minute per key. The limit is counted per key rather than per IP address, so one
+        integration cannot exhaust another's budget. Responses carry the standard
+        <code>RateLimit-*</code> headers; on a 429, wait and retry.
+    </p>
+    <p>
+        For a live counter, poll <code>/api/v1/availability</code> — it is the cheapest endpoint here.
+        Once every few seconds is plenty; there is no need to poll harder than a human can read.
+    </p>
+
+    <h2 id="me">Key info</h2>
+    <div class="ep"><span class="verb get">GET</span><span class="path">/api/v1/me</span><span class="scope">no scope needed</span></div>
+    <p>What this key is for and what it may do. The first call to make when wiring something up.</p>
+<pre><code>{
+  "key": { "id": "AbC123", "name": "Zapier", "prefix": "wts_AbC12", "lastUsedAt": "2026-08-17T09:14:00.000Z" },
+  "event": { "id": "eMYEqY6mFj", "name": "Summer Gala" },
+  "scopes": ["checkin", "manage_tickets"]
+}</code></pre>
+
+    <h2 id="event">Event</h2>
+    <div class="ep"><span class="verb get">GET</span><span class="path">/api/v1/event</span><span class="scope">checkin</span></div>
+    <p>The event, with live counts.</p>
+<pre><code>{
+  "id": "eMYEqY6mFj",
+  "name": "Summer Gala",
+  "startsAt": "2026-09-12T19:00:00.000Z",
+  "endsAt": null,
+  "venue": { "name": "The Old Hall", "address": "12 High Street" },
+  "capacity": 250,
+  "registered": 143,
+  "checkedIn": 96,
+  "remaining": 107,
+  "soldOut": false,
+  "registrationOpen": true,
+  "waitlistEnabled": true,
+  "ticketPriceCents": 0,
+  "registrationUrl": "https://tickets.willstechsupport.com/register.html?id=eMYEqY6mFj"
+}</code></pre>
+    <p><code>venue</code> is <code>null</code> when the event has no location set.</p>
+
+    <div class="ep"><span class="verb get">GET</span><span class="path">/api/v1/availability</span><span class="scope">checkin</span></div>
+    <p>Seat counts only — the endpoint to poll for a live "spots left" display.</p>
+<pre><code>{ "capacity": 250, "registered": 143, "held": 2, "remaining": 105, "soldOut": false, "unlimited": false }</code></pre>
+    <div class="note">
+        <strong><code>held</code> is people mid-signup.</strong> Someone with the registration form open
+        holds their seat for a few minutes. Those seats are already spoken for, which is why
+        <code>remaining</code> can be lower than <code>capacity − registered</code>.
+    </div>
+
+    <h2 id="registrations">Registrations</h2>
+
+    <div class="ep"><span class="verb get">GET</span><span class="path">/api/v1/registrations</span><span class="scope">checkin</span></div>
+    <p>Everyone on the event, oldest first.</p>
+    <table>
+        <thead><tr><th>Query</th><th>Does</th></tr></thead>
+        <tbody>
+            <tr><td><code>limit</code>, <code>offset</code></td><td>Page through. Default 100, max 500.</td></tr>
+            <tr><td><code>checkedIn=true|false</code></td><td>Only those who have or haven't arrived.</td></tr>
+            <tr><td><code>email=</code></td><td>Exact match, case-insensitive.</td></tr>
+            <tr><td><code>search=</code></td><td>Substring of name or email.</td></tr>
+        </tbody>
+    </table>
+<pre><code>{
+  "total": 143, "limit": 100, "offset": 0,
+  "registrations": [
+    {
+      "id": "ZZblnutO2r",
+      "name": "Ada Lovelace", "firstName": "Ada", "lastName": "Lovelace",
+      "email": "ada@example.com",
+      "customFields": { "Meal": "Vegetarian" },
+      "ticketCount": 2,
+      "checkedIn": false,
+      "checkedInAt": null,
+      "createdAt": "2026-08-01T10:22:31.000Z",
+      "tickets": [
+        { "id": "k3Jd82Ba", "token": "N1m-PEIiE9aF", "checkedInAt": null, "reentryStatus": null }
+      ]
+    }
+  ]
+}</code></pre>
+
+    <div class="ep"><span class="verb get">GET</span><span class="path">/api/v1/registrations/:id</span><span class="scope">checkin</span></div>
+    <p>One registration, same shape as above.</p>
+
+    <div class="ep"><span class="verb post">POST</span><span class="path">/api/v1/registrations</span><span class="scope">manage_tickets</span></div>
+    <p>Issue tickets. Returns <code>201</code> and the new registration.</p>
+<pre><code>curl -X POST https://tickets.willstechsupport.com/api/v1/registrations \
+  -H "Authorization: Bearer wts_your_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "Ada Lovelace",
+        "email": "ada@example.com",
+        "ticketCount": 2,
+        "customFields": { "Meal": "Vegetarian" },
+        "sendEmail": true
+      }'</code></pre>
+    <p>
+        <code>sendEmail</code> defaults to <strong>false</strong>, and needs the
+        <code>email_attendees</code> scope to take effect. Importing a list of people who already have
+        their tickets should not fire a surprise mailshot, so you have to ask for it.
+    </p>
+    <p>
+        If the event is full: <code>409 sold_out</code>, or — when the waitlist is enabled —
+        <code>202</code> with <code>{"waitlisted": true, "position": 4}</code>. Either way no ticket is
+        issued, and a seat someone else is mid-signup for is never taken.
+    </p>
+
+    <div class="ep"><span class="verb patch">PATCH</span><span class="path">/api/v1/registrations/:id</span><span class="scope">manage_tickets</span></div>
+    <p>Change <code>name</code>, <code>email</code> or <code>customFields</code>. Applies to every ticket in the group. Omitted fields are left alone.</p>
+
+    <div class="ep"><span class="verb delete">DELETE</span><span class="path">/api/v1/registrations/:id</span><span class="scope">manage_tickets</span></div>
+    <p>Removes the registration and all its tickets. Returns <code>{"deleted": 2}</code>.</p>
+
+    <h2 id="door">Check-in &amp; scanning</h2>
+
+    <div class="ep"><span class="verb post">POST</span><span class="path">/api/v1/registrations/:id/checkin</span><span class="scope">checkin</span></div>
+    <p>
+        Marks everyone in the group as arrived. Safe to call twice — a repeat returns
+        <code>200</code> with <code>"alreadyCheckedIn": true</code> rather than failing, so a retrying
+        integration cannot get stuck.
+    </p>
+
+    <div class="ep"><span class="verb delete">DELETE</span><span class="path">/api/v1/registrations/:id/checkin</span><span class="scope">undo_checkin</span></div>
+    <p>Reverses it.</p>
+
+    <div class="ep"><span class="verb post">POST</span><span class="path">/api/v1/scan</span><span class="scope">checkin</span></div>
+    <p>
+        The door, for your own hardware — a turnstile, a kiosk, a handheld reader. Send what the QR code
+        contains (with or without the <code>ticket:</code> prefix) and get back the verdict the built-in
+        scanner would show.
+    </p>
+<pre><code>curl -X POST https://tickets.willstechsupport.com/api/v1/scan \
+  -H "Authorization: Bearer wts_your_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{"token": "ticket:N1m-PEIiE9aF"}'</code></pre>
+    <table>
+        <thead><tr><th><code>status</code></th><th>Means</th></tr></thead>
+        <tbody>
+            <tr><td><code>valid</code></td><td>Genuine, unused — now checked in. Let them in.</td></tr>
+            <tr><td><code>already_used</code></td><td>Real ticket, already scanned. <code>checkedInAt</code> says when.</td></tr>
+            <tr><td><code>invalid</code></td><td>Not a ticket for this event. A ticket from another event reads as invalid and reveals nothing about it.</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="waitlist">Waitlist</h2>
+    <div class="ep"><span class="verb get">GET</span><span class="path">/api/v1/waitlist</span><span class="scope">manage_waitlist</span></div>
+    <p>Everyone waiting, with their live <code>position</code>.</p>
+
+    <div class="ep"><span class="verb post">POST</span><span class="path">/api/v1/waitlist/:id/promote</span><span class="scope">manage_waitlist</span></div>
+    <p>
+        Issues a free ticket and marks the entry converted. On a <em>paid</em> event this returns
+        <code>409 paid_event</code>: promoting there sends a personal checkout link, and money only ever
+        changes hands through Stripe.
+    </p>
+
+    <h2 id="orders">Orders</h2>
+    <div class="ep"><span class="verb get">GET</span><span class="path">/api/v1/orders</span><span class="scope">manage_payments</span></div>
+    <p>Paid orders for the event.</p>
+    <div class="note warn">
+        <strong>Paid ticketing is in beta and is a testing-only feature.</strong> Taking real money needs
+        your own Stripe account connected to this system — email
+        <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a> to get set up.
+    </div>
+
+    <h2 id="audit">Audit log</h2>
+    <div class="ep"><span class="verb get">GET</span><span class="path">/api/v1/audit-log</span><span class="scope">manage_event</span></div>
+    <p>
+        Who did what to this event, newest first, paginated with <code>limit</code> and <code>offset</code>.
+        Writes made through the API appear here too, attributed to the key by name — so you can always tell
+        which integration did something.
+    </p>
+
+    <h2 id="recipes">Worked examples</h2>
+
+    <h3>Add someone from your own signup form</h3>
+    <p>Scopes: <code>manage_tickets</code>, plus <code>email_attendees</code> to send them the ticket.</p>
+<pre><code>const res = await fetch('https://tickets.willstechsupport.com/api/v1/registrations', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${process.env.WTS_KEY}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ name, email, sendEmail: true }),
+});
+
+if (res.status === 202) {
+  const { position } = await res.json();
+  return `The event is full — you're number ${position} on the waitlist.`;
+}
+if (!res.ok) {
+  const { error } = await res.json();
+  throw new Error(error.message);   // written to be shown to a person
+}</code></pre>
+
+    <h3>A live "spots left" counter on your website</h3>
+    <p>Scope: <code>checkin</code>. Call this from your server, not the browser — the key must not be public.</p>
+<pre><code>const { remaining, soldOut } = await fetch(
+  'https://tickets.willstechsupport.com/api/v1/availability',
+  { headers: { Authorization: `Bearer ${process.env.WTS_KEY}` } },
+).then(r =&gt; r.json());
+
+document.querySelector('#spots').textContent =
+  soldOut ? 'Sold out' : `${remaining} tickets left`;</code></pre>
+
+    <h3>Your own turnstile or kiosk</h3>
+    <p>Scope: <code>checkin</code>.</p>
+<pre><code>const verdict = await fetch('https://tickets.willstechsupport.com/api/v1/scan', {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ token: scannedQrText }),
+}).then(r =&gt; r.json());
+
+if (verdict.status === 'valid') openGate();
+else showMessage(verdict.message);</code></pre>
+
+    <h3>Nightly export to a spreadsheet or warehouse</h3>
+    <p>Scope: <code>checkin</code>. Page through in batches of 500.</p>
+<pre><code>let offset = 0, all = [];
+for (;;) {
+  const page = await fetch(
+    `https://tickets.willstechsupport.com/api/v1/registrations?limit=500&offset=${offset}`,
+    { headers: { Authorization: `Bearer ${KEY}` } },
+  ).then(r =&gt; r.json());
+
+  all.push(...page.registrations);
+  offset += 500;
+  if (offset &gt;= page.total) break;
+}</code></pre>
+
+    <h3>Post arrivals into Slack</h3>
+    <p>Scope: <code>checkin</code>. Poll for new check-ins and forward them.</p>
+<pre><code>const arrived = await fetch(
+  'https://tickets.willstechsupport.com/api/v1/registrations?checkedIn=true',
+  { headers: { Authorization: `Bearer ${KEY}` } },
+).then(r =&gt; r.json());
+
+for (const r of arrived.registrations) {
+  if (seen.has(r.id)) continue;
+  seen.add(r.id);
+  await postToSlack(`${r.name} just arrived (${r.ticketCount} ticket(s))`);
+}</code></pre>
+
+    <h2>Getting help</h2>
+    <p>
+        Stuck, or want something the API doesn't do yet? Email
+        <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a> — include the key's
+        name and prefix (never the key itself) and what you were trying to do.
+    </p>
+</main>
+</div>
+
+<footer>© 2026 Will's Tech Support · <a href="/support.html">Support</a> · <a href="/privacy.html">Privacy</a></footer>
+</body>
+</html>

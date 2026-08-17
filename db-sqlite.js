@@ -229,6 +229,27 @@ CREATE TABLE IF NOT EXISTS scannerLinks (
 );
 CREATE INDEX IF NOT EXISTS idx_scannerLinks_token ON scannerLinks(token);
 CREATE INDEX IF NOT EXISTS idx_scannerLinks_eventId ON scannerLinks(eventId);
+
+-- Keys for the public HTTP API. Scoped to exactly one event, so a leaked key
+-- can never reach a second one, and carrying a subset of the capabilities the
+-- person who created it holds on that event. Only the SHA-256 of the secret is
+-- stored: the key itself is shown once, at creation, and is unrecoverable
+-- afterwards. The prefix column is the visible first characters, kept purely
+-- so a key can be recognised in a list without revealing it.
+CREATE TABLE IF NOT EXISTS apiKeys (
+    id TEXT PRIMARY KEY,
+    eventId TEXT NOT NULL,
+    userId TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    prefix TEXT NOT NULL,
+    keyHash TEXT UNIQUE NOT NULL,
+    scopes TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    lastUsedAt TEXT,
+    revokedAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_apiKeys_keyHash ON apiKeys(keyHash);
+CREATE INDEX IF NOT EXISTS idx_apiKeys_eventId ON apiKeys(eventId);
 `);
 
 // ── Column migrations ─────────────────────────────────────────────────────────
@@ -656,6 +677,7 @@ export const stmt = {
         bySpreadsheetId: db.prepare('SELECT * FROM sheetLinks WHERE spreadsheetId=?'),
         byToken: db.prepare('SELECT * FROM sheetLinks WHERE token=?'),
         byEventId: db.prepare('SELECT * FROM sheetLinks WHERE eventId=?'),
+        byApiKey: db.prepare('SELECT * FROM sheetLinks WHERE apiKey=?'),
         byId: db.prepare('SELECT * FROM sheetLinks WHERE id=?'),
         insert: db.prepare(`INSERT INTO sheetLinks (id, token, spreadsheetId, sheetName, eventId, createdAt, apiKey) VALUES (?,?,?,?,?,?,?)`),
         update: db.prepare(`UPDATE sheetLinks SET eventId=?, sheetName=? WHERE id=?`),
@@ -733,13 +755,26 @@ export const stmt = {
         deleteById: db.prepare(`DELETE FROM trustedDevices WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM trustedDevices WHERE userId=?`),
     },
+    apiKeys: {
+        byHash: db.prepare('SELECT * FROM apiKeys WHERE keyHash=?'),
+        byId: db.prepare('SELECT * FROM apiKeys WHERE id=?'),
+        byEventId: db.prepare('SELECT * FROM apiKeys WHERE eventId=? ORDER BY createdAt DESC'),
+        insert: db.prepare(`INSERT INTO apiKeys (id, eventId, userId, name, prefix, keyHash, scopes, createdAt) VALUES (?,?,?,?,?,?,?,?)`),
+        touch: db.prepare('UPDATE apiKeys SET lastUsedAt=? WHERE id=?'),
+        revoke: db.prepare('UPDATE apiKeys SET revokedAt=? WHERE id=?'),
+        deleteByEventId: db.prepare('DELETE FROM apiKeys WHERE eventId=?'),
+    },
     waitlist: {
-        byId: db.prepare('SELECT * FROM waitlist WHERE id=?'),
-        byEventId: db.prepare('SELECT * FROM waitlist WHERE eventId=? ORDER BY createdAt ASC'),
-        byEventAndEmail: db.prepare('SELECT * FROM waitlist WHERE eventId=? AND email=?'),
+        // rowid comes back with these rows because it is insertion order, and
+        // createdAt alone is not: it has millisecond resolution, so a burst of
+        // people joining at once shared a timestamp and were all told they
+        // were the same number in the queue.
+        byId: db.prepare('SELECT rowid AS rowid, * FROM waitlist WHERE id=?'),
+        byEventId: db.prepare('SELECT rowid AS rowid, * FROM waitlist WHERE eventId=? ORDER BY createdAt ASC, rowid ASC'),
+        byEventAndEmail: db.prepare('SELECT rowid AS rowid, * FROM waitlist WHERE eventId=? AND email=?'),
         byEventAndClaimToken: db.prepare(`SELECT * FROM waitlist WHERE eventId=? AND claimToken=?`),
         countWaitingByEventId: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='waiting'`),
-        countWaitingAheadOf: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='waiting' AND createdAt<?`),
+        countWaitingAheadOf: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='waiting' AND (createdAt < ? OR (createdAt = ? AND rowid < ?))`),
         countActiveClaims: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='notified' AND claimExpiresAt>?`),
         insert: db.prepare(`INSERT INTO waitlist (id, eventId, name, email, customFields, status, createdAt) VALUES (?,?,?,?,?,?,?)`),
         setStatus: db.prepare(`UPDATE waitlist SET status=? WHERE id=?`),

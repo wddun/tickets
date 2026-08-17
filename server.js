@@ -32,6 +32,10 @@ const PORT = process.env.PORT || 3002;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 const REPLY_TO_EMAIL = 'support@willstechsupport.com';
 
+// One definition of the password rule, so signup, reset and change can't
+// drift apart — signup used to accept a single character.
+const MIN_PASSWORD_LENGTH = 8;
+
 const stripeMode = (process.env.STRIPE_MODE || 'live').toUpperCase();
 const stripeSecretKey = process.env[`STRIPE_SECRET_KEY_${stripeMode}`];
 const stripeWebhookSecret = process.env[`STRIPE_WEBHOOK_SECRET_${stripeMode}`];
@@ -280,6 +284,40 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
     // Keep the chain alive even if this send fails, so later sends still run
     emailChain = task.catch(() => { });
     return task;
+}
+
+// One verification email, used by every path that creates an account —
+// ordinary signup, resend, and claiming a room through a share link. The
+// link-claim path used to create an account with no verify token at all,
+// which quietly exempted it from the check /api/auth/login makes.
+function sendVerificationEmail(email, verifyToken) {
+    const verifyURL = `${BASE_URL}/verify-email.html?token=${verifyToken}`;
+    return sendEmail({
+        to: email,
+        subject: 'Verify your WTS Tickets account',
+        html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
+  <div style="text-align:center;margin-bottom:28px;">
+    <div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;">
+      <span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span>
+    </div>
+  </div>
+  <h2 style="font-size:22px;font-weight:700;color:#1a1f3c;margin:0 0 10px;">Verify your email</h2>
+  <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 28px;">
+    Thanks for signing up. Click the button below to verify your email address and activate your account.
+  </p>
+  <div style="text-align:center;margin-bottom:28px;">
+    <a href="${verifyURL}" style="background:#c4294a;color:#fff;text-decoration:none;font-size:16px;font-weight:700;padding:14px 32px;border-radius:10px;display:inline-block;">
+      Verify Email Address
+    </a>
+  </div>
+  <p style="color:#94a3b8;font-size:13px;line-height:1.6;margin:0;">
+    This link expires in 24 hours. If you didn't create an account, you can ignore this email.
+  </p>
+  <div style="margin-top:12px;padding:12px 14px;background:#f8fafc;border-radius:8px;word-break:break-all;">
+    <span style="color:#64748b;font-size:12px;">${verifyURL}</span>
+  </div>
+</div>`,
+    });
 }
 
 // Resolves whether an admin-issued ticket (manual add, CSV import, sheet
@@ -1457,6 +1495,17 @@ const forgotPasswordLimiter = makeLimiter({
     message: { error: 'Too many password reset requests. Please try again later.' }
 });
 
+// Public, unauthenticated writes — signing up, taking a seat hold, joining a
+// waitlist, bootstrapping a sheet. Each of these creates rows, sends mail, or
+// both, and none of them sat behind any limit at all.
+const publicWriteLimiter = makeLimiter({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please slow down and try again shortly.' },
+});
+
 const validateLimiter = makeLimiter({
     windowMs: 60 * 1000,
     max: 240,
@@ -1527,6 +1576,9 @@ app.post('/api/auth/signup', loginLimiter, async (req, res) => {
         log('signup', `[ERR] Missing fields — ip: ${getIP(req)}`);
         return res.status(400).json({ error: 'email and password required' });
     }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+        return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+    }
 
     const normalizedEmail = email.toLowerCase();
     log('signup', `[note] Attempt — email: ${normalizedEmail}  ip: ${getIP(req)}`);
@@ -1550,34 +1602,8 @@ app.post('/api/auth/signup', loginLimiter, async (req, res) => {
     stmt.users.insert.run(newUser.id, newUser.email, newUser.password, 0, newUser.verifyToken, newUser.createdAt);
     log('signup', `[OK] Account created (unverified) — email: ${normalizedEmail}  id: ${newUser.id}`);
 
-    const verifyURL = `${BASE_URL}/verify-email.html?token=${verifyToken}`;
-    sendEmail({
-        to: normalizedEmail,
-        subject: 'Verify your WTS Tickets account',
-        html: `
-<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
-  <div style="text-align:center;margin-bottom:28px;">
-    <div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;">
-      <span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span>
-    </div>
-  </div>
-  <h2 style="font-size:22px;font-weight:700;color:#1a1f3c;margin:0 0 10px;">Verify your email</h2>
-  <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 28px;">
-    Thanks for signing up. Click the button below to verify your email address and activate your account.
-  </p>
-  <div style="text-align:center;margin-bottom:28px;">
-    <a href="${verifyURL}" style="background:#c4294a;color:#fff;text-decoration:none;font-size:16px;font-weight:700;padding:14px 32px;border-radius:10px;display:inline-block;">
-      Verify Email Address
-    </a>
-  </div>
-  <p style="color:#94a3b8;font-size:13px;line-height:1.6;margin:0;">
-    This link expires in 24 hours. If you didn't create an account, you can ignore this email.
-  </p>
-  <div style="margin-top:12px;padding:12px 14px;background:#f8fafc;border-radius:8px;word-break:break-all;">
-    <span style="color:#64748b;font-size:12px;">${verifyURL}</span>
-  </div>
-</div>`,
-    }).catch(err => log('signup', `[warn] Verification email failed — ${err.message}`));
+    sendVerificationEmail(normalizedEmail, verifyToken)
+        .catch(err => log('signup', `[warn] Verification email failed — ${err.message}`));
 
     res.json({ success: true, needsVerification: true, email: normalizedEmail });
 });
@@ -1730,32 +1756,8 @@ app.post('/api/auth/resend-verify', loginLimiter, async (req, res) => {
     if (!user || user.emailVerified !== false) return res.json({ success: true });
     const verifyToken = crypto.randomBytes(32).toString('hex');
     stmt.users.setVerifyToken.run(verifyToken, normalizedEmail);
-    const verifyURL = `${BASE_URL}/verify-email.html?token=${verifyToken}`;
-    sendEmail({
-        to: normalizedEmail,
-        subject: 'Verify your WTS Tickets account',
-        html: `
-<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
-  <div style="text-align:center;margin-bottom:28px;">
-    <div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;">
-      <span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span>
-    </div>
-  </div>
-  <h2 style="font-size:22px;font-weight:700;color:#1a1f3c;margin:0 0 10px;">Verify your email</h2>
-  <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 28px;">
-    Click the button below to verify your email address and activate your WTS Tickets account.
-  </p>
-  <div style="text-align:center;margin-bottom:28px;">
-    <a href="${verifyURL}" style="background:#c4294a;color:#fff;text-decoration:none;font-size:16px;font-weight:700;padding:14px 32px;border-radius:10px;display:inline-block;">
-      Verify Email Address
-    </a>
-  </div>
-  <p style="color:#94a3b8;font-size:13px;margin:0 0 8px;">If you didn't create an account, you can ignore this email.</p>
-  <div style="margin-top:12px;padding:12px 14px;background:#f8fafc;border-radius:8px;word-break:break-all;">
-    <span style="color:#64748b;font-size:12px;">${verifyURL}</span>
-  </div>
-</div>`,
-    }).catch(err => log('resend-verify', `[warn] Email failed — email: ${normalizedEmail}  err: ${err.message}`));
+    sendVerificationEmail(normalizedEmail, verifyToken)
+        .catch(err => log('resend-verify', `[warn] Email failed — email: ${normalizedEmail}  err: ${err.message}`));
     log('resend-verify', `[OK] Verification email resent — email: ${normalizedEmail}`);
     res.json({ success: true });
 });
@@ -1837,7 +1839,7 @@ app.post('/api/auth/forgot-password', forgotPasswordLimiter, async (req, res) =>
 app.post('/api/auth/reset-password', forgotPasswordLimiter, async (req, res) => {
     const { token, password } = req.body;
     if (!token || !password) return res.status(400).json({ error: 'Token and password are required.' });
-    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    if (password.length < MIN_PASSWORD_LENGTH) return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
     const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
     const entry = stmt.passwordResetTokens.byTokenHash.get(tokenHash);
     if (!entry || new Date(entry.expiresAt) < new Date()) {
@@ -1996,7 +1998,7 @@ app.post('/api/account/password', requireAuth, async (req, res) => {
     const match = await bcrypt.compare(currentPassword, user.password);
     if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
 
-    if (newPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    if (newPassword.length < MIN_PASSWORD_LENGTH) return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     stmt.users.setPassword.run(hashedPassword, user.id);
@@ -2430,7 +2432,7 @@ function eventSeatUsage(eventId) {
 // second seat, so a page that reloads mid-form keeps the one it already had.
 // Responds with `granted` (did *you* get a seat) — deliberately not `held`,
 // which is the number of seats other people are holding.
-app.post('/api/event/:id/hold', (req, res) => {
+app.post('/api/event/:id/hold', publicWriteLimiter, (req, res) => {
     purgeStaleHolds();
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -2573,7 +2575,7 @@ function consumeHoldOrCheckRoom(event, holdToken, quantity = 1) {
 }
 
 // Public self-registration — creates a free ticket and emails it
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', publicWriteLimiter, async (req, res) => {
     const { name, email, eventId, holdToken } = req.body;
     if (!name || !email || !eventId) {
         return res.status(400).json({ error: 'Name, email, and event are required' });
@@ -2725,7 +2727,7 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
 }
 
 // Create a Checkout Session for a paid ticket
-app.post('/api/checkout/:eventId', async (req, res) => {
+app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
     // Paid ticketing is beta: an organiser can set a price without a Stripe
     // account existing behind it, and the first person to notice is whoever
     // tries to buy. Say what's actually wrong and who fixes it.
@@ -3055,20 +3057,30 @@ app.get('/api/event/:id/discount-codes/preview', (req, res) => {
 // identically. Emails an immediate confirmation with a link to check live
 // status, since there's no attendee login to come back and look this up
 // any other way.
+// Where someone stands in the queue. Two people who join inside the same
+// millisecond share a createdAt, so insertion order (rowid) breaks the tie —
+// otherwise both were told they were the same number in line.
+function waitlistPosition(eventId, entry) {
+    const ahead = stmt.waitlist.countWaitingAheadOf.get(
+        eventId, entry.createdAt, entry.createdAt, entry.rowid ?? 0,
+    )?.cnt ?? 0;
+    return ahead + 1;
+}
+
 async function joinWaitlist(event, name, email, sendEmailFlag = true) {
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
     const existing = stmt.waitlist.byEventAndEmail.get(event.id, cleanEmail);
     if (existing) {
         const position = existing.status === 'waiting'
-            ? (stmt.waitlist.countWaitingAheadOf.get(event.id, existing.createdAt)?.cnt ?? 0) + 1
+            ? waitlistPosition(event.id, existing)
             : null;
         return { waitlisted: true, alreadyOnList: true, position, waitlistId: existing.id };
     }
     const id = nanoid(10);
     const now = new Date().toISOString();
-    stmt.waitlist.insert.run(id, event.id, cleanName, cleanEmail, null, 'waiting', now);
-    const position = (stmt.waitlist.countWaitingAheadOf.get(event.id, now)?.cnt ?? 0) + 1;
+    const inserted = stmt.waitlist.insert.run(id, event.id, cleanName, cleanEmail, null, 'waiting', now);
+    const position = waitlistPosition(event.id, { createdAt: now, rowid: inserted.lastInsertRowid });
     log('waitlist', `[join] Added to waitlist — name: ${cleanName}  email: ${cleanEmail}  event: ${event.name}  position: ${position}`);
 
     if (sendEmailFlag && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
@@ -3103,7 +3115,7 @@ app.get('/api/waitlist/entry/:id', (req, res) => {
 
     let position = null;
     if (entry.status === 'waiting') {
-        position = (stmt.waitlist.countWaitingAheadOf.get(entry.eventId, entry.createdAt)?.cnt ?? 0) + 1;
+        position = waitlistPosition(entry.eventId, entry);
     }
 
     const claimActive = entry.status === 'notified' && entry.claimToken && entry.claimExpiresAt && entry.claimExpiresAt > new Date().toISOString();
@@ -3179,7 +3191,7 @@ app.get('/api/event/:id/waitlist', requireAuth, (req, res) => {
 });
 
 // Join the waitlist directly (shown by register.html when an event is full).
-app.post('/api/event/:id/waitlist', async (req, res) => {
+app.post('/api/event/:id/waitlist', publicWriteLimiter, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.waitlistEnabled) return res.status(403).json({ error: 'This event does not have a waitlist' });
@@ -3287,9 +3299,13 @@ app.post('/api/orders/:id/refund', requireAuth, async (req, res) => {
 // Every sheet-integration call below (except create-event, which mints the key)
 // must present the apiKey that was returned when the room's event was created.
 function requireSheetApiKey(eventId, apiKey) {
-    if (!apiKey) return false;
-    const link = stmt.sheetLinks.byEventId.get(eventId);
-    return !!(link && link.apiKey && link.apiKey === apiKey);
+    if (!apiKey || !eventId) return false;
+    // Look the link up *by the key presented*, then check that key really
+    // belongs to this event. The old order — find the first link naming this
+    // event, then compare keys — meant any second link pointing at the same
+    // event could be treated as authoritative.
+    const link = stmt.sheetLinks.byApiKey.get(apiKey);
+    return !!(link && link.eventId === eventId);
 }
 
 // API: Bulk Register Tickets (for Google Sheets integration)
@@ -3511,7 +3527,10 @@ app.post('/api/register-bulk', async (req, res) => {
 // Shared helper — server fetches image directly from Google Drive thumbnail URL.
 // This avoids sending large payloads through the reverse proxy entirely.
 async function fetchAndSaveImage(driveFileId) {
-    const url = `https://drive.google.com/thumbnail?id=${driveFileId}&sz=w1200`;
+    if (!/^[A-Za-z0-9_-]{6,128}$/.test(String(driveFileId || ''))) {
+        throw new Error('Invalid Drive file id');
+    }
+    const url = `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveFileId)}&sz=w1200`;
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Drive fetch failed: ${response.status}`);
     const arrayBuffer = await response.arrayBuffer();
@@ -3569,7 +3588,7 @@ app.post('/api/sheet/update-event', async (req, res) => {
 // spreadsheetId and returns its apiKey — every other sheet-integration call
 // below must present that key. This is what makes "one sheet per room" safe
 // for many independent organizers sharing one server.
-app.post('/api/sheet/create-event', async (req, res) => {
+app.post('/api/sheet/create-event', publicWriteLimiter, async (req, res) => {
     const { name, time, endTime, color, locationName, address, lat, lng, driveFileId, spreadsheetId, sheetName } = req.body;
 
     if (!name || !time) {
@@ -4118,6 +4137,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.scannerLinks.deleteByEventId.run(req.params.id);
         stmt.scannerAccess.deleteByEventId.run(req.params.id);
         stmt.seatHolds.deleteByEventId.run(req.params.id);
+        stmt.apiKeys.deleteByEventId.run(req.params.id);
         deleteEventSharing(req.params.id);
         const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
         if (watcher) {
@@ -5858,9 +5878,27 @@ app.post('/api/wallet/v1/log', (req, res) => {
 // ============================================================
 
 // Generate a sharing link for a Google Sheet (called from Apps Script)
-app.post('/api/sheet/generate-link', async (req, res) => {
+app.post('/api/sheet/generate-link', publicWriteLimiter, async (req, res) => {
     const { spreadsheetId, sheetName, eventId, apiKey } = req.body;
     if (!spreadsheetId) return res.status(400).json({ error: 'spreadsheetId is required' });
+
+    // Binding a link to an event hands out an apiKey that can issue tickets
+    // for it and rewrite its details. This route had no authorization at all,
+    // and event ids are public — they are in every registration URL and QR
+    // code — so anyone with a registration link could mint themselves a key
+    // for that event. Naming an event here now requires the right to manage
+    // it, either through a session or through a key already bound to it.
+    if (eventId) {
+        const event = rowToEvent(stmt.events.byId.get(eventId));
+        if (!event) return res.status(404).json({ error: 'Event not found' });
+        const bySession = req.session.userId
+            && userHasEventCapability(req.session.userId, eventId, 'manage_event');
+        const byExistingKey = requireSheetApiKey(eventId, apiKey);
+        if (!bySession && !byExistingKey) {
+            log('sheet-link', `[ERR] Refused link bind — event: ${eventId}  ip: ${getIP(req)}`);
+            return res.status(403).json({ error: 'You do not have permission to link a sheet to this event' });
+        }
+    }
 
     let link = stmt.sheetLinks.bySpreadsheetId.get(spreadsheetId);
     if (link) {
@@ -5948,9 +5986,12 @@ app.post('/api/sheet/claim', requireAuth, async (req, res) => {
 });
 
 // Allow account creation during claim flow (since signup is normally disabled)
-app.post('/api/auth/signup-for-link', async (req, res) => {
+app.post('/api/auth/signup-for-link', publicWriteLimiter, async (req, res) => {
     const { email, password, token } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+    if (password.length < MIN_PASSWORD_LENGTH) {
+        return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+    }
     if (!token) return res.status(400).json({ error: 'link token required' });
 
     const link = stmt.sheetLinks.byToken.get(token);
@@ -5960,10 +6001,17 @@ app.post('/api/auth/signup-for-link', async (req, res) => {
     if (existing) return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    // This account is unverified like any other, and gets the same
+    // verification email — it used to be created with no token at all, so it
+    // could never be verified and permanently sidestepped the check that
+    // /api/auth/login makes. The session is still granted so the claim this
+    // signup exists for can go through.
+    const verifyToken = crypto.randomBytes(32).toString('hex');
     const newUser = { id: nanoid(), email: email.toLowerCase(), password: hashedPassword };
-    stmt.users.insert.run(newUser.id, newUser.email, newUser.password, 0, null, new Date().toISOString());
+    stmt.users.insert.run(newUser.id, newUser.email, newUser.password, 0, verifyToken, new Date().toISOString());
     req.session.userId = newUser.id;
-    res.json({ success: true, user: { id: newUser.id, email: newUser.email } });
+    sendVerificationEmail(newUser.email, verifyToken).catch(() => {});
+    res.json({ success: true, user: { id: newUser.id, email: newUser.email }, needsVerification: true });
 });
 
 // My Rooms — get all rooms/events the current user has access to
@@ -6166,8 +6214,23 @@ function parseCsv(text) {
 // Normalises any pasted Google Sheets link into a CSV export URL.
 // Handles regular /d/<id> share links (with optional #gid=), already-
 // published /d/e/…/pub links, and passes through any other direct URL.
+// The watcher fetches this URL from the server, so whatever a caller can put
+// here, the server will request from its own network position. Left open, that
+// is a server-side request forgery: paste http://127.0.0.1:… or a cloud
+// metadata address and the preview endpoint hands the response straight back.
+// Only Google's own spreadsheet hosts are ever fetched.
+const SHEET_ALLOWED_HOSTS = new Set(['docs.google.com', 'drive.google.com']);
+
+function sheetHostAllowed(url) {
+    try {
+        const u = new URL(url);
+        return (u.protocol === 'https:' || u.protocol === 'http:') && SHEET_ALLOWED_HOSTS.has(u.hostname.toLowerCase());
+    } catch { return false; }
+}
+
 function sheetCsvUrl(shareUrl) {
     if (!/^https?:\/\//i.test(shareUrl)) return null;
+    if (!sheetHostAllowed(shareUrl)) return null;
     if (shareUrl.includes('/spreadsheets/d/e/')) {
         if (shareUrl.includes('output=csv')) return shareUrl;
         return shareUrl + (shareUrl.includes('?') ? '&' : '?') + 'output=csv';
@@ -6181,11 +6244,19 @@ function sheetCsvUrl(shareUrl) {
 }
 
 async function fetchSheetRows(csvUrl) {
+    if (!sheetHostAllowed(csvUrl)) {
+        throw new Error('Only Google Sheets links are supported here.');
+    }
     let resp;
     try {
         resp = await fetch(csvUrl, { redirect: 'follow' });
     } catch (err) {
         throw new Error(`Could not reach the sheet: ${err.message}`);
+    }
+    // Google redirects export links around its own hosts; anything that lands
+    // somewhere else is not a sheet and its body is not ours to hand back.
+    if (resp.url && !sheetHostAllowed(resp.url)) {
+        throw new Error('That link redirected somewhere that is not Google Sheets.');
     }
     if (!resp.ok) throw new Error(`Sheet fetch failed (HTTP ${resp.status}) — is the sheet shared as "Anyone with the link"?`);
     const text = await resp.text();
@@ -6451,7 +6522,7 @@ app.post('/api/event/:id/sheet-watch/preview', requireAuth, async (req, res) => 
     const url = String(req.body?.url || '').trim();
     if (!url) return res.status(400).json({ error: 'url required' });
     const csvUrl = sheetCsvUrl(url);
-    if (!csvUrl) return res.status(400).json({ error: "That doesn't look like a link — paste the sheet's URL from your browser's address bar" });
+    if (!csvUrl) return res.status(400).json({ error: "That doesn't look like a Google Sheets link — paste the sheet's URL from your browser's address bar" });
     try {
         const { headers, rows } = await fetchSheetRows(csvUrl);
         const lower = headers.map(h => h.toLowerCase());
@@ -7420,6 +7491,552 @@ app.get('/api/admin/metrics', requireAdmin, (req, res) => {
         events: eventStats
     });
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+//  PUBLIC HTTP API  (/api/v1)
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Authentication is a bearer key. Every key belongs to exactly one event, so
+// there is no request in which a caller names the event they want — the key
+// decides it, and nothing a caller sends can widen that. A leaked key is a
+// leak of one event.
+//
+// Authorization reuses the capability model rather than inventing a second
+// one. A key carries a subset of the capabilities its creator held on that
+// event, and its effective permissions are re-intersected with that person's
+// *current* capabilities on every request: if their access is reduced or
+// revoked, every key they made narrows or dies with it. That is the property
+// that makes handing out keys safe — nobody can mint authority they do not
+// themselves have, or keep it after losing it.
+//
+// The secret is shown once. Only its SHA-256 is stored, so a database read
+// does not yield working keys.
+
+const API_KEY_PREFIX = 'wts_';
+const API_KEY_BYTES = 24;
+
+function mintApiKeySecret() {
+    return API_KEY_PREFIX + crypto.randomBytes(API_KEY_BYTES).toString('base64url');
+}
+
+function hashApiKey(secret) {
+    return crypto.createHash('sha256').update(String(secret)).digest('hex');
+}
+
+// Accepts the standard `Authorization: Bearer <key>` and, because a lot of
+// no-code tools can only set a plain header, `X-API-Key`.
+function apiKeyFromRequest(req) {
+    const auth = req.headers.authorization || '';
+    const bearer = auth.match(/^Bearer\s+(.+)$/i);
+    if (bearer) return bearer[1].trim();
+    const header = req.headers['x-api-key'];
+    if (typeof header === 'string' && header.trim()) return header.trim();
+    return null;
+}
+
+// What this key can actually do right now: what it was granted, narrowed to
+// what its creator still holds on that event.
+function effectiveApiScopes(keyRow) {
+    const granted = normalizeCapabilities(JSON.parse(keyRow.scopes || '[]')) || [];
+    const live = userEventCapabilities(keyRow.userId, keyRow.eventId);
+    return granted.filter(s => live.includes(s));
+}
+
+const apiError = (res, status, code, message) => res.status(status).json({ error: { code, message } });
+
+// Per-key rate limiting. Keyed by the key's id rather than by IP, so one
+// integration cannot be starved by another behind the same NAT, and a single
+// leaked key cannot be used to hammer the instance from many addresses.
+const apiLimiter = makeLimiter({
+    windowMs: 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.apiKey?.id || getIP(req),
+    message: { error: { code: 'rate_limited', message: 'Too many requests. The limit is 300 requests per minute per key.' } },
+});
+
+let lastTouchedAt = new Map();
+function touchApiKey(keyRow) {
+    // lastUsedAt is for humans deciding whether a key is still in use, so it
+    // does not need a write on every single request.
+    const now = Date.now();
+    if ((lastTouchedAt.get(keyRow.id) || 0) > now - 60_000) return;
+    lastTouchedAt.set(keyRow.id, now);
+    try { stmt.apiKeys.touch.run(new Date().toISOString(), keyRow.id); } catch { /* best effort */ }
+}
+
+// Resolves the key and hangs the event, the key row and its live scopes off
+// the request. Everything under /api/v1 goes through this.
+function apiAuth(req, res, next) {
+    const presented = apiKeyFromRequest(req);
+    if (!presented) {
+        return apiError(res, 401, 'missing_key', 'Send your key as "Authorization: Bearer <key>".');
+    }
+    const keyRow = stmt.apiKeys.byHash.get(hashApiKey(presented));
+    if (!keyRow || keyRow.revokedAt) {
+        log('api', `[ERR] Bad key — ip: ${getIP(req)}`);
+        return apiError(res, 401, 'invalid_key', 'That key is not valid, or has been revoked.');
+    }
+    const event = rowToEvent(stmt.events.byId.get(keyRow.eventId));
+    if (!event) {
+        return apiError(res, 404, 'event_gone', 'The event this key belongs to no longer exists.');
+    }
+    req.apiKey = keyRow;
+    req.apiEvent = event;
+    req.apiScopes = effectiveApiScopes(keyRow);
+    touchApiKey(keyRow);
+    next();
+}
+
+// Gate a route on one capability. The message names the scope so whoever is
+// wiring the integration up can see exactly what to add.
+const requireScope = (scope) => (req, res, next) => {
+    if (!req.apiScopes.includes(scope)) {
+        return apiError(res, 403, 'missing_scope',
+            `This key does not have the "${scope}" scope for this event.`);
+    }
+    next();
+};
+
+// Writes through the API land in the same audit trail as writes from the
+// dashboard, attributed to the key rather than to a person.
+function logApiAudit(req, action, details) {
+    try {
+        stmt.auditLog.insert.run(
+            nanoid(10), req.apiKey.userId, `api-key:${req.apiKey.name || req.apiKey.prefix}`,
+            req.apiEvent.id, action, details ? JSON.stringify(details) : null,
+            getIP(req), new Date().toISOString(),
+        );
+    } catch (err) {
+        log('api', `[ERROR] audit write failed — ${err.message}`);
+    }
+}
+
+const apiRoute = (scope) => scope ? [apiAuth, apiLimiter, requireScope(scope)] : [apiAuth, apiLimiter];
+
+// One shape for a registration everywhere in the API, so a caller can learn
+// it once. A "registration" is the group of tickets issued together.
+function apiRegistration(tickets) {
+    const first = tickets[0];
+    return {
+        id: first.registrationId,
+        name: first.name,
+        firstName: first.firstName ?? null,
+        lastName: first.lastName ?? null,
+        email: first.email ?? null,
+        customFields: first.customFields || {},
+        ticketCount: tickets.length,
+        checkedIn: tickets.every(t => !!t.used_at),
+        checkedInAt: tickets.map(t => t.used_at).filter(Boolean).sort()[0] || null,
+        createdAt: first.created_at ?? null,
+        tickets: tickets.map(t => ({
+            id: t.id,
+            token: t.token,
+            checkedInAt: t.used_at ?? null,
+            reentryStatus: t.reentry_status ?? null,
+        })),
+    };
+}
+
+function registrationsForEvent(eventId) {
+    const groups = new Map();
+    for (const t of stmt.tickets.byEventId.all(eventId).map(rowToTicket)) {
+        const key = t.registrationId || t.id;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(t);
+    }
+    return [...groups.values()];
+}
+
+// ── Discovery ─────────────────────────────────────────────────────────────
+
+// Tells a caller what their key is for and what it may do — the first call to
+// make when wiring something up, and the only one that needs no scope.
+app.get('/api/v1/me', ...apiRoute(), (req, res) => {
+    res.json({
+        key: {
+            id: req.apiKey.id,
+            name: req.apiKey.name,
+            prefix: req.apiKey.prefix,
+            createdAt: req.apiKey.createdAt,
+            lastUsedAt: req.apiKey.lastUsedAt,
+        },
+        event: { id: req.apiEvent.id, name: req.apiEvent.name },
+        scopes: req.apiScopes,
+    });
+});
+
+// ── The event ─────────────────────────────────────────────────────────────
+
+app.get('/api/v1/event', ...apiRoute('checkin'), (req, res) => {
+    const event = req.apiEvent;
+    const usage = eventSeatUsage(event.id);
+    res.json({
+        id: event.id,
+        name: event.name,
+        startsAt: event.time ?? null,
+        endsAt: event.endTime ?? null,
+        timezone: event.timezone ?? null,
+        venue: eventVenue(event).hasAny
+            ? { name: eventVenue(event).name || null, address: eventVenue(event).address || null }
+            : null,
+        capacity: usage.capacity,
+        registered: usage.issued,
+        checkedIn: stmt.tickets.byEventId.all(event.id).filter(t => t.used_at).length,
+        remaining: usage.remaining,
+        soldOut: usage.soldOut,
+        registrationOpen: !!event.allowPublicRegistration,
+        waitlistEnabled: !!event.waitlistEnabled,
+        ticketPriceCents: event.ticketPrice || 0,
+        registrationUrl: `${BASE_URL}/register.html?id=${event.id}`,
+    });
+});
+
+// Live seat counts. Cheap and safe to poll — this is what a dashboard tile or
+// a "spots left" widget should read.
+app.get('/api/v1/availability', ...apiRoute('checkin'), (req, res) => {
+    const usage = eventSeatUsage(req.apiEvent.id);
+    res.json({
+        capacity: usage.capacity,
+        registered: usage.issued,
+        held: usage.held,
+        remaining: usage.remaining,
+        soldOut: usage.soldOut,
+        unlimited: usage.unlimited,
+    });
+});
+
+// ── Registrations ─────────────────────────────────────────────────────────
+
+app.get('/api/v1/registrations', ...apiRoute('checkin'), (req, res) => {
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    let groups = registrationsForEvent(req.apiEvent.id).map(apiRegistration);
+
+    if (req.query.checkedIn === 'true') groups = groups.filter(g => g.checkedIn);
+    if (req.query.checkedIn === 'false') groups = groups.filter(g => !g.checkedIn);
+    if (req.query.email) {
+        const wanted = String(req.query.email).trim().toLowerCase();
+        groups = groups.filter(g => (g.email || '').toLowerCase() === wanted);
+    }
+    if (req.query.search) {
+        const needle = String(req.query.search).trim().toLowerCase();
+        groups = groups.filter(g =>
+            (g.name || '').toLowerCase().includes(needle) ||
+            (g.email || '').toLowerCase().includes(needle));
+    }
+
+    groups.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    res.json({ total: groups.length, limit, offset, registrations: groups.slice(offset, offset + limit) });
+});
+
+app.get('/api/v1/registrations/:id', ...apiRoute('checkin'), (req, res) => {
+    const tickets = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket)
+        .filter(t => t.eventId === req.apiEvent.id);
+    if (!tickets.length) return apiError(res, 404, 'not_found', 'No registration with that id on this event.');
+    res.json(apiRegistration(tickets));
+});
+
+app.post('/api/v1/registrations', ...apiRoute('manage_tickets'), async (req, res) => {
+    const name = String(req.body?.name || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const ticketCount = Math.max(1, Math.min(50, parseInt(req.body?.ticketCount, 10) || 1));
+    const customFields = (req.body?.customFields && typeof req.body.customFields === 'object' && !Array.isArray(req.body.customFields))
+        ? req.body.customFields : {};
+
+    if (!name) return apiError(res, 400, 'invalid_request', 'name is required.');
+    if (!email) return apiError(res, 400, 'invalid_request', 'email is required.');
+
+    const event = req.apiEvent;
+
+    // Every path that issues a ticket goes through the same seat accounting,
+    // so the API cannot quietly take a spot someone is mid-signup for.
+    if (event.capacity) {
+        const usage = eventSeatUsage(event.id);
+        if (usage.taken + ticketCount > usage.capacity) {
+            if (event.waitlistEnabled) {
+                const result = await joinWaitlist(event, name, email, false);
+                return res.status(202).json({ waitlisted: true, position: result.position, waitlistId: result.waitlistId });
+            }
+            return apiError(res, 409, 'sold_out', heldSeatMessage(usage, ticketCount));
+        }
+    }
+
+    const registrationId = nanoid(10);
+    const now = new Date().toISOString();
+    const parts = name.split(/\s+/);
+    const firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0];
+    const lastName = parts.length > 1 ? parts[parts.length - 1] : null;
+
+    const made = [];
+    db.transaction(() => {
+        for (let i = 0; i < ticketCount; i++) {
+            const id = nanoid(8);
+            const token = nanoid(12);
+            stmt.tickets.insert.run(id, event.id, token, registrationId, name, firstName, lastName,
+                email, JSON.stringify(customFields), null, null, null, null, now, null, null);
+            made.push(token);
+        }
+    })();
+
+    logApiAudit(req, 'api.registration_created', { name, email, ticketCount });
+    log('api', `[OK] Registration created — name: ${name}  event: ${event.name}  key: ${req.apiKey.prefix}`);
+
+    // Sending the ticket is opt-in: plenty of integrations import people who
+    // have already been told, and a surprise mailshot is not recoverable.
+    if (req.body?.sendEmail === true && req.apiScopes.includes('email_attendees')) {
+        const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
+        buildTicketEmailHtml({
+            firstName,
+            intro: `You&rsquo;re all set for <strong>${event.name}</strong>!`,
+            event,
+            tickets,
+        }).then(({ html, attachments, subject }) => sendEmail({
+            to: email,
+            fromName: `Tickets - ${event.name}`,
+            replyTo: REPLY_TO_EMAIL,
+            subject: subject || `Your ticket for ${event.name}`,
+            html, attachments, registrationId,
+        })).catch(err => log('api', `[warn] Ticket email failed — ${err.message}`));
+    }
+
+    const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
+    res.status(201).json(apiRegistration(tickets));
+});
+
+app.patch('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), (req, res) => {
+    const tickets = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket)
+        .filter(t => t.eventId === req.apiEvent.id);
+    if (!tickets.length) return apiError(res, 404, 'not_found', 'No registration with that id on this event.');
+
+    const current = tickets[0];
+    const name = req.body?.name !== undefined ? String(req.body.name).trim() : current.name;
+    const email = req.body?.email !== undefined ? String(req.body.email).trim().toLowerCase() : current.email;
+    const customFields = req.body?.customFields !== undefined ? req.body.customFields : (current.customFields || {});
+    if (!name) return apiError(res, 400, 'invalid_request', 'name cannot be empty.');
+
+    const parts = name.split(/\s+/);
+    const firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0];
+    const lastName = parts.length > 1 ? parts[parts.length - 1] : null;
+
+    db.transaction(() => {
+        for (const t of tickets) {
+            stmt.tickets.updateInfo.run(name, firstName, lastName, email, JSON.stringify(customFields), t.id);
+        }
+    })();
+
+    logApiAudit(req, 'api.registration_updated', { registrationId: req.params.id, name, email });
+    const updated = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket);
+    res.json(apiRegistration(updated));
+});
+
+app.delete('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), (req, res) => {
+    const tickets = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket)
+        .filter(t => t.eventId === req.apiEvent.id);
+    if (!tickets.length) return apiError(res, 404, 'not_found', 'No registration with that id on this event.');
+
+    db.transaction(() => { for (const t of tickets) stmt.tickets.deleteById.run(t.id); })();
+    ticketStatusCache.clear();
+    logApiAudit(req, 'api.registration_deleted', { registrationId: req.params.id, name: tickets[0].name });
+    res.json({ deleted: tickets.length });
+});
+
+// ── The door ──────────────────────────────────────────────────────────────
+
+app.post('/api/v1/registrations/:id/checkin', ...apiRoute('checkin'), (req, res) => {
+    const tickets = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket)
+        .filter(t => t.eventId === req.apiEvent.id);
+    if (!tickets.length) return apiError(res, 404, 'not_found', 'No registration with that id on this event.');
+
+    const now = new Date().toISOString();
+    let changed = 0;
+    db.transaction(() => {
+        for (const t of tickets) {
+            if (t.used_at) continue;
+            changed++;
+            if (req.apiEvent.allowReentry) stmt.tickets.checkInReentry.run(now, now, t.id);
+            else stmt.tickets.checkIn.run(now, now, t.id);
+        }
+    })();
+    ticketStatusCache.clear();
+    if (changed) logApiAudit(req, 'api.checkin', { registrationId: req.params.id, name: tickets[0].name, count: changed });
+
+    const updated = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket);
+    res.json({ ...apiRegistration(updated), alreadyCheckedIn: changed === 0 });
+});
+
+app.delete('/api/v1/registrations/:id/checkin', ...apiRoute('undo_checkin'), (req, res) => {
+    const tickets = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket)
+        .filter(t => t.eventId === req.apiEvent.id);
+    if (!tickets.length) return apiError(res, 404, 'not_found', 'No registration with that id on this event.');
+
+    db.transaction(() => { for (const t of tickets) stmt.tickets.undoCheckIn.run(new Date().toISOString(), t.id); })();
+    ticketStatusCache.clear();
+    logApiAudit(req, 'api.checkin_undone', { registrationId: req.params.id, name: tickets[0].name });
+
+    const updated = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket);
+    res.json(apiRegistration(updated));
+});
+
+// Scan a ticket the way a door device does: hand over what the QR code
+// contains and get back the same verdict the scanner would show.
+app.post('/api/v1/scan', ...apiRoute('checkin'), (req, res) => {
+    const raw = String(req.body?.token || '').trim();
+    if (!raw) return apiError(res, 400, 'invalid_request', 'token is required — the contents of the QR code.');
+    const token = raw.startsWith('ticket:') ? raw.slice('ticket:'.length).trim() : raw;
+
+    const ticket = rowToTicket(stmt.tickets.byToken.get(token));
+    // A ticket for another event is "invalid" here, not "belongs to event X" —
+    // a key for one event learns nothing about any other.
+    if (!ticket || ticket.eventId !== req.apiEvent.id) {
+        return res.json({ status: 'invalid', message: 'Not a valid ticket for this event.' });
+    }
+    if (ticket.used_at) {
+        return res.json({
+            status: 'already_used',
+            message: 'This ticket has already been checked in.',
+            checkedInAt: ticket.used_at,
+            registration: apiRegistration(stmt.tickets.byRegistrationId.all(ticket.registrationId).map(rowToTicket)),
+        });
+    }
+
+    const now = new Date().toISOString();
+    if (req.apiEvent.allowReentry) stmt.tickets.checkInReentry.run(now, now, ticket.id);
+    else stmt.tickets.checkIn.run(now, now, ticket.id);
+    ticketStatusCache.clear();
+    logApiAudit(req, 'api.scan', { name: ticket.name, ticketId: ticket.id });
+
+    res.json({
+        status: 'valid',
+        message: `Welcome to ${req.apiEvent.name}!`,
+        checkedInAt: now,
+        registration: apiRegistration(stmt.tickets.byRegistrationId.all(ticket.registrationId).map(rowToTicket)),
+    });
+});
+
+// ── Waitlist ──────────────────────────────────────────────────────────────
+
+app.get('/api/v1/waitlist', ...apiRoute('manage_waitlist'), (req, res) => {
+    const entries = stmt.waitlist.byEventId.all(req.apiEvent.id).map(rowToWaitlistEntry).map(e => ({
+        id: e.id,
+        name: e.name,
+        email: e.email,
+        status: e.status,
+        position: e.status === 'waiting' ? waitlistPosition(req.apiEvent.id, e) : null,
+        createdAt: e.createdAt,
+    }));
+    res.json({ total: entries.length, entries });
+});
+
+app.post('/api/v1/waitlist/:id/promote', ...apiRoute('manage_waitlist'), async (req, res) => {
+    const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
+    if (!entry || entry.eventId !== req.apiEvent.id) {
+        return apiError(res, 404, 'not_found', 'No waitlist entry with that id on this event.');
+    }
+    if (req.apiEvent.ticketPrice > 0) {
+        return apiError(res, 409, 'paid_event',
+            'Promoting on a paid event sends a personal checkout link, which only the dashboard can do — money changes hands through Stripe alone.');
+    }
+    const issued = await issueTicketForPayment({ eventId: req.apiEvent.id, buyerName: entry.name, buyerEmail: entry.email });
+    if (!issued) return apiError(res, 500, 'promote_failed', 'Could not issue the ticket.');
+    stmt.waitlist.setStatus.run('converted', entry.id);
+    logApiAudit(req, 'api.waitlist_promoted', { email: entry.email });
+    res.json({ promoted: true, ticket: { token: issued.ticket.token, registrationId: issued.registrationId } });
+});
+
+// ── Orders (Beta — paid ticketing) ────────────────────────────────────────
+
+app.get('/api/v1/orders', ...apiRoute('manage_payments'), (req, res) => {
+    res.json({ orders: stmt.orders.byEventId.all(req.apiEvent.id) });
+});
+
+// ── Audit ─────────────────────────────────────────────────────────────────
+
+app.get('/api/v1/audit-log', ...apiRoute('manage_event'), (req, res) => {
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    const entries = stmt.auditLog.byEventId.all(req.apiEvent.id, limit, offset).map(row => ({
+        ...row, details: row.details ? JSON.parse(row.details) : null,
+    }));
+    res.json({ total: stmt.auditLog.countByEventId.get(req.apiEvent.id)?.cnt ?? 0, limit, offset, entries });
+});
+
+// ── Key management (session-authenticated, from the dashboard) ────────────
+
+const apiKeyView = (row) => ({
+    id: row.id,
+    name: row.name,
+    prefix: row.prefix,
+    scopes: JSON.parse(row.scopes || '[]'),
+    createdAt: row.createdAt,
+    lastUsedAt: row.lastUsedAt,
+    revokedAt: row.revokedAt,
+    // What the key can do *now*, which is not always what it was granted:
+    // the creator's access may have narrowed since.
+    effectiveScopes: row.revokedAt ? [] : effectiveApiScopes(row),
+});
+
+app.get('/api/event/:id/api-keys', requireAuth, (req, res) => {
+    if (!userHasEventCapability(req.session.userId, req.params.id, 'manage_event')) {
+        return res.status(403).json({ error: 'Not authorized to manage keys for this event' });
+    }
+    res.json(stmt.apiKeys.byEventId.all(req.params.id).map(apiKeyView));
+});
+
+app.post('/api/event/:id/api-keys', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) {
+        return res.status(403).json({ error: 'Not authorized to manage keys for this event' });
+    }
+
+    const requested = normalizeCapabilities(req.body?.scopes);
+    if (!requested || !requested.length) {
+        return res.status(400).json({ error: 'Choose at least one scope for this key' });
+    }
+    // Nobody can mint a key more powerful than themselves.
+    const mine = userEventCapabilities(req.session.userId, event.id);
+    const over = requested.filter(s => !mine.includes(s));
+    if (over.length) {
+        return res.status(403).json({ error: `You do not have these permissions yourself: ${over.join(', ')}` });
+    }
+    // manage_access through a key would let the holder hand out access
+    // without ever signing in. Sharing stays a thing a person does.
+    if (requested.includes('manage_access')) {
+        return res.status(400).json({ error: 'Access sharing cannot be granted to an API key' });
+    }
+
+    const secret = mintApiKeySecret();
+    const row = {
+        id: nanoid(10),
+        eventId: event.id,
+        userId: req.session.userId,
+        name: String(req.body?.name || '').trim().slice(0, 60) || 'Untitled key',
+        prefix: secret.slice(0, API_KEY_PREFIX.length + 6),
+        keyHash: hashApiKey(secret),
+        scopes: JSON.stringify(requested),
+        createdAt: new Date().toISOString(),
+    };
+    stmt.apiKeys.insert.run(row.id, row.eventId, row.userId, row.name, row.prefix, row.keyHash, row.scopes, row.createdAt);
+    logAudit(req, { eventId: event.id, action: 'api_key.created', details: { name: row.name, scopes: requested } });
+    log('api', `[OK] Key created — name: ${row.name}  event: ${event.name}  by: ${req.session.userId}`);
+
+    // The only time the secret exists outside the caller's hands.
+    res.status(201).json({ ...apiKeyView(stmt.apiKeys.byId.get(row.id)), key: secret });
+});
+
+app.delete('/api/api-keys/:keyId', requireAuth, (req, res) => {
+    const row = stmt.apiKeys.byId.get(req.params.keyId);
+    if (!row) return res.status(404).json({ error: 'Key not found' });
+    if (!userHasEventCapability(req.session.userId, row.eventId, 'manage_event')) {
+        return res.status(403).json({ error: 'Not authorized to manage keys for this event' });
+    }
+    stmt.apiKeys.revoke.run(new Date().toISOString(), row.id);
+    logAudit(req, { eventId: row.eventId, action: 'api_key.revoked', details: { name: row.name } });
+    res.json({ success: true });
+});
+
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\nTicket Check-in System running at:\n - Local: http://localhost:${PORT}\n   - Network:  http://0.0.0.0:${PORT}\n`);

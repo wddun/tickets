@@ -5523,6 +5523,13 @@
                 const r = await fetch(`/api/event/${eventId}/sheet-watch`);
                 if (r.ok) watcher = (await r.json()).watcher;
             } catch (e) { /* rendered as not-connected below */ }
+
+            let keys = [];
+            try {
+                const r = await fetch(`/api/event/${eventId}/api-keys`);
+                if (r.ok) keys = await r.json();
+            } catch (e) { /* an empty list renders the "create one" state */ }
+            window.__apiKeyEventId = eventId;
             window.__swCurrent = watcher;
             const watcherHtml = watcher ? renderSheetWatcherStatus(eventId, watcher) : renderSheetWatcherConnect(eventId);
 
@@ -5536,9 +5543,20 @@
                 <div id="swArea">${watcherHtml}</div>
 
                 <hr class="settings-divider">
-                <div class="settings-subhead">Credentials</div>
+                <div class="settings-subhead">API keys</div>
                 <div class="settings-hint">
-                    For calling <code>/api/register-bulk</code> yourself from any external integration.
+                    Keys for the HTTP API — connect this event to anything that can make a web request.
+                    Each key works on <strong>this event only</strong> and carries only the permissions you tick,
+                    so a key you give to one tool can never reach another event or do more than its job.
+                    <a href="/api.html" target="_blank" rel="noopener">Read the API documentation</a>.
+                </div>
+                <div id="apiKeysArea">${renderApiKeyList(keys)}</div>
+
+                <hr class="settings-divider">
+                <div class="settings-subhead">Google Sheets credentials</div>
+                <div class="settings-hint">
+                    The older key used by the Google Sheets add-on and <code>/api/register-bulk</code>.
+                    New integrations should use an API key above instead.
                 </div>
                 <div class="settings-card">
                     <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Event ID</div>
@@ -5550,7 +5568,7 @@
                             Copy
                         </button>
                     </div>
-                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">API Key</div>
+                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Sheets key</div>
                     <div style="display:flex;align-items:center;gap:6px;">
                         <input type="text" readonly value="${esc(keyInfo.apiKey)}" onclick="this.select()"
                             style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;color:#555;background:#f9f9f9;cursor:text;min-width:0;">
@@ -5560,8 +5578,125 @@
                         </button>
                     </div>
                 </div>
-
             `;
+        }
+
+        // ── API keys ────────────────────────────────────────────────────────
+        // Scopes are the same capabilities used for sharing an event with a
+        // person, so there is one permission vocabulary to learn rather than
+        // two. manage_access is deliberately absent: handing out access is
+        // something a person does while signed in, not something a key does.
+        const API_SCOPES = [
+            ['checkin',          'Read the event and check people in'],
+            ['undo_checkin',     'Undo check-ins'],
+            ['manage_tickets',   'Add, edit and remove registrations'],
+            ['email_attendees',  'Send tickets by email'],
+            ['manage_waitlist',  'Read and promote the waitlist'],
+            ['manage_event',     'Read the audit log'],
+            ['manage_payments',  'Read orders'],
+            ['export_data',      'Export attendee data'],
+        ];
+
+        function renderApiKeyList(keys) {
+            const live = (keys || []).filter(k => !k.revokedAt);
+            const rows = live.length ? `<table class="mini-table"><thead><tr><th>Name</th><th>Key</th><th>Scopes</th><th>Last used</th><th></th></tr></thead><tbody>` +
+                live.map(k => `
+                    <tr>
+                        <td>${esc(k.name)}</td>
+                        <td><code style="font-size:11px;">${esc(k.prefix)}…</code></td>
+                        <td style="font-size:11px;color:#666;">${k.scopes.map(s => esc(s)).join(', ')}${
+                            k.effectiveScopes.length < k.scopes.length
+                                ? `<br><span style="color:#b45309;">Narrowed to: ${k.effectiveScopes.map(s => esc(s)).join(', ') || 'nothing'} — the account that made this key no longer holds the rest.</span>`
+                                : ''}</td>
+                        <td style="font-size:11px;color:#666;">${k.lastUsedAt ? fmtDate(k.lastUsedAt) : 'Never'}</td>
+                        <td style="text-align:right;"><button class="btn btn-danger btn-sm" onclick="revokeApiKey('${esc(k.id)}')">Revoke</button></td>
+                    </tr>`).join('') + '</tbody></table>'
+                : '<div class="settings-empty">No API keys yet.</div>';
+
+            return `
+                ${rows}
+                <div class="settings-card" style="margin-top:12px;">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:#555;">Create a key</div>
+                    <input type="text" id="newApiKeyName" placeholder="What is it for? e.g. Zapier, our website"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px;margin-bottom:12px;">
+                        ${API_SCOPES.map(([key, label]) => `
+                            <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;cursor:pointer;">
+                                <input type="checkbox" class="api-scope-cb" value="${key}" ${key === 'checkin' ? 'checked' : ''}
+                                    style="margin-top:2px;accent-color:#6366f1;">
+                                <span><code style="font-size:11px;">${key}</code><br><span style="color:#777;">${label}</span></span>
+                            </label>`).join('')}
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="createApiKey()">Create key</button>
+                </div>
+            `;
+        }
+
+        async function createApiKey() {
+            const eventId = window.__apiKeyEventId;
+            const name = document.getElementById('newApiKeyName').value.trim();
+            const scopes = [...document.querySelectorAll('.api-scope-cb')].filter(c => c.checked).map(c => c.value);
+            if (!scopes.length) return showToast('Pick at least one thing this key may do.');
+
+            try {
+                const r = await fetch(`/api/event/${eventId}/api-keys`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, scopes }),
+                });
+                const data = await r.json();
+                if (!r.ok) return showToast(data.error || 'Could not create the key.');
+                // This is the only moment the secret exists outside the
+                // server, so it gets a dialog of its own rather than a toast
+                // that disappears after five seconds.
+                showNewApiKey(data.key);
+                await refreshApiKeys(eventId);
+            } catch {
+                showToast('Network error while creating the key.');
+            }
+        }
+
+        function showNewApiKey(secret) {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.style.zIndex = '1500';
+            overlay.innerHTML = `
+                <div class="modal" style="max-width:520px;">
+                    <div class="modal-header"><h2>Your new API key</h2></div>
+                    <div style="font-size:14px;color:#444;line-height:1.5;margin-bottom:14px;">
+                        Copy it now — this is the only time it is shown. If you lose it, revoke the key and make another.
+                    </div>
+                    <div style="display:flex;gap:8px;margin-bottom:20px;">
+                        <input type="text" readonly value="${esc(secret)}" onclick="this.select()"
+                            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:#f9f9f9;min-width:0;">
+                        <button class="btn btn-secondary btn-sm" id="copyNewApiKey">Copy</button>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;">
+                        <button class="btn btn-primary" id="doneNewApiKey">Done</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector('#copyNewApiKey').onclick = (e) => copyToClipboard(secret, e.target);
+            overlay.querySelector('#doneNewApiKey').onclick = () => overlay.remove();
+        }
+
+        async function revokeApiKey(keyId) {
+            if (!await confirmDialog('Revoke this key? Anything using it stops working immediately.')) return;
+            try {
+                const r = await fetch(`/api/api-keys/${keyId}`, { method: 'DELETE' });
+                if (!r.ok) return showToast('Could not revoke the key.');
+                await refreshApiKeys(window.__apiKeyEventId);
+            } catch {
+                showToast('Network error while revoking the key.');
+            }
+        }
+
+        async function refreshApiKeys(eventId) {
+            try {
+                const r = await fetch(`/api/event/${eventId}/api-keys`);
+                const area = document.getElementById('apiKeysArea');
+                if (r.ok && area) area.innerHTML = renderApiKeyList(await r.json());
+            } catch { /* leave the list as it was */ }
         }
 
         async function setPublicRegistration(eventId, enabled) {

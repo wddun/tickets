@@ -60,6 +60,31 @@ describe('public pages', () => {
     });
 });
 
+describe('the API documentation', () => {
+    test('is public — an integrator should not need an account to read it', async () => {
+        const r = await anon().get('/api.html');
+        assert.equal(r.status, 200);
+        assert.match(r.text, /WTS Tickets API/);
+    });
+
+    test('documents every v1 endpoint the server actually serves', async () => {
+        const docs = readPublic('api.html');
+        const server = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
+        const served = [...server.matchAll(/app\.(get|post|patch|delete)\('(\/api\/v1\/[^']*)'/g)]
+            .map(m => m[2].replace(/:\w+/g, ':id'));
+
+        for (const route of new Set(served)) {
+            assert.ok(docs.includes(route), `${route} is served but not documented`);
+        }
+    });
+
+    test('tells people the key is shown once and must be kept server-side', async () => {
+        const docs = readPublic('api.html');
+        assert.match(docs, /shown once/i);
+        assert.match(docs, /never put it in a web page|keep it server-side/i);
+    });
+});
+
 describe('who may open the dashboard', () => {
     test('a signed-out visitor is sent to the login page', async () => {
         const r = await anon().get('/dashboard.html');

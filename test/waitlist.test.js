@@ -43,6 +43,19 @@ describe('joining the waitlist', () => {
         assert.equal(r.body.reason, 'sold_out');
     });
 
+    test('two people joining in the same millisecond still get distinct positions', async () => {
+        // createdAt has millisecond resolution, so a burst of joins shared a
+        // timestamp and everyone in it was told they were the same number in
+        // the queue. Insertion order breaks the tie.
+        const ev = await fullEventWithWaitlist();
+        const joins = await Promise.all(
+            Array.from({ length: 6 }, (_, i) =>
+                publicRegister(visitor(), ev.id, { name: `Burst ${i}`, email: uniqueEmail(`burst${i}`) })),
+        );
+        const positions = joins.map(r => r.body.position).sort((a, b) => a - b);
+        assert.deepEqual(positions, [1, 2, 3, 4, 5, 6], 'every position in the queue must be distinct');
+    });
+
     test('positions are handed out in the order people arrive', async () => {
         const ev = await fullEventWithWaitlist();
         const first = await publicRegister(visitor(), ev.id, { name: 'First In', email: uniqueEmail('w1') });
