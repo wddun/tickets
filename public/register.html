@@ -5,13 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Register | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
-    <script>
-    (function(){
-      var saved = localStorage.getItem('wts-theme');
-      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
-      document.documentElement.setAttribute('data-theme', theme);
-    })();
-    </script>
+    <!-- Public registration always renders light, regardless of any dark-mode
+         preference the visitor's browser has saved from the dashboard/login
+         pages — there is no toggle here, so data-theme is never set to dark. -->
     <link rel="stylesheet" href="style.css">
     <style>
         .container { max-width: 480px; padding: 24px 16px 40px; }
@@ -58,10 +54,6 @@
             padding: 4px 12px; border-radius: 20px;
             margin-top: 8px;
         }
-        /* --navy and --card are the same color in dark mode, so a plain-navy
-           badge on a card would have no visible edge. */
-        [data-theme="dark"] .price-badge { background: var(--navy-mid); }
-
         .processing-box {
             text-align: center; padding: 40px 20px;
         }
@@ -185,7 +177,6 @@
     </style>
 </head>
 <body>
-    <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode" style="position:fixed;top:14px;right:14px;z-index:50;">🌙</button>
     <div class="container">
         <div class="card">
             <div id="formView">
@@ -298,17 +289,6 @@
     </div>
 
     <script>
-        (function(){
-            var btn = document.getElementById('theme-toggle');
-            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
-            paint();
-            btn.addEventListener('click', function(){
-                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-                document.documentElement.setAttribute('data-theme', next);
-                localStorage.setItem('wts-theme', next);
-                paint();
-            });
-        })();
         const params  = new URLSearchParams(window.location.search);
         const eventId = params.get('id');
         const sessionId = params.get('session');

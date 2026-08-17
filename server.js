@@ -562,6 +562,19 @@ function normalizeCssColor(raw) {
     return '#' + nums.slice(0, 3).map(n => Math.max(0, Math.min(255, parseInt(n, 10))).toString(16).padStart(2, '0')).join('');
 }
 
+// Given a CSS color (hex or "rgb(r,g,b)"), returns black or white — whichever
+// reads clearly against it — using the standard relative-luminance formula.
+// Falls back to white (the old hardcoded value) if the color can't be parsed.
+function contrastTextColor(raw) {
+    const hex = normalizeCssColor(raw);
+    if (!hex) return '#ffffff';
+    const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (!m) return '#ffffff';
+    const [r, g, b] = m.slice(1).map(h => parseInt(h, 16) / 255).map(c => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return luminance > 0.6 ? '#000000' : '#ffffff';
+}
+
 function eventLocationLine(event) {
     const { name, address } = eventVenue(event);
     if (name && address && name !== address) return `${name}, ${address}`;
@@ -784,8 +797,8 @@ function renderEmailBlock(block, ctx) {
     switch (block.type) {
         case 'header':
             return `<tr><td style="background:${ctx.accentHex};padding:28px 32px;text-align:center;">
-    ${p.eyebrow ? `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.eyebrow, ctx.vars)}</p>` : ''}
-    <h1 style="margin:0;font-size:26px;font-weight:800;color:#fff;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.title, ctx.vars)}</h1>
+    ${p.eyebrow ? `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgba(${ctx.accentTextRgb},0.7);text-transform:uppercase;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.eyebrow, ctx.vars)}</p>` : ''}
+    <h1 style="margin:0;font-size:26px;font-weight:800;color:${ctx.accentTextColor};line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.title, ctx.vars)}</h1>
   </td></tr>`;
 
         case 'text':
@@ -827,7 +840,7 @@ function renderEmailBlock(block, ctx) {
             const url = safeEmailUrl(applyEmailVars(p.url, ctx.vars));
             if (!url || !p.label) return '';
             return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="${p.align}">
-    <a href="${url}" style="display:inline-block;padding:13px 26px;background:${ctx.accentHex};color:#fff;font-size:15px;font-weight:700;border-radius:10px;text-decoration:none;">${renderEmailInline(p.label, ctx.vars)}</a>
+    <a href="${url}" style="display:inline-block;padding:13px 26px;background:${ctx.accentHex};color:${ctx.accentTextColor};font-size:15px;font-weight:700;border-radius:10px;text-decoration:none;">${renderEmailInline(p.label, ctx.vars)}</a>
     </td></tr></table>`;
         }
 
@@ -898,6 +911,10 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
 
     const template = normalizeEmailTemplate(event.emailTemplate);
     const accentHex = template.settings.accent === 'auto' ? eventAccentHex : template.settings.accent;
+    // Header/button/badge blocks paint text over accentHex — pick black or
+    // white so it stays readable when an organiser picks a light event color.
+    const accentTextColor = contrastTextColor(accentHex);
+    const accentTextRgb = accentTextColor === '#000000' ? '0,0,0' : '255,255,255';
 
     // Only build what the template actually asks for: generating QR images (and
     // attaching the wallet badge, or the .ics) for blocks the organiser removed
@@ -932,7 +949,7 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         attachments.push({ cid: qrCid, content: qrBuffer, contentType: 'image/png', filename: `ticket-qr-${i}.png` });
         return `
 <div style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:16px;background:#fff;">
-  ${n > 1 ? `<div style="background:${accentHex};padding:7px 16px;"><p style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.9);text-transform:uppercase;letter-spacing:1px;margin:0;">Ticket ${i + 1} of ${n}</p></div>` : ''}
+  ${n > 1 ? `<div style="background:${accentHex};padding:7px 16px;"><p style="font-size:11px;font-weight:700;color:rgba(${accentTextRgb},0.9);text-transform:uppercase;letter-spacing:1px;margin:0;">Ticket ${i + 1} of ${n}</p></div>` : ''}
   <div style="padding:24px;text-align:center;">
     <p style="font-size:15px;font-weight:600;color:#111;margin:0 0 16px;">${t.name}</p>
     <table role="presentation" width="200" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 12px;">
@@ -971,6 +988,8 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
 
     const ctx = {
         accentHex,
+        accentTextColor,
+        accentTextRgb,
         intro,
         changesHtml,
         customFieldsHtml,
@@ -4131,6 +4150,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         return res.status(404).json({ error: 'Event not found' });
     }
 
+    const ticketsBeforeDelete = stmt.tickets.byEventId.all(req.params.id);
     const deleteEvent = db.transaction(() => {
         stmt.tickets.deleteByEventId.run(req.params.id);
         stmt.pushSubscriptions.deleteByEventId.run(req.params.id);
@@ -4147,6 +4167,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.events.deleteById.run(req.params.id);
     });
     deleteEvent();
+    voidWalletTickets(ticketsBeforeDelete, event);
     logAudit(req, { eventId: event.id, action: 'event.deleted', details: { name: event.name } });
     res.json({ success: true });
 });
@@ -4158,6 +4179,13 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
     const allowed = new Set(
         eventIds.filter(id => userHasEventCapability(req.session.userId, id, 'delete_event'))
     );
+    const ticketsBeforeDelete = [];
+    const eventsBeforeDelete = [];
+    for (const eventId of allowed) {
+        ticketsBeforeDelete.push(...stmt.tickets.byEventId.all(eventId));
+        const ev = rowToEvent(stmt.events.byId.get(eventId));
+        if (ev) eventsBeforeDelete.push(ev);
+    }
     const bulkDelete = db.transaction(() => {
         for (const eventId of allowed) {
             stmt.tickets.deleteByEventId.run(eventId);
@@ -4175,6 +4203,7 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
         }
     });
     bulkDelete();
+    voidWalletTickets(ticketsBeforeDelete, eventsBeforeDelete);
     for (const eventId of allowed) {
         logAudit(req, { eventId, action: 'event.deleted', details: { bulk: true } });
     }
@@ -4193,9 +4222,11 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
         for (const t of tickets) eventIdsForRegs.add(t.eventId);
     }
 
+    const eventsById = new Map();
     for (const eventId of eventIdsForRegs) {
         const event = rowToEvent(stmt.events.byId.get(eventId));
         if (!event) continue;
+        eventsById.set(eventId, event);
         if (userHasEventCapability(req.session.userId, eventId, 'manage_tickets')) {
             for (const regId of registrationIds) {
                 const tickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket).filter(t => t.eventId === eventId);
@@ -4206,17 +4237,20 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
 
     let deleted = 0;
     const deletedEventIds = new Set();
+    const deletedTickets = [];
     const bulkDel = db.transaction(() => {
         for (const regId of allowedRegistrationIds) {
             const tickets = stmt.tickets.byRegistrationId.all(regId);
             deleted += tickets.length;
             for (const t of tickets) {
                 deletedEventIds.add(t.eventId);
+                deletedTickets.push(t);
                 stmt.tickets.deleteById.run(t.id);
             }
         }
     });
     bulkDel();
+    voidWalletTickets(deletedTickets, [...eventsById.values()]);
     for (const eventId of deletedEventIds) {
         logAudit(req, { eventId, action: 'registrations.deleted', details: { count: allowedRegistrationIds.size } });
     }
@@ -5402,6 +5436,60 @@ async function pushWalletIfChanged(tickets, events) {
     return changed.length > 0;
 }
 
+// Called right before a ticket row is deleted. Apple has no remote-delete
+// API for Wallet — the closest a pass gets to disappearing is being served
+// back as voided (greyed out, no barcode) the next time the device checks
+// in, which the APNs push below prompts immediately. Once the tickets row
+// is gone, the wallet web-service routes have nothing left to answer a
+// device with, so this stamps a small tombstone (voidedTickets) they can
+// fall back to — see walletAuth() and GET .../passes/:passTypeId/:serial.
+function voidWalletTickets(tickets, events) {
+    if (!Array.isArray(tickets)) tickets = [tickets];
+    const now = new Date().toISOString();
+    const voided = [];
+    for (const ticket of tickets) {
+        const event = events && events.find ? events.find(e => e.id === ticket.eventId) : events;
+        stmt.voidedTickets.insert.run(ticket.token, ticket.id, ticket.name, event?.name || null, event?.color || null, now);
+        const cachePath = path.join(passCacheDir, `${ticket.token}.pkpass`);
+        try { if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath); } catch (_) {}
+        try { if (fs.existsSync(cachePath + '.meta')) fs.unlinkSync(cachePath + '.meta'); } catch (_) {}
+        voided.push(ticket.token);
+    }
+    if (voided.length) pushWalletUpdate(voided).catch(() => { });
+}
+
+// Builds a minimal .pkpass for a ticket that no longer exists — voided, no
+// barcode, no location/time fields (the live event may be gone too). Not
+// cached: a deleted ticket's pass is fetched at most a handful of times.
+async function generateVoidedPassBuffer(tombstone) {
+    const certPath = path.resolve(__dirname, 'certs');
+    const modelPath = path.resolve(__dirname, 'pass-assets.pass');
+    const pass = await PKPass.from({
+        model: modelPath,
+        certificates: {
+            wwdr: fs.readFileSync(path.join(certPath, 'wwdr.pem')),
+            signerCert: fs.readFileSync(path.join(certPath, 'signer.pem')),
+            signerKey: fs.readFileSync(path.join(certPath, 'signer.key')),
+            signerKeyPassphrase: process.env.PASS_CERT_PASSWORD || undefined,
+        }
+    }, {
+        serialNumber: tombstone.token,
+        passTypeIdentifier: process.env.PASS_TYPE_ID,
+        teamIdentifier: process.env.TEAM_ID,
+        description: tombstone.eventName || 'Ticket removed',
+        logoText: 'REMOVED',
+        backgroundColor: 'rgb(90, 90, 90)',
+        foregroundColor: 'rgb(255, 255, 255)',
+        labelColor: 'rgb(255, 255, 255)',
+        // Must be set here, in the props passed to PKPass.from() — passkit-generator
+        // has no `voided` setter, so assigning pass.voided after construction
+        // (as this file previously did for the check-in case below) is a silent
+        // no-op that never reaches pass.json.
+        voided: true,
+    });
+    return pass.getAsBuffer();
+}
+
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
@@ -5448,15 +5536,23 @@ async function generatePassBuffer(ticket, event) {
     const isCheckedIn = !event.allowReentry && !!ticket.used_at;
     const showCheckedInStyle = isCheckedIn || isInsideReentry;
 
+    const passBackgroundColor = showCheckedInStyle ? "rgb(90, 90, 90)" : (event.color || "rgb(99, 102, 241)");
+    const passTextColor = contrastTextColor(passBackgroundColor) === '#000000' ? "rgb(0, 0, 0)" : "rgb(255, 255, 255)";
     const passOverride = {
         serialNumber: ticket.token,
         passTypeIdentifier: process.env.PASS_TYPE_ID,
         teamIdentifier: process.env.TEAM_ID,
         description: event.name,
         logoText: showCheckedInStyle ? "✓ CHECKED IN" : event.name,
-        backgroundColor: showCheckedInStyle ? "rgb(90, 90, 90)" : (event.color || "rgb(99, 102, 241)"),
-        foregroundColor: "rgb(255, 255, 255)",
-        labelColor: "rgb(255, 255, 255)",
+        backgroundColor: passBackgroundColor,
+        foregroundColor: passTextColor,
+        labelColor: passTextColor,
+        // Reentry events: never void — keep QR so attendee can re-scan. Change
+        // color/text instead. Normal events: void when checked in. This must be
+        // set here, in the props passed to PKPass.from() — passkit-generator has
+        // no `voided` setter, so assigning pass.voided after construction (as
+        // this previously did) is a silent no-op that never reaches pass.json.
+        voided: isCheckedIn,
     };
     // Enable push updates if APNs is configured (authenticationToken must be ≥16 chars)
     if (process.env.APNS_KEY_ID && process.env.APNS_KEY_PATH) {
@@ -5473,10 +5569,6 @@ async function generatePassBuffer(ticket, event) {
             signerKeyPassphrase: process.env.PASS_CERT_PASSWORD || undefined,
         }
     }, passOverride);
-
-    // Reentry events: never void — keep QR so attendee can re-scan. Change color/text instead.
-    // Normal events: void and remove QR when checked in (existing behavior).
-    pass.voided = isCheckedIn;
 
     if (!isCheckedIn) {
         pass.setBarcodes({
@@ -5738,14 +5830,22 @@ app.get('/api/passes/bundle/:registrationId', async (req, res) => {
 //  https://developer.apple.com/documentation/walletpasses/adding_a_web_service_to_update_passes
 // ============================================================
 
-// Helper: verify ApplePass auth token and return ticket
+// Helper: verify ApplePass auth token and return ticket. Falls back to the
+// voidedTickets tombstone once a ticket's row has actually been deleted, so
+// a device that already has the pass can still authenticate and be served
+// a voided copy — see generateVoidedPassBuffer().
 function walletAuth(req, serialNumber) {
     const authHeader = req.headers['authorization'] || '';
     const token = authHeader.replace(/^ApplePass\s+/i, '').trim();
     const ticket = rowToTicket(stmt.tickets.byToken.get(serialNumber));
-    if (!ticket) return null;
-    if (ticket.id + ticket.token !== token) return null;
-    return ticket;
+    if (ticket) {
+        if (ticket.id + ticket.token !== token) return null;
+        return ticket;
+    }
+    const tombstone = stmt.voidedTickets.byToken.get(serialNumber);
+    if (!tombstone) return null;
+    if (tombstone.ticketId + tombstone.token !== token) return null;
+    return { ...tombstone, __voided: true };
 }
 
 // Register a device to receive push updates for a pass
@@ -5797,7 +5897,12 @@ app.get('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId', async (req
         const sinceDate = new Date(since);
         serialNumbers = serialNumbers.filter(sn => {
             const t = stmt.tickets.byToken.get(sn);
-            return t && new Date(t.updated_at || t.created_at) > sinceDate;
+            if (t) return new Date(t.updated_at || t.created_at) > sinceDate;
+            // Ticket's gone — still "updated" if it was voided after the
+            // device's last check, so the delete reaches devices that
+            // registered before the ticket was removed.
+            const voided = stmt.voidedTickets.byToken.get(sn);
+            return voided && new Date(voided.voidedAt) > sinceDate;
         });
     }
 
@@ -5818,11 +5923,25 @@ app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
         return res.status(401).send();
     }
 
-    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
-    if (!event) return res.status(404).send();
-
     const prereqError = checkPassPrereqs();
     if (prereqError) return res.status(503).send();
+
+    if (ticket.__voided) {
+        try {
+            const buffer = await generateVoidedPassBuffer(ticket);
+            res.set('Content-Type', 'application/vnd.apple.pkpass');
+            res.set('Last-Modified', new Date(ticket.voidedAt).toUTCString());
+            res.set('Cache-Control', 'no-store');
+            log('wallet-pass', `[pass] Serving voided pass (ticket deleted) — serial: ${serialNumber.slice(0, 8)}…`);
+            return res.send(buffer);
+        } catch (err) {
+            log('wallet-pass', `[ERR] Voided pass generate failed — serial: ${serialNumber.slice(0, 8)}…  err: ${err.message}`);
+            return res.status(500).send();
+        }
+    }
+
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
+    if (!event) return res.status(404).send();
 
     const ims = req.headers['if-modified-since'];
     if (ims) {
@@ -7851,6 +7970,7 @@ app.delete('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), (req, res
     if (!tickets.length) return apiError(res, 404, 'not_found', 'No registration with that id on this event.');
 
     db.transaction(() => { for (const t of tickets) stmt.tickets.deleteById.run(t.id); })();
+    voidWalletTickets(tickets, req.apiEvent);
     ticketStatusCache.clear();
     logApiAudit(req, 'api.registration_deleted', { registrationId: req.params.id, name: tickets[0].name });
     res.json({ deleted: tickets.length });

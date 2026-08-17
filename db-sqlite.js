@@ -96,6 +96,21 @@ CREATE TABLE IF NOT EXISTS walletDevices (
     registeredAt TEXT
 );
 
+-- A tiny tombstone for tickets deleted while their Apple Wallet pass may
+-- still be on someone's phone. The wallet web-service routes (walletAuth,
+-- GET /passes/:serial) fall back to this once the real tickets row is gone,
+-- so they can keep answering the device with a voided pass instead of a 401
+-- — Apple has no remote-delete API, so this is the closest a deleted ticket
+-- gets to disappearing: greyed out, void, no barcode.
+CREATE TABLE IF NOT EXISTS voidedTickets (
+    token TEXT PRIMARY KEY,
+    ticketId TEXT,
+    name TEXT,
+    eventName TEXT,
+    eventColor TEXT,
+    voidedAt TEXT
+);
+
 CREATE TABLE IF NOT EXISTS pushDevices (
     id TEXT PRIMARY KEY,
     userId TEXT,
@@ -656,6 +671,10 @@ export const stmt = {
         setPushToken: db.prepare(`UPDATE walletDevices SET pushToken=? WHERE deviceId=? AND serialNumber=?`),
         delete: db.prepare(`DELETE FROM walletDevices WHERE deviceId=? AND serialNumber=?`),
         deleteByPushToken: db.prepare(`DELETE FROM walletDevices WHERE pushToken=?`),
+    },
+    voidedTickets: {
+        byToken: db.prepare(`SELECT * FROM voidedTickets WHERE token=?`),
+        insert: db.prepare(`INSERT OR REPLACE INTO voidedTickets (token, ticketId, name, eventName, eventColor, voidedAt) VALUES (?,?,?,?,?,?)`),
     },
     pushDevices: {
         byToken: db.prepare('SELECT * FROM pushDevices WHERE token=?'),
