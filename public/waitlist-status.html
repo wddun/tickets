@@ -5,17 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Waitlist Status | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <link rel="stylesheet" href="style.css">
     <style>
         .container { max-width: 480px; padding: 24px 16px 40px; }
 
         .status-box {
-            background: #fff; border: 1px solid var(--border);
+            background: var(--card); border: 1px solid var(--border);
             border-radius: 14px; padding: 28px 20px;
             text-align: center;
         }
         .status-icon { width: 52px; height: 52px; margin: 0 auto 12px; display: block; }
-        .status-title { font-size: 20px; font-weight: 800; color: var(--navy); margin-bottom: 6px; }
+        .status-title { font-size: 20px; font-weight: 800; color: var(--text); margin-bottom: 6px; }
         .status-sub   { font-size: 14px; color: var(--text-muted); margin-bottom: 6px; line-height: 1.5; }
 
         .position-badge {
@@ -26,13 +33,17 @@
             margin: 12px 0 18px;
         }
         .position-badge span { font-size: 14px; font-weight: 600; display: block; opacity: .75; margin-top: 2px; }
+        /* --navy and --card are the same color in dark mode, so a plain-navy
+           badge/button on the card would have no visible edge. */
+        [data-theme="dark"] .position-badge,
+        [data-theme="dark"] #claimBtn { background: var(--navy-mid) !important; }
 
         .btn-outline {
-            background: var(--bg); color: var(--navy);
+            background: var(--bg); color: var(--text);
             border: 1.5px solid var(--border);
             font-size: 15px;
         }
-        .btn-outline:hover { background: #e8ecf4; }
+        .btn-outline:hover { background: var(--border); }
 
         @media (max-width: 480px) {
             .container { padding: 16px 12px 32px; }
@@ -41,6 +52,9 @@
 </head>
 <body>
     <div class="container">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
+        </div>
         <div class="card">
             <div id="loadingView">
                 <div class="status-box">
@@ -50,7 +64,7 @@
 
             <div id="waitingView" style="display:none;">
                 <div class="status-box">
-                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <div class="status-title" id="waitingEventName"></div>
                     <div class="status-sub">You're in line for this event.</div>
                     <div class="position-badge">#<span id="positionNum"></span><span>your position</span></div>
@@ -98,6 +112,17 @@
     </div>
 
     <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
         const params = new URLSearchParams(window.location.search);
         const id = params.get('id');
 

@@ -5,22 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Link Sheet | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root, [data-theme="light"] {
+            --bg: #f4f5f8; --card: #ffffff; --text: #1e293b; --text-muted: #64748b;
+            --navy: #1a1f3c; --navy-mid: #252b52; --border: #dde3ed; --red: #c4294a; --red-text: #c4294a; --success: #10b981;
+            --danger: #dc2626; --danger-soft-bg: #fef2f2; --danger-soft-border: #fecaca; --danger-soft-text: #dc2626;
+            --badge-bg: #f0f1f7;
+        }
+        [data-theme="dark"] {
+            --bg: #10132a; --card: #1a1f3c; --text: #e9ecf5; --text-muted: #8b90a3;
+            --navy: #1a1f3c; --navy-mid: #252b52; --border: #252b52; --red: #c4294a; --red-text: #e78098; --success: #10b981;
+            --danger: #dc2626; --danger-soft-bg: rgba(220,38,38,.14); --danger-soft-border: rgba(220,38,38,.4); --danger-soft-text: #f87171;
+            --badge-bg: #252b52;
+        }
+        .theme-toggle {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.08); color: #fff;
+            font-size: 14px; cursor: pointer; padding: 0;
+        }
+        .theme-toggle:hover { background: rgba(255,255,255,.16); }
         /* iOS Safari auto-zooms on focus for text fields under 16px */
         input, select, textarea { font-size: 16px !important; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f4f5f8; color: #1e293b;
+            background: var(--bg); color: var(--text);
             min-height: 100vh; display: flex; flex-direction: column;
             -webkit-font-smoothing: antialiased;
         }
         nav {
-            background: #1a1f3c; height: 52px;
+            background: var(--navy); height: 52px;
             display: flex; align-items: center; justify-content: space-between;
             padding: 0 20px; flex-shrink: 0;
         }
         nav img { height: 24px; width: auto; }
+        nav .nav-right { display: flex; align-items: center; gap: 14px; }
         nav a   { font-size: 13px; color: rgba(255,255,255,.6); font-weight: 500; text-decoration: none; }
         nav a:hover { color: #fff; }
 
@@ -30,7 +58,7 @@
             padding: 32px 16px 48px;
         }
         .card {
-            background: #fff; border: 1px solid #dde3ed;
+            background: var(--card); border: 1px solid var(--border);
             border-radius: 14px;
             box-shadow: 0 2px 12px rgba(0,0,0,.07);
             padding: 32px 28px;
@@ -43,39 +71,43 @@
 
         .card-icon {
             width: 52px; height: 52px;
-            background: #1a1f3c;
+            background: var(--navy);
             border-radius: 14px;
             display: flex; align-items: center; justify-content: center;
             font-size: 24px; margin-bottom: 18px;
         }
-        h1 { font-size: 20px; font-weight: 800; margin-bottom: 6px; color: #1a1f3c; }
-        h2 { font-size: 18px; font-weight: 700; margin-bottom: 8px; color: #1a1f3c; }
-        .subtitle { color: #64748b; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
+        /* --navy and --card are the same color in dark mode, so a plain-navy
+           icon/button on the card would have no visible edge. */
+        [data-theme="dark"] .card-icon,
+        [data-theme="dark"] .btn-primary { background: var(--navy-mid); }
+        h1 { font-size: 20px; font-weight: 800; margin-bottom: 6px; color: var(--text); }
+        h2 { font-size: 18px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
+        .subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
 
         .event-badge {
             display: inline-flex; align-items: center; gap: 6px;
-            background: #f0f1f7; color: #1a1f3c;
+            background: var(--badge-bg); color: var(--text);
             padding: 8px 14px; border-radius: 8px;
             font-weight: 600; font-size: 14px;
-            margin-bottom: 22px; border: 1px solid #dde3ed;
+            margin-bottom: 22px; border: 1px solid var(--border);
         }
 
         .form-group { margin-bottom: 16px; }
         label {
             display: block; font-size: 12px; font-weight: 700;
-            color: #64748b; text-transform: uppercase;
+            color: var(--text-muted); text-transform: uppercase;
             letter-spacing: .5px; margin-bottom: 6px;
         }
         input[type="email"],
         input[type="password"] {
             width: 100%; padding: 12px 14px;
-            border: 1.5px solid #dde3ed; border-radius: 10px;
+            border: 1.5px solid var(--border); border-radius: 10px;
             font-size: 15px; outline: none;
             transition: border-color .2s, box-shadow .2s;
-            min-height: 48px; color: #1e293b; background: #fff;
+            min-height: 48px; color: var(--text); background: var(--card);
         }
         input:focus {
-            border-color: #1a1f3c;
+            border-color: var(--red);
             box-shadow: 0 0 0 3px rgba(26,31,60,.08);
         }
 
@@ -90,43 +122,46 @@
         .btn:hover   { opacity: .9; }
         .btn:active  { transform: scale(.98); }
         .btn:disabled { opacity: .55; cursor: not-allowed; }
-        .btn-primary { background: #1a1f3c; color: #fff; }
-        .btn-success { background: #10b981; color: #fff; }
+        .btn-primary { background: var(--navy); color: #fff; }
+        .btn-success { background: var(--success); color: #fff; }
         .btn-outline {
-            background: transparent; border: 1.5px solid #dde3ed;
-            color: #64748b; margin-top: 10px;
+            background: transparent; border: 1.5px solid var(--border);
+            color: var(--text-muted); margin-top: 10px;
         }
-        .btn-outline:hover { background: #f4f5f8; opacity: 1; }
+        .btn-outline:hover { background: var(--border); opacity: 1; }
 
         .toggle-link {
             display: block; text-align: center;
-            margin-top: 14px; color: #c4294a;
+            margin-top: 14px; color: var(--red-text);
             cursor: pointer; font-size: 13px; font-weight: 600;
         }
         .toggle-link:hover { text-decoration: underline; }
 
         .error-msg {
-            color: #dc2626; font-size: 13px;
+            color: var(--danger-soft-text); font-size: 13px;
             margin-top: 8px; display: none;
-            background: #fef2f2; border: 1px solid #fecaca;
+            background: var(--danger-soft-bg); border: 1px solid var(--danger-soft-border);
             border-radius: 8px; padding: 8px 12px;
         }
 
         .center-state { text-align: center; padding: 12px 0; }
         .state-icon   { width: 52px; height: 52px; margin: 0 auto 14px; display: block; }
-        .state-title  { font-size: 20px; font-weight: 700; color: #1a1f3c; margin-bottom: 8px; }
-        .state-sub    { color: #64748b; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
+        .state-title  { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+        .state-sub    { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
 
-        .loading-state { text-align: center; padding: 48px 20px; color: #94a3b8; font-size: 14px; }
+        .loading-state { text-align: center; padding: 48px 20px; color: var(--text-muted); font-size: 14px; }
         .hidden { display: none !important; }
 
-        .logged-in-note { font-size: 14px; color: #64748b; margin-bottom: 16px; line-height: 1.5; }
+        .logged-in-note { font-size: 14px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
     </style>
 </head>
 <body>
     <nav>
         <a href="/"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
-        <a href="/">← Home</a>
+        <div class="nav-right">
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
+            <a href="/">← Home</a>
+        </div>
     </nav>
     <div class="page-body">
         <div class="card">
@@ -178,7 +213,7 @@
 
             <!-- Success -->
             <div id="successState" class="hidden center-state">
-                <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="#1a1f3c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                 <div class="state-title">Successfully Linked!</div>
                 <p class="state-sub">This event sheet is now connected to your account.</p>
                 <a href="/dashboard.html" class="btn btn-primary" style="display:block;text-align:center;text-decoration:none;">View in Dashboard</a>
@@ -187,6 +222,17 @@
     </div>
 
     <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
         let linkToken = null;
         let isSignup = false;
 

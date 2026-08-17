@@ -5,9 +5,17 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>At Door · WTS Tickets</title>
 <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+<script>
+(function(){
+  var saved = localStorage.getItem('wts-theme');
+  var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+</script>
 <style>
-:root {
+:root, [data-theme="light"] {
     --bg:        #0f1429;
+    --bg-2:      #1a1f3c;
     --card:      #ffffff;
     --text:      #1a1f3c;
     --muted:    #6b7280;
@@ -16,14 +24,42 @@
     --border:   #e5e7eb;
     --green:     #10b981;
     --red:       #dc2626;
+    --input-bg:  #f9fafb;
+    --url-bg:    #f4f5f8;
+    --success-bg: #ecfdf5; --success-text: #065f46; --success-border: #6ee7b7;
+    --error-bg:   #fef2f2; --error-text:   #991b1b; --error-border:   #fecaca;
 }
+[data-theme="dark"] {
+    --bg:        #10132a;
+    --bg-2:      #1a1f3c;
+    --card:      #1a1f3c;
+    --text:      #e9ecf5;
+    --muted:    #8b90a3;
+    --accent:    #c4294a;
+    --accent-bg: rgba(196,41,74,.14);
+    --border:   #252b52;
+    --green:     #10b981;
+    --red:       #dc2626;
+    --input-bg:  #10132a;
+    --url-bg:    #10132a;
+    --success-bg: rgba(16,185,129,.14); --success-text: #34d399; --success-border: rgba(16,185,129,.4);
+    --error-bg:   rgba(220,38,38,.14);  --error-text:   #f87171; --error-border:   rgba(220,38,38,.4);
+}
+.theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.18);
+    background: rgba(255,255,255,.08); color: #fff;
+    font-size: 14px; cursor: pointer; padding: 0;
+}
+.theme-toggle:hover { background: rgba(255,255,255,.16); }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 /* iOS Safari auto-zooms on focus for text fields under 16px */
 input, select, textarea { font-size: 16px !important; }
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: linear-gradient(160deg, #1a1f3c 0%, #0f1429 100%);
+    background: linear-gradient(160deg, var(--bg-2) 0%, var(--bg) 100%);
     color: var(--text);
     min-height: 100vh;
     display: flex;
@@ -89,14 +125,14 @@ input[type=text], input[type=email] {
     font-size: 16px;
     border: 1px solid var(--border);
     border-radius: 10px;
-    background: #f9fafb;
+    background: var(--input-bg);
     color: var(--text);
     transition: border .15s, background .15s;
 }
 input[type=text]:focus, input[type=email]:focus {
     outline: none;
     border-color: var(--accent);
-    background: white;
+    background: var(--card);
 }
 button.primary {
     width: 100%;
@@ -153,7 +189,7 @@ button.primary:disabled { opacity: .5; cursor: not-allowed; }
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 12px;
     color: var(--muted);
-    background: #f4f5f8;
+    background: var(--url-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
     min-width: 0;
@@ -181,14 +217,14 @@ button.primary:disabled { opacity: .5; cursor: not-allowed; }
 }
 .banner.show { display: block; }
 .banner.success {
-    background: #ecfdf5;
-    color: #065f46;
-    border: 1px solid #6ee7b7;
+    background: var(--success-bg);
+    color: var(--success-text);
+    border: 1px solid var(--success-border);
 }
 .banner.error {
-    background: #fef2f2;
-    color: #991b1b;
-    border: 1px solid #fecaca;
+    background: var(--error-bg);
+    color: var(--error-text);
+    border: 1px solid var(--error-border);
 }
 .spinner {
     display: inline-block;
@@ -212,7 +248,10 @@ button.primary:disabled { opacity: .5; cursor: not-allowed; }
 <body>
 <div class="shell">
     <header>
-        <a class="back" href="/dashboard.html">← Back to dashboard</a>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <a class="back" href="/dashboard.html">← Back to dashboard</a>
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
+        </div>
         <h1>At Door</h1>
         <div class="sub">In-person ticket sales</div>
     </header>
@@ -226,12 +265,23 @@ button.primary:disabled { opacity: .5; cursor: not-allowed; }
 
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script>
+(function(){
+    var btn = document.getElementById('theme-toggle');
+    function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+    paint();
+    btn.addEventListener('click', function(){
+        var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('wts-theme', next);
+        paint();
+    });
+})();
 const params = new URLSearchParams(location.search);
 const eventId = params.get('id');
 const content = document.getElementById('content');
 
 if (!eventId) {
-    content.innerHTML = '<div class="card" style="color:var(--red);">Missing ?id= in URL.</div>';
+    content.innerHTML = '<div class="card" style="color:var(--error-text);">Missing ?id= in URL.</div>';
 } else {
     checkAuth().then(ok => { if (ok) loadEvent(); });
 }
@@ -255,12 +305,12 @@ async function loadEvent() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const ev = await res.json();
         if (!ev.atDoorEnabled) {
-            content.innerHTML = '<div class="card" style="color:var(--red);">At-door sales are not enabled for this event. Enable it in the event settings on the dashboard.</div>';
+            content.innerHTML = '<div class="card" style="color:var(--error-text);">At-door sales are not enabled for this event. Enable it in the event settings on the dashboard.</div>';
             return;
         }
         render(ev);
     } catch (err) {
-        content.innerHTML = `<div class="card" style="color:var(--red);">Failed to load event: ${err.message}</div>`;
+        content.innerHTML = `<div class="card" style="color:var(--error-text);">Failed to load event: ${err.message}</div>`;
     }
 }
 

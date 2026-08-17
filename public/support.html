@@ -5,19 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Support | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root, [data-theme="light"] {
+            --bg: #f4f5f8; --card: #ffffff; --text: #1e293b; --text-muted: #94a3b8;
+            --navy: #1a1f3c; --red: #c4294a; --red-text: #c4294a; --border: #e5e7eb; --border-strong: #dde3ed;
+            --body-text: #374151;
+        }
+        [data-theme="dark"] {
+            --bg: #10132a; --card: #1a1f3c; --text: #e9ecf5; --text-muted: #8b90a3;
+            --navy: #1a1f3c; --red: #c4294a; --red-text: #e78098; --border: #252b52; --border-strong: #252b52;
+            --body-text: #c5cadb;
+        }
+        .theme-toggle {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.08); color: #fff;
+            font-size: 14px; cursor: pointer; padding: 0;
+        }
+        .theme-toggle:hover { background: rgba(255,255,255,.16); }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f4f5f8; color: #1e293b;
+            background: var(--bg); color: var(--text);
             -webkit-font-smoothing: antialiased;
         }
         nav {
-            background: #1a1f3c; height: 52px;
+            background: var(--navy); height: 52px;
             display: flex; align-items: center; justify-content: space-between;
             padding: 0 20px;
         }
         nav img { height: 24px; width: auto; }
+        nav .nav-right { display: flex; align-items: center; gap: 14px; }
         nav a   { font-size: 13px; color: rgba(255,255,255,.6); font-weight: 500; text-decoration: none; }
         nav a:hover { color: #fff; }
 
@@ -27,38 +53,38 @@
         }
         h1 {
             font-size: clamp(24px, 5vw, 32px);
-            font-weight: 800; color: #1a1f3c; margin-bottom: 4px;
+            font-weight: 800; color: var(--text); margin-bottom: 4px;
         }
-        .meta { font-size: 13px; color: #94a3b8; margin-bottom: 28px; }
+        .meta { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; }
 
         .contact-card {
-            background: #fff;
-            border: 1.5px solid #dde3ed;
-            border-left: 4px solid #c4294a;
+            background: var(--card);
+            border: 1.5px solid var(--border-strong);
+            border-left: 4px solid var(--red);
             border-radius: 12px;
             padding: 20px 22px;
             margin-bottom: 36px;
         }
-        .contact-card p { font-size: 15px; line-height: 1.7; color: #374151; margin-bottom: 6px; }
+        .contact-card p { font-size: 15px; line-height: 1.7; color: var(--body-text); margin-bottom: 6px; }
         .contact-card p:last-child { margin-bottom: 0; }
 
         h2 {
             font-size: 16px; font-weight: 700;
-            color: #1a1f3c; margin-top: 32px; margin-bottom: 8px;
+            color: var(--text); margin-top: 32px; margin-bottom: 8px;
         }
-        p, li { font-size: 15px; line-height: 1.75; color: #374151; }
+        p, li { font-size: 15px; line-height: 1.75; color: var(--body-text); }
         ul { padding-left: 20px; }
         li { margin-bottom: 4px; }
-        a  { color: #c4294a; text-decoration: none; }
+        a  { color: var(--red-text); text-decoration: none; }
         a:hover { text-decoration: underline; }
 
         .footer-bar {
             margin-top: 48px; padding-top: 20px;
-            border-top: 1px solid #e5e7eb;
-            font-size: 13px; color: #94a3b8;
+            border-top: 1px solid var(--border);
+            font-size: 13px; color: var(--text-muted);
         }
-        .footer-bar a { color: #94a3b8; }
-        .footer-bar a:hover { color: #64748b; }
+        .footer-bar a { color: var(--text-muted); }
+        .footer-bar a:hover { color: var(--text); }
 
         @media (max-width: 480px) {
             .content { padding: 28px 16px 48px; }
@@ -69,7 +95,10 @@
 <body>
     <nav>
         <a href="/"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
-        <a href="/">← Home</a>
+        <div class="nav-right">
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
+            <a href="/">← Home</a>
+        </div>
     </nav>
     <div class="content">
         <h1>Support</h1>
@@ -85,5 +114,18 @@
             © 2026 Will's Tech Support &nbsp;·&nbsp; <a href="/">WTS Tickets</a>
         </div>
     </div>
+    <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
+    </script>
 </body>
 </html>

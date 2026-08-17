@@ -1,4 +1,4 @@
-:root {
+:root, [data-theme="light"] {
     --navy:        #1a1f3c;
     --navy-dark:   #10132a;
     --navy-mid:    #252b52;
@@ -11,6 +11,7 @@
     --danger-soft-bg:     #fef2f2;
     --danger-soft-border: #fca5a5;
     --danger-soft-text:   #991b1b;
+    --red-text:    #c4294a;
     --bg:          #f4f5f8;
     --card:        #ffffff;
     --text:        #1e293b;
@@ -19,6 +20,59 @@
     --radius:      13px;
     --shadow:      0 2px 12px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.04);
 }
+
+[data-theme="dark"] {
+    --navy:        #1a1f3c;
+    --navy-dark:   #10132a;
+    --navy-mid:    #252b52;
+    --red:         #c4294a;
+    --red-dark:    #a02039;
+    --success:     #10b981;
+    --danger:      #dc2626;
+    --warning-bg:  rgba(251,191,36,0.14);
+    --warning-text:#fbbf24;
+    --danger-soft-bg:     rgba(220,38,38,0.14);
+    --danger-soft-border: rgba(220,38,38,0.4);
+    --danger-soft-text:   #f87171;
+    /* --red itself stays the brand color (used for button fills, which keep
+       white text regardless of theme); text set *directly* in this color —
+       links, icons — needs a lighter shade or it reads as ~3:1 against the
+       dark navy/card backgrounds, below the 4.5:1 body-text minimum. */
+    --red-text:    #e78098;
+    --bg:          #10132a;
+    --card:        #1a1f3c;
+    --text:        #e9ecf5;
+    --text-muted:  #8b90a3;
+    --border:      #252b52;
+    --radius:      13px;
+    --shadow:      0 2px 12px rgba(0,0,0,.25), 0 1px 3px rgba(0,0,0,.15);
+}
+
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    min-height: 0;
+}
+.theme-toggle:hover { background: var(--border); }
+
+/* Some pages show the navy-on-transparent logo variant (logo-nav-dark.svg)
+   against a card background — that card goes dark in dark mode and the navy
+   logo would vanish, so we swap it for the white+red variant (logo-nav.svg)
+   instead of trying to filter/invert it. */
+.logo-swap-dark { display: none; }
+[data-theme="dark"] .logo-swap-light { display: none; }
+[data-theme="dark"] .logo-swap-dark  { display: inline-block; }
 
 * {
     box-sizing: border-box;
@@ -91,7 +145,7 @@ body {
 .header h1 {
     font-size: 22px;
     font-weight: 800;
-    color: var(--navy);
+    color: var(--text);
     margin-bottom: 6px;
 }
 
@@ -118,14 +172,14 @@ input {
     font-size: 16px;
     transition: border-color .2s, box-shadow .2s;
     outline: none;
-    background: #fff;
+    background: var(--card);
     color: var(--text);
     min-height: 48px;
 }
 
 input:focus {
-    border-color: var(--navy);
-    box-shadow: 0 0 0 3px rgba(26,31,60,.09);
+    border-color: var(--red);
+    box-shadow: 0 0 0 3px rgba(196,41,74,.12);
 }
 
 button {
@@ -147,6 +201,13 @@ button:hover  { background: var(--navy-dark); }
 button:active { transform: scale(0.98); }
 button:disabled { opacity: .55; cursor: not-allowed; }
 
+/* --navy and --card are the same color in dark mode (by design, so nav bars
+   and cards read as one surface) — but that means a plain navy button drawn
+   on a card vanishes into it with no visible edge. Lighten the button itself
+   in dark mode so it reads as a raised control instead of a hole in the card. */
+[data-theme="dark"] button   { background: var(--navy-mid); }
+[data-theme="dark"] button:hover { background: #2f3768; }
+
 .qr-result {
     text-align: center;
     margin-top: 28px;
@@ -156,7 +217,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .qr-result img {
     max-width: min(200px, 100%);
     border-radius: 12px;
-    border: 4px solid white;
+    border: 4px solid var(--card);
     box-shadow: var(--shadow);
 }
 
@@ -168,7 +229,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     display: none;
     flex-direction: column;
     align-items: center; justify-content: center;
-    background: rgba(255,255,255,.95);
+    background: var(--card);
     z-index: 1000; text-align: center;
     padding: 32px 20px;
 }
@@ -188,7 +249,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
     gap: 20px; margin-top: 18px;
     font-size: 14px; flex-wrap: wrap;
 }
-.nav a { color: var(--red); text-decoration: none; font-weight: 600; }
+.nav a { color: var(--red-text); text-decoration: none; font-weight: 600; }
 .nav a:hover { text-decoration: underline; }
 
 @media (max-width: 480px) {

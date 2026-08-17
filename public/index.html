@@ -41,19 +41,50 @@
         }
     }
     </script>
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <style>
-        :root {
+        :root, [data-theme="light"] {
             --navy:      #1a1f3c;
             --navy-dark: #10132a;
             --navy-mid:  #252b52;
             --red:       #c4294a;
             --red-dark:  #a02039;
+            --red-text:  #c4294a;
             --text:      #1e293b;
             --muted:     #64748b;
             --bg:        #f4f5f8;
             --white:     #ffffff;
             --border:    #dde3ed;
         }
+        [data-theme="dark"] {
+            --navy:      #1a1f3c;
+            --navy-dark: #10132a;
+            --navy-mid:  #252b52;
+            --red:       #c4294a;
+            --red-dark:  #a02039;
+            /* --red on dark backgrounds reads ~3:1 — too low for text; only
+               use this lighter shade where red is the text color itself. */
+            --red-text:  #e78098;
+            --text:      #e9ecf5;
+            --muted:     #8b90a3;
+            --bg:        #10132a;
+            --white:     #1a1f3c;
+            --border:    #252b52;
+        }
+        .theme-toggle {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 32px; height: 32px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.08); color: #fff;
+            font-size: 15px; cursor: pointer; padding: 0;
+        }
+        .theme-toggle:hover { background: rgba(255,255,255,.16); }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -84,7 +115,10 @@
         .nav-link:hover { color: #fff; background: rgba(255,255,255,.09); }
         .nav-cta {
             font-size: 14px; font-weight: 600;
-            color: var(--white); background: var(--red);
+            /* Literal white, not var(--white) — that variable doubles as the
+               card surface color and turns navy in dark mode, which would
+               leave this button's text nearly invisible on its red fill. */
+            color: #fff; background: var(--red);
             padding: 8px 16px; border-radius: 8px;
             transition: background .15s;
             white-space: nowrap;
@@ -177,8 +211,8 @@
         /* ── Content sections ── */
         .section { padding: 56px 20px; }
         .section-inner { max-width: 960px; margin: 0 auto; }
-        .section-eyebrow { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--red); margin-bottom: 8px; }
-        .section-title { font-size: clamp(22px, 4vw, 32px); font-weight: 800; letter-spacing: -.4px; color: var(--navy); margin-bottom: 10px; }
+        .section-eyebrow { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--red-text); margin-bottom: 8px; }
+        .section-title { font-size: clamp(22px, 4vw, 32px); font-weight: 800; letter-spacing: -.4px; color: var(--text); margin-bottom: 10px; }
         .section-sub   { font-size: 15px; color: var(--muted); max-width: 460px; }
 
         /* Features */
@@ -194,8 +228,8 @@
             transition: box-shadow .2s, border-color .2s, transform .2s;
         }
         .feature-card:hover { box-shadow: 0 6px 22px rgba(26,31,60,.09); border-color: #b0bcd0; transform: translateY(-2px); }
-        .feature-icon  { width: 32px; height: 32px; margin-bottom: 10px; color: var(--navy); }
-        .feature-title { font-size: 14px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+        .feature-icon  { width: 32px; height: 32px; margin-bottom: 10px; color: var(--text); }
+        .feature-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
         .feature-desc  { font-size: 13px; color: var(--muted); line-height: 1.55; }
 
         /* Steps */
@@ -212,7 +246,7 @@
             color: white; font-size: 15px; font-weight: 800;
             border-radius: 50%; margin-bottom: 12px;
         }
-        .step-title { font-size: 14px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+        .step-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
         .step-desc  { font-size: 13px; color: var(--muted); }
 
         /* Wallet callout */
@@ -373,7 +407,7 @@
             width: 8px; height: 8px; border-radius: 50%;
             background: var(--red); flex-shrink: 0; margin-top: 6px;
         }
-        .ios-feature-title { font-size: 14px; font-weight: 700; color: var(--navy); margin-bottom: 2px; }
+        .ios-feature-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
         .ios-feature-desc  { font-size: 13px; color: var(--muted); line-height: 1.5; }
         .ios-phone-mock {
             background: var(--navy);
@@ -430,6 +464,7 @@
             <a href="support.html" class="nav-link">Support</a>
             <a href="scanner.html" class="nav-link">Scanner</a>
             <a href="login.html"   class="nav-cta">Organizer Login</a>
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
         </div>
     </nav>
 
@@ -734,7 +769,7 @@
                 <div class="step">
                     <div class="step-num">2</div>
                     <div class="step-title">Add attendees</div>
-                    <div class="step-desc">Import from a Google Sheet (<a href="https://docs.google.com/spreadsheets/d/1x2Jd4EMHaLYz7WG6CH6crIcJaQNqonLHxXjis0KlCjo/copy?usp=sharing" target="_blank" rel="noopener noreferrer" style="color: var(--red); font-weight: 600;">View Template</a>) or add guests manually. Tickets are emailed automatically.</div>
+                    <div class="step-desc">Import from a Google Sheet (<a href="https://docs.google.com/spreadsheets/d/1x2Jd4EMHaLYz7WG6CH6crIcJaQNqonLHxXjis0KlCjo/copy?usp=sharing" target="_blank" rel="noopener noreferrer" style="color: var(--red-text); font-weight: 600;">View Template</a>) or add guests manually. Tickets are emailed automatically.</div>
                 </div>
                 <div class="step">
                     <div class="step-num">3</div>
@@ -768,5 +803,18 @@
     </footer>
 
     <script src="/sw-register.js"></script>
+    <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
+    </script>
 </body>
 </html>

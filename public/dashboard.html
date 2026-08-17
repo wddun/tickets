@@ -14,7 +14,36 @@
     <meta name="apple-mobile-web-app-title" content="WTS Dashboard">
     <link rel="manifest" href="/manifest-dashboard.json">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <style>
+        :root, [data-theme="light"] {
+            --bg: #f4f5f7; --card: #ffffff; --text: #1a1a2e; --text-muted: #888888;
+            --border: #dde3ed; --navy: #1a1f3c; --navy-mid: #252b52; --red-text: #c4294a;
+            --surface-soft: #f9fafb; --accent-indigo: #4f46e5;
+        }
+        [data-theme="dark"] {
+            --bg: #10132a; --card: #1a1f3c; --text: #e9ecf5;
+            /* Slightly lighter than the site-wide #8b90a3 — this file layers
+               muted text on an elevated surface (--navy-mid) more than most
+               pages, where the darker shade reads just under 4.5:1. */
+            --text-muted: #94a3b8;
+            --border: #252b52; --navy: #1a1f3c; --navy-mid: #252b52; --red-text: #e78098;
+            --surface-soft: var(--navy-mid); --accent-indigo: #a5b4fc;
+        }
+        .theme-toggle {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 32px; height: 32px; border-radius: 8px;
+            border: none; background: rgba(255,255,255,0.08); color: #fff;
+            font-size: 15px; cursor: pointer; padding: 0;
+            font-family: inherit;
+        }
+        .theme-toggle:hover { background: rgba(255,255,255,0.14); }
         * {
             box-sizing: border-box;
             margin: 0;
@@ -44,17 +73,23 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #f4f5f7;
-            color: #1a1a2e;
+            background: var(--bg);
+            color: var(--text);
             height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
 
+        /* No page-wide link color was ever set, so a plain <a> with no class
+           fell back to the browser's default blue/purple — illegible on the
+           dark theme's navy backgrounds. Specific link classes below still
+           override this. */
+        a { color: var(--red-text); }
+
         /* ── Top bar ── */
         .topbar {
-            background: #1a1f3c;
+            background: var(--navy);
             /* min-height (not height) + safe-area-inset-top: as a standalone
                PWA (no Safari chrome) this bar sits directly under the notch/
                Dynamic Island, so it needs room to grow into that area rather
@@ -118,7 +153,7 @@
         /* ── Home page (event list, shown when no event is selected) ── */
         .sidebar {
             width: 100%;
-            background: #f4f5f7;
+            background: var(--bg);
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -137,13 +172,13 @@
         .sidebar-header h2 {
             font-size: 26px;
             font-weight: 800;
-            color: #1a1a2e;
+            color: var(--text);
             letter-spacing: -0.3px;
         }
 
         .sidebar-header-sub {
             font-size: 13px;
-            color: #888;
+            color: var(--text-muted);
             margin-top: 4px;
         }
 
@@ -188,11 +223,11 @@
             border-radius: 14px;
             cursor: pointer;
             transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-            border: 1px solid #e8e8e8;
+            border: 1px solid var(--border);
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            background: #fff;
+            background: var(--card);
             -webkit-touch-callout: none;
         }
 
@@ -242,18 +277,18 @@
         .event-card-name {
             font-weight: 700;
             font-size: 15px;
-            color: #1a1a2e;
+            color: var(--text);
             margin-bottom: 4px;
         }
 
         .event-card-meta {
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
         }
 
         .event-card-badge {
             display: inline-block;
-            background: #1a1f3c;
+            background: var(--navy);
             color: #fff;
             font-size: 11px;
             font-weight: 600;
@@ -289,7 +324,7 @@
             flex: 1;
             overflow-y: auto;
             padding: 28px;
-            background: #fff;
+            background: var(--card);
         }
 
         .empty-state {
@@ -298,7 +333,7 @@
             align-items: center;
             justify-content: center;
             height: 100%;
-            color: #aaa;
+            color: var(--text-muted);
             gap: 12px;
         }
 
@@ -319,7 +354,7 @@
             gap: 6px;
             background: none;
             border: none;
-            color: #c4294a;
+            color: var(--red-text);
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
@@ -336,14 +371,14 @@
             justify-content: center;
             height: 60vh;
             gap: 16px;
-            color: #888;
+            color: var(--text-muted);
         }
 
         .event-transition-spinner {
             display: inline-block;
             width: 34px;
             height: 34px;
-            border: 3px solid #e8e8e8;
+            border: 3px solid var(--border);
             border-top-color: #c4294a;
             border-radius: 50%;
             animation: btn-spin 0.7s linear infinite;
@@ -368,14 +403,14 @@
             border-radius: 14px;
             object-fit: cover;
             flex-shrink: 0;
-            background: #eee;
+            background: var(--border);
         }
 
         .detail-image-placeholder {
             width: 90px;
             height: 90px;
             border-radius: 14px;
-            background: linear-gradient(135deg, #1a1f3c, #252b52);
+            background: linear-gradient(135deg, var(--navy), #252b52);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -394,7 +429,7 @@
 
         .detail-meta {
             font-size: 14px;
-            color: #666;
+            color: var(--text-muted);
             line-height: 1.7;
         }
 
@@ -434,7 +469,7 @@
         }
 
         .btn-primary {
-            background: #1a1f3c;
+            background: var(--navy);
             color: #fff;
         }
 
@@ -445,7 +480,7 @@
 
         .btn-danger {
             background: #fee2e2;
-            color: #dc2626;
+            color: #b91c1c;
         }
 
         /* Referenced from several places (bulk-action row, confirm dialogs) but
@@ -453,8 +488,16 @@
            text color), looking broken next to the styled primary/danger buttons. */
         .btn-secondary {
             background: #f1f2f5;
-            color: #333;
+            color: #1a1a2e;
             border: 1px solid #e0e1e6;
+        }
+        /* Fixed light chip regardless of theme (matches border above), so the
+           text must stay dark too — var(--text) would go near-white in dark
+           mode and disappear against this light background. */
+        [data-theme="dark"] .btn-secondary {
+            background: var(--navy-mid);
+            color: var(--text);
+            border-color: var(--border);
         }
 
         .btn-sm {
@@ -464,8 +507,8 @@
 
         /* ── Start Scanning card ── */
         .scan-access-card {
-            background: #fff;
-            border: 1px solid #e8e8e8;
+            background: var(--card);
+            border: 1px solid var(--border);
             border-radius: 12px;
             padding: 18px 20px;
             margin-bottom: 24px;
@@ -479,16 +522,16 @@
             width: 100px;
             height: 100px;
             border-radius: 10px;
-            border: 1px solid #e8e8e8;
+            border: 1px solid var(--border);
             flex-shrink: 0;
         }
         .scan-access-info { flex: 1; min-width: 0; }
         .scan-access-title { font-size: 16px; font-weight: 800; margin-bottom: 4px; }
-        .scan-access-sub { font-size: 13px; color: #666; line-height: 1.5; }
+        .scan-access-sub { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
         .scan-access-toggle {
             background: none;
             border: none;
-            color: #1a1f3c;
+            color: var(--text);
             font-size: 12px;
             font-weight: 700;
             cursor: pointer;
@@ -497,7 +540,7 @@
         }
         .scan-access-skeleton {
             padding: 20px;
-            color: #999;
+            color: var(--text-muted);
             font-size: 13px;
         }
 
@@ -510,8 +553,8 @@
         }
 
         .stat-box {
-            background: #fff;
-            border: 1px solid #e8e8e8;
+            background: var(--card);
+            border: 1px solid var(--border);
             border-radius: 12px;
             padding: 18px 20px;
             cursor: pointer;
@@ -525,31 +568,34 @@
         }
 
         .stat-box.stat-active {
-            border-color: #1a1f3c;
+            border-color: var(--navy);
             background: #f0f1f7;
+        }
+        [data-theme="dark"] .stat-box.stat-active {
+            background: var(--navy-mid);
         }
 
         .stat-box.stat-active .stat-label {
-            color: #1a1f3c;
+            color: var(--text);
         }
 
         .stat-num {
             font-size: 30px;
             font-weight: 800;
-            color: #1a1a2e;
+            color: var(--text);
             line-height: 1;
             margin-bottom: 6px;
         }
 
         .stat-label {
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.6px;
         }
 
         .progress-bar-wrap {
-            background: #f0f0f0;
+            background: var(--border);
             border-radius: 99px;
             height: 6px;
             margin-top: 8px;
@@ -579,13 +625,13 @@
 
         .refresh-hint {
             font-size: 12px;
-            color: #aaa;
+            color: var(--text-muted);
         }
 
         .search-box {
             width: 100%;
             padding: 10px 14px;
-            border: 1px solid #e8e8e8;
+            border: 1px solid var(--border);
             border-radius: 9px;
             font-size: 14px;
             margin-bottom: 12px;
@@ -593,12 +639,12 @@
         }
 
         .search-box:focus {
-            border-color: #1a1f3c;
+            border-color: var(--navy);
         }
 
         .attendee-table {
-            background: #fff;
-            border: 1px solid #e8e8e8;
+            background: var(--card);
+            border: 1px solid var(--border);
             border-radius: 12px;
             /* No overflow:hidden here — that would establish its own clipping
                scrollport and sever the header row's position:sticky from
@@ -619,7 +665,7 @@
             grid-template-columns: 32px 1fr 1.4fr auto auto auto;
             align-items: center;
             padding: 12px 18px;
-            border-bottom: 1px solid #f4f5f7;
+            border-bottom: 1px solid var(--bg);
             font-size: 13px;
             gap: 12px;
         }
@@ -629,10 +675,10 @@
         }
 
         .attendee-row.header-row {
-            background: #f4f5f8;
+            background: var(--bg);
             font-size: 11px;
             font-weight: 700;
-            color: #888;
+            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             position: sticky;
@@ -646,7 +692,7 @@
             cursor: pointer;
             font-size: 11px;
             font-weight: 700;
-            color: #888;
+            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             padding: 0;
@@ -656,11 +702,11 @@
         }
 
         .sort-btn:hover {
-            color: #333;
+            color: var(--text);
         }
 
         .sort-btn.sort-active {
-            color: #1a1f3c;
+            color: var(--text);
         }
 
         .copy-email-btn {
@@ -668,7 +714,7 @@
             border: none;
             cursor: pointer;
             padding: 1px 4px;
-            color: #bbb;
+            color: var(--text-muted);
             font-size: 11px;
             border-radius: 4px;
             line-height: 1;
@@ -685,18 +731,18 @@
 
         .attendee-name {
             font-weight: 600;
-            color: #1a1a2e;
+            color: var(--text);
         }
 
         .attendee-email {
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
             margin-top: 1px;
         }
 
         .ticket-count {
             font-size: 12px;
-            color: #1a1f3c;
+            color: var(--text);
             font-weight: 600;
         }
 
@@ -743,7 +789,7 @@
         .empty-list {
             padding: 40px;
             text-align: center;
-            color: #aaa;
+            color: var(--text-muted);
             font-size: 14px;
         }
 
@@ -949,7 +995,7 @@
         }
 
         .modal {
-            background: #fff;
+            background: var(--card);
             border-radius: 16px;
             padding: 28px;
             max-width: 480px;
@@ -989,12 +1035,12 @@
             border: none;
             font-size: 22px;
             cursor: pointer;
-            color: #999;
+            color: var(--text-muted);
             padding: 4px;
         }
 
         .modal-close:hover {
-            color: #333;
+            color: var(--text);
         }
 
         .color-swatch {
@@ -1004,10 +1050,10 @@
             transition: transform 0.15s, border-color 0.15s;
         }
         .color-swatch:hover { transform: scale(1.15); }
-        .color-swatch.selected { border-color: #1a1f3c; transform: scale(1.15); }
+        .color-swatch.selected { border-color: var(--navy); transform: scale(1.15); }
         .color-swatch-custom {
             position: relative; display: flex; align-items: center; justify-content: center;
-            border: 2px dashed #cbd5e1; background: #f8fafc; flex-shrink: 0;
+            border: 2px dashed var(--border); background: var(--bg); flex-shrink: 0;
         }
         .color-swatch-custom input[type=color] {
             position: absolute; inset: 0; width: 100%; height: 100%;
@@ -1017,23 +1063,23 @@
         .addr-wrap { position: relative; }
         .ac-dropdown {
             display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
-            background: #fff; border: 1px solid #dde3ed; border-radius: 8px;
+            background: var(--card); border: 1px solid var(--border); border-radius: 8px;
             box-shadow: 0 6px 20px rgba(0,0,0,0.1); z-index: 2000;
             max-height: 220px; overflow-y: auto;
         }
         .ac-item {
             padding: 9px 12px; cursor: pointer; font-size: 13px;
-            border-bottom: 1px solid #f4f5f7; line-height: 1.4;
+            border-bottom: 1px solid var(--bg); line-height: 1.4;
         }
         .ac-item:last-child { border-bottom: none; }
         .ac-item:hover { background: #f8f9fa; }
-        .ac-item strong { color: #1a1a2e; display: block; }
-        .ac-item span { color: #888; font-size: 12px; }
+        .ac-item strong { color: var(--text); display: block; }
+        .ac-item span { color: var(--text-muted); font-size: 12px; }
 
         .modal-section-title {
             font-size: 12px;
             font-weight: 600;
-            color: #888;
+            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.6px;
             margin-bottom: 10px;
@@ -1047,7 +1093,7 @@
             flex-direction: column;
             gap: 10px;
             padding: 10px 0;
-            border-bottom: 1px solid #f4f5f7;
+            border-bottom: 1px solid var(--bg);
         }
 
         .access-item:last-child {
@@ -1058,7 +1104,7 @@
             width: 34px;
             height: 34px;
             border-radius: 50%;
-            background: linear-gradient(135deg, #1a1f3c, #252b52);
+            background: linear-gradient(135deg, var(--navy), #252b52);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1076,12 +1122,12 @@
         .access-email {
             font-size: 13px;
             font-weight: 600;
-            color: #333;
+            color: var(--text);
         }
 
         .access-date {
             font-size: 11px;
-            color: #bbb;
+            color: var(--text-muted);
         }
 
         .revoke-btn {
@@ -1135,7 +1181,7 @@
             vertical-align: middle;
         }
 
-        .role-badge.owner  { background: #1a1f3c; color: #fff; }
+        .role-badge.owner  { background: var(--navy); color: #fff; }
         .role-badge.full   { background: #dcfce7; color: #15803d; }
         .role-badge.view   { background: #e0e7ff; color: #4338ca; }
         .role-badge.custom { background: #fef3c7; color: #b45309; }
@@ -1160,16 +1206,17 @@
         .cap-option input { margin-top: 2px; flex-shrink: 0; cursor: pointer; }
         .cap-option.disabled { opacity: 0.45; cursor: not-allowed; }
         .cap-option.disabled input { cursor: not-allowed; }
-        .cap-option-label { font-size: 13px; font-weight: 600; color: #333; line-height: 1.3; }
-        .cap-option-hint { font-size: 11px; color: #8a8f98; line-height: 1.35; }
+        .cap-option-label { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.3; }
+        .cap-option-hint { font-size: 11px; color: var(--text-muted); line-height: 1.35; }
 
         .cap-editor {
             background: #f8f9fc;
-            border: 1px solid #e5e8f0;
+            border: 1px solid var(--border);
             border-radius: 10px;
             padding: 12px 14px;
             margin: 4px 0 12px;
         }
+        [data-theme="dark"] .cap-editor { background: var(--navy-mid); }
 
         .cap-editor-presets {
             display: flex;
@@ -1179,9 +1226,9 @@
         }
 
         .cap-preset-btn {
-            background: #fff;
-            border: 1px solid #dde3ed;
-            color: #475569;
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
             padding: 4px 10px;
             border-radius: 999px;
             font-size: 11px;
@@ -1200,8 +1247,8 @@
         }
         .theme-card {
             display: flex; flex-direction: column; gap: 0;
-            border: 2px solid #e5e8f0; border-radius: 12px;
-            background: #fff; padding: 0; overflow: hidden;
+            border: 2px solid var(--border); border-radius: 12px;
+            background: var(--card); padding: 0; overflow: hidden;
             cursor: pointer; text-align: left; font-family: inherit;
         }
         .theme-card:hover { border-color: #c7d2fe; }
@@ -1209,26 +1256,26 @@
         .theme-swatch { display: block; height: 34px; width: 100%; }
         .theme-body {
             display: block; padding: 9px 10px 11px;
-            border-top: 1px solid transparent; border-bottom: 1px solid #eee;
+            border-top: 1px solid transparent; border-bottom: 1px solid var(--border);
         }
         .theme-line { display: block; height: 5px; border-radius: 3px; margin-bottom: 5px; width: 82%; }
         .theme-line.short { width: 55%; }
         .theme-btn { display: block; height: 11px; border-radius: 4px; width: 62%; margin-top: 8px; }
-        .theme-name { display: block; padding: 8px 10px 2px; font-size: 12px; font-weight: 700; color: #333; }
-        .theme-desc { display: block; padding: 0 10px 10px; font-size: 11px; color: #8a8f98; line-height: 1.35; }
+        .theme-name { display: block; padding: 8px 10px 2px; font-size: 12px; font-weight: 700; color: var(--text); }
+        .theme-desc { display: block; padding: 0 10px 10px; font-size: 11px; color: var(--text-muted); line-height: 1.35; }
 
         .admin-room-owner {
             font-size: 12px;
             font-weight: 700;
-            color: #475569;
+            color: var(--text-muted);
             padding: 14px 0 6px;
-            border-bottom: 1px solid #eef0f4;
+            border-bottom: 1px solid var(--border);
             margin-bottom: 4px;
         }
 
         .link-box {
-            background: #f4f5f8;
-            border: 1px solid #dde3ed;
+            background: var(--bg);
+            border: 1px solid var(--border);
             border-radius: 10px;
             padding: 12px;
             margin-bottom: 18px;
@@ -1237,7 +1284,7 @@
         .link-box label {
             font-size: 12px;
             font-weight: 600;
-            color: #888;
+            color: var(--text-muted);
             margin-bottom: 6px;
             display: block;
         }
@@ -1245,21 +1292,21 @@
         .link-box input {
             width: 100%;
             padding: 8px 10px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border);
             border-radius: 8px;
             font-size: 13px;
-            background: #fff;
+            background: var(--card);
             outline: none;
         }
 
         .link-box input:focus {
-            border-color: #1a1f3c;
+            border-color: var(--navy);
         }
 
         .btn-settings {
-            background: #f4f5f7;
-            border: 1px solid #e0e0e0;
-            color: #666;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
             padding: 9px 14px;
             border-radius: 9px;
             font-size: 13px;
@@ -1271,7 +1318,7 @@
         }
 
         .btn-settings:hover {
-            background: #eee;
+            background: var(--border);
         }
 
         .btn-settings.has-dropdown::after { content: ' ▾'; font-size: 11px; }
@@ -1279,13 +1326,13 @@
         .settings-empty {
             text-align: center;
             padding: 20px;
-            color: #bbb;
+            color: var(--text-muted);
             font-size: 13px;
         }
 
         .settings-hint {
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
             margin-bottom: 18px;
             line-height: 1.5;
         }
@@ -1296,28 +1343,29 @@
             gap: 12px;
             cursor: pointer;
             padding: 12px;
-            background: #f4f5f8;
+            background: var(--bg);
             border-radius: 10px;
-            border: 1px solid #dde3ed;
+            border: 1px solid var(--border);
         }
         .settings-toggle + .settings-toggle { margin-top: 12px; }
         .settings-toggle input[type=checkbox] {
             width: 18px;
             height: 18px;
-            accent-color: #1a1f3c;
+            accent-color: var(--navy);
             cursor: pointer;
             flex-shrink: 0;
         }
         .settings-toggle-title { font-size: 13px; font-weight: 600; }
-        .settings-toggle-desc { font-size: 12px; color: #888; margin-top: 2px; }
+        .settings-toggle-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
         .settings-card {
             background: #f9fafb;
-            border: 1px solid #eee;
+            border: 1px solid var(--border);
             border-radius: 10px;
             padding: 14px;
             margin-bottom: 14px;
         }
+        [data-theme="dark"] .settings-card { background: var(--navy-mid); }
 
         /* ── Grid Styles ── */
         .igr-row {
@@ -1330,17 +1378,17 @@
         .igr-inp {
             width: 100%;
             padding: 7px 10px;
-            border: 1px solid #e0e0e0;
+            border: 1px solid var(--border);
             border-radius: 6px;
             font-size: 13px;
             outline: none;
             box-sizing: border-box;
-            background: #fff;
+            background: var(--card);
             transition: border-color 0.1s, background 0.1s;
         }
 
         .igr-inp:focus {
-            border-color: #1a1f3c;
+            border-color: var(--navy);
             z-index: 2;
         }
 
@@ -1357,7 +1405,7 @@
         .igr-del {
             background: none;
             border: none;
-            color: #ccc;
+            color: var(--border);
             cursor: pointer;
             font-size: 18px;
             padding: 0;
@@ -1378,7 +1426,7 @@
             margin-bottom: 20px;
         }
         .metrics-stat {
-            background: #f8f9fb;
+            background: var(--bg);
             border-radius: 10px;
             padding: 12px 14px;
             text-align: center;
@@ -1386,19 +1434,19 @@
         .metrics-stat-num {
             font-size: 24px;
             font-weight: 800;
-            color: #1a1f3c;
+            color: var(--text);
             line-height: 1;
         }
         .metrics-stat-label {
             font-size: 11px;
-            color: #888;
+            color: var(--text-muted);
             margin-top: 4px;
             font-weight: 500;
         }
         .metrics-section-title {
             font-size: 11px;
             font-weight: 700;
-            color: #888;
+            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.6px;
             margin: 16px 0 8px;
@@ -1411,7 +1459,7 @@
         }
         .metrics-bar-label {
             font-size: 12px;
-            color: #555;
+            color: var(--text-muted);
             width: 52px;
             flex-shrink: 0;
             text-align: right;
@@ -1419,20 +1467,20 @@
         .metrics-bar-track {
             flex: 1;
             height: 10px;
-            background: #eef0f4;
+            background: var(--border);
             border-radius: 6px;
             overflow: hidden;
         }
         .metrics-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #475569, #64748b);
+            background: linear-gradient(90deg, var(--text-muted), var(--text-muted));
             border-radius: 6px;
             transition: width 0.4s ease;
         }
         .metrics-bar-fill.green { background: linear-gradient(90deg, #10b981, #34d399); }
         .metrics-bar-value {
             font-size: 11px;
-            color: #888;
+            color: var(--text-muted);
             width: 28px;
             flex-shrink: 0;
         }
@@ -1440,7 +1488,7 @@
         .metrics-field-title {
             font-size: 12px;
             font-weight: 600;
-            color: #444;
+            color: var(--text-muted);
             margin-bottom: 6px;
         }
         .metrics-field-bar-label { width: 90px; font-size: 12px; }
@@ -1451,10 +1499,10 @@
             align-items: center;
             gap: 12px;
             padding: 24px 28px 20px;
-            border-bottom: 1px solid #eef0f4;
+            border-bottom: 1px solid var(--border);
         }
         .admin-overview-stat {
-            background: #f8f9fb;
+            background: var(--bg);
             border-radius: 10px;
             padding: 14px 18px;
             flex: 1;
@@ -1469,22 +1517,22 @@
             text-align: left;
             font-size: 11px;
             font-weight: 600;
-            color: #999;
+            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: .5px;
             padding: 6px 12px;
-            border-bottom: 1px solid #eef0f4;
+            border-bottom: 1px solid var(--border);
         }
         .admin-events-table td {
             padding: 9px 12px;
-            border-bottom: 1px solid #f4f5f7;
+            border-bottom: 1px solid var(--bg);
             vertical-align: middle;
         }
         .admin-events-table tr:last-child td { border-bottom: none; }
         .admin-events-table tr:hover td { background: #fafbff; }
         .admin-mini-bar-track {
             height: 6px;
-            background: #eef0f4;
+            background: var(--border);
             border-radius: 4px;
             overflow: hidden;
             width: 80px;
@@ -1493,7 +1541,7 @@
         }
         .admin-mini-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #475569, #64748b);
+            background: linear-gradient(90deg, var(--text-muted), var(--text-muted));
             border-radius: 4px;
         }
 
@@ -1531,8 +1579,8 @@
             position: absolute;
             top: calc(100% + 6px);
             right: 0;
-            background: #fff;
-            border: 1px solid #e8e8e8;
+            background: var(--card);
+            border: 1px solid var(--border);
             border-radius: 10px;
             box-shadow: 0 4px 24px rgba(0,0,0,0.13);
             min-width: 190px;
@@ -1547,7 +1595,7 @@
             width: 100%;
             padding: 10px 16px;
             font-size: 13px;
-            color: #333;
+            color: var(--text);
             background: none;
             border: none;
             text-align: left;
@@ -1557,10 +1605,10 @@
             white-space: nowrap;
             box-sizing: border-box;
         }
-        .dropdown-item:hover { background: #f4f5f7; }
+        .dropdown-item:hover { background: var(--bg); }
         .dropdown-item.danger { color: #dc2626; }
         .dropdown-item.danger:hover { background: #fef2f2; }
-        .dropdown-divider { height: 1px; background: #f0f0f0; margin: 4px 0; }
+        .dropdown-divider { height: 1px; background: var(--border); margin: 4px 0; }
         .topbar-btn.has-dropdown::after { content: '▾'; margin-left: 3px; font-size: 11px; }
 
         /* ── Settings page (full-page, per event) ── */
@@ -1570,7 +1618,7 @@
         .settings-page-header h1 {
             font-size: 22px;
             font-weight: 700;
-            color: #1a1a2e;
+            color: var(--text);
         }
         .settings-page-header .settings-hint {
             margin-top: 2px;
@@ -1589,7 +1637,7 @@
             position: sticky;
             top: 0;
             z-index: 6;
-            background: #fff;
+            background: var(--card);
             padding: 4px 0 14px;
             margin-bottom: 2px;
         }
@@ -1613,7 +1661,7 @@
             padding: 9px 12px;
             font-size: 13px;
             font-weight: 500;
-            color: #666;
+            color: var(--text-muted);
             cursor: pointer;
             border: none;
             border-radius: 8px;
@@ -1622,14 +1670,16 @@
             font-family: inherit;
             transition: background 0.15s, color 0.15s;
         }
-        .settings-nav-item.active { color: #1a1f3c; background: #f0f1f5; font-weight: 600; }
-        .settings-nav-item:hover:not(.active) { background: #f7f7f9; color: #333; }
+        .settings-nav-item.active { color: var(--text); background: #f0f1f5; font-weight: 600; }
+        .settings-nav-item:hover:not(.active) { background: #f7f7f9; color: var(--text); }
+        [data-theme="dark"] .settings-nav-item.active { background: var(--navy-mid); }
+        [data-theme="dark"] .settings-nav-item:hover:not(.active) { background: var(--navy-mid); }
         .settings-panel {
             flex: 1;
             min-width: 0;
             max-width: 640px;
-            background: #fff;
-            border: 1px solid #eee;
+            background: var(--card);
+            border: 1px solid var(--border);
             border-radius: 14px;
             padding: 32px 36px;
             box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
@@ -1638,7 +1688,7 @@
             scroll-margin-top: 20px;
             padding-bottom: 32px;
             margin-bottom: 32px;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid var(--border);
         }
         .settings-section:last-child {
             padding-bottom: 0;
@@ -1650,14 +1700,14 @@
            implying they're separate top-level sections. */
         .settings-divider {
             height: 1px;
-            background: #f0f0f0;
+            background: var(--border);
             border: none;
             margin: 24px 0;
         }
         .settings-subhead {
             font-size: 13px;
             font-weight: 700;
-            color: #333;
+            color: var(--text);
             margin-bottom: 12px;
         }
         @media (max-width: 700px) {
@@ -1675,15 +1725,15 @@
                 top: var(--settings-back-bar-h, 38px);
                 gap: 6px;
                 padding-bottom: 6px;
-                background: #f4f5f7;
+                background: var(--bg);
                 z-index: 10;
             }
             .settings-nav-item {
                 flex: 0 0 auto;
                 white-space: nowrap;
-                background: #f4f5f7;
+                background: var(--bg);
             }
-            .settings-nav-item.active { background: #1a1f3c; color: #fff; }
+            .settings-nav-item.active { background: var(--navy); color: #fff; }
             .settings-panel { max-width: none; width: 100%; padding: 18px 18px; }
 
             /* Touch targets: bump small/secondary buttons up to a more
@@ -1708,7 +1758,7 @@
             transform: translate(-50%, 100px);
             width: calc(100% - 40px);
             max-width: 640px;
-            background: #1a1f3c;
+            background: var(--navy);
             color: #fff;
             border-radius: 12px;
             padding: 14px 18px;
@@ -1754,7 +1804,7 @@
         .eb-overlay {
             position: fixed;
             inset: 0;
-            background: #f4f5f7;
+            background: var(--bg);
             z-index: 300;
             display: flex;
             flex-direction: column;
@@ -1765,7 +1815,7 @@
             align-items: center;
             gap: 12px;
             padding: 12px 16px;
-            background: #1a1f3c;
+            background: var(--navy);
             color: #fff;
             flex-shrink: 0;
         }
@@ -1785,23 +1835,23 @@
         .eb-pane { overflow-y: auto; padding: 14px; min-height: 0; }
         .eb-pane + .eb-pane { border-left: 1px solid var(--border); }
         .eb-pane-title {
-            font-size: 10px; font-weight: 700; color: #94a3b8;
+            font-size: 10px; font-weight: 700; color: var(--text-muted);
             text-transform: uppercase; letter-spacing: .7px; margin-bottom: 8px;
         }
 
         .eb-palette-btn {
             display: flex; align-items: center; gap: 8px; width: 100%;
             padding: 9px 10px; margin-bottom: 5px;
-            background: #fff; border: 1px solid var(--border); border-radius: 9px;
-            font-size: 13px; font-weight: 600; color: var(--navy);
+            background: var(--card); border: 1px solid var(--border); border-radius: 9px;
+            font-size: 13px; font-weight: 600; color: var(--text);
             cursor: pointer; text-align: left;
         }
         .eb-palette-btn:hover:not(:disabled) { border-color: var(--navy); background: #fbfcfe; }
         .eb-palette-btn:disabled { opacity: .4; cursor: default; }
-        .eb-palette-btn svg { flex-shrink: 0; color: #64748b; }
+        .eb-palette-btn svg { flex-shrink: 0; color: var(--text-muted); }
 
         .eb-card {
-            background: #fff; border: 1px solid var(--border); border-radius: 11px;
+            background: var(--card); border: 1px solid var(--border); border-radius: 11px;
             margin-bottom: 7px; overflow: hidden;
             /* Suppresses the browser's own touch scrolling/long-press
                selection while a pointer drag is in progress on the handle. */
@@ -1812,33 +1862,33 @@
         .eb-card.drop-target { border-color: #6366f1; }
         .eb-card-head { display: flex; align-items: center; gap: 8px; padding: 10px 11px; cursor: pointer; }
         .eb-drag {
-            cursor: grab; color: #cbd5e1; flex-shrink: 0; display: flex;
+            cursor: grab; color: var(--border); flex-shrink: 0; display: flex;
             padding: 2px; touch-action: none; /* pointer events only, no scroll steal */
         }
         .eb-drag:active { cursor: grabbing; }
-        .eb-card-label { font-size: 13px; font-weight: 700; color: var(--navy); }
+        .eb-card-label { font-size: 13px; font-weight: 700; color: var(--text); }
         .eb-card-sub {
-            font-size: 11px; color: #94a3b8; margin-top: 1px;
+            font-size: 11px; color: var(--text-muted); margin-top: 1px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px;
         }
         .eb-card-actions { margin-left: auto; display: flex; gap: 2px; flex-shrink: 0; }
         .eb-icon-btn {
             background: none; border: none; padding: 4px; cursor: pointer;
-            color: #94a3b8; display: flex; border-radius: 5px;
+            color: var(--text-muted); display: flex; border-radius: 5px;
         }
-        .eb-icon-btn:hover { background: #f1f5f9; color: var(--navy); }
+        .eb-icon-btn:hover { background: var(--border); color: var(--text); }
         .eb-icon-btn.danger:hover { background: #fef2f2; color: #dc2626; }
-        .eb-card-body { padding: 0 11px 12px; border-top: 1px solid #f1f5f9; }
+        .eb-card-body { padding: 0 11px 12px; border-top: 1px solid var(--border); }
         .eb-field { margin-top: 10px; }
         .eb-field label {
-            display: block; font-size: 11px; font-weight: 700; color: #64748b;
+            display: block; font-size: 11px; font-weight: 700; color: var(--text-muted);
             text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px;
         }
         .eb-field input[type=text], .eb-field input[type=url], .eb-field input[type=number],
         .eb-field select, .eb-field textarea {
             width: 100%; padding: 7px 9px; border: 1px solid var(--border);
             border-radius: 7px; font-size: 13px !important; font-family: inherit;
-            background: #fff; color: var(--navy);
+            background: var(--card); color: var(--text);
         }
         .eb-field textarea { resize: vertical; min-height: 66px; line-height: 1.5; }
         .eb-field input:focus, .eb-field select:focus, .eb-field textarea:focus {
@@ -1846,26 +1896,26 @@
         }
         .eb-row { display: flex; gap: 8px; }
         .eb-row > * { flex: 1; min-width: 0; }
-        .eb-check { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 13px; color: #334155; cursor: pointer; }
-        .eb-check input { width: 15px; height: 15px; accent-color: #1a1f3c; flex-shrink: 0; }
-        .eb-note { font-size: 11.5px; color: #94a3b8; line-height: 1.5; margin-top: 8px; }
+        .eb-check { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
+        .eb-check input { width: 15px; height: 15px; accent-color: var(--navy); flex-shrink: 0; }
+        .eb-note { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }
         .eb-dynamic-note {
-            background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;
-            padding: 9px 10px; font-size: 11.5px; color: #64748b; line-height: 1.5; margin-top: 10px;
+            background: var(--bg); border: 1px dashed var(--border); border-radius: 8px;
+            padding: 9px 10px; font-size: 11.5px; color: var(--text-muted); line-height: 1.5; margin-top: 10px;
         }
 
         .eb-preview-frame {
             width: 100%; height: 100%; border: 1px solid var(--border);
-            border-radius: 10px; background: #fff;
+            border-radius: 10px; background: var(--card);
         }
         .eb-preview-wrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
         .eb-preview-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-shrink: 0; }
         .eb-seg { display: flex; background: #e8ecf4; border-radius: 7px; padding: 2px; margin-left: auto; }
         .eb-seg button {
             border: none; background: none; padding: 4px 10px; border-radius: 5px;
-            font-size: 11.5px; font-weight: 600; color: #64748b; cursor: pointer;
+            font-size: 11.5px; font-weight: 600; color: var(--text-muted); cursor: pointer;
         }
-        .eb-seg button.active { background: #fff; color: var(--navy); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+        .eb-seg button.active { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
         .eb-preview-body { flex: 1; min-height: 0; display: flex; justify-content: center; }
         .eb-preview-body.mobile .eb-preview-frame { max-width: 390px; }
 
@@ -1905,7 +1955,7 @@
         .toast {
             min-width: 240px;
             max-width: 380px;
-            background: #1a1f3c;
+            background: var(--navy);
             color: #fff;
             padding: 13px 16px;
             border-radius: 10px;
@@ -1957,10 +2007,10 @@
             font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            color: #999;
+            color: var(--text-muted);
             font-weight: 600;
             padding: 6px 10px;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--border);
         }
         .mini-table td { padding: 9px 10px; border-bottom: 1px solid #f4f4f4; vertical-align: middle; }
         .mini-table tr:last-child td { border-bottom: none; }
@@ -1978,7 +2028,7 @@
         .badge-notified { background: #fef3c7; color: #92400e; }
         .badge-converted { background: #d1fae5; color: #065f46; }
         .badge-active { background: #d1fae5; color: #065f46; }
-        .badge-inactive { background: #f1f5f9; color: #64748b; }
+        .badge-inactive { background: var(--border); color: var(--text-muted); }
         .beta-callout {
             margin-top: 10px;
             padding: 11px 13px;
@@ -2014,6 +2064,7 @@
     <div class="topbar">
         <a href="/" class="topbar-logo"><img src="/logo-nav.svg" alt="WTS Tickets"></a>
         <div class="topbar-actions">
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
             <a href="/scanner.html" class="topbar-btn">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/></svg>
                 Scanner
@@ -2062,7 +2113,7 @@
                 <div class="sidebar-header-actions">
                     <button class="btn btn-primary btn-sm" onclick="openNewEventModal()">+ New</button>
                     <button class="btn btn-secondary btn-sm" id="selectModeBtn" onclick="toggleSelectMode()">Select</button>
-                    <label id="selectAllLabel" style="display:none;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;">
+                    <label id="selectAllLabel" style="display:none;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);cursor:pointer;">
                         <input type="checkbox" id="selectAllEvents" onchange="toggleAllEvents(this.checked)"
                             style="accent-color:#dc2626;">
                         All
@@ -2074,7 +2125,7 @@
                 <button class="btn btn-danger btn-sm" onclick="deleteSelectedEvents()">Delete Selected</button>
             </div>
             <div class="event-list" id="eventList">
-                <div style="padding: 20px; color: #aaa; font-size: 13px;">Loading…</div>
+                <div style="padding: 20px; color: var(--text-muted); font-size: 13px;">Loading…</div>
             </div>
         </div>
 
@@ -2082,10 +2133,10 @@
         <div class="main" id="main">
             <div class="empty-state" id="emptyState">
                 <div class="empty-state-icon">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#dde3ed" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--border)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>
                 </div>
                 <p>Select an event to view details</p>
-                <p style="font-size:13px; color:#bbb;">Create an event with <strong>+ New</strong> or import from your Google Sheet</p>
+                <p style="font-size:13px; color:var(--text-muted);">Create an event with <strong>+ New</strong> or import from your Google Sheet</p>
             </div>
             <div id="eventDetail" style="display:none;"></div>
             <div id="settingsView" style="display:none;"></div>
@@ -2098,7 +2149,7 @@
             style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px;border-bottom:1px solid #1e293b;">
             <span style="color:#94a3b8;font-size:12px;font-weight:600;letter-spacing:.5px;">SERVER LOGS</span>
             <button id="adminLogsToggle" onclick="toggleLogsPanel()"
-                style="background:none;border:none;color:#64748b;cursor:pointer;font-size:13px;padding:2px 6px;">▲</button>
+                style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:13px;padding:2px 6px;">▲</button>
         </div>
         <div id="adminLogsBody" style="display:none;height:180px;overflow-y:auto;padding:8px 14px;">
             <div id="adminLogsContent" style="font-family:monospace;"></div>
@@ -2115,52 +2166,52 @@
     <!-- Account Settings Modal -->
     <div class="modal-overlay" id="accountSettingsModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeAccountSettingsModal()">
-        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
+        <div class="modal" style="max-width:460px;background: var(--card);border-radius:14px;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
                 <h2>Account Settings</h2>
                 <button class="modal-close" onclick="closeAccountSettingsModal()">&times;</button>
             </div>
 
-            <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #f0f0f0;">
+            <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border);">
                 <div class="modal-section-title">Account</div>
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:13px;">
-                    <span style="color:#888;">Email</span>
-                    <span id="acctSettingsEmail" style="font-weight:600;color:#1a1a2e;">—</span>
+                    <span style="color:var(--text-muted);">Email</span>
+                    <span id="acctSettingsEmail" style="font-weight:600;color:var(--text);">—</span>
                 </div>
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:13px;">
-                    <span style="color:#888;">Member since</span>
-                    <span id="acctSettingsCreated" style="font-weight:600;color:#1a1a2e;">—</span>
+                    <span style="color:var(--text-muted);">Member since</span>
+                    <span id="acctSettingsCreated" style="font-weight:600;color:var(--text);">—</span>
                 </div>
             </div>
 
-            <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #f0f0f0;">
+            <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border);">
                 <div class="modal-section-title">Change Password</div>
                 <div style="margin-bottom:10px;">
                     <input type="password" id="acctCurrentPassword" placeholder="Current password" autocomplete="current-password"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:10px;">
                     <input type="password" id="acctNewPassword" placeholder="New password" autocomplete="new-password"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:10px;">
                     <input type="password" id="acctConfirmPassword" placeholder="Confirm new password" autocomplete="new-password"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div id="acctPasswordMsg" style="font-size:12px;margin-bottom:10px;min-height:14px;"></div>
                 <button class="btn btn-primary" id="acctChangePasswordBtn" style="width:100%;" onclick="changeAccountPassword()">Update Password</button>
             </div>
 
-            <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #f0f0f0;">
+            <div style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border);">
                 <div class="modal-section-title">Two-Factor Authentication</div>
                 <div id="twoFactorModalBody" style="min-height:80px;">
-                    <div style="text-align:center;padding:32px;color:#bbb;">Loading…</div>
+                    <div style="text-align:center;padding:32px;color:var(--text-muted);">Loading…</div>
                 </div>
             </div>
 
             <div>
                 <div class="modal-section-title" style="color:#dc2626;">Danger Zone</div>
-                <div style="font-size:12px;color:#888;margin-bottom:10px;">Permanently delete your account, all your events, and all tickets. This cannot be undone.</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Permanently delete your account, all your events, and all tickets. This cannot be undone.</div>
                 <button class="btn btn-danger" style="width:100%;" onclick="confirmDeleteAccount()">Delete Account</button>
             </div>
         </div>
@@ -2169,13 +2220,13 @@
     <!-- Metrics Modal -->
     <div class="modal-overlay" id="metricsModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeMetricsModal()">
-        <div class="modal" style="max-width:660px;background:#fff;border-radius:14px;max-height:90vh;">
+        <div class="modal" style="max-width:660px;background: var(--card);border-radius:14px;max-height:90vh;">
             <div class="modal-header">
                 <h2 id="metricsModalTitle">Metrics</h2>
                 <button class="modal-close" onclick="closeMetricsModal()">&times;</button>
             </div>
             <div id="metricsModalBody" style="min-height:120px;">
-                <div style="text-align:center;padding:32px;color:#bbb;">Loading…</div>
+                <div style="text-align:center;padding:32px;color:var(--text-muted);">Loading…</div>
             </div>
         </div>
     </div>
@@ -2183,40 +2234,40 @@
     <!-- New Event Modal -->
     <div class="modal-overlay" id="newEventModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeNewEventModal()">
-        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;">
+        <div class="modal" style="max-width:460px;background: var(--card);border-radius:14px;">
             <div class="modal-header">
                 <h2>Create New Event</h2>
                 <button class="modal-close" onclick="closeNewEventModal()">&times;</button>
             </div>
             <div class="form-group" style="margin-bottom:14px;">
-                <label for="newEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name <span style="color:#c4294a">*</span></label>
+                <label for="newEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name <span style="color:var(--red-text)">*</span></label>
                 <input type="text" id="newEventName" placeholder="e.g. Summer Gala 2026"
-                    style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;"
+                    style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;"
                     onkeydown="if(event.key==='Enter')document.getElementById('newEventTime').focus()">
             </div>
             <div class="dt-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
                 <div class="form-group">
-                    <label for="newEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date & Time <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                    <label for="newEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date & Time <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
                     <input type="datetime-local" id="newEventTime"
-                        style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
+                        style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
                 </div>
                 <div class="form-group">
-                    <label for="newEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Time <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                    <label for="newEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Time <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
                     <input type="datetime-local" id="newEventEndTime"
-                        style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
+                        style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
                 </div>
             </div>
             <div class="form-group" style="margin-bottom:10px;">
-                <label for="newEventLocName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                <label for="newEventLocName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
                 <input type="text" id="newEventLocName" placeholder="e.g. The Grand Ballroom"
-                    style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+                    style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
             </div>
             <div class="form-group" style="margin-bottom:14px;">
-                <label for="newEventAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address <span style="color:#aaa;font-weight:400;">(optional)</span></label>
+                <label for="newEventAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
                 <div class="addr-wrap">
                     <input type="text" id="newEventAddress" placeholder="Start typing an address…"
                         autocomplete="off"
-                        style="width:100%;padding:9px 11px;border:1px solid #dde3ed;border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+                        style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
                     <div class="ac-dropdown" id="newEventAddressAC"></div>
                 </div>
                 <input type="hidden" id="newEventLat">
@@ -2234,12 +2285,12 @@
                     <div class="color-swatch" data-color="rgb(168,85,247)"  style="background:rgb(168,85,247)"></div>
                     <div class="color-swatch" data-color="rgb(20,184,166)"  style="background:rgb(20,184,166)"></div>
                     <div class="color-swatch color-swatch-custom" id="customSwatchLabel" title="Custom color">
-                        <span id="customSwatchPlus" style="font-size:14px;color:#94a3b8;pointer-events:none;">+</span>
+                        <span id="customSwatchPlus" style="font-size:14px;color:var(--text-muted);pointer-events:none;">+</span>
                         <input type="color" id="customSwatchColor" value="#6366f1">
                     </div>
                 </div>
             </div>
-            <div id="newEventError" style="color:#c4294a;font-size:13px;margin-bottom:10px;display:none;"></div>
+            <div id="newEventError" style="color:var(--red-text);font-size:13px;margin-bottom:10px;display:none;"></div>
             <button class="btn btn-primary" style="width:100%;" id="newEventSubmitBtn" onclick="submitNewEvent()">Create Event</button>
         </div>
     </div>
@@ -2247,21 +2298,21 @@
     <!-- Bulk Email Modal -->
     <div class="modal-overlay" id="bulkEmailModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeBulkEmailModal()">
-        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;">
+        <div class="modal" style="max-width:460px;background: var(--card);border-radius:14px;">
             <div class="modal-header">
                 <h2>Email All Attendees</h2>
                 <button class="modal-close" onclick="closeBulkEmailModal()">&times;</button>
             </div>
-            <div id="bulkEmailRecipientCount" style="font-size:13px;color:#666;margin-bottom:12px;"></div>
+            <div id="bulkEmailRecipientCount" style="font-size:13px;color:var(--text-muted);margin-bottom:12px;"></div>
             <div style="margin-bottom:12px;">
                 <label for="bulkEmailSubject" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Subject</label>
                 <input type="text" id="bulkEmailSubject"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
+                    style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
             <div style="margin-bottom:16px;">
                 <label for="bulkEmailBody" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Message</label>
                 <textarea id="bulkEmailBody" rows="6"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
+                    style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
             </div>
             <button class="btn btn-primary" style="width:100%;" onclick="sendBulkEmail(this)">Send to All</button>
         </div>
@@ -2270,21 +2321,21 @@
     <!-- Direct Email Modal -->
     <div class="modal-overlay" id="directEmailModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeDirectEmailModal()">
-        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;">
+        <div class="modal" style="max-width:460px;background: var(--card);border-radius:14px;">
             <div class="modal-header">
                 <h2>Send Email</h2>
                 <button class="modal-close" onclick="closeDirectEmailModal()">&times;</button>
             </div>
-            <div id="directEmailTo" style="font-size:13px;color:#666;margin-bottom:12px;"></div>
+            <div id="directEmailTo" style="font-size:13px;color:var(--text-muted);margin-bottom:12px;"></div>
             <div style="margin-bottom:12px;">
                 <label for="directEmailSubject" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Subject</label>
                 <input type="text" id="directEmailSubject"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
+                    style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
             <div style="margin-bottom:16px;">
                 <label for="directEmailBody" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Message</label>
                 <textarea id="directEmailBody" rows="6"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
+                    style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
             </div>
             <button class="btn btn-primary" style="width:100%;" onclick="sendDirectEmail(this)">Send</button>
         </div>
@@ -2296,6 +2347,17 @@
     <!-- Event details editing now lives inline in the Settings page's General section -->
 
     <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
         let events = [];
         let selectedId = null;
         let refreshTimer = null;
@@ -2353,7 +2415,7 @@
                 overlay.innerHTML = `
                     <div class="modal" style="max-width:400px;">
                         <div class="modal-header"><h2>${esc(title)}</h2></div>
-                        <div style="font-size:14px;color:#444;line-height:1.5;margin-bottom:22px;">${esc(message)}</div>
+                        <div style="font-size:14px;color:var(--text-muted);line-height:1.5;margin-bottom:22px;">${esc(message)}</div>
                         <div style="display:flex;gap:10px;justify-content:flex-end;">
                             <button class="btn btn-secondary" id="confirmDialogCancel">Cancel</button>
                             <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="confirmDialogOk">${esc(confirmText)}</button>
@@ -2484,7 +2546,7 @@
                 overlay.innerHTML = `
                     <div class="modal" style="max-width:420px;">
                         <div class="modal-header"><h2>Unsaved changes</h2></div>
-                        <div style="font-size:14px;color:#444;line-height:1.5;margin-bottom:22px;">You have unsaved changes in event settings. Save them before leaving?</div>
+                        <div style="font-size:14px;color:var(--text-muted);line-height:1.5;margin-bottom:22px;">You have unsaved changes in event settings. Save them before leaving?</div>
                         <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
                             <button class="btn btn-secondary" id="unsavedCancelBtn">Cancel</button>
                             <button class="btn btn-danger" id="unsavedDiscardBtn">Discard</button>
@@ -2759,7 +2821,7 @@
         function renderSidebar() {
             const list = document.getElementById('eventList');
             if (!events.length) {
-                list.innerHTML = '<div style="padding:20px; color:#aaa; font-size:13px;">No events yet.<br>Create one from your Google Sheet.</div>';
+                list.innerHTML = '<div style="padding:20px; color:var(--text-muted); font-size:13px;">No events yet.<br>Create one from your Google Sheet.</div>';
                 return;
             }
             list.innerHTML = '';
@@ -2977,7 +3039,7 @@
 
         <div class="stats-row">
             <div class="stat-box${activeStatFilter === 'all' ? ' stat-active' : ''}" onclick="setStatFilter('all')">
-                <div class="stat-num">${total}${event.capacity ? `<span style="font-size:13px;font-weight:500;color:#94a3b8;"> / ${event.capacity}</span>` : ''}</div>
+                <div class="stat-num">${total}${event.capacity ? `<span style="font-size:13px;font-weight:500;color:var(--text-muted);"> / ${event.capacity}</span>` : ''}</div>
                 <div class="stat-label">Tickets${event.capacity ? ` · ${Math.round(total/event.capacity*100)}% full` : ''}</div>
             </div>
             <div class="stat-box${activeStatFilter === 'checked' ? ' stat-active' : ''}" onclick="setStatFilter('checked')">
@@ -2990,7 +3052,7 @@
             <div class="stat-box${activeStatFilter === 'pending' ? ' stat-active' : ''}" onclick="setStatFilter('pending')">
                 <div class="stat-num" style="color:#f59e0b;" id="liveStatPending">${total - scanned}</div>
                 <div class="stat-label">Not Yet In</div>
-                <div style="font-size:11px;color:#bbb;margin-top:4px;" id="liveStatPct">${pct}% checked in</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="liveStatPct">${pct}% checked in</div>
             </div>
         </div>
 
@@ -3148,8 +3210,8 @@
             <div>
                 <div class="attendee-name">${esc(g.name)}</div>
                 <div style="display:flex;gap:4px;margin-top:3px;">
-                    ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : `<span title="Email not opened" style="font-size:10px;font-weight:600;color:#9ca3af;">Sent</span>`}
-                    ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:#475569;">Downloaded to Wallet</span>` : ''}
+                    ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : `<span title="Email not opened" style="font-size:10px;font-weight:600;color:var(--text-muted);">Sent</span>`}
+                    ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:var(--text-muted);">Downloaded to Wallet</span>` : ''}
                 </div>
             </div>
             <div class="col-email">
@@ -3422,7 +3484,7 @@
             const tz = current || browserTimezone() || 'America/New_York';
             const options = [...new Set([tz, ...COMMON_TIMEZONES])];
             return `<select id="editEventTimezone" onchange="onEventTimezoneChanged(this.value)"
-                style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;background:#fff;">${options.map(z =>
+                style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;background: var(--card);">${options.map(z =>
                 `<option value="${esc(z)}" ${z === tz ? 'selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`).join('')}</select>`;
         }
 
@@ -3680,7 +3742,7 @@
                 if (_pendingImagePreviewUrl) URL.revokeObjectURL(_pendingImagePreviewUrl);
                 _pendingImagePreviewUrl = URL.createObjectURL(blob);
                 document.getElementById('editEventImagePreview').innerHTML =
-                    `<img src="${_pendingImagePreviewUrl}" style="max-width:100%;max-height:120px;border-radius:8px;border:1px solid #eee;">`;
+                    `<img src="${_pendingImagePreviewUrl}" style="max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--border);">`;
                 const removeBtn = document.getElementById('removeEventImageBtn');
                 if (removeBtn) removeBtn.style.display = '';
                 markSettingsDirty('tab-general');
@@ -3692,7 +3754,7 @@
             _pendingEventImageBlob = null;
             _pendingRemoveImage = true;
             if (_pendingImagePreviewUrl) { URL.revokeObjectURL(_pendingImagePreviewUrl); _pendingImagePreviewUrl = null; }
-            document.getElementById('editEventImagePreview').innerHTML = '<span style="font-size:12px;color:#aaa;">No image set</span>';
+            document.getElementById('editEventImagePreview').innerHTML = '<span style="font-size:12px;color:var(--text-muted);">No image set</span>';
             const removeBtn = document.getElementById('removeEventImageBtn');
             if (removeBtn) removeBtn.style.display = 'none';
             markSettingsDirty('tab-general');
@@ -3711,50 +3773,50 @@
                 ? '#' + colorRaw.match(/\d+/g).map(n => parseInt(n).toString(16).padStart(2, '0')).join('')
                 : colorRaw;
             const imagePreview = ev.imageUrl
-                ? `<img src="${ev.imageUrl}" style="max-width:100%;max-height:120px;border-radius:8px;border:1px solid #eee;">`
-                : '<span style="font-size:12px;color:#aaa;">No image set</span>';
+                ? `<img src="${ev.imageUrl}" style="max-width:100%;max-height:120px;border-radius:8px;border:1px solid var(--border);">`
+                : '<span style="font-size:12px;color:var(--text-muted);">No image set</span>';
             return `
                 <div class="modal-section-title">General</div>
                 <div class="settings-hint">Core event details — name, date, location, and ticket price.</div>
                 <div style="margin-bottom:12px;">
                     <label for="editEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name</label>
                     <input type="text" id="editEventName" value="${esc(ev.name || '')}"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
                     <label for="editEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Start Date &amp; Time</label>
                     <input type="datetime-local" id="editEventTime" value="${_toZonedDT(ev.time, ev.timezone || browserTimezone())}"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label for="editEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Date &amp; Time <span style="font-weight:400;color:#aaa;">(optional — for multi-day events)</span></label>
+                    <label for="editEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Date &amp; Time <span style="font-weight:400;color:var(--text-muted);">(optional — for multi-day events)</span></label>
                     <input type="datetime-local" id="editEventEndTime" value="${_toZonedDT(ev.endTime, ev.timezone || browserTimezone())}"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
                     <label for="editEventTimezone" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Timezone</label>
                     ${timezoneSelectHtml(ev.timezone)}
-                    <div style="font-size:12px;color:#888;margin-top:5px;">The times above are entered and shown in this zone. Ticket emails, reminders and calendar invites all label it, so attendees never have to guess.</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">The times above are entered and shown in this zone. Ticket emails, reminders and calendar invites all label it, so attendees never have to guess.</div>
                 </div>
                 <div style="margin-bottom:12px;">
                     <label for="editEventColor" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Accent Color</label>
                     <div style="display:flex;align-items:center;gap:10px;">
                         <input type="color" id="editEventColor" value="${esc(hexColor)}"
-                            style="width:44px;height:36px;padding:2px;border:1px solid #ddd;border-radius:6px;cursor:pointer;">
-                        <span style="font-size:12px;color:#888;">Used on Apple Wallet pass background</span>
+                            style="width:44px;height:36px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer;">
+                        <span style="font-size:12px;color:var(--text-muted);">Used on Apple Wallet pass background</span>
                     </div>
                 </div>
                 <div style="margin-bottom:12px;">
                     <label for="editEventLocName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name</label>
                     <input type="text" id="editEventLocName" value="${esc(ev.location?.name || '')}"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:16px;">
                     <label for="editEventLocAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address</label>
                     <div class="addr-wrap">
                         <input type="text" id="editEventLocAddress" placeholder="Start typing an address…"
                             autocomplete="off" value="${esc(ev.location?.address || '')}"
-                            style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                            style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                         <div class="ac-dropdown" id="editEventAddressAC"></div>
                     </div>
                     <input type="hidden" id="editEventLat" value="${esc(ev.location?.lat || '')}">
@@ -3762,7 +3824,7 @@
                 </div>
                 <div style="margin-bottom:20px;">
                     <label for="editEventImage" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Image <span
-                            style="font-weight:400;color:#aaa;">(optional, replaces current)</span></label>
+                            style="font-weight:400;color:var(--text-muted);">(optional, replaces current)</span></label>
                     <div id="editEventImagePreview" style="margin-bottom:8px;">${imagePreview}</div>
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                         <input type="file" id="editEventImage" accept="image/png,image/jpeg" style="font-size:13px;" onchange="handleEventImageFileSelected(this)">
@@ -3770,59 +3832,59 @@
                     </div>
                 </div>
                 <div
-                    style="margin-bottom:20px;padding:14px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:10px;">
+                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;">
                     <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
                         <input type="checkbox" id="editEventAllowReentry" ${ev.allowReentry ? 'checked' : ''}
-                            style="width:18px;height:18px;accent-color:#1a1f3c;cursor:pointer;flex-shrink:0;">
+                            style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
                         <div>
                             <div style="font-size:13px;font-weight:600;">Allow Reentry</div>
-                            <div style="font-size:12px;color:#888;margin-top:2px;">Attendees can exit and re-enter. Scanner
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Attendees can exit and re-enter. Scanner
                                 must confirm each check-out. QR code stays active on Apple Wallet pass.</div>
                         </div>
                     </label>
                 </div>
                 <div
-                    style="margin-bottom:20px;padding:14px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:10px;">
+                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;">
                     <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
                         <input type="checkbox" id="editEventShuttleLink" ${ev.shuttleLinkEnabled ? 'checked' : ''}
                             onchange="setShuttleLinkEnabled('${eventId}', this.checked)"
-                            style="width:18px;height:18px;accent-color:#1a1f3c;cursor:pointer;flex-shrink:0;">
+                            style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
                         <div>
                             <div style="font-size:13px;font-weight:600;">Allow Shuttle Linking</div>
-                            <div style="font-size:12px;color:#888;margin-top:2px;">Lets a linked shuttle/bus app check
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Lets a linked shuttle/bus app check
                                 riders' existing tickets to board — read-only, never marks a ticket used. Only enable
                                 this if tickets for this event are <strong>never</strong> also scanned at a door.</div>
                         </div>
                     </label>
-                    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #dde3ed;">
-                        <span style="font-size:12px;color:#888;">Event ID for linking:</span>
-                        <code style="font-size:12px;background:#fff;border:1px solid #dde3ed;border-radius:4px;padding:2px 6px;">${esc(eventId)}</code>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+                        <span style="font-size:12px;color:var(--text-muted);">Event ID for linking:</span>
+                        <code style="font-size:12px;background: var(--card);border:1px solid var(--border);border-radius:4px;padding:2px 6px;">${esc(eventId)}</code>
                         <button type="button" class="btn btn-secondary btn-sm" onclick="copyToClipboard('${esc(eventId)}', this)">Copy</button>
                     </div>
                 </div>
                 <div
-                    style="margin-bottom:20px;padding:14px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:10px;">
+                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;">
                     <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
                         <input type="checkbox" id="editEventWalletLockScreen" ${ev.walletLockScreenEnabled !== false ? 'checked' : ''}
                             onchange="setWalletLockScreenEnabled('${eventId}', this.checked)"
-                            style="width:18px;height:18px;accent-color:#1a1f3c;cursor:pointer;flex-shrink:0;">
+                            style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
                         <div>
                             <div style="font-size:13px;font-weight:600;">Show on Lock Screen</div>
-                            <div style="font-size:12px;color:#888;margin-top:2px;">Apple Wallet reminds attendees near the event time and when they're close to the venue (e.g. "Tonight at 8pm"). Turn off to keep the ticket silent in Wallet — recommended if you'd rather guests not see event details on a locked phone.</div>
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Apple Wallet reminds attendees near the event time and when they're close to the venue (e.g. "Tonight at 8pm"). Turn off to keep the ticket silent in Wallet — recommended if you'd rather guests not see event details on a locked phone.</div>
                         </div>
                     </label>
                 </div>
                 <div style="margin-bottom:20px;">
-                    <label for="editEventCapacity" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Capacity <span style="font-weight:400;color:#aaa;">(optional — leave blank for unlimited)</span></label>
+                    <label for="editEventCapacity" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Capacity <span style="font-weight:400;color:var(--text-muted);">(optional — leave blank for unlimited)</span></label>
                     <input type="number" min="1" inputmode="numeric" id="editEventCapacity" placeholder="e.g. 200" value="${ev.capacity || ''}"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:20px;">
-                    <label for="editEventTicketPrice" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:#aaa;">(leave blank or 0 for free)</span></label>
+                    <label for="editEventTicketPrice" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:var(--text-muted);">(leave blank or 0 for free)</span></label>
                     <div style="position:relative;">
-                        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#888;font-size:14px;">$</span>
+                        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:14px;">$</span>
                         <input type="number" min="0" step="0.01" inputmode="decimal" id="editEventTicketPrice" placeholder="0.00" value="${ev.ticketPrice ? (ev.ticketPrice / 100).toFixed(2) : ''}"
-                            style="width:100%;padding:8px 8px 8px 24px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;">
+                            style="width:100%;padding:8px 8px 8px 24px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                     </div>
                     <div class="beta-callout">
                         <strong>Paid ticketing is a beta, testing-only feature.</strong>
@@ -4047,11 +4109,11 @@
             const fields = ev?.customFields || [];
             const rows = fields.map((f, i) => `
                 <div class="cf-row" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                    <span style="color:#aaa;font-size:13px;cursor:ns-resize;padding:0 4px;">⠿</span>
+                    <span style="color:var(--text-muted);font-size:13px;cursor:ns-resize;padding:0 4px;">⠿</span>
                     <input type="text" class="settings-cf-key" value="${esc(f)}"
-                        style="flex:1;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;">
+                        style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;">
                     <button type="button" onclick="this.closest('.cf-row').remove()"
-                        style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;">&times;</button>
+                        style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;">&times;</button>
                 </div>`).join('');
 
             return `
@@ -4059,7 +4121,7 @@
                 <div class="settings-hint">Define fields that appear when adding or editing tickets (e.g. T-Shirt Size, Meal choice).</div>
                 <div id="settingsCfRows">${rows}</div>
                 <button type="button" onclick="addSettingsCfRow()"
-                    style="width:100%;margin-top:6px;font-size:12px;color:#6366f1;background:none;border:1px dashed #c4b5fd;border-radius:6px;padding:7px 12px;cursor:pointer;">+ Add field</button>`;
+                    style="width:100%;margin-top:6px;font-size:12px;color:var(--accent-indigo);background:none;border:1px dashed #c4b5fd;border-radius:6px;padding:7px 12px;cursor:pointer;">+ Add field</button>`;
         }
 
         function addSettingsCfRow() {
@@ -4069,11 +4131,11 @@
             div.className = 'cf-row';
             div.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px;';
             div.innerHTML = `
-                <span style="color:#aaa;font-size:13px;padding:0 4px;">⠿</span>
+                <span style="color:var(--text-muted);font-size:13px;padding:0 4px;">⠿</span>
                 <input type="text" class="settings-cf-key" placeholder="e.g. T-Shirt Size"
-                    style="flex:1;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;">
+                    style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;">
                 <button type="button" onclick="this.closest('.cf-row').remove()"
-                    style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;">&times;</button>`;
+                    style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;">&times;</button>`;
             rows.appendChild(div);
             div.querySelector('.settings-cf-key').focus();
         }
@@ -4110,13 +4172,13 @@
                 if (d.sentAt) {
                     statusText = `<span style="color:#10b981;font-size:12px;">✓ Sent ${fmtDate(d.sentAt)}</span>`;
                 } else if (isUndated) {
-                    statusText = `<span style="color:#aaa;font-size:12px;">Set an event date to enable reminders</span>`;
+                    statusText = `<span style="color:var(--text-muted);font-size:12px;">Set an event date to enable reminders</span>`;
                 } else if (isPast) {
-                    statusText = `<span style="color:#aaa;font-size:12px;">Event has passed</span>`;
+                    statusText = `<span style="color:var(--text-muted);font-size:12px;">Event has passed</span>`;
                 } else if (d.enabled) {
-                    statusText = `<span style="color:#475569;font-size:12px;">Will send ~24h before event</span>`;
+                    statusText = `<span style="color:var(--text-muted);font-size:12px;">Will send ~24h before event</span>`;
                 } else {
-                    statusText = `<span style="color:#aaa;font-size:12px;">Disabled</span>`;
+                    statusText = `<span style="color:var(--text-muted);font-size:12px;">Disabled</span>`;
                 }
                 return `
                     <div class="dirty-scope" data-tab="tab-notifications">
@@ -4132,13 +4194,13 @@
                     <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;">
                         <label style="font-size:13px;font-weight:600;white-space:nowrap;">Send</label>
                         <input type="number" id="reminderHoursBefore" inputmode="numeric" value="${d.hoursBefore}" min="1" max="168" ${reminderDisabled ? 'disabled' : ''}
-                            style="width:70px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                            style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                         <label style="font-size:13px;font-weight:600;white-space:nowrap;">hours before event</label>
                     </div>
                     <div style="margin-bottom:8px;">
-                        <label style="display:block;margin-bottom:6px;font-size:12px;color:#888;">Custom message (optional — leave blank for default)</label>
+                        <label style="display:block;margin-bottom:6px;font-size:12px;color:var(--text-muted);">Custom message (optional — leave blank for default)</label>
                         <textarea id="reminderMessage" rows="3" ${reminderDisabled ? 'disabled' : ''}
-                            style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"
+                            style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"
                             placeholder="Your event is coming up in 24 hours. We look forward to seeing you!">${esc(d.message)}</textarea>
                     </div>
                     <div style="display:flex;gap:8px;margin-bottom:4px;">
@@ -4246,11 +4308,11 @@
             const hasDevices = Array.isArray(devices) && devices.length > 0;
             const deviceRows = hasDevices
                 ? devices.map(d => `
-                    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f3f3f3;">
+                    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--bg);">
                         <input type="checkbox" class="push-device-cb" value="${esc(d.token)}" style="accent-color:#6366f1;">
                         <div style="font-size:12px;">
-                            <div style="font-weight:600;color:#333;">${esc(d.email)}</div>
-                            <div style="color:#888;">Token: ${esc(d.token.slice(0, 10))}…</div>
+                            <div style="font-weight:600;color:var(--text);">${esc(d.email)}</div>
+                            <div style="color:var(--text-muted);">Token: ${esc(d.token.slice(0, 10))}…</div>
                         </div>
                     </label>
                 `).join('')
@@ -4262,22 +4324,22 @@
                     Send a notification to event subscribers or selected devices.
                 </div>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-                    <select id="pushTarget" onchange="togglePushDeviceList()" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                    <select id="pushTarget" onchange="togglePushDeviceList()" style="padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                         <option value="subscribers">Everyone subscribed</option>
                         <option value="devices">Select devices</option>
                     </select>
                 </div>
-                <div id="pushDeviceList" style="display:none;border:1px solid #eee;border-radius:8px;padding:8px;max-height:180px;overflow:auto;margin-bottom:10px;">
+                <div id="pushDeviceList" style="display:none;border:1px solid var(--border);border-radius:8px;padding:8px;max-height:180px;overflow:auto;margin-bottom:10px;">
                     ${deviceRows}
                 </div>
                 <div style="margin-bottom:8px;">
                     <label for="pushTitle" style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Title</label>
                     <input type="text" id="pushTitle" placeholder="Update • ${esc(events.find(e => e.id === eventId)?.name || 'Event')}"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;font-size:13px;" />
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;font-size:13px;" />
                 </div>
                 <div style="margin-bottom:12px;">
                     <label for="pushBody" style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Message</label>
-                    <textarea id="pushBody" rows="3" placeholder="Message…" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"></textarea>
+                    <textarea id="pushBody" rows="3" placeholder="Message…" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"></textarea>
                 </div>
                 <button class="btn btn-primary" onclick="sendPush('${eventId}', this)">Send Push</button>
             `;
@@ -4384,7 +4446,7 @@
                             <div class="access-item-row">
                                 <div class="access-avatar">${getInitials(a.email)}</div>
                                 <div class="access-info">
-                                    <div class="access-email">${esc(a.email)}${a.isSelf ? ' <span style="font-weight:normal;color:#888;font-size:11px;">(you)</span>' : ''} ${roleBadge('owner')}</div>
+                                    <div class="access-email">${esc(a.email)}${a.isSelf ? ' <span style="font-weight:normal;color:var(--text-muted);font-size:11px;">(you)</span>' : ''} ${roleBadge('owner')}</div>
                                     <div class="access-date">Owns this event — full control, and the only role that can hand it over</div>
                                 </div>
                                 ${data.canTransferOwnership ? `
@@ -4401,7 +4463,7 @@
                                         </div>
                                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
                                             <input type="email" id="transferOwnerEmail" placeholder="New owner's email" autocomplete="email"
-                                                   style="flex:1;min-width:170px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                                                   style="flex:1;min-width:170px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                                             <button class="btn btn-primary btn-sm" onclick="transferOwnership('${eventId}')">Transfer ownership</button>
                                             <button class="btn btn-sm" onclick="toggleTransferOwnership()">Cancel</button>
                                         </div>
@@ -4422,7 +4484,7 @@
                         <div class="access-item-row">
                             <div class="access-avatar">${getInitials(a.email)}</div>
                             <div class="access-info">
-                                <div class="access-email">${esc(a.email)}${a.isSelf ? ' <span style="font-weight:normal;color:#888;font-size:11px;">(you)</span>' : ''} ${roleBadge(a.role)}</div>
+                                <div class="access-email">${esc(a.email)}${a.isSelf ? ' <span style="font-weight:normal;color:var(--text-muted);font-size:11px;">(you)</span>' : ''} ${roleBadge(a.role)}</div>
                                 <div class="access-date">${esc(capSummary)}</div>
                                 <div class="access-date">Added ${fmtDate(a.claimedAt)}${a.grantedByEmail ? ' by ' + esc(a.grantedByEmail) : ''}</div>
                             </div>
@@ -4465,7 +4527,7 @@
                 <hr class="settings-divider">
                 <div class="settings-subhead">Add someone</div>
                 <div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
-                    <input type="email" id="shareEmail" placeholder="User email" autocomplete="email" style="flex:1;min-width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;" />
+                    <input type="email" id="shareEmail" placeholder="User email" autocomplete="email" style="flex:1;min-width:150px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;" />
                     <button class="btn btn-primary" onclick="shareRoom('${eventId}')">Share</button>
                 </div>
                 <div class="settings-hint" style="margin-bottom:2px;">Pick exactly what they can do. They need an account already.</div>
@@ -4788,13 +4850,13 @@
                     </div>
                 </label>
                 <div id="publicRegLinkBox" class="settings-card" style="${enabled ? '' : 'display:none;'}">
-                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Shareable Registration Link</div>
+                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted);">Shareable Registration Link</div>
                     <div style="display:flex;align-items:center;gap:6px;">
                         <input type="text" readonly value="${esc(regUrl)}"
                             onclick="this.select()"
-                            style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;color:#555;background:#f9f9f9;cursor:text;min-width:0;">
+                            style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);background:var(--bg);cursor:text;min-width:0;">
                         <button onclick="copySettingsLink('${esc(regUrl)}')"
-                            style="flex-shrink:0;padding:8px 12px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                            style="flex-shrink:0;padding:8px 12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
                             Copy
                         </button>
                     </div>
@@ -5067,21 +5129,21 @@
         function swRenderLeaf(node, path) {
             const headers = window.__swPreview.headers;
             return `
-                <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;">
+                <div style="background: var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                        <span style="font-size:10px;font-weight:700;color:#9ca3af;letter-spacing:.05em;">CONDITION</span>
+                        <span style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.05em;">CONDITION</span>
                         <button type="button" onclick="swNodeRemove('${path}')" title="Remove condition" style="border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:17px;line-height:1;padding:0 2px;">&times;</button>
                     </div>
                     <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                        <select onchange="swLeafSetField('${path}','column',this.value)" style="flex:1 1 45%;min-width:130px;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                        <select onchange="swLeafSetField('${path}','column',this.value)" style="flex:1 1 45%;min-width:130px;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                             <option value="">-- Column --</option>
                             ${headers.map(h => `<option value="${esc(h)}" ${node.column === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
                         </select>
-                        <select onchange="swLeafSetField('${path}','operator',this.value)" style="flex:1 1 45%;min-width:130px;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                        <select onchange="swLeafSetField('${path}','operator',this.value)" style="flex:1 1 45%;min-width:130px;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                             ${SW_OPERATORS.map(o => `<option value="${o.value}" ${node.operator === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
                         </select>
                         ${swNeedsValue(node.operator)
-                            ? `<input type="text" value="${esc(node.value)}" oninput="swLeafSetValue('${path}',this.value)" placeholder="value" style="flex:1 1 100%;min-width:0;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;box-sizing:border-box;">`
+                            ? `<input type="text" value="${esc(node.value)}" oninput="swLeafSetValue('${path}',this.value)" placeholder="value" style="flex:1 1 100%;min-width:0;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;box-sizing:border-box;">`
                             : ''}
                     </div>
                 </div>`;
@@ -5106,7 +5168,7 @@
             return `
                 <div style="${wrapStyle}margin-bottom:6px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-                        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#555;">
+                        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);">
                             <span>Match</span>
                             <span style="display:inline-flex;border:1px solid #c7d2fe;border-radius:999px;overflow:hidden;background:#eef2ff;">${seg('all', 'ALL')}${seg('any', 'ANY')}</span>
                             <span>of these:</span>
@@ -5180,17 +5242,17 @@
                     const name = [gv(row, map.first), gv(row, map.last)].filter(Boolean).join(' ') || '—';
                     const count = matched ? swResolveTicketCount(map, headers, row) : '';
                     return `<tr style="background:${matched ? '#ecfdf5' : 'transparent'};">
-                        <td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;text-align:center;">${matched ? '<span style="color:#059669;font-weight:700;">&#10003;</span>' : '<span style="color:#ccc;">&mdash;</span>'}</td>
-                        <td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;white-space:nowrap;">${esc(name)}</td>
-                        <td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;color:#666;white-space:nowrap;">${esc(gv(row, map.email)) || '—'}</td>
-                        <td style="padding:4px 6px;border-bottom:1px solid #f0f0f0;text-align:center;">${count ? '&times;' + count : ''}</td>
+                        <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center;">${matched ? '<span style="color:#059669;font-weight:700;">&#10003;</span>' : '<span style="color:var(--border);">&mdash;</span>'}</td>
+                        <td style="padding:4px 6px;border-bottom:1px solid var(--border);white-space:nowrap;">${esc(name)}</td>
+                        <td style="padding:4px 6px;border-bottom:1px solid var(--border);color:var(--text-muted);white-space:nowrap;">${esc(gv(row, map.email)) || '—'}</td>
+                        <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center;">${count ? '&times;' + count : ''}</td>
                     </tr>`;
                 }).join('');
                 table.innerHTML = `
-                    <div style="font-size:11px;color:#666;margin:8px 0 4px;">Preview of first ${sampleRows.length} rows (matches highlighted):</div>
-                    <div style="overflow-x:auto;border:1px solid #eee;border-radius:6px;">
+                    <div style="font-size:11px;color:var(--text-muted);margin:8px 0 4px;">Preview of first ${sampleRows.length} rows (matches highlighted):</div>
+                    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:6px;">
                       <table style="width:100%;border-collapse:collapse;font-size:11px;">
-                        <thead><tr style="background:#f9fafb;">
+                        <thead><tr style="background:var(--surface-soft);">
                           <th style="padding:4px 6px;text-align:center;font-weight:600;">Match</th>
                           <th style="padding:4px 6px;text-align:left;font-weight:600;">Name</th>
                           <th style="padding:4px 6px;text-align:left;font-weight:600;">Email</th>
@@ -5246,8 +5308,8 @@
             return `
                 <div class="settings-card">
                     <div style="margin-bottom:12px;">
-                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Step 1: Paste your form's response sheet link</label>
-                        <input type="text" id="swUrl" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;box-sizing:border-box;margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted);">Step 1: Paste your form's response sheet link</label>
+                        <input type="text" id="swUrl" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;box-sizing:border-box;margin-bottom:8px;">
                         <button class="btn btn-primary btn-sm" onclick="swPreview('${eventId}')" style="margin-right:6px;">Preview Sheet</button>
                     </div>
                     <div id="swPreviewArea"></div>
@@ -5306,7 +5368,7 @@
                         <input type="checkbox" ${checked ? 'checked' : ''} onchange="swToggleExtraColumn(${i}, this.checked)">
                         <span style="flex:1;min-width:0;">${esc(h)}</span>
                     </label>
-                    ${checked ? `<input type="text" value="${esc(label)}" oninput="swSetExtraLabel(${i}, this.value)" placeholder="Ticket label (optional — default: ${esc(h)})" style="width:100%;margin-top:3px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;box-sizing:border-box;">` : ''}
+                    ${checked ? `<input type="text" value="${esc(label)}" oninput="swSetExtraLabel(${i}, this.value)" placeholder="Ticket label (optional — default: ${esc(h)})" style="width:100%;margin-top:3px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:11px;box-sizing:border-box;">` : ''}
                 </div>`;
             }).join('');
         }
@@ -5349,7 +5411,7 @@
             const area = document.getElementById('swPreviewArea');
             area.innerHTML = `
                 <div style="margin-bottom:12px;">
-                    <div style="font-size:11px;color:#666;margin-bottom:8px;">${data.rowCount} rows, ${data.headers.length} columns</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">${data.rowCount} rows, ${data.headers.length} columns</div>
 
                     <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">When should a ticket be issued?</label>
                     <div id="swConditionsList"></div>
@@ -5358,47 +5420,47 @@
 
                     <div style="margin-bottom:8px;">
                         <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">First name column</label>
-                        <select id="swFirst" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                        <select id="swFirst" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                             ${data.headers.map(h => `<option value="${esc(h)}" ${(suggested.firstNameColumn || data.suggested.firstNameColumn) === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
                         </select>
                     </div>
                     <div style="margin-bottom:8px;">
                         <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Last name column (optional)</label>
-                        <select id="swLast" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                        <select id="swLast" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                             <option value="">-- None --</option>
                             ${data.headers.map(h => `<option value="${esc(h)}" ${(suggested.lastNameColumn || data.suggested.lastNameColumn) === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
                         </select>
                     </div>
                     <div style="margin-bottom:8px;">
                         <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Email column</label>
-                        <select id="swEmail" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                        <select id="swEmail" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                             ${data.headers.map(h => `<option value="${esc(h)}" ${(suggested.emailColumn || data.suggested.emailColumn) === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
                         </select>
                     </div>
                     <div style="margin-bottom:8px;">
                         <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Tickets per matching row</label>
-                        <select id="swTicketMode" onchange="swOnTicketModeChange()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                        <select id="swTicketMode" onchange="swOnTicketModeChange()" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                             <option value="fixed" ${ticketMode === 'fixed' ? 'selected' : ''}>Fixed number</option>
                             <option value="column" ${ticketMode === 'column' ? 'selected' : ''}>From a column (e.g. "How many guests?")</option>
                         </select>
                         <div id="swTicketFixedWrap" style="margin-top:6px;display:${ticketMode === 'column' ? 'none' : 'block'};">
-                            <input type="number" id="swTicketCount" min="1" max="10" value="${fixedCount}" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;box-sizing:border-box;">
+                            <input type="number" id="swTicketCount" min="1" max="10" value="${fixedCount}" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;box-sizing:border-box;">
                         </div>
                         <div id="swTicketColumnWrap" style="margin-top:6px;display:${ticketMode === 'column' ? 'block' : 'none'};">
-                            <select id="swTicketCountColumn" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                            <select id="swTicketCountColumn" onchange="swUpdateMatchPreview()" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                                 <option value="">-- Select column --</option>
                                 ${colOptions(suggested.ticketCountColumn)}
                             </select>
-                            <div style="font-size:11px;color:#aaa;margin-top:3px;">Reads a number from this column per row (e.g. 3 → 3 tickets). Non-numbers fall back to 1; capped at 50.</div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Reads a number from this column per row (e.g. 3 → 3 tickets). Non-numbers fall back to 1; capped at 50.</div>
                         </div>
                     </div>
                     <div style="margin-bottom:8px;">
-                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Custom fields on the ticket <span style="font-weight:400;color:#aaa;">(optional — copies these columns onto each ticket, e.g. T-shirt size, meal choice)</span></label>
-                        <div id="swExtraColumns" style="max-height:180px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;padding:8px;background:#fff;"></div>
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Custom fields on the ticket <span style="font-weight:400;color:var(--text-muted);">(optional — copies these columns onto each ticket, e.g. T-shirt size, meal choice)</span></label>
+                        <div id="swExtraColumns" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:8px;background: var(--card);"></div>
                     </div>
                     <div style="margin-bottom:8px;">
                         <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Check for new entries every</label>
-                        <select id="swInterval" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+                        <select id="swInterval" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
                             ${[1, 2, 5, 10, 15].map(intervalOpt).join('')}
                         </select>
                     </div>
@@ -5432,7 +5494,7 @@
             const url = document.getElementById('swUrl').value;
             if (!url.trim()) { showToast('Paste the sheet link first.'); return; }
             const area = document.getElementById('swPreviewArea');
-            area.innerHTML = '<div style="font-size:12px;color:#888;">Fetching sheet…</div>';
+            area.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">Fetching sheet…</div>';
             try {
                 const data = await swFetchPreview(eventId, url);
                 swRenderConnectForm(eventId, data);
@@ -5483,7 +5545,7 @@
             if (!w) return;
             document.getElementById('swArea').innerHTML = `
                 <div class="settings-card">
-                    <div id="swPreviewArea"><div style="font-size:12px;color:#888;">Loading sheet…</div></div>
+                    <div id="swPreviewArea"><div style="font-size:12px;color:var(--text-muted);">Loading sheet…</div></div>
                 </div>
             `;
             try {
@@ -5559,21 +5621,21 @@
                     New integrations should use an API key above instead.
                 </div>
                 <div class="settings-card">
-                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Event ID</div>
+                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted);">Event ID</div>
                     <div style="display:flex;align-items:center;gap:6px;margin-bottom:14px;">
                         <input type="text" readonly value="${esc(keyInfo.eventId)}" onclick="this.select()"
-                            style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;color:#555;background:#f9f9f9;cursor:text;min-width:0;">
+                            style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);background:var(--bg);cursor:text;min-width:0;">
                         <button onclick="copyToClipboard('${esc(keyInfo.eventId)}', this)"
-                            style="flex-shrink:0;padding:8px 12px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                            style="flex-shrink:0;padding:8px 12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
                             Copy
                         </button>
                     </div>
-                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#555;">Sheets key</div>
+                    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted);">Sheets key</div>
                     <div style="display:flex;align-items:center;gap:6px;">
                         <input type="text" readonly value="${esc(keyInfo.apiKey)}" onclick="this.select()"
-                            style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;color:#555;background:#f9f9f9;cursor:text;min-width:0;">
+                            style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);background:var(--bg);cursor:text;min-width:0;">
                         <button onclick="copyToClipboard('${esc(keyInfo.apiKey)}', this)"
-                            style="flex-shrink:0;padding:8px 12px;background:#f4f5f8;border:1px solid #dde3ed;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                            style="flex-shrink:0;padding:8px 12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
                             Copy
                         </button>
                     </div>
@@ -5604,11 +5666,11 @@
                     <tr>
                         <td>${esc(k.name)}</td>
                         <td><code style="font-size:11px;">${esc(k.prefix)}…</code></td>
-                        <td style="font-size:11px;color:#666;">${k.scopes.map(s => esc(s)).join(', ')}${
+                        <td style="font-size:11px;color:var(--text-muted);">${k.scopes.map(s => esc(s)).join(', ')}${
                             k.effectiveScopes.length < k.scopes.length
                                 ? `<br><span style="color:#b45309;">Narrowed to: ${k.effectiveScopes.map(s => esc(s)).join(', ') || 'nothing'} — the account that made this key no longer holds the rest.</span>`
                                 : ''}</td>
-                        <td style="font-size:11px;color:#666;">${k.lastUsedAt ? fmtDate(k.lastUsedAt) : 'Never'}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">${k.lastUsedAt ? fmtDate(k.lastUsedAt) : 'Never'}</td>
                         <td style="text-align:right;"><button class="btn btn-danger btn-sm" onclick="revokeApiKey('${esc(k.id)}')">Revoke</button></td>
                     </tr>`).join('') + '</tbody></table>'
                 : '<div class="settings-empty">No API keys yet.</div>';
@@ -5616,15 +5678,15 @@
             return `
                 ${rows}
                 <div class="settings-card" style="margin-top:12px;">
-                    <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:#555;">Create a key</div>
+                    <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-muted);">Create a key</div>
                     <input type="text" id="newApiKeyName" placeholder="What is it for? e.g. Zapier, our website"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px;margin-bottom:12px;">
                         ${API_SCOPES.map(([key, label]) => `
                             <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;cursor:pointer;">
                                 <input type="checkbox" class="api-scope-cb" value="${key}" ${key === 'checkin' ? 'checked' : ''}
                                     style="margin-top:2px;accent-color:#6366f1;">
-                                <span><code style="font-size:11px;">${key}</code><br><span style="color:#777;">${label}</span></span>
+                                <span><code style="font-size:11px;">${key}</code><br><span style="color:var(--text-muted);">${label}</span></span>
                             </label>`).join('')}
                     </div>
                     <button class="btn btn-primary btn-sm" onclick="createApiKey()">Create key</button>
@@ -5663,12 +5725,12 @@
             overlay.innerHTML = `
                 <div class="modal" style="max-width:520px;">
                     <div class="modal-header"><h2>Your new API key</h2></div>
-                    <div style="font-size:14px;color:#444;line-height:1.5;margin-bottom:14px;">
+                    <div style="font-size:14px;color:var(--text-muted);line-height:1.5;margin-bottom:14px;">
                         Copy it now — this is the only time it is shown. If you lose it, revoke the key and make another.
                     </div>
                     <div style="display:flex;gap:8px;margin-bottom:20px;">
                         <input type="text" readonly value="${esc(secret)}" onclick="this.select()"
-                            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:#f9f9f9;min-width:0;">
+                            style="flex:1;padding:10px;border:1px solid var(--border);border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:var(--bg);min-width:0;">
                         <button class="btn btn-secondary btn-sm" id="copyNewApiKey">Copy</button>
                     </div>
                     <div style="display:flex;justify-content:flex-end;">
@@ -5855,20 +5917,20 @@
                             <div class="scan-access-title">Start Scanning</div>
                             <div class="scan-access-sub">Scan this code with any camera app, or share the link — it opens straight into the scanner for this event only, no login needed.</div>
                             <div style="display:flex;gap:8px;margin-top:10px;">
-                                <input type="text" value="${esc(primary.url)}" readonly onclick="this.select()" style="flex:1;min-width:0;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:12px;">
+                                <input type="text" value="${esc(primary.url)}" readonly onclick="this.select()" style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:12px;">
                                 <button class="btn btn-primary btn-sm tap-target-sm" onclick="copySettingsLink('${esc(primary.url)}')">Copy</button>
                             </div>
                             <button class="scan-access-toggle" onclick="toggleScanAccessManage()">Manage scan links (${links.length})</button>
                         </div>
                     </div>
-                    <div id="scanAccessManage" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #eee;">
+                    <div id="scanAccessManage" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
                         <div style="display:flex;gap:8px;margin-bottom:12px;">
-                            <input type="text" id="newScanLinkLabel" placeholder="Label (e.g. Front gate iPad)" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                            <input type="text" id="newScanLinkLabel" placeholder="Label (e.g. Front gate iPad)" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                             <button class="btn btn-secondary btn-sm" onclick="generateScannerLink('${eventId}')">+ New Link</button>
                         </div>
                         ${links.map(l => `
                             <div class="link-box" style="margin-bottom:8px;">
-                                <label>${esc(l.label || 'Default')}${l.lastUsedAt ? ` <span style="font-weight:400;color:#888;font-size:11px;">last used ${fmtDate(l.lastUsedAt)}</span>` : ''}</label>
+                                <label>${esc(l.label || 'Default')}${l.lastUsedAt ? ` <span style="font-weight:400;color:var(--text-muted);font-size:11px;">last used ${fmtDate(l.lastUsedAt)}</span>` : ''}</label>
                                 <div style="display:flex;gap:8px;">
                                     <input type="text" value="${esc(l.url)}" readonly onclick="this.select()">
                                     <button class="btn btn-secondary btn-sm" onclick="copySettingsLink('${esc(l.url)}')">Copy</button>
@@ -5974,13 +6036,13 @@
                     Percentage or fixed-amount codes applied at checkout for paid events. A 100%-off code issues the ticket immediately.
                 </div>
                 <div class="settings-card" style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <input type="text" id="newCodeText" placeholder="CODE" maxlength="24" autocapitalize="characters" autocorrect="off" style="width:110px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;text-transform:uppercase;">
-                    <select id="newCodeType" style="padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                    <input type="text" id="newCodeText" placeholder="CODE" maxlength="24" autocapitalize="characters" autocorrect="off" style="width:110px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;text-transform:uppercase;">
+                    <select id="newCodeType" style="padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                         <option value="percent">% off</option>
                         <option value="fixed">$ off</option>
                     </select>
-                    <input type="number" id="newCodeValue" placeholder="Value" min="1" inputmode="numeric" style="width:80px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
-                    <input type="number" id="newCodeMaxUses" placeholder="Max uses (optional)" min="1" inputmode="numeric" style="width:150px;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;font-size:13px;">
+                    <input type="number" id="newCodeValue" placeholder="Value" min="1" inputmode="numeric" style="width:80px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
+                    <input type="number" id="newCodeMaxUses" placeholder="Max uses (optional)" min="1" inputmode="numeric" style="width:150px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                     <button class="btn btn-primary btn-sm" onclick="createDiscountCode('${eventId}')">Add Code</button>
                 </div>
                 <div id="discountRows">${rows}</div>
@@ -6047,8 +6109,8 @@
                         rows = `<table class="mini-table"><thead><tr><th>Buyer</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>` +
                             orders.map(o => `
                                 <tr>
-                                    <td>${esc(o.buyerName || '')}<br><span style="color:#999;font-size:11px;">${esc(o.buyerEmail || '')}</span></td>
-                                    <td>$${(o.amount / 100).toFixed(2)}${o.discountAmount ? `<br><span style="color:#999;font-size:11px;">$${(o.discountAmount / 100).toFixed(2)} off</span>` : ''}</td>
+                                    <td>${esc(o.buyerName || '')}<br><span style="color:var(--text-muted);font-size:11px;">${esc(o.buyerEmail || '')}</span></td>
+                                    <td>$${(o.amount / 100).toFixed(2)}${o.discountAmount ? `<br><span style="color:var(--text-muted);font-size:11px;">$${(o.discountAmount / 100).toFixed(2)} off</span>` : ''}</td>
                                     <td><span class="badge badge-${o.status}">${o.status}</span></td>
                                     <td>${fmtDate(o.createdAt)}</td>
                                     <td style="text-align:right;">
@@ -6105,7 +6167,7 @@
                     <tr>
                         <td>${esc(e.userEmail || 'system')}</td>
                         <td>${esc(e.action.replace(/[._]/g, ' '))}</td>
-                        <td style="color:#999;font-size:11px;">${fmtDate(e.createdAt)}</td>
+                        <td style="color:var(--text-muted);font-size:11px;">${fmtDate(e.createdAt)}</td>
                     </tr>`).join('');
                 return `
                     <hr class="settings-divider">
@@ -6177,7 +6239,7 @@
         function openMetricsModal(eventId) {
             const ev = events.find(e => e.id === eventId);
             document.getElementById('metricsModalTitle').textContent = (ev ? ev.name + ' — ' : '') + 'Metrics';
-            document.getElementById('metricsModalBody').innerHTML = '<div style="text-align:center;padding:32px;color:#bbb;">Loading…</div>';
+            document.getElementById('metricsModalBody').innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);">Loading…</div>';
             document.getElementById('metricsModal').style.display = 'flex';
             fetch(`/api/event/${eventId}/metrics`)
                 .then(r => r.json())
@@ -6198,7 +6260,7 @@
         }
 
         function svgBarChart(data, { labelKey, valueKey, color = '#10b981', h = 190 } = {}) {
-            if (!data.length) return '<p style="color:#bbb;font-size:13px;padding:12px 0;">No data yet.</p>';
+            if (!data.length) return '<p style="color:var(--text-muted);font-size:13px;padding:12px 0;">No data yet.</p>';
             const W = 520, H = h;
             const pad = { t: 16, r: 12, b: 44, l: 36 };
             const cW = W - pad.l - pad.r, cH = H - pad.t - pad.b;
@@ -6211,8 +6273,8 @@
             const grid = [0, 1, 2, 3, 4].map(i => {
                 const v = Math.round(maxV * i / 4);
                 const y = pad.t + cH - (i / 4) * cH;
-                return `<line x1="${pad.l}" x2="${pad.l + cW}" y1="${y}" y2="${y}" stroke="#f0f0f0" stroke-width="1"/>
-                         <text x="${pad.l - 5}" y="${y + 3.5}" text-anchor="end" font-size="10" fill="#ccc">${v}</text>`;
+                return `<line x1="${pad.l}" x2="${pad.l + cW}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-width="1"/>
+                         <text x="${pad.l - 5}" y="${y + 3.5}" text-anchor="end" font-size="10" fill="var(--border)">${v}</text>`;
             }).join('');
 
             const skip = n > 16 ? Math.ceil(n / 12) : 1;
@@ -6225,19 +6287,19 @@
                 const showLbl = i % skip === 0 || i === n - 1;
                 return `<rect x="${x}" y="${bH > 0 ? y : pad.t + cH}" width="${bW}" height="${Math.max(bH, 0)}" fill="${color}" rx="3" opacity="0.88"><title>${lbl}: ${v}</title></rect>
                          ${v > 0 && bH > 14 ? `<text x="${x + bW / 2}" y="${y - 4}" text-anchor="middle" font-size="9" fill="${color}">${v}</text>` : ''}
-                         ${showLbl ? `<text x="${x + bW / 2}" y="${pad.t + cH + 13}" text-anchor="end" font-size="10" fill="#aaa" transform="rotate(-40 ${x + bW / 2} ${pad.t + cH + 13})">${lbl}</text>` : ''}`;
+                         ${showLbl ? `<text x="${x + bW / 2}" y="${pad.t + cH + 13}" text-anchor="end" font-size="10" fill="var(--text-muted)" transform="rotate(-40 ${x + bW / 2} ${pad.t + cH + 13})">${lbl}</text>` : ''}`;
             }).join('');
 
             return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;overflow:visible;" xmlns="http://www.w3.org/2000/svg">
                 ${grid}
                 ${barsSvg}
-                <line x1="${pad.l}" x2="${pad.l}" y1="${pad.t}" y2="${pad.t + cH}" stroke="#e8e8e8" stroke-width="1"/>
-                <line x1="${pad.l}" x2="${pad.l + cW}" y1="${pad.t + cH}" y2="${pad.t + cH}" stroke="#e8e8e8" stroke-width="1"/>
+                <line x1="${pad.l}" x2="${pad.l}" y1="${pad.t}" y2="${pad.t + cH}" stroke="var(--border)" stroke-width="1"/>
+                <line x1="${pad.l}" x2="${pad.l + cW}" y1="${pad.t + cH}" y2="${pad.t + cH}" stroke="var(--border)" stroke-width="1"/>
             </svg>`;
         }
 
         function svgLineChart(data, { labelKey, valueKey, color = '#6366f1', h = 170 } = {}) {
-            if (!data.length) return '<p style="color:#bbb;font-size:13px;padding:12px 0;">No data yet.</p>';
+            if (!data.length) return '<p style="color:var(--text-muted);font-size:13px;padding:12px 0;">No data yet.</p>';
             if (data.length === 1) return svgBarChart(data, { labelKey, valueKey, color, h });
             const W = 520, H = h;
             const pad = { t: 16, r: 12, b: 44, l: 36 };
@@ -6258,14 +6320,14 @@
             const grid = [0, 1, 2, 3].map(i => {
                 const v = Math.round(maxV * i / 3);
                 const y = pad.t + cH - (i / 3) * cH;
-                return `<line x1="${pad.l}" x2="${pad.l + cW}" y1="${y}" y2="${y}" stroke="#f0f0f0" stroke-width="1"/>
-                         <text x="${pad.l - 5}" y="${y + 3.5}" text-anchor="end" font-size="10" fill="#ccc">${v}</text>`;
+                return `<line x1="${pad.l}" x2="${pad.l + cW}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-width="1"/>
+                         <text x="${pad.l - 5}" y="${y + 3.5}" text-anchor="end" font-size="10" fill="var(--border)">${v}</text>`;
             }).join('');
 
             const dotsSvg = pts.map(p => `
                 <circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${color}"><title>${p.l}: ${p.v}</title></circle>
                 ${p.v > 0 ? `<text x="${p.x}" y="${p.y - 7}" text-anchor="middle" font-size="9" fill="${color}">${p.v}</text>` : ''}
-                ${p.show ? `<text x="${p.x}" y="${pad.t + cH + 13}" text-anchor="end" font-size="10" fill="#aaa" transform="rotate(-40 ${p.x} ${pad.t + cH + 13})">${p.l}</text>` : ''}
+                ${p.show ? `<text x="${p.x}" y="${pad.t + cH + 13}" text-anchor="end" font-size="10" fill="var(--text-muted)" transform="rotate(-40 ${p.x} ${pad.t + cH + 13})">${p.l}</text>` : ''}
             `).join('');
 
             return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;overflow:visible;" xmlns="http://www.w3.org/2000/svg">
@@ -6273,8 +6335,8 @@
                 <path d="${fillPath}" fill="${color}" opacity="0.08"/>
                 <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
                 ${dotsSvg}
-                <line x1="${pad.l}" x2="${pad.l}" y1="${pad.t}" y2="${pad.t + cH}" stroke="#e8e8e8" stroke-width="1"/>
-                <line x1="${pad.l}" x2="${pad.l + cW}" y1="${pad.t + cH}" y2="${pad.t + cH}" stroke="#e8e8e8" stroke-width="1"/>
+                <line x1="${pad.l}" x2="${pad.l}" y1="${pad.t}" y2="${pad.t + cH}" stroke="var(--border)" stroke-width="1"/>
+                <line x1="${pad.l}" x2="${pad.l + cW}" y1="${pad.t + cH}" y2="${pad.t + cH}" stroke="var(--border)" stroke-width="1"/>
             </svg>`;
         }
 
@@ -6289,7 +6351,7 @@
                         <div class="metrics-bar-track"><div class="metrics-bar-fill green" style="width:${Math.round(count / maxCheckin * 100)}%"></div></div>
                         <span class="metrics-bar-value">${count}</span>
                     </div>`).join('')
-                : '<div style="color:#bbb;font-size:13px;padding:8px 0;">No check-ins recorded yet.</div>';
+                : '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">No check-ins recorded yet.</div>';
 
             const regBars = d.registrationTimeline.length
                 ? d.registrationTimeline.map(({ day, count }) => `
@@ -6298,7 +6360,7 @@
                         <div class="metrics-bar-track"><div class="metrics-bar-fill" style="width:${Math.round(count / maxReg * 100)}%"></div></div>
                         <span class="metrics-bar-value">${count}</span>
                     </div>`).join('')
-                : '<div style="color:#bbb;font-size:13px;padding:8px 0;">No registration data.</div>';
+                : '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">No registration data.</div>';
 
             const fieldSections = Object.entries(d.customFieldBreakdowns || {}).map(([field, vals]) => {
                 const maxVal = Math.max(...Object.values(vals));
@@ -6315,7 +6377,7 @@
                 <div class="metrics-stat-grid">
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.total}</div><div class="metrics-stat-label">Tickets</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num" style="color:#10b981">${d.scanned}</div><div class="metrics-stat-label">Checked In</div></div>
-                    <div class="metrics-stat"><div class="metrics-stat-num" style="color:#475569">${d.pct}%</div><div class="metrics-stat-label">Attendance</div></div>
+                    <div class="metrics-stat"><div class="metrics-stat-num" style="color:var(--text-muted)">${d.pct}%</div><div class="metrics-stat-label">Attendance</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.uniqueRegistrations}</div><div class="metrics-stat-label">Registrations</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.walletDownloads}</div><div class="metrics-stat-label">Wallet DL</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.emailOpens}</div><div class="metrics-stat-label">Email Opens</div></div>
@@ -6335,7 +6397,7 @@
             setUrlState({ view: 'admin-overview' });
             document.getElementById('emptyState').style.display = 'none';
             document.getElementById('eventDetail').style.display = 'block';
-            document.getElementById('eventDetail').innerHTML = '<div style="padding:32px;color:#bbb;text-align:center;">Loading overview…</div>';
+            document.getElementById('eventDetail').innerHTML = '<div style="padding:32px;color:var(--text-muted);text-align:center;">Loading overview…</div>';
             document.body.classList.add('event-selected');
 
             try {
@@ -6378,17 +6440,17 @@
                             <span style="font-weight:600;">${esc(e.name)}</span>
                         </div>
                     </td>
-                    <td style="color:#888;">${e.time ? new Date(e.time).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : '—'}</td>
+                    <td style="color:var(--text-muted);">${e.time ? new Date(e.time).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : '—'}</td>
                     <td style="font-weight:600;">${e.total}</td>
                     <td style="color:#10b981;font-weight:600;">${e.scanned}</td>
                     <td>
                         <div style="display:flex;align-items:center;gap:6px;">
                             <div class="admin-mini-bar-track"><div class="admin-mini-bar-fill" style="width:${e.pct}%"></div></div>
-                            <span style="font-size:12px;color:#888;">${e.pct}%</span>
+                            <span style="font-size:12px;color:var(--text-muted);">${e.pct}%</span>
                         </div>
                     </td>
-                    <td style="color:#888;">${e.walletDownloads}</td>
-                    <td style="color:#888;">${e.emailOpens}</td>
+                    <td style="color:var(--text-muted);">${e.walletDownloads}</td>
+                    <td style="color:var(--text-muted);">${e.emailOpens}</td>
                 </tr>`).join('');
 
             document.getElementById('eventDetail').innerHTML = `
@@ -6398,7 +6460,7 @@
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalEvents}</div><div class="metrics-stat-label">Events</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalTickets}</div><div class="metrics-stat-label">Total Tickets</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num" style="color:#10b981">${d.totalScanned}</div><div class="metrics-stat-label">Checked In</div></div>
-                        <div class="metrics-stat"><div class="metrics-stat-num" style="color:#475569">${d.totalPct}%</div><div class="metrics-stat-label">Overall Rate</div></div>
+                        <div class="metrics-stat"><div class="metrics-stat-num" style="color:var(--text-muted)">${d.totalPct}%</div><div class="metrics-stat-label">Overall Rate</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalWalletDownloads}</div><div class="metrics-stat-label">Wallet DLs</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalEmailOpens}</div><div class="metrics-stat-label">Email Opens</div></div>
                     </div>
@@ -6443,7 +6505,7 @@
                             <div class="access-item-row">
                                 <span style="width:10px;height:10px;border-radius:50%;background:${esc(r.event.color || '#6366f1')};flex-shrink:0;display:inline-block;"></span>
                                 <div class="access-info">
-                                    <div class="access-email">${esc(r.event.name)}${r.isMine ? ' <span style="font-weight:normal;color:#888;font-size:11px;">(in your rooms)</span>' : ''}</div>
+                                    <div class="access-email">${esc(r.event.name)}${r.isMine ? ' <span style="font-weight:normal;color:var(--text-muted);font-size:11px;">(in your rooms)</span>' : ''}</div>
                                     <div class="access-date">
                                         ${r.ticketCount} ticket${r.ticketCount === 1 ? '' : 's'}
                                         ${r.collaborators.length ? ' &middot; shared with ' + r.collaborators.map(c => esc(c.email)).join(', ') : ' &middot; not shared'}
@@ -6474,7 +6536,7 @@
                                     <td style="color:${u.emailVerified ? '#10b981' : '#b45309'};font-weight:600;">${u.emailVerified ? 'Yes' : 'No'}</td>
                                     <td>${u.ownedRooms}</td>
                                     <td>${u.sharedRooms}</td>
-                                    <td style="color:#888;">${u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
+                                    <td style="color:var(--text-muted);">${u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -6555,7 +6617,7 @@
 
         async function loadTwoFactorStatus() {
             const body = document.getElementById('twoFactorModalBody');
-            body.innerHTML = '<div style="text-align:center;padding:32px;color:#bbb;">Loading…</div>';
+            body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);">Loading…</div>';
             try {
                 const r = await fetch('/api/account/2fa/status');
                 if (!r.ok) throw new Error();
@@ -6570,7 +6632,7 @@
         function renderTwoFactorDisabled() {
             const body = document.getElementById('twoFactorModalBody');
             body.innerHTML = `
-                <div style="font-size:13px;color:#666;line-height:1.5;margin-bottom:16px;">
+                <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:16px;">
                     Two-factor authentication is currently <strong>off</strong>. Turning it on requires a 6-digit
                     code from an authenticator app (Google Authenticator, Authy, 1Password, etc.) whenever you
                     sign in from a new device.
@@ -6581,30 +6643,30 @@
 
         async function start2FASetup() {
             const body = document.getElementById('twoFactorModalBody');
-            body.innerHTML = '<div style="text-align:center;padding:32px;color:#bbb;">Generating setup code…</div>';
+            body.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);">Generating setup code…</div>';
             try {
                 const r = await fetch('/api/account/2fa/setup', { method: 'POST' });
                 const d = await r.json();
                 if (!r.ok) { showToast(d.error || 'Failed to start setup.'); renderTwoFactorDisabled(); return; }
                 body.innerHTML = `
-                    <div style="font-size:13px;color:#666;line-height:1.5;margin-bottom:14px;">
+                    <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:14px;">
                         Scan this code with your authenticator app, or enter the secret manually if you can't scan it.
                     </div>
                     <div style="text-align:center;margin-bottom:14px;">
-                        <img src="${d.qrDataUrl}" alt="Two-factor setup QR code" style="width:180px;height:180px;border:1px solid #eee;border-radius:8px;">
+                        <img src="${d.qrDataUrl}" alt="Two-factor setup QR code" style="width:180px;height:180px;border:1px solid var(--border);border-radius:8px;">
                     </div>
                     <div style="margin-bottom:16px;">
-                        <label style="display:block;margin-bottom:6px;font-size:12px;color:#888;">Manual entry secret</label>
+                        <label style="display:block;margin-bottom:6px;font-size:12px;color:var(--text-muted);">Manual entry secret</label>
                         <div style="display:flex;gap:8px;">
                             <input type="text" readonly value="${esc(d.secret)}" onclick="this.select()"
-                                style="flex:1;min-width:0;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;font-family:monospace;background:#f9f9f9;">
+                                style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;background:var(--bg);">
                             <button type="button" class="btn btn-secondary btn-sm" onclick="copyToClipboard('${esc(d.secret)}', this)">Copy</button>
                         </div>
                     </div>
                     <div style="margin-bottom:16px;">
                         <label for="twoFactorEnableCode" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Enter the 6-digit code from your app</label>
                         <input type="text" id="twoFactorEnableCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"
-                            style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;font-size:16px;letter-spacing:2px;text-align:center;">
+                            style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;font-size:16px;letter-spacing:2px;text-align:center;">
                     </div>
                     <button class="btn btn-primary" style="width:100%;" id="twoFactorVerifyBtn" onclick="verify2FAEnable()">Verify &amp; Enable</button>
                 `;
@@ -6644,11 +6706,11 @@
             const body = document.getElementById('twoFactorModalBody');
             body.innerHTML = `
                 <div style="font-size:13px;color:#10b981;font-weight:600;margin-bottom:10px;">Two-factor authentication is now enabled.</div>
-                <div style="font-size:12px;color:#c4294a;font-weight:600;margin-bottom:10px;">
+                <div style="font-size:12px;color:var(--red-text);font-weight:600;margin-bottom:10px;">
                     Save these backup codes somewhere safe — each works once if you lose access to your authenticator
                     app. They will not be shown again.
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#f8f8f8;border:1px solid #eee;border-radius:8px;padding:12px;margin-bottom:16px;font-family:monospace;font-size:13px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px;font-family:monospace;font-size:13px;">
                     ${codes.map(c => `<div>${esc(c)}</div>`).join('')}
                 </div>
                 <button type="button" class="btn btn-secondary" style="width:100%;margin-bottom:8px;"
@@ -6670,10 +6732,10 @@
                     const devices = await r.json();
                     if (devices.length) {
                         devicesHtml = devices.map(dv => `
-                            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #f3f3f3;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--bg);">
                                 <div style="min-width:0;">
                                     <div style="font-size:13px;font-weight:600;">${esc(dv.label || 'Unknown device')}</div>
-                                    <div style="font-size:11px;color:#888;">Added ${fmtDate(dv.createdAt)}${dv.lastUsedAt ? ` · Last used ${fmtDate(dv.lastUsedAt)}` : ''}</div>
+                                    <div style="font-size:11px;color:var(--text-muted);">Added ${fmtDate(dv.createdAt)}${dv.lastUsedAt ? ` · Last used ${fmtDate(dv.lastUsedAt)}` : ''}</div>
                                 </div>
                                 <button class="revoke-btn" style="flex-shrink:0;" onclick="revokeTrustedDevice('${dv.id}')">Revoke</button>
                             </div>
@@ -6691,22 +6753,22 @@
                 <div style="margin-bottom:20px;">${devicesHtml}</div>
                 <div class="modal-section-title" style="margin-bottom:8px;">Backup Codes</div>
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px;">
-                    <div style="font-size:13px;${lowCodes ? 'color:#c4294a;font-weight:600;' : 'color:#666;'}">
+                    <div style="font-size:13px;${lowCodes ? 'color:var(--red-text);font-weight:600;' : 'color:var(--text-muted);'}">
                         ${backupCodesRemaining} code${backupCodesRemaining === 1 ? '' : 's'} remaining
                         ${lowCodes ? ' — running low' : ''}
                     </div>
                     <button class="btn btn-secondary btn-sm" style="flex-shrink:0;" onclick="showRegenerateBackupCodes()">Regenerate</button>
                 </div>
-                <div id="regenerateBackupCodesForm" style="display:none;margin-bottom:20px;padding-top:8px;border-top:1px solid #f0f0f0;">
-                    <div style="font-size:12px;color:#888;margin-bottom:8px;">Enter your password to generate a fresh set of codes. Your old codes will stop working.</div>
+                <div id="regenerateBackupCodesForm" style="display:none;margin-bottom:20px;padding-top:8px;border-top:1px solid var(--border);">
+                    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Enter your password to generate a fresh set of codes. Your old codes will stop working.</div>
                     <input type="password" id="regenerateBackupCodesPassword" placeholder="Current password" autocomplete="current-password"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;margin-bottom:10px;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;margin-bottom:10px;">
                     <button class="btn btn-primary" style="width:100%;" onclick="regenerateBackupCodes()">Regenerate Backup Codes</button>
                 </div>
-                <div style="border-top:1px solid #f0f0f0;padding-top:16px;">
-                    <div style="font-size:12px;color:#888;margin-bottom:8px;">Enter your password to disable two-factor authentication.</div>
+                <div style="border-top:1px solid var(--border);padding-top:16px;">
+                    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Enter your password to disable two-factor authentication.</div>
                     <input type="password" id="twoFactorDisablePassword" placeholder="Current password" autocomplete="current-password"
-                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;margin-bottom:10px;">
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;margin-bottom:10px;">
                     <button class="btn btn-danger" style="width:100%;" onclick="disable2FA()">Disable Two-Factor Authentication</button>
                 </div>
             `;
@@ -6808,10 +6870,10 @@
             <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px">
                 <span style="font-size:17px;font-weight:600;color:#fff">Select Tickets</span>
                 <button onclick="closeTicketPicker()"
-                    style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;line-height:1">&times;</button>
+                    style="background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;line-height:1">&times;</button>
             </div>
             <div id="ticketPickerList" style="overflow-y:auto;flex:1;padding:0 12px 12px"></div>
-            <div style="padding:14px 20px;border-top:1px solid #333">
+            <div style="padding:14px 20px;border-top:1px solid var(--text)">
                 <button id="ticketPickerConfirm" class="btn btn-primary" style="width:100%">Check In Selected</button>
             </div>
         </div>
@@ -6820,7 +6882,7 @@
     <!-- Bulk Import Modal -->
     <div class="modal-overlay" id="bulkImportModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeBulkImportModal()">
-        <div class="modal" style="max-width:560px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
+        <div class="modal" style="max-width:560px;background: var(--card);border-radius:14px;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
                 <h2>➕ Add Tickets</h2>
                 <button class="modal-close" onclick="closeBulkImportModal()">&times;</button>
@@ -6828,7 +6890,7 @@
 
             <!-- Hint + CSV upload button -->
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:12px;">
-                <div style="font-size:12px;color:#888;line-height:1.5;">
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.5;">
                     Type or paste names and emails. <strong>Tab</strong> between fields, <strong>Tab from Qty</strong>
                     adds a row, <strong>Enter</strong> to import.
                 </div>
@@ -6843,16 +6905,16 @@
             <!-- Column headers -->
             <div style="display:grid;grid-template-columns:1fr 1fr 1.3fr 46px 24px;gap:4px;margin-bottom:4px;padding:0 2px;">
                 <div
-                    style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
+                    style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
                     First</div>
                 <div
-                    style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
+                    style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
                     Last</div>
                 <div
-                    style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
+                    style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;padding-left:4px;">
                     Email</div>
                 <div
-                    style="font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;text-align:center;">
+                    style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;text-align:center;">
                     Qty</div>
                 <div></div>
             </div>
@@ -6867,7 +6929,7 @@
             <!-- Options -->
             <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
                 <input type="checkbox" id="importNoEmail" style="accent-color:#6366f1;width:15px;height:15px;">
-                <label for="importNoEmail" style="font-size:13px;color:#555;cursor:pointer;">Don't send emails (add
+                <label for="importNoEmail" style="font-size:13px;color:var(--text-muted);cursor:pointer;">Don't send emails (add
                     silently)</label>
             </div>
 
@@ -6883,7 +6945,7 @@
     <!-- Edit Ticket Modal -->
     <div class="modal-overlay" id="editTicketModal" style="display:none;"
         onclick="if(event.target===this)closeEditTicketModal()">
-        <div class="modal" style="max-width:460px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
+        <div class="modal" style="max-width:460px;background: var(--card);border-radius:14px;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
                 <h2>Edit Registration</h2>
                 <div style="display:flex;align-items:center;gap:8px;">
@@ -6899,12 +6961,12 @@
             <div style="margin-bottom:12px;">
                 <label for="editTicketName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Name</label>
                 <input type="text" id="editTicketName"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
+                    style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
             <div style="margin-bottom:16px;">
                 <label for="editTicketEmail" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Email</label>
                 <input type="email" id="editTicketEmail"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;outline:none;box-sizing:border-box;" />
+                    style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;" />
             </div>
             <div id="editTicketCustomFields" style="margin-bottom:16px;"></div>
             <input type="hidden" id="editTicketId" />
@@ -6916,14 +6978,14 @@
             </div>
             <button class="btn btn-danger" style="width:100%;margin-top:4px;"
                 onclick="deleteRegistrationFromModal()">Delete Registration</button>
-            <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:#666;"></div>
+            <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:var(--text-muted);"></div>
         </div>
     </div>
 
     <!-- Image Crop Modal -->
     <div class="modal-overlay" id="imageCropModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeImageCropModal()">
-        <div class="modal" style="max-width:480px;background:#fff;border-radius:14px;max-height:90vh;overflow-y:auto;">
+        <div class="modal" style="max-width:480px;background: var(--card);border-radius:14px;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
                 <h2>Crop Event Image</h2>
                 <button class="modal-close" onclick="closeImageCropModal()">&times;</button>
@@ -6935,15 +6997,15 @@
                 <button type="button" class="crop-ratio-btn" id="cropRatioBtn-original" onclick="setCropRatio('original')">Original</button>
             </div>
 
-            <div style="display:flex;align-items:center;justify-content:center;background:#f4f5f8;border:1px solid #dde3ed;border-radius:10px;padding:12px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;justify-content:center;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;">
                 <canvas id="cropCanvas" style="cursor:grab;touch-action:none;border-radius:4px;max-width:100%;"></canvas>
             </div>
 
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-                <span style="font-size:12px;color:#888;font-weight:600;flex-shrink:0;">Zoom</span>
+                <span style="font-size:12px;color:var(--text-muted);font-weight:600;flex-shrink:0;">Zoom</span>
                 <input type="range" id="cropZoomSlider" min="1" max="3" step="0.01" value="1" style="flex:1;" oninput="setCropZoom(parseFloat(this.value))">
             </div>
-            <div style="font-size:11px;color:#aaa;text-align:center;margin-bottom:16px;">Drag the image to reposition. Scroll, or use the slider, to zoom.</div>
+            <div style="font-size:11px;color:var(--text-muted);text-align:center;margin-bottom:16px;">Drag the image to reposition. Scroll, or use the slider, to zoom.</div>
 
             <div style="display:flex;gap:8px;">
                 <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeImageCropModal()">Cancel</button>
@@ -6956,18 +7018,18 @@
         .crop-ratio-btn {
             flex: 1;
             padding: 8px 10px;
-            border: 1px solid #dde3ed;
-            background: #fff;
+            border: 1px solid var(--border);
+            background: var(--card);
             border-radius: 8px;
             font-size: 13px;
             font-weight: 600;
-            color: #333;
+            color: var(--text);
             cursor: pointer;
             font-family: inherit;
         }
-        .crop-ratio-btn span { font-weight: 400; color: #aaa; }
-        .crop-ratio-btn:hover { background: #f4f5f8; }
-        .crop-ratio-btn.active { border-color: #1a1f3c; background: #1a1f3c; color: #fff; }
+        .crop-ratio-btn span { font-weight: 400; color: var(--text-muted); }
+        .crop-ratio-btn:hover { background: var(--bg); }
+        .crop-ratio-btn.active { border-color: var(--navy); background: var(--navy); color: #fff; }
         .crop-ratio-btn.active span { color: rgba(255,255,255,0.65); }
     </style>
 
@@ -6998,7 +7060,7 @@
             width: 40px;
             height: 40px;
             border-radius: 6px;
-            background: #fff;
+            background: var(--card);
             padding: 2px;
             flex-shrink: 0;
         }
@@ -7017,7 +7079,7 @@
         }
 
         .ticket-picker-id {
-            color: #888;
+            color: var(--text-muted);
             font-size: 11px;
             margin-top: 2px;
             overflow: hidden;
@@ -7028,14 +7090,14 @@
     <script>
         function cfRowHtml(key, value, isEventField) {
             const keyAttrs = isEventField
-                ? `readonly style="width:36%;padding:7px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;background:#f8f8f8;color:#888;box-sizing:border-box;"`
-                : `placeholder="Field name" style="width:36%;padding:7px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;"`;
+                ? `readonly style="width:36%;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text-muted);box-sizing:border-box;"`
+                : `placeholder="Field name" style="width:36%;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;"`;
             return `<div class="cf-row" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                 <input type="text" class="cf-key" ${keyAttrs} value="${esc(key)}">
                 <input type="text" class="cf-value" placeholder="Value"
-                    style="flex:1;padding:7px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;" value="${esc(value)}">
+                    style="flex:1;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;" value="${esc(value)}">
                 <button type="button" onclick="this.closest('.cf-row').remove()"
-                    style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>
+                    style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>
             </div>`;
         }
 
@@ -7047,7 +7109,7 @@
 
             let html = '';
             if (eventFields.length || ticketOnlyKeys.length) {
-                html += `<div style="margin-bottom:8px;font-size:11px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.5px;">Custom Fields</div>`;
+                html += `<div style="margin-bottom:8px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Custom Fields</div>`;
             }
             html += `<div id="${containerId}-rows">`;
             eventFields.forEach(f => {
@@ -7058,7 +7120,7 @@
             });
             html += `</div>
             <button type="button" onclick="addCustomFieldRow('${containerId}-rows')"
-                style="margin-top:4px;font-size:12px;color:#6366f1;background:none;border:1px dashed #c4b5fd;border-radius:6px;padding:5px 12px;cursor:pointer;width:100%;">+ Add field</button>`;
+                style="margin-top:4px;font-size:12px;color:var(--accent-indigo);background:none;border:1px dashed #c4b5fd;border-radius:6px;padding:5px 12px;cursor:pointer;width:100%;">+ Add field</button>`;
 
             container.innerHTML = html;
         }
@@ -7071,11 +7133,11 @@
             div.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px;';
             div.innerHTML = `
                 <input type="text" class="cf-key" placeholder="Field name"
-                    style="width:36%;padding:7px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;">
+                    style="width:36%;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;">
                 <input type="text" class="cf-value" placeholder="Value"
-                    style="flex:1;padding:7px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;">
+                    style="flex:1;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;">
                 <button type="button" onclick="this.closest('.cf-row').remove()"
-                    style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>`;
+                    style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>`;
             rows.appendChild(div);
             div.querySelector('.cf-key').focus();
         }
@@ -7422,17 +7484,17 @@
                     statusBadge = `<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">✓ Checked in ${new Date(tk.used_at).toLocaleString()}</span>`;
                 }
                 const walletBadge = tk.wallet_downloaded_at
-                    ? `<div style="font-size:10px;font-weight:600;color:#475569;margin-top:3px;" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">Downloaded to Wallet</div>`
+                    ? `<div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-top:3px;" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">Downloaded to Wallet</div>`
                     : `<div style="font-size:10px;color:#d1d5db;margin-top:3px;">No wallet download</div>`;
                 const toggleBtn = checkedIn
                     ? (reentryEvent?.fullAccess ? `<button onclick="toggleTicketInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Undo Check-in</button>` : '')
                     : `<button onclick="toggleTicketInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#d1fae5;color:#065f46;border:none;border-radius:6px;cursor:pointer;">Mark Checked In</button>`;
                 const size = showLarge ? 120 : 80;
-                const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:4px;">Ticket ${i + 1}</div>` : '';
+                const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Ticket ${i + 1}</div>` : '';
                 return `<div style="text-align:center;">
                     ${label}
                     <img src="/qr/${tk.token}" style="width:${size}px;height:${size}px;display:block;margin:0 auto 6px;" />
-                    <div style="font-size:10px;color:#aaa;margin-bottom:4px;">${tk.token}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">${tk.token}</div>
                     ${statusBadge}
                     ${walletBadge}
                     ${toggleBtn}
@@ -7443,9 +7505,9 @@
             const emailOpenedAt = t.email_opened_at ? new Date(t.email_opened_at).toLocaleString() : null;
             const emailBadge = emailOpenedAt
                 ? `<span style="background:#d1fae5;color:#065f46;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;" title="Opened ${emailOpenedAt}">Opened</span>`
-                : `<span style="background:#f3f4f6;color:#9ca3af;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Sent</span>`;
+                : `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Sent</span>`;
 
-            const infoBar = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px;font-size:12px;color:#888;">
+            const infoBar = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px;font-size:12px;color:var(--text-muted);">
                 <span>${createdStr ? `Registered ${createdStr}` : ''}</span>
                 <div style="display:flex;gap:6px;align-items:center;">
                     ${emailBadge}
@@ -7455,7 +7517,7 @@
 
             preview.innerHTML = `
                 ${infoBar}
-                <div style="padding:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;margin-bottom:12px;">
+                <div style="padding:12px;background:var(--surface-soft);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;">
                     <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">${qrItems}</div>
                 </div>`;
 
@@ -7558,7 +7620,7 @@
                     + `<span style="color:#64748b;">${l.time.replace('T', ' ').replace('Z', '')}</span> `
                     + `<span style="color:#818cf8;">[${esc(l.tag)}]</span> ${esc(l.msg)}`
                     + `</div>`;
-            }).join('') || '<div style="color:#64748b;font-size:11px;">No logs yet.</div>';
+            }).join('') || '<div style="color:var(--text-muted);font-size:11px;">No logs yet.</div>';
         }
 
         function toggleLogsPanel() {
@@ -7754,7 +7816,7 @@
                 <div class="settings-hint">Design the email attendees receive with their ticket &mdash; drag blocks to reorder, edit the wording, and add a calendar invite.</div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;">
                     <button class="btn btn-primary" onclick="openEmailEditor('${eventId}')">Open email editor</button>
-                    <span style="font-size:13px;color:${customized ? '#059669' : '#94a3b8'};font-weight:600;">
+                    <span style="font-size:13px;color:${customized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
                         ${customized ? 'Using a custom layout' : 'Using the default layout'}
                     </span>
                 </div>`;

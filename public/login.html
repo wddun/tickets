@@ -5,15 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <link rel="stylesheet" href="style.css">
     <style>
-        body { justify-content: flex-start; background: #f4f5f8; }
+        body { justify-content: flex-start; background: var(--bg); }
         .page-nav {
-            background: #1a1f3c;
+            background: var(--navy);
             padding: 0 20px; height: 52px;
             display: flex; align-items: center; justify-content: space-between;
         }
         .page-nav img { height: 24px; width: auto; }
+        .page-nav .page-nav-right { display: flex; align-items: center; gap: 14px; }
         .page-nav a { font-size: 13px; color: rgba(255,255,255,.6); font-weight: 500; }
         .page-nav a:hover { color: #fff; }
 
@@ -23,10 +31,10 @@
             padding: 32px 16px 40px;
         }
         .auth-card {
-            background: #fff;
-            border: 1px solid #dde3ed;
+            background: var(--card);
+            border: 1px solid var(--border);
             border-radius: 14px;
-            box-shadow: 0 2px 12px rgba(0,0,0,.07);
+            box-shadow: var(--shadow);
             padding: 32px 28px;
             width: 100%; max-width: 400px;
         }
@@ -37,32 +45,38 @@
 
         .auth-logo { text-align: center; margin-bottom: 24px; }
         .auth-logo img { height: 32px; margin: 0 auto; }
-        .auth-title { font-size: 20px; font-weight: 800; color: #1a1f3c; text-align: center; margin-bottom: 4px; }
-        .auth-desc  { font-size: 14px; color: #64748b; text-align: center; margin-bottom: 24px; }
+        .auth-title { font-size: 20px; font-weight: 800; color: var(--text); text-align: center; margin-bottom: 4px; }
+        .auth-desc  { font-size: 14px; color: var(--text-muted); text-align: center; margin-bottom: 24px; }
 
         .toggle-row {
             text-align: center; margin-top: 18px;
-            font-size: 14px; color: #64748b;
+            font-size: 14px; color: var(--text-muted);
         }
-        .toggle-row a { color: #c4294a; font-weight: 600; text-decoration: none; }
+        .toggle-row a { color: var(--red); font-weight: 600; text-decoration: none; }
         .toggle-row a:hover { text-decoration: underline; }
 
         .footer-note {
             margin-top: 20px;
-            font-size: 11px; color: #94a3b8; text-align: center;
+            font-size: 11px; color: var(--text-muted); text-align: center;
         }
-        .footer-note a { color: #94a3b8; }
-        .footer-note a:hover { color: #64748b; }
+        .footer-note a { color: var(--text-muted); }
+        .footer-note a:hover { color: var(--text-muted); }
     </style>
 </head>
 <body>
     <nav class="page-nav">
         <a href="/"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
-        <a href="/">← Back</a>
+        <div class="page-nav-right">
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
+            <a href="/">← Back</a>
+        </div>
     </nav>
     <div class="auth-wrap" id="authWrap" style="visibility:hidden">
         <div class="auth-card">
-            <div class="auth-logo"><img src="/logo-nav-dark.svg" alt="Will's Tech Support"></div>
+            <div class="auth-logo">
+                <img class="logo-swap-light" src="/logo-nav-dark.svg" alt="Will's Tech Support">
+                <img class="logo-swap-dark" src="/logo-nav.svg" alt="Will's Tech Support">
+            </div>
             <div class="auth-title" id="authTitle">Organizer Login</div>
             <div class="auth-desc"  id="authDesc">Manage your events and tickets.</div>
 
@@ -76,7 +90,7 @@
                     <label for="password">Password</label>
                     <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password">
                 </div>
-                <label id="rememberMeRow" style="display:flex; align-items:center; gap:8px; font-size:14px; color:#475569; margin:-6px 0 18px; cursor:pointer;">
+                <label id="rememberMeRow" style="display:flex; align-items:center; gap:8px; font-size:14px; color:var(--text-muted); margin:-6px 0 18px; cursor:pointer;">
                     <input type="checkbox" id="rememberMe" checked style="width:auto;">
                     Remember me
                 </label>
@@ -86,21 +100,21 @@
             <!-- Check-your-email state (after signup or blocked login) -->
             <div id="verifyState" style="display:none; text-align:center; padding: 8px 0 4px;">
                 <div style="font-size:40px; margin-bottom:14px;">📬</div>
-                <div style="font-size:17px; font-weight:700; color:#1a1f3c; margin-bottom:8px;" id="verifyTitle">Check your email</div>
-                <div style="font-size:14px; color:#64748b; line-height:1.6; margin-bottom:22px;" id="verifyDesc">
+                <div style="font-size:17px; font-weight:700; color:var(--text); margin-bottom:8px;" id="verifyTitle">Check your email</div>
+                <div style="font-size:14px; color:var(--text-muted); line-height:1.6; margin-bottom:22px;" id="verifyDesc">
                     We sent a verification link to <strong id="verifyEmail"></strong>. Click it to activate your account.
                 </div>
-                <button id="resendBtn" onclick="resendVerification()" style="background:#f1f5f9;border:none;color:#1a1f3c;font-size:14px;font-weight:600;padding:10px 22px;border-radius:10px;cursor:pointer;width:100%;margin-bottom:10px;">
+                <button id="resendBtn" onclick="resendVerification()" style="background:var(--border);border:none;color:var(--text);font-size:14px;font-weight:600;padding:10px 22px;border-radius:10px;cursor:pointer;width:100%;margin-bottom:10px;">
                     Resend verification email
                 </button>
-                <button onclick="showAuthForm()" style="background:none;border:none;color:#94a3b8;font-size:13px;font-weight:500;cursor:pointer;padding:4px;">
+                <button onclick="showAuthForm()" style="background:none;border:none;color:var(--text-muted);font-size:13px;font-weight:500;cursor:pointer;padding:4px;">
                     ← Back to login
                 </button>
             </div>
 
             <!-- Two-factor code state (after password succeeds on a 2FA-enabled account) -->
             <div id="totpState" style="display:none;">
-                <div style="font-size:14px; color:#64748b; text-align:center; margin-bottom:20px;" id="totpPrompt">
+                <div style="font-size:14px; color:var(--text-muted); text-align:center; margin-bottom:20px;" id="totpPrompt">
                     Enter the 6-digit code from your authenticator app.
                 </div>
                 <div class="form-group">
@@ -109,21 +123,21 @@
                         onkeydown="if(event.key==='Enter'){event.preventDefault();submitTotp();}"
                         style="letter-spacing:3px; text-align:center; font-size:18px;">
                 </div>
-                <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#64748b; margin-bottom:18px; cursor:pointer;">
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); margin-bottom:18px; cursor:pointer;">
                     <input type="checkbox" id="totpRemember" style="width:auto;">
                     Remember this device for 30 days
                 </label>
                 <button type="button" id="totpSubmitBtn" onclick="submitTotp()" style="width:100%;">Verify</button>
-                <button type="button" id="totpModeToggle" onclick="toggleTotpMode()" style="background:none;border:none;color:#94a3b8;font-size:13px;font-weight:500;cursor:pointer;padding:12px 4px 0;width:100%;">
+                <button type="button" id="totpModeToggle" onclick="toggleTotpMode()" style="background:none;border:none;color:var(--text-muted);font-size:13px;font-weight:500;cursor:pointer;padding:12px 4px 0;width:100%;">
                     Use a backup code instead
                 </button>
-                <button type="button" onclick="showAuthForm()" style="background:none;border:none;color:#94a3b8;font-size:13px;font-weight:500;cursor:pointer;padding:4px;width:100%;">
+                <button type="button" onclick="showAuthForm()" style="background:none;border:none;color:var(--text-muted);font-size:13px;font-weight:500;cursor:pointer;padding:4px;width:100%;">
                     ← Back to login
                 </button>
             </div>
 
             <div class="toggle-row" id="forgotRow">
-                <a href="/forgot-password.html" style="color:#94a3b8;font-weight:500;">Forgot password?</a>
+                <a href="/forgot-password.html" style="color:var(--text-muted);font-weight:500;">Forgot password?</a>
             </div>
             <div class="toggle-row" id="toggleRow">
                 <span id="toggleText">Don't have an account?</span>
@@ -137,6 +151,17 @@
     </div>
 
     <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
         async function redirectIfAlreadyLoggedIn() {
             try {
                 const r = await fetch('/api/auth/me', { cache: 'no-store' });

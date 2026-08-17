@@ -5,13 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Verify Email | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <link rel="stylesheet" href="style.css">
     <style>
-        body { justify-content: flex-start; background: #f4f5f8; }
+        body { justify-content: flex-start; background: var(--bg); }
         .page-nav {
-            background: #1a1f3c;
+            background: var(--navy);
             padding: 0 20px; height: 52px;
-            display: flex; align-items: center;
+            display: flex; align-items: center; justify-content: space-between;
         }
         .page-nav img { height: 24px; width: auto; }
         .auth-wrap {
@@ -20,27 +27,31 @@
             padding: 40px 16px;
         }
         .auth-card {
-            background: #fff;
-            border: 1px solid #dde3ed;
+            background: var(--card);
+            border: 1px solid var(--border);
             border-radius: 14px;
-            box-shadow: 0 2px 12px rgba(0,0,0,.07);
+            box-shadow: var(--shadow);
             padding: 40px 32px;
             width: 100%; max-width: 400px;
             text-align: center;
         }
         .icon { font-size: 52px; margin-bottom: 18px; }
-        .card-title { font-size: 22px; font-weight: 800; color: #1a1f3c; margin-bottom: 10px; }
-        .card-desc  { font-size: 15px; color: #64748b; line-height: 1.6; margin-bottom: 28px; }
+        .card-title { font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 10px; }
+        .card-desc  { font-size: 15px; color: var(--text-muted); line-height: 1.6; margin-bottom: 28px; }
         .btn-primary {
-            display: inline-block; background: #1a1f3c; color: #fff;
+            display: inline-block; background: var(--navy); color: #fff;
             text-decoration: none; font-size: 15px; font-weight: 700;
             padding: 13px 32px; border-radius: 10px; width: 100%;
             box-sizing: border-box; border: none; cursor: pointer;
         }
-        .btn-primary:hover { background: #2d3561; }
+        .btn-primary:hover { background: var(--navy-dark); }
+        /* --navy and --card are the same color in dark mode, so a plain-navy
+           button on the card would have no visible edge. */
+        [data-theme="dark"] .btn-primary { background: var(--navy-mid); }
+        [data-theme="dark"] .btn-primary:hover { background: #2f3768; }
         .spinner {
-            width: 36px; height: 36px; border: 3px solid #e2e8f0;
-            border-top-color: #1a1f3c; border-radius: 50%;
+            width: 36px; height: 36px; border: 3px solid var(--border);
+            border-top-color: var(--red); border-radius: 50%;
             animation: spin 0.8s linear infinite;
             margin: 0 auto 20px;
         }
@@ -50,6 +61,7 @@
 <body>
     <nav class="page-nav">
         <a href="/"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
+        <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
     </nav>
     <div class="auth-wrap">
         <div class="auth-card" id="card">
@@ -60,6 +72,17 @@
     </div>
 
     <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
         const token = new URLSearchParams(window.location.search).get('token');
         const card  = document.getElementById('card');
 

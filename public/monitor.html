@@ -6,12 +6,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scanner Monitor | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <style>
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
+
+        :root, [data-theme="light"] {
+            --bg: #f4f5f7; --card: #ffffff; --text: #1a1a2e; --text-muted: #888888;
+            --border: #e8e8e8; --border-soft: #f4f5f7; --navy: #1a1f3c; --row-bg: #f8f9fc;
+        }
+        [data-theme="dark"] {
+            --bg: #10132a; --card: #1a1f3c; --text: #e9ecf5; --text-muted: #8b90a3;
+            --border: #252b52; --border-soft: #252b52; --navy: #1a1f3c; --row-bg: #20244a;
+        }
+        .theme-toggle {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; border-radius: 8px;
+            border: none; background: rgba(255,255,255,.08); color: #fff;
+            font-size: 14px; cursor: pointer; padding: 0;
+        }
+        .theme-toggle:hover { background: rgba(255,255,255,.14); }
 
         /* iOS Safari auto-zooms on focus for text fields under 16px */
         input, select, textarea {
@@ -20,8 +43,8 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #f4f5f7;
-            color: #1a1a2e;
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -29,7 +52,7 @@
 
         /* ── Top bar ── */
         .topbar {
-            background: #1a1f3c;
+            background: var(--navy);
             padding: 0 20px;
             height: 56px;
             display: flex;
@@ -112,7 +135,7 @@
 
         .page-sub {
             font-size: 14px;
-            color: #888;
+            color: var(--text-muted);
             margin-top: 2px;
         }
 
@@ -129,7 +152,7 @@
             gap: 6px;
             font-size: 12px;
             font-weight: 600;
-            color: #059669;
+            color: #047857;
             background: #d1fae5;
             border-radius: 20px;
             padding: 4px 10px;
@@ -176,13 +199,13 @@
         }
 
         .btn-primary {
-            background: #1a1f3c;
+            background: var(--navy);
             color: #fff;
         }
 
         .btn-secondary {
-            background: #e8eaf0;
-            color: #1a1a2e;
+            background: var(--border);
+            color: var(--text);
         }
 
         .btn-danger {
@@ -210,20 +233,20 @@
             font-weight: 600;
             cursor: pointer;
             border: 2px solid transparent;
-            background: #fff;
-            color: #888;
+            background: var(--card);
+            color: var(--text-muted);
             transition: all 0.15s;
         }
 
         .event-tab:hover {
-            border-color: #dde3ed;
-            color: #333;
+            border-color: var(--border);
+            color: var(--text);
         }
 
         .event-tab.active {
-            background: #1a1f3c;
+            background: var(--navy);
             color: #fff;
-            border-color: #1a1f3c;
+            border-color: var(--navy);
         }
 
         /* ── Scanner grid ── */
@@ -234,8 +257,8 @@
         }
 
         .scanner-card {
-            background: #fff;
-            border: 1.5px solid #e8e8e8;
+            background: var(--card);
+            border: 1.5px solid var(--border);
             border-radius: 14px;
             overflow: hidden;
             transition: box-shadow 0.15s, border-color 0.15s;
@@ -303,7 +326,7 @@
 
         .scanner-meta {
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
         }
 
         .platform-badge {
@@ -329,8 +352,8 @@
         }
 
         .badge-unknown {
-            background: #f4f5f7;
-            color: #888;
+            background: var(--border);
+            color: var(--text-muted);
         }
 
         .badge-push-off {
@@ -347,7 +370,7 @@
             align-items: center;
             gap: 8px;
             padding: 10px 12px;
-            background: #f8f9fc;
+            background: var(--row-bg);
             border-radius: 10px;
             margin-bottom: 12px;
             min-height: 42px;
@@ -382,8 +405,8 @@
         }
 
         .pill-idle {
-            background: #f4f5f7;
-            color: #aaa;
+            background: var(--border);
+            color: var(--text-muted);
         }
 
         .scan-result-name {
@@ -398,21 +421,21 @@
 
         .scan-result-event {
             font-size: 12px;
-            color: #aaa;
+            color: var(--text-muted);
         }
 
         .scanner-footer {
             display: flex;
             align-items: center;
             gap: 8px;
-            border-top: 1px solid #f4f5f7;
+            border-top: 1px solid var(--border);
             padding-top: 12px;
             flex-wrap: wrap;
         }
 
         .last-seen {
             font-size: 11px;
-            color: #bbb;
+            color: var(--text-muted);
             flex: 1;
             min-width: 0;
         }
@@ -420,8 +443,8 @@
         /* ── Details drawer ── */
         .details-drawer {
             display: none;
-            background: #f8f9fc;
-            border-top: 1px solid #e8eef6;
+            background: var(--row-bg);
+            border-top: 1px solid var(--border);
             padding: 14px 18px;
             font-size: 12px;
         }
@@ -434,7 +457,7 @@
             display: flex;
             gap: 8px;
             padding: 4px 0;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--border);
             line-height: 1.5;
         }
 
@@ -443,7 +466,7 @@
         }
 
         .details-label {
-            color: #999;
+            color: var(--text-muted);
             font-weight: 600;
             width: 100px;
             flex-shrink: 0;
@@ -454,7 +477,7 @@
         }
 
         .details-value {
-            color: #333;
+            color: var(--text);
             word-break: break-all;
         }
 
@@ -462,8 +485,8 @@
         .notify-form {
             display: none;
             padding: 14px 18px;
-            border-top: 1px solid #e8eef6;
-            background: #fff;
+            border-top: 1px solid var(--border);
+            background: var(--card);
             gap: 8px;
         }
 
@@ -475,12 +498,14 @@
         .notify-input {
             width: 100%;
             padding: 9px 11px;
-            border: 1px solid #dde3ed;
+            border: 1px solid var(--border);
             border-radius: 8px;
             font-size: 13px;
             outline: none;
             font-family: inherit;
             resize: none;
+            background: var(--card);
+            color: var(--text);
         }
 
         .notify-input:focus {
@@ -491,7 +516,7 @@
         .empty-state {
             text-align: center;
             padding: 80px 32px;
-            color: #bbb;
+            color: var(--text-muted);
             grid-column: 1/-1;
         }
 
@@ -502,7 +527,7 @@
 
         .empty-state h3 {
             font-size: 17px;
-            color: #999;
+            color: var(--text-muted);
             margin-bottom: 6px;
         }
 
@@ -526,7 +551,7 @@
         }
 
         .modal {
-            background: #fff;
+            background: var(--card);
             border-radius: 16px;
             padding: 28px;
             max-width: 440px;
@@ -553,7 +578,7 @@
             border: none;
             font-size: 22px;
             cursor: pointer;
-            color: #999;
+            color: var(--text-muted);
         }
 
         .form-group {
@@ -564,7 +589,7 @@
             display: block;
             font-size: 12px;
             font-weight: 600;
-            color: #555;
+            color: var(--text-muted);
             margin-bottom: 6px;
             text-transform: uppercase;
             letter-spacing: 0.4px;
@@ -585,6 +610,7 @@
         <div class="topbar-actions">
             <a href="/dashboard.html" class="topbar-btn">← Dashboard</a>
             <a href="/scanner.html" class="topbar-btn">Web Scanner</a>
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
             <button class="topbar-btn" onclick="logout()">Sign Out</button>
         </div>
     </div>
@@ -648,6 +674,17 @@
     </div>
 
     <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
         // ── State ──────────────────────────────────────────────────────────
         let scanners = new Map();   // pairToken → scanner object
         let events = new Map();   // eventId → event object

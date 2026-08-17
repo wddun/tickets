@@ -7,8 +7,15 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Kiosk · WTS Tickets</title>
 <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+<script>
+(function(){
+  var saved = localStorage.getItem('wts-theme');
+  var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+</script>
 <style>
-:root {
+:root, [data-theme="light"] {
     --bg-1:   #0f1429;
     --bg-2:   #1a1f3c;
     --card:   #ffffff;
@@ -18,7 +25,30 @@
     --border: #e5e7eb;
     --green:  #10b981;
     --red:    #dc2626;
+    --input-bg: #f9fafb;
+    --error-bg: #fef2f2; --error-text: #991b1b; --error-border: #fecaca;
 }
+[data-theme="dark"] {
+    --bg-1:   #10132a;
+    --bg-2:   #1a1f3c;
+    --card:   #1a1f3c;
+    --text:   #e9ecf5;
+    --muted:  #8b90a3;
+    --accent: #6366f1;
+    --border: #252b52;
+    --green:  #10b981;
+    --red:    #dc2626;
+    --input-bg: #10132a;
+    --error-bg: rgba(220,38,38,.14); --error-text: #f87171; --error-border: rgba(220,38,38,.4);
+}
+.theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.18);
+    background: rgba(255,255,255,.08); color: #fff;
+    font-size: 14px; cursor: pointer; padding: 0;
+}
+.theme-toggle:hover { background: rgba(255,255,255,.16); }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
 /* iOS Safari auto-zooms on focus for text fields under 16px */
@@ -82,14 +112,14 @@ input[type=text], input[type=email] {
     font-size: 20px;
     border: 1px solid var(--border);
     border-radius: 12px;
-    background: #f9fafb;
+    background: var(--input-bg);
     color: var(--text);
     transition: border .15s, background .15s;
 }
 input[type=text]:focus, input[type=email]:focus {
     outline: none;
     border-color: var(--accent);
-    background: white;
+    background: var(--card);
 }
 button.primary {
     width: 100%;
@@ -138,9 +168,9 @@ button.primary:disabled { opacity: .5; cursor: not-allowed; }
 }
 
 .error-banner {
-    background: #fef2f2;
-    color: #991b1b;
-    border: 1px solid #fecaca;
+    background: var(--error-bg);
+    color: var(--error-text);
+    border: 1px solid var(--error-border);
     padding: 14px;
     border-radius: 10px;
     margin-top: 14px;
@@ -209,6 +239,8 @@ footer {
 </head>
 <body>
 
+<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode" style="position:fixed;top:14px;right:14px;z-index:50;">🌙</button>
+
 <div class="shell" id="shell">
     <div class="loading-screen">
         <span class="spinner"></span> Loading event…
@@ -219,6 +251,17 @@ footer {
 
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script>
+(function(){
+    var btn = document.getElementById('theme-toggle');
+    function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+    paint();
+    btn.addEventListener('click', function(){
+        var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('wts-theme', next);
+        paint();
+    });
+})();
 const RESET_AFTER_SUCCESS_MS = 6000;
 const IDLE_RESET_MS          = 60000;
 

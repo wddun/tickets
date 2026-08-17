@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Register | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <link rel="stylesheet" href="style.css">
     <style>
         .container { max-width: 480px; padding: 24px 16px 40px; }
@@ -12,37 +19,37 @@
         .event-header {
             text-align: center; margin-bottom: 6px;
         }
-        .event-name { font-size: 22px; font-weight: 800; color: var(--navy); margin-bottom: 4px; }
+        .event-name { font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 4px; }
         .event-meta { font-size: 14px; color: var(--text-muted); }
 
         .success-box {
-            background: #fff; border: 1px solid var(--border);
+            background: var(--card); border: 1px solid var(--border);
             border-radius: 14px; padding: 28px 20px;
             text-align: center;
         }
         .success-icon { width: 52px; height: 52px; margin: 0 auto 12px; display: block; }
-        .success-title { font-size: 20px; font-weight: 800; color: var(--navy); margin-bottom: 6px; }
+        .success-title { font-size: 20px; font-weight: 800; color: var(--text); margin-bottom: 6px; }
         .success-sub   { font-size: 14px; color: var(--text-muted); margin-bottom: 22px; }
 
         .qr-img {
             width: min(180px, 70vw); height: min(180px, 70vw);
-            border-radius: 12px; border: 4px solid #fff;
+            border-radius: 12px; border: 4px solid var(--card);
             box-shadow: 0 4px 16px rgba(0,0,0,.1);
             margin: 0 auto 14px; display: block;
         }
         .ticket-token {
             font-size: 12px; font-family: monospace;
-            color: #94a3b8; margin-bottom: 20px;
+            color: var(--text-muted); margin-bottom: 20px;
         }
         .wallet-link { display: inline-block; margin-bottom: 16px; }
         .wallet-link img { height: 44px; width: auto; display: block; }
 
         .btn-outline {
-            background: var(--bg); color: var(--navy);
+            background: var(--bg); color: var(--text);
             border: 1.5px solid var(--border);
             font-size: 15px;
         }
-        .btn-outline:hover { background: #e8ecf4; }
+        .btn-outline:hover { background: var(--border); }
 
         .price-badge {
             display: inline-block;
@@ -51,13 +58,16 @@
             padding: 4px 12px; border-radius: 20px;
             margin-top: 8px;
         }
+        /* --navy and --card are the same color in dark mode, so a plain-navy
+           badge on a card would have no visible edge. */
+        [data-theme="dark"] .price-badge { background: var(--navy-mid); }
 
         .processing-box {
             text-align: center; padding: 40px 20px;
         }
         .processing-spinner {
             width: 40px; height: 40px; margin: 0 auto 16px;
-            border: 3px solid var(--border); border-top-color: var(--navy);
+            border: 3px solid var(--border); border-top-color: var(--red);
             border-radius: 50%; animation: spin 0.8s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -175,6 +185,7 @@
     </style>
 </head>
 <body>
+    <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode" style="position:fixed;top:14px;right:14px;z-index:50;">🌙</button>
     <div class="container">
         <div class="card">
             <div id="formView">
@@ -224,7 +235,7 @@
             <div id="processingView" style="display:none;">
                 <div class="processing-box">
                     <div class="processing-spinner"></div>
-                    <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:6px;">Processing your ticket…</div>
+                    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px;">Processing your ticket…</div>
                     <div style="font-size:14px;color:var(--text-muted);">This will only take a moment.</div>
                 </div>
             </div>
@@ -258,7 +269,7 @@
 
             <div id="waitlistView" style="display:none;">
                 <div class="success-box">
-                    <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <div class="success-title" id="waitlistTitle">You're on the waitlist</div>
                     <div class="success-sub" id="waitlistSub"></div>
                     <button class="btn-outline" onclick="window.location.href = window.location.pathname + '?id=' + eventId">Back</button>
@@ -287,6 +298,17 @@
     </div>
 
     <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
         const params  = new URLSearchParams(window.location.search);
         const eventId = params.get('id');
         const sessionId = params.get('session');

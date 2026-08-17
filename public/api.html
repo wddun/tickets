@@ -6,15 +6,38 @@
     <title>API | WTS Tickets</title>
     <meta name="theme-color" content="#1a1f3c">
     <meta name="description" content="Connect a WTS Tickets event to anything that can make a web request.">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
+        :root, [data-theme="light"] {
             --ink: #1e293b; --muted: #64748b; --line: #e2e8f0;
             --accent: #6366f1; --navy: #1a1f3c; --code-bg: #0f172a;
+            --page-bg: #f4f5f8; --surface: #ffffff; --code-text: #e2e8f0;
+            --scope-bg: #f1f5f9; --note-bg: #ffffff; --note-strong: #1a1f3c;
         }
+        [data-theme="dark"] {
+            --ink: #e9ecf5; --muted: #8b90a3; --line: #252b52;
+            --accent: #818cf8; --navy: #1a1f3c; --code-bg: #0a0d1c;
+            --page-bg: #10132a; --surface: #1a1f3c; --code-text: #e2e8f0;
+            --scope-bg: #252b52; --note-bg: #21274d; --note-strong: #e9ecf5;
+        }
+        .theme-toggle {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.08); color: #fff;
+            font-size: 14px; cursor: pointer; padding: 0;
+        }
+        .theme-toggle:hover { background: rgba(255,255,255,.16); }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f4f5f8; color: var(--ink);
+            background: var(--page-bg); color: var(--ink);
             -webkit-font-smoothing: antialiased; line-height: 1.6;
         }
         nav {
@@ -23,6 +46,7 @@
         }
         nav a { color: #fff; text-decoration: none; font-size: 14px; }
         nav .brand { font-weight: 800; letter-spacing: -0.3px; }
+        nav .nav-right { display: flex; align-items: center; gap: 14px; }
 
         .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 96px; display: flex; gap: 40px; }
         aside { width: 210px; flex-shrink: 0; position: sticky; top: 84px; align-self: flex-start; max-height: calc(100vh - 110px); overflow-y: auto; }
@@ -34,13 +58,17 @@
         h1 { font-size: 32px; letter-spacing: -0.7px; margin-bottom: 8px; }
         h2 { font-size: 22px; letter-spacing: -0.4px; margin: 44px 0 12px; padding-top: 8px; }
         h3 { font-size: 16px; margin: 26px 0 8px; }
-        p, li { color: #334155; margin-bottom: 12px; }
+        p, li { color: var(--ink); margin-bottom: 12px; }
         ul, ol { padding-left: 22px; }
         .lede { font-size: 17px; color: var(--muted); margin-bottom: 28px; }
+        /* No page-wide link color was ever set, so links in body text (the
+           support email, footer) fell back to the browser's default blue —
+           illegible against the dark page background. */
+        a { color: var(--accent); }
 
         code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
-               background: #eef2ff; color: #3730a3; padding: 1px 5px; border-radius: 4px; }
-        pre { background: var(--code-bg); color: #e2e8f0; padding: 16px 18px; border-radius: 10px;
+               background: var(--scope-bg); color: var(--accent); padding: 1px 5px; border-radius: 4px; }
+        pre { background: var(--code-bg); color: var(--code-text); padding: 16px 18px; border-radius: 10px;
               overflow-x: auto; margin-bottom: 16px; font-size: 13px; line-height: 1.55; }
         pre code { background: none; color: inherit; padding: 0; font-size: 13px; }
 
@@ -49,17 +77,19 @@
         th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); }
         td code { white-space: nowrap; }
 
-        .note { background: #fff; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+        .note { background: var(--note-bg); border: 1px solid var(--line); border-left: 3px solid var(--accent);
                 border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; }
-        .note.warn { border-left-color: #f59e0b; background: #fffbeb; }
-        .note strong { color: var(--navy); }
+        .note.warn { border-left-color: #f59e0b; background: rgba(245,158,11,.12); }
+        .note strong { color: var(--note-strong); }
 
         .ep { display: flex; align-items: baseline; gap: 10px; margin: 22px 0 6px; flex-wrap: wrap; }
         .verb { font-size: 11px; font-weight: 800; letter-spacing: 0.6px; padding: 3px 8px; border-radius: 5px; color: #fff; }
-        .get { background: #0284c7; } .post { background: #16a34a; }
-        .patch { background: #ca8a04; } .delete { background: #dc2626; }
+        /* Darkened from the original #0284c7/#16a34a/#ca8a04/#dc2626 — those
+           read under 4.5:1 with white text (as low as 2.9:1 for PATCH). */
+        .get { background: #0369a1; } .post { background: #15803d; }
+        .patch { background: #a16207; } .delete { background: #b91c1c; }
         .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; font-weight: 600; }
-        .scope { font-size: 11px; color: var(--muted); background: #f1f5f9; padding: 2px 7px; border-radius: 20px; }
+        .scope { font-size: 11px; color: var(--muted); background: var(--scope-bg); padding: 2px 7px; border-radius: 20px; }
 
         footer { border-top: 1px solid var(--line); padding: 24px 20px; text-align: center; color: var(--muted); font-size: 13px; }
         @media (max-width: 860px) { aside { display: none; } .wrap { padding-top: 24px; } }
@@ -68,7 +98,10 @@
 <body>
 <nav>
     <a href="/" class="brand">WTS Tickets</a>
-    <a href="/support.html">Support</a>
+    <div class="nav-right">
+        <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">🌙</button>
+        <a href="/support.html">Support</a>
+    </div>
 </nav>
 
 <div class="wrap">
@@ -441,5 +474,18 @@ for (const r of arrived.registrations) {
 </div>
 
 <footer>© 2026 Will's Tech Support · <a href="/support.html">Support</a> · <a href="/privacy.html">Privacy</a></footer>
+<script>
+    (function(){
+        var btn = document.getElementById('theme-toggle');
+        function paint(){ btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+        paint();
+        btn.addEventListener('click', function(){
+            var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('wts-theme', next);
+            paint();
+        });
+    })();
+</script>
 </body>
 </html>
