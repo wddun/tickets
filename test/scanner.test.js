@@ -318,6 +318,29 @@ describe('scan links', () => {
     test('an unknown token resolves to nothing', async () => {
         assert.equal((await anon().get('/api/scanner-links/made-up-token')).status, 404);
     });
+
+    test('resolving always says what the caller may actually do on that event', async () => {
+        // The scanner page refuses to enter an event unless the answer grants
+        // check-in, so this response is what authorizes the switch.
+        const ev = await createEvent(owner.client, { name: 'Capability Answer' });
+        const link = (await owner.client.post(`/api/event/${ev.id}/scanner-links`, {})).body.link;
+
+        const anonymous = await anon().get(`/api/scanner-links/${link.token}`);
+        assert.ok(anonymous.body.capabilities.includes('checkin'));
+
+        // A signed-in stranger holding the link gets standing check-in access
+        // to that one event — the link is the credential.
+        const stranger = await newUser(server);
+        const before = (await stranger.client.get('/api/events')).body;
+        assert.ok(!before.some(e => e.id === ev.id), 'no access before the link is used');
+
+        const resolved = await stranger.client.get(`/api/scanner-links/${link.token}`);
+        assert.equal(resolved.status, 200);
+        assert.ok(resolved.body.capabilities.includes('checkin'));
+
+        const seen = (await stranger.client.get('/api/events')).body.find(e => e.id === ev.id);
+        assert.deepEqual(seen.capabilities, ['checkin'], 'a scan link confers check-in and nothing more');
+    });
 });
 
 describe('the door display', () => {

@@ -316,6 +316,13 @@
             text-align: center;
         }
         #gateScanCancelWrap .ag-btn { width: auto; display: inline-block; padding: 12px 28px; }
+        #gateScanHint {
+            font-size: 14px;
+            color: rgba(255,255,255,0.85);
+            margin-bottom: 6px;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+        }
+        #gateScanHint strong { color: #fff; }
 
         /* ── First-time walkthrough ── */
         #walkthrough {
@@ -729,6 +736,8 @@
 
 <!-- Shown while scanning a QR from the gate (camera runs behind it) -->
 <div id="gateScanCancelWrap" style="display:none;">
+    <div id="gateScanHint">Point the camera at an event's <strong>scan link</strong> QR code</div>
+    <div id="gateScanError" class="ag-error" style="margin-bottom:10px;"></div>
     <button class="ag-btn ag-btn-secondary" onclick="cancelGateScan()">Cancel</button>
 </div>
 
@@ -1163,8 +1172,19 @@ let qrScanReturnTo = null;
 function startQuickQRScan(returnToId) {
     qrScanReturnTo = returnToId;
     document.getElementById(returnToId).classList.remove('show');
+    document.getElementById('gateScanError').textContent = '';
     document.getElementById('gateScanCancelWrap').style.display = 'block';
     ensureCameraRunning();
+}
+
+// True while the camera is open to *choose an event*, rather than to scan
+// tickets. In this mode the only QR that means anything is a scan link.
+function isChoosingEventByQR() { return qrScanReturnTo !== null; }
+
+function showGateScanError(message) {
+    const el = document.getElementById('gateScanError');
+    if (el) el.textContent = message;
+    playSound('error');
 }
 
 function startGateQRScan() { startQuickQRScan('anonGate'); }
@@ -1172,6 +1192,7 @@ function startPickerQRScan() { startQuickQRScan('eventPicker'); }
 
 function cancelGateScan() {
     document.getElementById('gateScanCancelWrap').style.display = 'none';
+    document.getElementById('gateScanError').textContent = '';
     if (qrScanReturnTo) document.getElementById(qrScanReturnTo).classList.add('show');
     qrScanReturnTo = null;
 }
@@ -1186,7 +1207,7 @@ async function submitAnonGateCode() {
     btn.disabled = true;
     btn.textContent = 'Checking…';
     const ok = await initScanLinkMode(token, {
-        onError: () => { errorEl.textContent = 'Invalid or revoked scan link.'; }
+        onError: (message) => { errorEl.textContent = message || 'Invalid or revoked scan link.'; }
     });
     if (!ok) {
         btn.disabled = false;
@@ -1196,15 +1217,28 @@ async function submitAnonGateCode() {
 
 // ── Scan-link mode: no login, locked to one event ──────────
 async function initScanLinkMode(scanToken, opts = {}) {
+    const fail = (message) => {
+        if (opts.onError) { opts.onError(message); return false; }
+        document.getElementById('scanLinkErrorOverlay').classList.add('show');
+        return false;
+    };
+
     let link;
     try {
         const r = await fetch(`/api/scanner-links/${encodeURIComponent(scanToken)}`);
         if (!r.ok) throw new Error();
         link = await r.json();
     } catch (_) {
-        if (opts.onError) { opts.onError(); return false; }
-        document.getElementById('scanLinkErrorOverlay').classList.add('show');
-        return false;
+        return fail('That scan link is invalid or has been revoked.');
+    }
+
+    // The link is what authorizes this device, so it has to actually grant
+    // something here. The server answers with the capabilities this caller
+    // really holds on that event; a link that confers no check-in right is
+    // not a way into the event, and entering it would only produce a scanner
+    // that is refused on every scan.
+    if (!(link.capabilities || []).includes('checkin')) {
+        return fail('That link does not allow checking people in for this event.');
     }
 
     document.getElementById('anonGate').classList.remove('show');
@@ -1481,7 +1515,7 @@ async function submitEventPickerCode() {
     btn.disabled = true;
     btn.textContent = 'Checking…';
     const ok = await initScanLinkMode(token, {
-        onError: () => { errorEl.textContent = 'Invalid or revoked scan link.'; }
+        onError: (message) => { errorEl.textContent = message || 'Invalid or revoked scan link.'; }
     });
     if (!ok) {
         btn.disabled = false;
@@ -1803,21 +1837,44 @@ function extractScanTokenFromQR(raw) {
 
 // ── Scan handler ──────────────────────────────────────────
 function onScanSuccess(decodedText) {
+    // "Scan QR Instead" opens the camera to *choose an event*, not to work a
+    // door. Only a scan link answers that question, so nothing else is acted
+    // on here. Falling through to the normal handler meant a plain attendee
+    // ticket got sent to /api/validate and the person was checked in — for an
+    // event that had not even been selected yet — while the picker sat
+    // dismissed and the screen showed nothing at all.
+    const choosingEvent = isChoosingEventByQR();
+
     // Display QR code — navigate straight to the display page
     if (decodedText.includes('/display.html') && decodedText.includes('token=')) {
+        if (choosingEvent) {
+            showGateScanError('That opens a door display, not an event. Scan the event\'s scan link QR code.');
+            return;
+        }
         window.location.href = decodedText;
         return;
     }
 
     // Scan-link QR — switch this scanner to that event immediately, whether
     // it's currently logged in, locked to a different event, or anonymous.
+    // The link is the authorization: initScanLinkMode checks with the server
+    // that it is real, still live, and actually confers check-in here.
     const scanLinkToken = extractScanTokenFromQR(decodedText);
     if (scanLinkToken) {
         const now = Date.now();
         if (scanLinkToken === lastScannedToken && (now - lastScanTs) < SCAN_DEBOUNCE_MS) return;
         lastScannedToken = scanLinkToken;
         lastScanTs = now;
-        initScanLinkMode(scanLinkToken);
+        initScanLinkMode(scanLinkToken, choosingEvent ? {
+            onError: (message) => showGateScanError(message || 'That scan link is invalid or has been revoked.'),
+        } : {});
+        return;
+    }
+
+    if (choosingEvent) {
+        showGateScanError(decodedText.startsWith('ticket:')
+            ? 'That is an attendee ticket, not a scan link. Nobody was checked in.'
+            : 'That QR code is not an event scan link.');
         return;
     }
 

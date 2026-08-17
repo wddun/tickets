@@ -194,6 +194,42 @@ describe('the registration page', () => {
     });
 });
 
+describe('choosing an event by QR', () => {
+    const scanner = readPublic('scanner.html');
+
+    test('only a scan link is acted on while choosing an event', async () => {
+        // "Scan QR Instead" opens the camera to pick an event, but the scan
+        // handler had no idea that was why. A plain attendee ticket fell
+        // through to /api/validate and the person was checked in — for an
+        // event that had not even been selected — while the picker sat
+        // dismissed and the screen showed nothing.
+        assert.match(scanner, /function isChoosingEventByQR/,
+            'the scan handler must be able to tell "pick an event" from "work the door"');
+        assert.match(scanner, /const choosingEvent = isChoosingEventByQR\(\);/,
+            'onScanSuccess must check which mode it is in');
+
+        const handler = scanner.slice(scanner.indexOf('function onScanSuccess'));
+        const body = handler.slice(0, handler.indexOf('let videoEl'));
+        const refusal = body.indexOf('if (choosingEvent) {');
+        const validate = body.indexOf("fetch('/api/validate'");
+        assert.ok(refusal !== -1 && validate !== -1, 'expected both branches in the scan handler');
+        assert.ok(refusal < validate, 'a ticket must be refused before it can reach /api/validate');
+    });
+
+    test('a scan link is only entered when it actually confers check-in', async () => {
+        const init = scanner.slice(scanner.indexOf('async function initScanLinkMode'));
+        assert.match(init.slice(0, 2000), /capabilities \|\| \[\]\)\.includes\('checkin'\)/,
+            'resolving a link is not enough — it has to grant check-in on that event');
+    });
+
+    test('a door-display QR does not navigate away while choosing an event', async () => {
+        const handler = scanner.slice(scanner.indexOf('function onScanSuccess'));
+        const displayBranch = handler.slice(0, handler.indexOf('const scanLinkToken'));
+        assert.match(displayBranch, /if \(choosingEvent\)/,
+            'scanning a display QR while picking an event should explain, not navigate');
+    });
+});
+
 describe('the scanner page', () => {
     const scanner = readPublic('scanner.html');
 
