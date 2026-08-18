@@ -663,6 +663,7 @@ export const stmt = {
         countByTicket: db.prepare(`SELECT COUNT(*) as cnt FROM ticketScans WHERE ticketId=?`),
         lastByTicket: db.prepare(`SELECT * FROM ticketScans WHERE ticketId=? ORDER BY scannedAt DESC LIMIT 1`),
         byEventId: db.prepare(`SELECT * FROM ticketScans WHERE eventId=? ORDER BY scannedAt DESC`),
+        lastPerTicketByEventId: db.prepare(`SELECT ticketId, MAX(scannedAt) as lastSeenAt FROM ticketScans WHERE eventId=? GROUP BY ticketId`),
     },
     walletDevices: {
         byDeviceAndSerial: db.prepare(`SELECT * FROM walletDevices WHERE deviceId=? AND serialNumber=?`),

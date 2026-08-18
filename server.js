@@ -4123,6 +4123,8 @@ app.get('/api/event/:id/tickets', requireAuthOrScanLink, (req, res) => {
         return res.status(401).json({ error: 'Unauthorized or not found' });
     }
     const tickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
+    const lastSeen = new Map(stmt.ticketScans.lastPerTicketByEventId.all(req.params.id).map(r => [r.ticketId, r.lastSeenAt]));
+    tickets.forEach(t => { t.lastSeenAt = lastSeen.get(t.id) || null; });
     res.json(tickets);
 });
 

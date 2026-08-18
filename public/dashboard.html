@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Dashboard | WTS Tickets</title>
-    <meta name="theme-color" content="#1a1f3c">
+    <meta name="theme-color" content="#ffffff">
     <!-- Installable as its own home-screen icon, separate from the scanner's
          (manifest.json) — start_url differs, so the dashboard reopens into
          itself instead of the scanner. Not linked from any other page. -->
@@ -19,13 +19,24 @@
       var saved = localStorage.getItem('wts-theme');
       var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
       document.documentElement.setAttribute('data-theme', theme);
+      var metaColor = document.querySelector('meta[name="theme-color"]');
+      if (metaColor) metaColor.setAttribute('content', theme === 'dark' ? '#1a1f3c' : '#ffffff');
     })();
     </script>
     <style>
         :root, [data-theme="light"] {
-            --bg: #f4f5f7; --card: #ffffff; --text: #1a1a2e; --text-muted: #888888;
+            --bg: #f4f5f7; --card: #ffffff; --text: #1e293b; --text-muted: #888888;
             --border: #dde3ed; --navy: #1a1f3c; --navy-mid: #252b52; --red-text: #c4294a;
             --surface-soft: #f9fafb; --accent-indigo: #4f46e5;
+            /* Header/topbar: its own surface, distinct from --navy (which
+               stays a fixed brand color for buttons/badges in both themes —
+               see the dark block below). Previously the topbar always used
+               --navy directly, so it stayed dark-navy even in light mode. */
+            --header-bg:            #ffffff;
+            --header-fg:            rgba(26,31,60,.75);
+            --header-fg-strong:     #1a1f3c;
+            --header-btn-bg:        rgba(26,31,60,.06);
+            --header-btn-bg-hover:  rgba(26,31,60,.12);
         }
         [data-theme="dark"] {
             --bg: #10132a; --card: #1a1f3c; --text: #e9ecf5;
@@ -35,15 +46,30 @@
             --text-muted: #94a3b8;
             --border: #252b52; --navy: #1a1f3c; --navy-mid: #252b52; --red-text: #e78098;
             --surface-soft: var(--navy-mid); --accent-indigo: #a5b4fc;
+            /* Unchanged from before this pass — dark mode's topbar already
+               matched the rest of the dark surface, only light mode needed
+               its own values. */
+            --header-bg:            var(--navy);
+            --header-fg:            rgba(255,255,255,.75);
+            --header-fg-strong:     #ffffff;
+            --header-btn-bg:        rgba(255,255,255,.08);
+            --header-btn-bg-hover:  rgba(255,255,255,.14);
         }
+        /* Scoped to .topbar-logo (not just the bare class) so this beats
+           .topbar-logo img's own `display: block` on specificity — otherwise
+           that rule wins the tie and both swapped images show at once. */
+        .topbar-logo .logo-swap-dark { display: none; }
+        [data-theme="dark"] .topbar-logo .logo-swap-light { display: none; }
+        [data-theme="dark"] .topbar-logo .logo-swap-dark  { display: inline-block; }
         .theme-toggle {
             display: inline-flex; align-items: center; justify-content: center;
             width: 32px; height: 32px; border-radius: 8px;
-            border: none; background: rgba(255,255,255,0.08); color: #fff;
+            border: 1px solid var(--border);
+            background: var(--header-btn-bg); color: var(--header-fg-strong);
             font-size: 15px; cursor: pointer; padding: 0;
             font-family: inherit;
         }
-        .theme-toggle:hover { background: rgba(255,255,255,0.14); }
+        .theme-toggle:hover { background: var(--header-btn-bg-hover); }
         * {
             box-sizing: border-box;
             margin: 0;
@@ -106,7 +132,8 @@
 
         /* ── Top bar ── */
         .topbar {
-            background: var(--navy);
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border);
             /* min-height (not height) + safe-area-inset-top: as a standalone
                PWA (no Safari chrome) this bar sits directly under the notch/
                Dynamic Island, so it needs room to grow into that area rather
@@ -128,9 +155,9 @@
         .topbar-actions { display: flex; align-items: center; gap: 6px; }
 
         .topbar-btn {
-            background: rgba(255,255,255,0.08);
+            background: var(--header-btn-bg);
             border: none;
-            color: rgba(255,255,255,0.75);
+            color: var(--header-fg);
             padding: 7px 13px;
             border-radius: 8px;
             font-size: 13px;
@@ -142,7 +169,7 @@
             white-space: nowrap;
             font-family: inherit;
         }
-        .topbar-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+        .topbar-btn:hover { background: var(--header-btn-bg-hover); color: var(--header-fg-strong); }
         .topbar-btn-danger { color: #fca5a5; }
         .topbar-btn-danger:hover { background: rgba(220,38,38,0.2); color: #fca5a5; }
 
@@ -2191,7 +2218,10 @@
     <div id="toastStack"></div>
 
     <div class="topbar">
-        <a href="/" class="topbar-logo"><img src="/logo-nav.svg" alt="WTS Tickets"></a>
+        <a href="/" class="topbar-logo">
+            <img class="logo-swap-light" src="/logo-nav-dark.svg" alt="WTS Tickets">
+            <img class="logo-swap-dark" src="/logo-nav.svg" alt="WTS Tickets">
+        </a>
         <div class="topbar-actions">
             <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
             <a href="/scanner.html" class="topbar-btn">
@@ -2507,7 +2537,12 @@
     <script>
         (function(){
             var btn = document.getElementById('theme-toggle');
-            function paint(){ btn.innerHTML = document.documentElement.getAttribute('data-theme') === 'dark' ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'; }
+            var metaColor = document.querySelector('meta[name="theme-color"]');
+            function paint(){
+                var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+                btn.innerHTML = dark ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+                if (metaColor) metaColor.setAttribute('content', dark ? '#1a1f3c' : '#ffffff');
+            }
             paint();
             btn.addEventListener('click', function(){
                 var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -3307,6 +3342,11 @@
             return 'Tickets';
         }
 
+        function groupLastSeenAt(tickets) {
+            const stamps = tickets.map(t => t.lastSeenAt).filter(Boolean);
+            return stamps.length ? stamps.sort().pop() : null;
+        }
+
         function renderAttendeeRows(groups) {
             const filtered = getFilteredSortedGroups(groups);
 
@@ -3353,6 +3393,11 @@
                     pill = `<span class="status-pill scanned">✓ Checked In</span>`;
                 }
 
+                const lastSeenAt = groupLastSeenAt(g.tickets);
+                const lastSeenBadge = lastSeenAt
+                    ? `<span title="Last sighting: ${new Date(lastSeenAt).toLocaleString()}" style="font-size:10px;font-weight:600;color:var(--text-muted);">Last seen ${new Date(lastSeenAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>`
+                    : '';
+
                 const allIn = scanned === total && total > 0;
                 const unchecked = total - scanned;
                 const undoBtn = (scanned > 0 && canUndo) ? `<button class="btn btn-secondary btn-sm" onclick="undoCheckin('${g.registrationId}')">Undo</button>` : '';
@@ -3367,9 +3412,10 @@
                 onchange="toggleTicketCheck('${g.registrationId}', this.checked)">
             <div>
                 <div class="attendee-name">${esc(g.name)}</div>
-                <div style="display:flex;gap:4px;margin-top:3px;">
+                <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap;">
                     ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : `<span title="Email not opened" style="font-size:10px;font-weight:600;color:var(--text-muted);">Sent</span>`}
                     ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:var(--text-muted);">Downloaded to Wallet</span>` : ''}
+                    ${lastSeenBadge}
                 </div>
             </div>
             <div class="col-email">

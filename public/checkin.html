@@ -179,6 +179,11 @@
         .sd-partial { background: var(--warning); }
         .sd-done    { background: var(--success); }
 
+        .person-lastseen {
+            font-size: 11px; color: rgba(255,255,255,0.3);
+            margin-top: 2px;
+        }
+
         .row-checkin-btn {
             background: #fff;
             border: none; color: #1a1f3c;
@@ -503,6 +508,12 @@ function buildPersonRow(a) {
     const allDone = scanned === total;
     const noDone  = scanned === 0;
 
+    const lastSeenStamps = a.tickets.map(t => t.lastSeenAt).filter(Boolean);
+    const lastSeenAt = lastSeenStamps.length ? lastSeenStamps.sort().pop() : null;
+    const lastSeenHtml = lastSeenAt
+        ? `<div class="person-lastseen" title="Last sighting: ${new Date(lastSeenAt).toLocaleString()}">Last seen ${new Date(lastSeenAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>`
+        : '';
+
     const initials = a.name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
     const avClass  = allDone ? 'av-done' : noDone ? 'av-pending' : 'av-partial';
     const sdClass  = allDone ? 'sd-done' : noDone ? 'sd-pending' : 'sd-partial';
@@ -540,6 +551,7 @@ function buildPersonRow(a) {
                         <span class="status-dot ${sdClass}"></span>
                         ${escHtml(statusTxt)}
                     </div>
+                    ${lastSeenHtml}
                 </div>
                 <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:8px;flex-shrink:0">
                     ${multiHint}${actionHtml}
