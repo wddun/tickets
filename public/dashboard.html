@@ -1694,13 +1694,14 @@
         .topbar-btn.has-dropdown::after { content: '▾'; margin-left: 3px; font-size: 11px; }
 
         /* ── Settings page (full-page, per event) ── */
-        /* Caps the whole page (title + nav + panel) at a comfortable reading
-           width and centers it — .settings-panel alone used to be the only
-           thing capped, which left a large dead gap to its right on anything
-           wider than ~950px instead of a balanced margin on both sides. */
+        /* Left-aligned like every other page in the app ("Your Events", the
+           event detail view) rather than centered — a centered settings page
+           read as inconsistent with the rest of the dashboard. The width cap
+           is generous enough that it rarely engages before an ultrawide
+           monitor; on ordinary desktop widths the sidebar + panel simply use
+           more of the available row instead of leaving a dead gap. */
         .settings-page {
-            max-width: 1120px;
-            margin: 0 auto;
+            max-width: 1320px;
         }
         .settings-page-header {
             margin-bottom: 24px;
@@ -1715,7 +1716,7 @@
         }
         .settings-layout {
             display: flex;
-            gap: 32px;
+            gap: 24px;
             align-items: flex-start;
         }
         /* Back-link and nav stick together as one unit at the top of .main's
@@ -1727,20 +1728,29 @@
            wrapped to a second line) the nav would stick a few pixels too high
            and clip behind the back-link, which itself could clip behind the
            topbar above it. One sticky element with both inside it can't drift
-           out of sync like that. Its own background covers page content
-           (the "Settings" title) scrolling underneath as it passes behind.  */
+           out of sync like that.
+           It's also given the same card treatment (border, radius, shadow)
+           as .settings-panel — a bordered box of its own instead of nav items
+           floating unbounded on the page background — so the two read as a
+           matched pair of panels rather than one panel next to loose text. */
         .settings-sidebar {
-            width: 220px;
+            width: 232px;
             flex-shrink: 0;
             position: sticky;
             top: 0;
             z-index: 6;
             background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+            padding: 16px;
             display: flex;
             flex-direction: column;
         }
         .settings-back-bar {
-            padding: 0 0 14px;
+            padding: 0 4px 14px;
+            margin-bottom: 6px;
+            border-bottom: 1px solid var(--border);
         }
         .settings-back-bar .back-btn {
             margin-bottom: 0;
@@ -1759,7 +1769,7 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
             color: var(--text-muted);
-            padding: 14px 12px 6px;
+            padding: 14px 8px 6px;
         }
         .settings-nav-group-label:first-child {
             padding-top: 0;
