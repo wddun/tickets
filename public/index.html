@@ -6,7 +6,7 @@
     <title>WTS Tickets — Event Ticketing &amp; Check-In by Will's Tech Support</title>
     <meta name="description" content="WTS Tickets is Will's Tech Support's event ticketing platform — Apple Wallet passes, QR code check-in, and real-time attendee tracking, built for organizers.">
     <link rel="canonical" href="https://tickets.willstechsupport.com/">
-    <meta name="theme-color" content="#1a1f3c">
+    <meta name="theme-color" content="#ffffff">
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/icons/icon-192.png">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -46,6 +46,8 @@
       var saved = localStorage.getItem('wts-theme');
       var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
       document.documentElement.setAttribute('data-theme', theme);
+      var metaColor = document.querySelector('meta[name="theme-color"]');
+      if (metaColor) metaColor.setAttribute('content', theme === 'dark' ? '#1a1f3c' : '#ffffff');
     })();
     </script>
     <style>
@@ -61,6 +63,17 @@
             --bg:        #f4f5f8;
             --white:     #ffffff;
             --border:    #dde3ed;
+            /* Header/nav bar: a distinct surface from --navy (which stays a
+               fixed brand color used for buttons/badges in both themes —
+               see the dark block below). Light mode gets its own light
+               surface + navy-tinted controls instead of inheriting navy
+               wholesale, which used to make the bar read as permanently
+               "dark mode" even when the rest of the page was light. */
+            --header-bg:            #ffffff;
+            --header-fg:            rgba(26,31,60,.75);
+            --header-fg-strong:     #1a1f3c;
+            --header-btn-bg:        rgba(26,31,60,.06);
+            --header-btn-bg-hover:  rgba(26,31,60,.12);
         }
         [data-theme="dark"] {
             --navy:      #1a1f3c;
@@ -76,15 +89,29 @@
             --bg:        #10132a;
             --white:     #1a1f3c;
             --border:    #252b52;
+            /* Unchanged from before this pass — dark mode's header already
+               matched the rest of the dark surface, only light mode needed
+               its own values. */
+            --header-bg:            var(--navy);
+            --header-fg:            rgba(255,255,255,.75);
+            --header-fg-strong:     #ffffff;
+            --header-btn-bg:        rgba(255,255,255,.08);
+            --header-btn-bg-hover:  rgba(255,255,255,.14);
         }
+        /* Scoped to .nav-logo (not just the bare class) so this beats
+           .nav-logo img's own `display: block` on specificity — otherwise
+           that rule wins the tie and both swapped images show at once. */
+        .nav-logo .logo-swap-dark { display: none; }
+        [data-theme="dark"] .nav-logo .logo-swap-light { display: none; }
+        [data-theme="dark"] .nav-logo .logo-swap-dark  { display: inline-block; }
         .theme-toggle {
             display: inline-flex; align-items: center; justify-content: center;
             width: 32px; height: 32px; border-radius: 8px;
-            border: 1px solid rgba(255,255,255,.18);
-            background: rgba(255,255,255,.08); color: #fff;
+            border: 1px solid var(--border);
+            background: var(--header-btn-bg); color: var(--header-fg-strong);
             font-size: 15px; cursor: pointer; padding: 0;
         }
-        .theme-toggle:hover { background: rgba(255,255,255,.16); }
+        .theme-toggle:hover { background: var(--header-btn-bg-hover); }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -99,7 +126,8 @@
         /* ── Nav ── */
         nav {
             position: sticky; top: 0; z-index: 100;
-            background: var(--navy);
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border);
             padding: 0 20px; height: 56px;
             display: flex; align-items: center; justify-content: space-between;
         }
@@ -107,12 +135,12 @@
         .nav-links { display: flex; align-items: center; gap: 4px; }
         .nav-link {
             font-size: 14px; font-weight: 500;
-            color: rgba(255,255,255,.65);
+            color: var(--header-fg);
             padding: 7px 11px; border-radius: 7px;
             transition: color .15s, background .15s;
             white-space: nowrap;
         }
-        .nav-link:hover { color: #fff; background: rgba(255,255,255,.09); }
+        .nav-link:hover { color: var(--header-fg-strong); background: var(--header-btn-bg-hover); }
         .nav-cta {
             font-size: 14px; font-weight: 600;
             /* Literal white, not var(--white) — that variable doubles as the
@@ -459,7 +487,10 @@
 <body>
 
     <nav>
-        <a href="/" class="nav-logo"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
+        <a href="/" class="nav-logo">
+            <img class="logo-swap-light" src="/logo-nav-dark.svg" alt="Will's Tech Support">
+            <img class="logo-swap-dark" src="/logo-nav.svg" alt="Will's Tech Support">
+        </a>
         <div class="nav-links">
             <a href="support.html" class="nav-link">Support</a>
             <a href="scanner.html" class="nav-link">Scanner</a>
@@ -806,7 +837,12 @@
     <script>
         (function(){
             var btn = document.getElementById('theme-toggle');
-            function paint(){ btn.innerHTML = document.documentElement.getAttribute('data-theme') === 'dark' ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'; }
+            var metaColor = document.querySelector('meta[name="theme-color"]');
+            function paint(){
+                var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+                btn.innerHTML = dark ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+                if (metaColor) metaColor.setAttribute('content', dark ? '#1a1f3c' : '#ffffff');
+            }
             paint();
             btn.addEventListener('click', function(){
                 var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
