@@ -108,11 +108,14 @@
         body.themed .wts-footer { color: var(--rt-muted); }
         body.themed .wts-footer img { filter: var(--rt-footer-filter, none); }
 
-        /* Banner / logo across the top of the card */
+        /* Banner / logo across the top of the card. --rt-header-h is a max
+           height, not a crop box — contain (not cover) so a tall or square
+           logo is never cut off, just letterboxed on the header's own
+           colour/gradient instead of zoomed and cropped. */
         .event-banner {
             display: none; width: 100%; height: var(--rt-header-h);
             background: var(--rt-header-bg, var(--rt-accent));
-            background-size: cover; background-position: center;
+            background-size: contain; background-repeat: no-repeat; background-position: center;
             margin: -1px -1px 18px; width: calc(100% + 2px);
         }
         .event-banner.show { display: block; }

@@ -670,6 +670,19 @@ function safeEmailUrl(value) {
     return /^(https?:\/\/|mailto:)/i.test(url) ? url : null;
 }
 
+// Same rule as safeEmailUrl, but an image block is the one place organisers
+// commonly paste a path copied straight out of the browser (their event's
+// own /uploads/... image) rather than a full URL — that's site-relative and
+// resolves fine on the page, but a bare "/uploads/x.png" has no base to
+// resolve against in an email client, so the image silently never loads.
+// Absolute it against BASE_URL instead of just rejecting it.
+function safeEmailImageUrl(value) {
+    const url = String(value ?? '').trim();
+    if (/^https?:\/\//i.test(url)) return url;
+    if (url.startsWith('/')) return `${BASE_URL}${url}`;
+    return null;
+}
+
 function safeEmailColor(value, fallback) {
     const color = String(value ?? '').trim();
     return /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(color) ? color : fallback;
@@ -762,7 +775,7 @@ function normalizeEmailTemplate(raw) {
                     props.height = Math.min(80, Math.max(4, parseInt(p.height, 10) || 16));
                     break;
                 case 'image':
-                    props.url = safeEmailUrl(p.url) || '';
+                    props.url = safeEmailImageUrl(p.url) || '';
                     props.href = safeEmailUrl(p.href) || '';
                     props.width = Math.min(560, Math.max(40, parseInt(p.width, 10) || 320));
                     props.align = EMAIL_ALIGNMENTS.has(p.align) ? p.align : 'center';
@@ -851,8 +864,18 @@ function renderEmailBlock(block, ctx) {
             return `<div style="height:${p.height}px;line-height:${p.height}px;font-size:0;">&nbsp;</div>`;
 
         case 'image': {
+            // p.url is already absolutized/validated by normalizeEmailTemplate
+            // (safeEmailImageUrl) — a relative /uploads/... path pasted from
+            // the dashboard used to get rejected there and silently render
+            // nothing, with no indication why.
             if (!p.url) return '';
-            const img = `<img src="${p.url}" alt="" width="${p.width}" style="width:${p.width}px;max-width:100%;height:auto;display:block;border:0;border-radius:8px;">`;
+            // Constrained by max-width AND max-height together (both auto on
+            // the other axis) rather than a fixed width — a wide banner scales
+            // to the organiser's chosen width same as before, but a tall or
+            // square logo is capped by height instead of rendering as tall as
+            // its width would otherwise force, and either way the whole image
+            // shows: nothing here crops, only scales down to fit.
+            const img = `<img src="${p.url}" alt="" style="max-width:min(${p.width}px,100%);max-height:220px;width:auto;height:auto;display:block;border:0;border-radius:8px;">`;
             return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="${p.align}">${p.href ? `<a href="${p.href}" style="text-decoration:none;">${img}</a>` : img}</td></tr></table>`;
         }
 
