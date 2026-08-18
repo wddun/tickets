@@ -709,7 +709,7 @@ function renderEmailInline(text, vars) {
 }
 
 const EMAIL_BLOCK_TYPES = new Set([
-    'header', 'text', 'intro', 'eventDetails', 'calendar', 'changes',
+    'header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'changes',
     'customFields', 'tickets', 'button', 'divider', 'spacer', 'image', 'footerNote',
 ]);
 
@@ -717,6 +717,7 @@ const DEFAULT_TICKET_EMAIL_TEMPLATE = {
     version: 1,
     settings: { accent: 'auto', pageBackground: '#f3f4f6', cardBackground: '#ffffff', subject: '' },
     blocks: [
+        { id: 'b-eventimage', type: 'eventImage', props: {} },
         { id: 'b-header', type: 'header', props: { eyebrow: 'Your Registration Confirmation', title: '{{eventName}}' } },
         { id: 'b-greeting', type: 'text', props: { text: 'Hi **{{firstName}}**,', size: 'md', align: 'left', color: '#374151' } },
         { id: 'b-body', type: 'text', props: { text: "Thank you for registering for **{{eventName}}**. This email confirms your registration and contains your event ticket. Please save this email—you'll need it to check in at the event.", size: 'sm', align: 'left', color: '#555555' } },
@@ -785,7 +786,7 @@ function normalizeEmailTemplate(raw) {
                         .slice(0, 6).map(l => String(l ?? '').slice(0, 300));
                     break;
                 default:
-                    break; // intro / changes / customFields / divider carry no props
+                    break; // intro / eventImage / changes / customFields / divider carry no props
             }
             return { id: typeof b.id === 'string' && b.id ? b.id.slice(0, 40) : `b-${i}`, type: b.type, props };
         });
@@ -817,6 +818,19 @@ function renderEmailBlock(block, ctx) {
         case 'text':
             if (!String(p.text || '').trim()) return '';
             return `<p style="font-size:${EMAIL_TEXT_SIZES[p.size] || 15}px;color:${p.color};margin:0 0 24px;line-height:1.6;text-align:${p.align};">${renderEmailInline(p.text, ctx.vars)}</p>`;
+
+        // The event's own photo, full-bleed above the header so nothing —
+        // header text included — ever sits on top of it. Sized like the
+        // organiser-added `image` block (max-width AND max-height together,
+        // both auto on the other axis): a wide banner or a tall/square logo
+        // both scale down to fit with nothing cropped, at whatever aspect
+        // ratio the organiser uploaded. Silently absent for events with no
+        // photo — nothing to show, not a broken image icon.
+        case 'eventImage':
+            if (!ctx.eventImageUrl) return '';
+            return `<tr><td align="center" style="padding:24px 24px 0;">
+    <img src="${ctx.eventImageUrl}" alt="" style="display:block;max-width:100%;max-height:240px;width:auto;height:auto;border:0;border-radius:10px;">
+    </td></tr>`;
 
         case 'intro':
             return ctx.intro ? `<p style="font-size:15px;color:#555;margin:0 0 24px;line-height:1.6;">${ctx.intro}</p>` : '';
@@ -1013,6 +1027,7 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         accentHex,
         accentTextColor,
         accentTextRgb,
+        eventImageUrl: safeEmailImageUrl(event.imageUrl) || null,
         intro,
         changesHtml,
         customFieldsHtml,
@@ -1034,9 +1049,10 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         },
     };
 
-    // A `header` block is full-bleed (its own coloured row); everything else
-    // lives inside the padded body cell. Consecutive body blocks are coalesced
-    // into a single cell so padding isn't repeated between them.
+    // `header` and `eventImage` blocks are full-bleed (their own row, not
+    // inset in the padded body cell); everything else lives inside the
+    // padded body cell. Consecutive body blocks are coalesced into a single
+    // cell so padding isn't repeated between them.
     const rows = [];
     let bodyBuffer = [];
     const flushBody = () => {
@@ -1046,7 +1062,7 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         if (inner) rows.push(`<tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">${inner}</td></tr>`);
     };
     for (const block of template.blocks) {
-        if (block.type === 'header') {
+        if (block.type === 'header' || block.type === 'eventImage') {
             flushBody();
             rows.push(renderEmailBlock(block, ctx));
         } else {
