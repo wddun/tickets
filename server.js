@@ -5524,6 +5524,31 @@ function humanEventTime(date, event) {
     return `Tonight at ${timeStr}`;
 }
 
+// The pass model's logo.png/logo@2x.png are white-on-transparent, sized for
+// the default dark/saturated backgrounds. When an organiser picks a bright
+// event color, contrastTextColor() flips the text to black — but a white
+// logo would then vanish the same way the white text would have. Recolor it
+// to black (keeping the original alpha, so anti-aliased edges stay clean)
+// the same way, and cache the result since the source logo never changes.
+let _blackLogoCache = null;
+async function getBlackLogoBuffers() {
+    if (_blackLogoCache) return _blackLogoCache;
+    const modelPath = path.resolve(__dirname, 'pass-assets.pass');
+    const blacken = async (file) => {
+        const img = sharp(path.join(modelPath, file));
+        const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
+        for (let i = 0; i < data.length; i += info.channels) {
+            data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; // RGB → black; leave alpha (i+3) untouched
+        }
+        return sharp(data, { raw: info }).png().toBuffer();
+    };
+    _blackLogoCache = {
+        logo: await blacken('logo.png'),
+        logo2x: await blacken('logo@2x.png'),
+    };
+    return _blackLogoCache;
+}
+
 // Shared helper — builds and returns a .pkpass Buffer for a ticket+event
 async function generatePassBuffer(ticket, event) {
     const certPath = path.resolve(__dirname, 'certs');
@@ -5569,6 +5594,14 @@ async function generatePassBuffer(ticket, event) {
             signerKeyPassphrase: process.env.PASS_CERT_PASSWORD || undefined,
         }
     }, passOverride);
+
+    // The model's logo is white — swap it for the black variant whenever the
+    // background is bright enough that text went black too, or it disappears.
+    if (passTextColor === "rgb(0, 0, 0)") {
+        const { logo, logo2x } = await getBlackLogoBuffers();
+        pass.addBuffer('logo.png', logo);
+        pass.addBuffer('logo@2x.png', logo2x);
+    }
 
     if (!isCheckedIn) {
         pass.setBarcodes({
