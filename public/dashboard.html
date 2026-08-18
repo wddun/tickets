@@ -317,6 +317,14 @@
         .event-card-badge.all-clear {
             background: #10b981;
         }
+        /* var(--navy) is the same color as var(--card) in dark mode by design
+           (see the .btn-primary note above), and .event-card-badge sits
+           directly on an .event-card, whose background is var(--card) — so
+           the "N/M checked in" pill had no fill at all, just floating text.
+           Same fix as the buttons above: a real, lighter surface. */
+        [data-theme="dark"] .event-card-badge:not(.all-clear) {
+            background: #5b68ab;
+        }
 
         .event-checkbox {
             display: none;
@@ -1220,6 +1228,11 @@
         .role-badge.full   { background: #dcfce7; color: #15803d; }
         .role-badge.view   { background: #e0e7ff; color: #4338ca; }
         .role-badge.custom { background: #fef3c7; color: #b45309; }
+        /* var(--navy) is the same color as var(--card)/.settings-panel in
+           dark mode by design, and this badge sits directly on the settings
+           panel — so "OWNER" rendered as plain floating text with no pill at
+           all. Same fix as the other var(--navy)-on-card surfaces. */
+        [data-theme="dark"] .role-badge.owner { background: #5b68ab; }
 
         /* Capability checklist, shared by the "add person" form and the
            per-person editor that opens under an existing collaborator. */
@@ -2163,6 +2176,10 @@
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                         Support
                     </a>
+                    <button class="dropdown-item" onclick="openReportProblemModal();closeAllDropdowns()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        Report a Problem
+                    </button>
                     <div class="dropdown-divider"></div>
                     <button class="dropdown-item" onclick="logout()">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -2230,7 +2247,10 @@
     <footer style="background:#10132a;border-top:1px solid rgba(255,255,255,0.06);padding:10px 20px calc(env(safe-area-inset-bottom, 0px) + 10px);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;">
         <img src="/logo-nav.svg" alt="WTS Tickets" style="height:20px;width:auto;opacity:0.7;">
         <span style="font-size:12px;color:rgba(255,255,255,0.28);">&copy; 2026 Will's Tech Support</span>
-        <a href="/support.html" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;">Support</a>
+        <span style="display:flex;align-items:center;gap:14px;">
+            <button type="button" onclick="openReportProblemModal()" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;background:none;border:none;padding:0;cursor:pointer;font-family:inherit;">Report a Problem</button>
+            <a href="/support.html" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;">Support</a>
+        </span>
     </footer>
 
 
@@ -2409,6 +2429,28 @@
                     style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
             </div>
             <button class="btn btn-primary" style="width:100%;" onclick="sendDirectEmail(this)">Send</button>
+        </div>
+    </div>
+
+    <!-- Report a Problem Modal -->
+    <div class="modal-overlay" id="reportProblemModal" style="display:none;z-index:200;"
+        onclick="if(event.target===this)closeReportProblemModal()">
+        <div class="modal" style="max-width:460px;background: var(--card);border-radius:14px;">
+            <div class="modal-header">
+                <h2>Report a Problem</h2>
+                <button class="modal-close" onclick="closeReportProblemModal()">&times;</button>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <button type="button" class="btn" id="reportTypeBugBtn" style="flex:1;" onclick="setReportType('bug')">Bug</button>
+                <button type="button" class="btn" id="reportTypeFeatureBtn" style="flex:1;" onclick="setReportType('feature')">Feature Request</button>
+            </div>
+            <div style="margin-bottom:16px;">
+                <label for="reportProblemMessage" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">What's going on?</label>
+                <textarea id="reportProblemMessage" rows="6" placeholder="Describe the bug or the feature you'd like to see…"
+                    style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:14px;"></textarea>
+            </div>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">This is emailed straight to support@willstechsupport.com along with your account email so we can follow up.</p>
+            <button class="btn btn-primary" style="width:100%;" onclick="submitReportProblem(this)">Send Report</button>
         </div>
     </div>
 
@@ -7102,6 +7144,12 @@
         .crop-ratio-btn:hover { background: var(--bg); }
         .crop-ratio-btn.active { border-color: var(--navy); background: var(--navy); color: #fff; }
         .crop-ratio-btn.active span { color: rgba(255,255,255,0.65); }
+        /* var(--navy) is the same color as var(--card) in dark mode by design,
+           and this button's own unselected state is already var(--card) — so
+           the "active" ratio button (the one actually selected) rendered
+           identically to every unselected one. Same fix as the buttons/badge
+           elsewhere in this file. */
+        [data-theme="dark"] .crop-ratio-btn.active { border-color: #5b68ab; background: #5b68ab; }
     </style>
 
     <style>
@@ -7791,6 +7839,51 @@
         function printTicketEmail() {
             const id = document.getElementById('editTicketId').value;
             window.open('/api/ticket/' + id + '/preview', '_blank');
+        }
+
+        let reportProblemType = 'bug';
+        function setReportType(type) {
+            reportProblemType = type;
+            const bugBtn = document.getElementById('reportTypeBugBtn');
+            const featureBtn = document.getElementById('reportTypeFeatureBtn');
+            bugBtn.className = 'btn ' + (type === 'bug' ? 'btn-primary' : 'btn-secondary');
+            featureBtn.className = 'btn ' + (type === 'feature' ? 'btn-primary' : 'btn-secondary');
+        }
+
+        function openReportProblemModal() {
+            document.getElementById('reportProblemMessage').value = '';
+            setReportType('bug');
+            document.getElementById('reportProblemModal').style.display = 'flex';
+        }
+
+        function closeReportProblemModal() {
+            document.getElementById('reportProblemModal').style.display = 'none';
+        }
+
+        async function submitReportProblem(btn) {
+            const message = document.getElementById('reportProblemMessage').value.trim();
+            if (!message) return showToast('Please describe the issue first.');
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            try {
+                const r = await fetch('/api/support/report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: reportProblemType, message, page: location.pathname })
+                });
+                if (r.ok) {
+                    closeReportProblemModal();
+                    showToast('Thanks — your report has been sent.');
+                } else {
+                    const d = await r.json();
+                    showToast(d.error || 'Failed to send your report.');
+                }
+            } catch {
+                showToast('Failed to send your report.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Send Report';
+            }
         }
         async function submitEditTicket(noEmail = false) {
             const id = document.getElementById('editTicketId').value;

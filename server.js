@@ -1556,6 +1556,14 @@ const validateLimiter = makeLimiter({
     message: { error: 'Too many scan requests.' }
 });
 
+const supportReportLimiter = makeLimiter({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many reports sent. Please try again later.' }
+});
+
 // Create pass-cache directory for pre-generated .pkpass files
 const passCacheDir = process.env.PASS_CACHE_DIR
     ? path.resolve(process.env.PASS_CACHE_DIR)
@@ -1922,6 +1930,47 @@ const requireAuth = (req, res, next) => {
     if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
     next();
 };
+
+// "Report a problem" — a bug report or feature request from inside the app,
+// emailed straight to support rather than making the user leave and compose
+// their own message. Requires login so a report always carries a real
+// reply-to address and we're not an open mail relay for anonymous input.
+app.post('/api/support/report', requireAuth, supportReportLimiter, async (req, res) => {
+    const { type, message } = req.body || {};
+    if (type !== 'bug' && type !== 'feature') return res.status(400).json({ error: 'Invalid report type.' });
+    const trimmed = String(message || '').trim();
+    if (!trimmed) return res.status(400).json({ error: 'Please describe the issue.' });
+    if (trimmed.length > 4000) return res.status(400).json({ error: 'Message is too long.' });
+
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const escaped = trimmed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    const label = type === 'bug' ? 'Bug Report' : 'Feature Request';
+    const pageUrl = String(req.body.page || '').slice(0, 300).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    try {
+        await sendEmail({
+            to: REPLY_TO_EMAIL,
+            subject: `[${label}] from ${user.email}`,
+            html: `
+                <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+                    <p><strong>${label}</strong> submitted from WTS Tickets</p>
+                    <p>From: ${user.name ? `${user.name} ` : ''}&lt;${user.email}&gt;</p>
+                    ${pageUrl ? `<p>Page: ${pageUrl}</p>` : ''}
+                    <div style="margin-top:16px;padding:16px;background:#f9fafb;border-left:4px solid #6366f1;border-radius:8px;">
+                        <p style="white-space:pre-wrap;margin:0;">${escaped}</p>
+                    </div>
+                </div>`,
+            replyTo: user.email,
+        });
+        log('support-report', `[${type}] from ${user.email}: ${trimmed.slice(0, 120)}`);
+        res.json({ success: true });
+    } catch (err) {
+        log('support-report', `[ERR] Failed to send report from ${user.email}: ${err.message}`);
+        res.status(500).json({ error: 'Failed to send your report. Please email support@willstechsupport.com directly.' });
+    }
+});
 
 // --- Optional TOTP two-factor auth (account settings) ---
 
