@@ -1694,6 +1694,14 @@
         .topbar-btn.has-dropdown::after { content: '▾'; margin-left: 3px; font-size: 11px; }
 
         /* ── Settings page (full-page, per event) ── */
+        /* Caps the whole page (title + nav + panel) at a comfortable reading
+           width and centers it — .settings-panel alone used to be the only
+           thing capped, which left a large dead gap to its right on anything
+           wider than ~950px instead of a balanced margin on both sides. */
+        .settings-page {
+            max-width: 1120px;
+            margin: 0 auto;
+        }
         .settings-page-header {
             margin-bottom: 24px;
         }
@@ -1710,31 +1718,51 @@
             gap: 32px;
             align-items: flex-start;
         }
-        /* Sticks to the top of .main's scroll area so it's always reachable
-           without scrolling back up — background covers content scrolling
-           underneath it. .settings-nav's top offset is pushed down by this
-           bar's height (see JS-measured --settings-back-bar-h below) so the
-           two stickies stack without overlapping. */
-        .settings-back-bar {
+        /* Back-link and nav stick together as one unit at the top of .main's
+           scroll area, so "back to event" and every tab stay reachable
+           without scrolling up. Previously these were two separately-sticky
+           elements, with a JS-measured CSS variable pushing the nav down by
+           the back-link's rendered height so they wouldn't overlap — any time
+           that measurement went stale (the window resized, the back label
+           wrapped to a second line) the nav would stick a few pixels too high
+           and clip behind the back-link, which itself could clip behind the
+           topbar above it. One sticky element with both inside it can't drift
+           out of sync like that. Its own background covers page content
+           (the "Settings" title) scrolling underneath as it passes behind.  */
+        .settings-sidebar {
+            width: 220px;
+            flex-shrink: 0;
             position: sticky;
             top: 0;
             z-index: 6;
             background: var(--card);
-            padding: 4px 0 14px;
-            margin-bottom: 2px;
+            display: flex;
+            flex-direction: column;
+        }
+        .settings-back-bar {
+            padding: 0 0 14px;
         }
         .settings-back-bar .back-btn {
             margin-bottom: 0;
         }
-
         .settings-nav {
-            width: 200px;
-            flex-shrink: 0;
             display: flex;
             flex-direction: column;
             gap: 2px;
-            position: sticky;
-            top: var(--settings-back-bar-h, 38px);
+        }
+        /* Groups the ten tabs into scannable clusters instead of one flat
+           list — "which of these ten is discount codes?" gets faster to
+           answer when it's filed under a labeled "Money" group. */
+        .settings-nav-group-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            padding: 14px 12px 6px;
+        }
+        .settings-nav-group-label:first-child {
+            padding-top: 0;
         }
         .settings-nav-item {
             display: flex;
@@ -1759,7 +1787,7 @@
         .settings-panel {
             flex: 1;
             min-width: 0;
-            max-width: 640px;
+            max-width: 780px;
             background: var(--card);
             border: 1px solid var(--border);
             border-radius: 14px;
@@ -1794,22 +1822,29 @@
         }
         @media (max-width: 700px) {
             .settings-layout { flex-direction: column; }
-            .settings-nav {
+            /* The sidebar (back-link + nav) is already one sticky unit at the
+               base rule above — on mobile it just needs to go full-width and
+               swap its fill to match the pill-row look, since the old fixed
+               topbar goes position:static on mobile (see its mobile rule
+               above) and scrolls away instead of reserving space above it. */
+            .settings-sidebar {
                 width: 100%;
-                flex-direction: row;
-                flex-wrap: wrap;
-                position: sticky;
-                /* Was a flat 0 to sit flush against the viewport (the old
-                   fixed/sticky topbar is position:static on mobile, see its
-                   mobile rule above, so it scrolls away instead of reserving
-                   that space) — now pushed down by the back bar's actual
-                   height so the two stickies don't paint on top of each other. */
-                top: var(--settings-back-bar-h, 38px);
-                gap: 6px;
-                padding-bottom: 6px;
                 background: var(--bg);
                 z-index: 10;
+                padding-bottom: 6px;
             }
+            .settings-back-bar {
+                padding: 10px 0 8px;
+            }
+            .settings-nav {
+                flex-direction: row;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            /* Group labels only earn their keep in the vertical desktop
+               list — in a wrapped pill row they'd just be orphan text with
+               nothing to head, so all ten tabs go back to one flat row. */
+            .settings-nav-group-label { display: none; }
             .settings-nav-item {
                 flex: 0 0 auto;
                 white-space: nowrap;
@@ -4139,31 +4174,40 @@
             const view = document.getElementById('settingsView');
             view.style.display = 'block';
             view.innerHTML = `
-                <div class="settings-back-bar" id="settingsBackBar">
-                    <button class="back-btn" onclick="showOverviewView('${id}')">
-                        <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,1 1,7 7,13"/></svg>
-                        <span id="settingsBackLabel">Back to ${event ? esc(event.name) : 'Event'}</span>
-                    </button>
-                </div>
-                <div class="settings-page-header">
-                    <h1>Settings</h1>
-                    <div class="settings-hint" id="settingsHeaderSubtitle">${event ? esc(event.name) : ''}</div>
-                </div>
-                <div class="settings-layout">
-                    <div class="settings-nav">
-                        <button class="settings-nav-item active" id="navfor-tab-general" onclick="switchSettingsTab(this,'tab-general')">General</button>
-                        <button class="settings-nav-item" id="navfor-tab-fields" onclick="switchSettingsTab(this,'tab-fields')">Custom Fields</button>
-                        <button class="settings-nav-item" id="navfor-tab-access" onclick="switchSettingsTab(this,'tab-access')">Access & Sharing</button>
-                        <button class="settings-nav-item" id="navfor-tab-notifications" onclick="switchSettingsTab(this,'tab-notifications')">Notifications</button>
-                        <button class="settings-nav-item" id="navfor-tab-email" onclick="switchSettingsTab(this,'tab-email')">Ticket Email</button>
-                        <button class="settings-nav-item" id="navfor-tab-registration" onclick="switchSettingsTab(this,'tab-registration')">Registration</button>
-                        <button class="settings-nav-item" id="navfor-tab-waitlist" onclick="switchSettingsTab(this,'tab-waitlist')">Waitlist</button>
-                        <button class="settings-nav-item" id="navfor-tab-discounts" onclick="switchSettingsTab(this,'tab-discounts')">Discounts</button>
-                        <button class="settings-nav-item" id="navfor-tab-payments" onclick="switchSettingsTab(this,'tab-payments')">Payments<span class="beta-pill">BETA</span></button>
-                        <button class="settings-nav-item" id="navfor-tab-api" onclick="switchSettingsTab(this,'tab-api')">API Access</button>
+                <div class="settings-page">
+                    <div class="settings-page-header">
+                        <h1>Settings</h1>
+                        <div class="settings-hint" id="settingsHeaderSubtitle">${event ? esc(event.name) : ''}</div>
                     </div>
-                    <div class="settings-panel">
-                        <div id="settingsContent"><div class="settings-empty">Loading…</div></div>
+                    <div class="settings-layout">
+                        <div class="settings-sidebar">
+                            <div class="settings-back-bar">
+                                <button class="back-btn" onclick="showOverviewView('${id}')">
+                                    <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,1 1,7 7,13"/></svg>
+                                    <span id="settingsBackLabel">Back to ${event ? esc(event.name) : 'Event'}</span>
+                                </button>
+                            </div>
+                            <div class="settings-nav">
+                                <div class="settings-nav-group-label">Event</div>
+                                <button class="settings-nav-item active" id="navfor-tab-general" onclick="switchSettingsTab(this,'tab-general')">General</button>
+                                <button class="settings-nav-item" id="navfor-tab-fields" onclick="switchSettingsTab(this,'tab-fields')">Custom Fields</button>
+                                <div class="settings-nav-group-label">Access</div>
+                                <button class="settings-nav-item" id="navfor-tab-access" onclick="switchSettingsTab(this,'tab-access')">Access & Sharing</button>
+                                <button class="settings-nav-item" id="navfor-tab-notifications" onclick="switchSettingsTab(this,'tab-notifications')">Notifications</button>
+                                <div class="settings-nav-group-label">Attendees</div>
+                                <button class="settings-nav-item" id="navfor-tab-email" onclick="switchSettingsTab(this,'tab-email')">Ticket Email</button>
+                                <button class="settings-nav-item" id="navfor-tab-registration" onclick="switchSettingsTab(this,'tab-registration')">Registration</button>
+                                <button class="settings-nav-item" id="navfor-tab-waitlist" onclick="switchSettingsTab(this,'tab-waitlist')">Waitlist</button>
+                                <div class="settings-nav-group-label">Money</div>
+                                <button class="settings-nav-item" id="navfor-tab-discounts" onclick="switchSettingsTab(this,'tab-discounts')">Discounts</button>
+                                <button class="settings-nav-item" id="navfor-tab-payments" onclick="switchSettingsTab(this,'tab-payments')">Payments<span class="beta-pill">BETA</span></button>
+                                <div class="settings-nav-group-label">Developer</div>
+                                <button class="settings-nav-item" id="navfor-tab-api" onclick="switchSettingsTab(this,'tab-api')">API Access</button>
+                            </div>
+                        </div>
+                        <div class="settings-panel">
+                            <div id="settingsContent"><div class="settings-empty">Loading…</div></div>
+                        </div>
                     </div>
                 </div>
                 <div class="settings-save-bar" id="settingsSaveBar">
@@ -4174,12 +4218,6 @@
                     </div>
                 </div>`;
             setUrlState({ event: id, view: 'settings' });
-
-            // Push .settings-nav's sticky offset down by the back bar's
-            // actual rendered height so the two stickies stack cleanly
-            // instead of overlapping (avoids hardcoding a guessed pixel gap).
-            const backBar = document.getElementById('settingsBackBar');
-            if (backBar) view.style.setProperty('--settings-back-bar-h', `${backBar.offsetHeight}px`);
 
             // Reset unsaved-changes tracking for this settings session, then
             // watch every field across every tab via one delegated listener
