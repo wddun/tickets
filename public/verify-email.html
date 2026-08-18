@@ -46,9 +46,12 @@
         }
         .btn-primary:hover { background: var(--navy-dark); }
         /* --navy and --card are the same color in dark mode, so a plain-navy
-           button on the card would have no visible edge. */
-        [data-theme="dark"] .btn-primary { background: var(--navy-mid); }
-        [data-theme="dark"] .btn-primary:hover { background: #2f3768; }
+           button on the card would have no visible edge. var(--navy-mid)
+           alone only reaches ~1.2:1 against --card — technically different,
+           not actually visible — so this uses the same stronger indigo as
+           everywhere else in the app (~3:1). */
+        [data-theme="dark"] .btn-primary { background: #5b68ab; }
+        [data-theme="dark"] .btn-primary:hover { background: #4c5896; }
         .spinner {
             width: 36px; height: 36px; border: 3px solid var(--border);
             border-top-color: var(--red); border-radius: 50%;

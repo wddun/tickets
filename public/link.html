@@ -77,9 +77,13 @@
             font-size: 24px; margin-bottom: 18px;
         }
         /* --navy and --card are the same color in dark mode, so a plain-navy
-           icon/button on the card would have no visible edge. */
+           icon/button on the card would have no visible edge. var(--navy-mid)
+           alone only reaches ~1.2:1 against --card — technically different,
+           not actually visible — so this uses the same stronger indigo as
+           everywhere else in the app (~3:1). */
         [data-theme="dark"] .card-icon,
-        [data-theme="dark"] .btn-primary { background: var(--navy-mid); }
+        [data-theme="dark"] .btn-primary { background: #5b68ab; }
+        [data-theme="dark"] .btn-primary:hover { background: #4c5896; }
         h1 { font-size: 20px; font-weight: 800; margin-bottom: 6px; color: var(--text); }
         h2 { font-size: 18px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
         .subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; line-height: 1.5; }

@@ -70,6 +70,23 @@
         input, select, textarea {
             font-size: 16px !important;
         }
+        /* var(--border) is a hairline divider color, tuned to be subtle
+           against --bg/--card — appropriate for a 1px line between
+           sections, but the same coincidence that makes --navy-mid
+           (a button/panel fill) equal to --border in this file's dark
+           palette also means any input/select drawn with a plain
+           `border: 1px solid var(--border)` (there are ~20 of them,
+           mostly inline, scattered through the settings forms) reads as
+           borderless against the card or panel it sits on. Can't scope a
+           dark-mode override to individual inline style="" attributes, so
+           this catches all of them by matching the literal var(--border)
+           reference — the !important is answering an inline style, not
+           fighting another stylesheet rule. */
+        [data-theme="dark"] input[style*="var(--border)"],
+        [data-theme="dark"] select[style*="var(--border)"],
+        [data-theme="dark"] textarea[style*="var(--border)"] {
+            border-color: #5b68ab !important;
+        }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -497,7 +514,25 @@
         [data-theme="dark"] .btn-secondary {
             background: var(--navy-mid);
             color: var(--text);
-            border-color: var(--border);
+            /* var(--border) happens to equal var(--navy-mid) in this file's
+               dark palette, so the old `border-color: var(--border)` drew a
+               border in the exact same color as the fill — invisible. */
+            border-color: #5b68ab;
+        }
+        /* --navy is the same color as --card in dark mode (by design — see
+           the button/.btn-scanner note in style.css) so .btn-primary and
+           .btn-scanner, which have no border to fall back on, disappeared
+           into the card entirely: "Check In", "Copy", "Add Tickets" were all
+           rendering as plain unstyled text. Both get a real fill instead —
+           kept lighter than the brand navy so it still reads as "this app's
+           button", not a generic indigo swap. */
+        [data-theme="dark"] .btn-primary,
+        [data-theme="dark"] .btn-scanner {
+            background: #5b68ab;
+        }
+        [data-theme="dark"] .btn-primary:hover,
+        [data-theme="dark"] .btn-scanner:hover {
+            background: #4c5896;
         }
 
         .btn-sm {
@@ -1237,6 +1272,7 @@
         }
 
         .cap-preset-btn:hover { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
+        [data-theme="dark"] .cap-preset-btn:not(:hover) { border-color: #5b68ab; }
 
         /* ── Registration theme picker ── */
         .theme-grid {
@@ -1253,6 +1289,7 @@
         }
         .theme-card:hover { border-color: #c7d2fe; }
         .theme-card.selected { border-color: #4338ca; }
+        [data-theme="dark"] .theme-card:not(.selected):not(:hover) { border-color: #5b68ab; }
         .theme-swatch { display: block; height: 34px; width: 100%; }
         .theme-body {
             display: block; padding: 9px 10px 11px;
@@ -1302,6 +1339,9 @@
         .link-box input:focus {
             border-color: var(--navy);
         }
+        [data-theme="dark"] .link-box input:not(:focus) {
+            border-color: #5b68ab;
+        }
 
         .btn-settings {
             background: var(--bg);
@@ -1320,8 +1360,37 @@
         .btn-settings:hover {
             background: var(--border);
         }
+        /* var(--bg) is the page background, one shade *darker* than the card
+           these buttons sit on in dark mode — so instead of looking raised,
+           they read as a hole in the card, with only a border (also close in
+           value to both) as a faint hint anything is there. Give them a real
+           lighter surface and a border that actually stands out. */
+        [data-theme="dark"] .btn-settings {
+            background: var(--navy-mid);
+            border-color: #5b68ab;
+        }
+        [data-theme="dark"] .btn-settings:hover {
+            background: #333c72;
+        }
 
         .btn-settings.has-dropdown::after { content: ' ▾'; font-size: 11px; }
+
+        /* Copy-a-value rows (registration link, event ID, sheets key) —
+           these live inside a .settings-card, which itself sits on
+           --surface-soft (= --navy-mid in dark mode). The border used to be
+           set inline (border:1px solid var(--border)), which — being
+           inline — always wins over any external override regardless of
+           specificity, so a dark-mode class rule here could never actually
+           reach it; the border now lives entirely in these two classes
+           instead, with the inline styles only setting layout/color/bg. */
+        .inline-copy-input,
+        .inline-copy-btn {
+            border: 1px solid var(--border);
+        }
+        [data-theme="dark"] .inline-copy-input,
+        [data-theme="dark"] .inline-copy-btn {
+            border-color: #5b68ab;
+        }
 
         .settings-empty {
             text-align: center;
@@ -1672,7 +1741,7 @@
         }
         .settings-nav-item.active { color: var(--text); background: #f0f1f5; font-weight: 600; }
         .settings-nav-item:hover:not(.active) { background: #f7f7f9; color: var(--text); }
-        [data-theme="dark"] .settings-nav-item.active { background: var(--navy-mid); }
+        [data-theme="dark"] .settings-nav-item.active { background: #333c72; }
         [data-theme="dark"] .settings-nav-item:hover:not(.active) { background: var(--navy-mid); }
         .settings-panel {
             flex: 1;
@@ -1734,6 +1803,8 @@
                 background: var(--bg);
             }
             .settings-nav-item.active { background: var(--navy); color: #fff; }
+            [data-theme="dark"] .settings-nav-item:not(.active) { background: var(--navy-mid); }
+            [data-theme="dark"] .settings-nav-item.active { background: #333c72; }
             .settings-panel { max-width: none; width: 100%; padding: 18px 18px; }
 
             /* Touch targets: bump small/secondary buttons up to a more
@@ -4854,9 +4925,9 @@
                     <div style="display:flex;align-items:center;gap:6px;">
                         <input type="text" readonly value="${esc(regUrl)}"
                             onclick="this.select()"
-                            style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);background:var(--bg);cursor:text;min-width:0;">
+                            class="inline-copy-input" style="flex:1;padding:8px;border-radius:6px;font-size:12px;color:var(--text-muted);background:var(--bg);cursor:text;min-width:0;">
                         <button onclick="copySettingsLink('${esc(regUrl)}')"
-                            style="flex-shrink:0;padding:8px 12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                            class="inline-copy-btn" style="flex-shrink:0;padding:8px 12px;background:var(--bg);color:var(--text);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
                             Copy
                         </button>
                     </div>
@@ -5624,18 +5695,18 @@
                     <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted);">Event ID</div>
                     <div style="display:flex;align-items:center;gap:6px;margin-bottom:14px;">
                         <input type="text" readonly value="${esc(keyInfo.eventId)}" onclick="this.select()"
-                            style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);background:var(--bg);cursor:text;min-width:0;">
+                            class="inline-copy-input" style="flex:1;padding:8px;border-radius:6px;font-size:12px;color:var(--text-muted);background:var(--bg);cursor:text;min-width:0;">
                         <button onclick="copyToClipboard('${esc(keyInfo.eventId)}', this)"
-                            style="flex-shrink:0;padding:8px 12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                            class="inline-copy-btn" style="flex-shrink:0;padding:8px 12px;background:var(--bg);color:var(--text);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
                             Copy
                         </button>
                     </div>
                     <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted);">Sheets key</div>
                     <div style="display:flex;align-items:center;gap:6px;">
                         <input type="text" readonly value="${esc(keyInfo.apiKey)}" onclick="this.select()"
-                            style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);background:var(--bg);cursor:text;min-width:0;">
+                            class="inline-copy-input" style="flex:1;padding:8px;border-radius:6px;font-size:12px;color:var(--text-muted);background:var(--bg);cursor:text;min-width:0;">
                         <button onclick="copyToClipboard('${esc(keyInfo.apiKey)}', this)"
-                            style="flex-shrink:0;padding:8px 12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                            class="inline-copy-btn" style="flex-shrink:0;padding:8px 12px;background:var(--bg);color:var(--text);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
                             Copy
                         </button>
                     </div>
@@ -5917,7 +5988,7 @@
                             <div class="scan-access-title">Start Scanning</div>
                             <div class="scan-access-sub">Scan this code with any camera app, or share the link — it opens straight into the scanner for this event only, no login needed.</div>
                             <div style="display:flex;gap:8px;margin-top:10px;">
-                                <input type="text" value="${esc(primary.url)}" readonly onclick="this.select()" style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:12px;">
+                                <input type="text" value="${esc(primary.url)}" readonly onclick="this.select()" class="inline-copy-input" style="flex:1;min-width:0;padding:8px;border-radius:6px;outline:none;font-size:12px;color:var(--text);background:var(--card);">
                                 <button class="btn btn-primary btn-sm tap-target-sm" onclick="copySettingsLink('${esc(primary.url)}')">Copy</button>
                             </div>
                             <button class="scan-access-toggle" onclick="toggleScanAccessManage()">Manage scan links (${links.length})</button>

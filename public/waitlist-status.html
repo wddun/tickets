@@ -34,9 +34,12 @@
         }
         .position-badge span { font-size: 14px; font-weight: 600; display: block; opacity: .75; margin-top: 2px; }
         /* --navy and --card are the same color in dark mode, so a plain-navy
-           badge/button on the card would have no visible edge. */
+           badge/button on the card would have no visible edge. var(--navy-mid)
+           alone only reaches ~1.2:1 against --card — technically different,
+           not actually visible — so this uses the same stronger indigo as
+           everywhere else in the app (~3:1). */
         [data-theme="dark"] .position-badge,
-        [data-theme="dark"] #claimBtn { background: var(--navy-mid) !important; }
+        [data-theme="dark"] #claimBtn { background: #5b68ab !important; }
 
         .btn-outline {
             background: var(--bg); color: var(--text);

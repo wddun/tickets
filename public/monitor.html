@@ -207,6 +207,15 @@
             background: var(--border);
             color: var(--text);
         }
+        /* var(--border) is tuned as a subtle divider color, not a button
+           fill — against this page's dark card/background it reads as
+           almost no surface at all. */
+        [data-theme="dark"] .btn-secondary {
+            background: #2f3768;
+        }
+        [data-theme="dark"] .btn-secondary:hover {
+            background: #3a437a;
+        }
 
         .btn-danger {
             background: #fee2e2;

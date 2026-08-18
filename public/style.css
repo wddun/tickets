@@ -65,6 +65,13 @@
     min-height: 0;
 }
 .theme-toggle:hover { background: var(--border); }
+/* Usually sits on var(--navy), which equals var(--card) in dark mode — same
+   invisible-button problem as the base button rule above. */
+[data-theme="dark"] .theme-toggle {
+    background: var(--navy-mid);
+    border-color: #5b68ab;
+}
+[data-theme="dark"] .theme-toggle:hover { background: #333c72; }
 
 /* Some pages show the navy-on-transparent logo variant (logo-nav-dark.svg)
    against a card background — that card goes dark in dark mode and the navy
@@ -177,6 +184,13 @@ input {
     min-height: 48px;
 }
 
+/* var(--border) reads at roughly 1.2:1 against var(--card) in dark mode —
+   fine for a hairline divider, not enough to show a text field has an edge
+   at all. */
+[data-theme="dark"] input:not(:focus) {
+    border-color: #5b68ab;
+}
+
 input:focus {
     border-color: var(--red);
     box-shadow: 0 0 0 3px rgba(196,41,74,.12);
@@ -203,10 +217,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 
 /* --navy and --card are the same color in dark mode (by design, so nav bars
    and cards read as one surface) — but that means a plain navy button drawn
-   on a card vanishes into it with no visible edge. Lighten the button itself
-   in dark mode so it reads as a raised control instead of a hole in the card. */
-[data-theme="dark"] button   { background: var(--navy-mid); }
-[data-theme="dark"] button:hover { background: #2f3768; }
+   on a card vanishes into it with no visible edge. var(--navy-mid) alone only
+   reaches about 1.2:1 against --card — enough to technically differ, not
+   enough to actually read as a raised control — so this uses the same
+   stronger indigo as the dashboard's primary buttons instead (~3:1). */
+[data-theme="dark"] button   { background: #5b68ab; }
+[data-theme="dark"] button:hover { background: #4c5896; }
 
 .qr-result {
     text-align: center;
