@@ -5583,7 +5583,7 @@ async function generateVoidedPassBuffer(tombstone) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 15;
+const PASS_TEMPLATE_VERSION = 16;
 function passContentHash(ticket, event) {
     const data = JSON.stringify({
         _v: PASS_TEMPLATE_VERSION,
@@ -5777,16 +5777,18 @@ async function generatePassBuffer(ticket, event) {
     } else if (hasTime) {
         pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
     }
-    if (hasNote) {
-        pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
-    }
 
-    // Auxiliary row: Location (two lines)
+    // Auxiliary row: Location, plus the first custom field alongside it —
+    // this row otherwise sits mostly empty, so it has more room to spare
+    // than doubling the field count in the (already full-width) date row.
     const { name: locName, address: locAddress } = eventVenue(event);
     // Front: venue name, or just the street portion of the address
     const frontLoc = locName || (locAddress ? locAddress.split(',')[0].trim() : null);
     if (frontLoc) {
         pass.auxiliaryFields.push({ key: "loc", label: "LOCATION", value: frontLoc });
+    }
+    if (hasNote) {
+        pass.auxiliaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
     }
 
     // Back: remaining custom fields
