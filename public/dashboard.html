@@ -7799,11 +7799,12 @@
                 if (!await confirmDialog('You have unsaved changes. "Resend Only" will send the current saved data — your edits will NOT be included. Continue?')) return;
             }
             const id = document.getElementById('editTicketId').value;
+            const originalText = btn.textContent;
             btn.disabled = true;
             btn.textContent = 'Sending…';
             const r = await fetch('/api/ticket/' + id + '/resend', { method: 'POST' });
             btn.disabled = false;
-            btn.textContent = 'Resend Only';
+            btn.textContent = originalText;
             if (r.ok) {
                 const d = await r.json();
                 showToast(`Email resent (${d.count} ticket${d.count > 1 ? 's' : ''}).`);
