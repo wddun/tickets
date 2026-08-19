@@ -5757,41 +5757,28 @@ async function generatePassBuffer(ticket, event) {
         }
     };
 
-    // If notes exist, keep date in the header and notes in secondary.
-    // If no notes, place date in secondary (so the row isn't empty).
+    // Date always lives in secondaryFields, never headerFields — a header
+    // field with no room beside a long event title wraps onto its own line
+    // underneath the title, which reads as broken rather than intentional.
     // Three cases: a valid date (format it and drive relevance/expiry), a
     // present-but-unparseable legacy value (show the raw string, no
     // relevance/expiry), or no date at all (omit the field entirely — the
     // pass simply never auto-expires and carries no relevance window).
+    if (hasValidDate) {
+        if (isMultiDay) {
+            pass.secondaryFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
+        } else {
+            pass.secondaryFields.push({
+                key: "date", label: buildDateLabel(), value: eventDate,
+                dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
+            });
+        }
+        setRelevantDatesAndExpiry();
+    } else if (hasTime) {
+        pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
+    }
     if (hasNote) {
-        if (hasValidDate) {
-            if (isMultiDay) {
-                pass.headerFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
-            } else {
-                pass.headerFields.push({
-                    key: "date", label: buildDateLabel(), value: eventDate,
-                    dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
-                });
-            }
-            setRelevantDatesAndExpiry();
-        } else if (hasTime) {
-            pass.headerFields.push({ key: "date", label: "DATE", value: String(event.time) });
-        }
         pass.secondaryFields.push({ key: 'cf_0', label: cfEntries[0][0].toUpperCase(), value: String(cfEntries[0][1]) });
-    } else {
-        if (hasValidDate) {
-            if (isMultiDay) {
-                pass.secondaryFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
-            } else {
-                pass.secondaryFields.push({
-                    key: "date", label: buildDateLabel(), value: eventDate,
-                    dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort"
-                });
-            }
-            setRelevantDatesAndExpiry();
-        } else if (hasTime) {
-            pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
-        }
     }
 
     // Auxiliary row: Location (two lines)

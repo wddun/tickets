@@ -1373,6 +1373,7 @@
             border-radius: 8px;
             font-size: 13px;
             background: var(--card);
+            color: var(--text);
             outline: none;
         }
 
@@ -1493,6 +1494,7 @@
             outline: none;
             box-sizing: border-box;
             background: var(--card);
+            color: var(--text);
             transition: border-color 0.1s, background 0.1s;
         }
 
@@ -3688,7 +3690,7 @@
             const tz = current || browserTimezone() || 'America/New_York';
             const options = [...new Set([tz, ...COMMON_TIMEZONES])];
             return `<select id="editEventTimezone" onchange="onEventTimezoneChanged(this.value)"
-                style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;background: var(--card);">${options.map(z =>
+                style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;background: var(--card);color:var(--text);">${options.map(z =>
                 `<option value="${esc(z)}" ${z === tz ? 'selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`).join('')}</select>`;
         }
 
