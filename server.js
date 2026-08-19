@@ -5595,6 +5595,7 @@ function passContentHash(ticket, event) {
         eventName: event.name,
         eventColor: event.color,
         eventTime: event.time,
+        eventImageUrl: event.imageUrl,
         eventLat: event.location?.lat,
         eventLng: event.location?.lng,
         allowReentry: !!event.allowReentry,
