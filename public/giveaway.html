@@ -403,9 +403,20 @@
                     <button data-v="fast" onclick="setSpeed('fast')">Fast</button>
                 </div>
             </div>
-            <div class="cz-row">
+            <div class="cz-row" id="czSoundRowSingle">
                 <div class="cz-label">Sound effects</div>
                 <label class="cz-toggle"><input type="checkbox" id="czSound" checked onchange="customization.sound=this.checked"></label>
+            </div>
+            <div class="cz-row" id="czSoundRowPresenter" style="display:none;">
+                <div>
+                    <div class="cz-label">Sound on presentation screen</div>
+                    <div class="cz-sub">Plays there by default while presenting.</div>
+                </div>
+                <label class="cz-toggle"><input type="checkbox" id="czSoundPresenter" checked onchange="customization.soundOnPresenter=this.checked"></label>
+            </div>
+            <div class="cz-row" id="czSoundRowController" style="display:none;">
+                <div class="cz-label">Sound on this screen</div>
+                <label class="cz-toggle"><input type="checkbox" id="czSoundController" onchange="customization.soundOnController=this.checked"></label>
             </div>
             <div class="cz-row">
                 <div class="cz-label">Confetti on win</div>
@@ -500,6 +511,8 @@ const customization = {
     theme: 'gold',
     speed: 'normal',
     sound: true,
+    soundOnPresenter: true,
+    soundOnController: false,
     confetti: true,
     winnersPerSpin: 1,
     customMessage: '',
@@ -834,13 +847,27 @@ function reelGlowAmount(centerPos, itemsPerSec) {
 }
 
 // ── Sound (synthesized — no audio assets) ──────────────────────
+// Not presenting: the single "Sound effects" toggle drives this one screen.
+// Presenting: sound defaults to the presentation screen, and this screen's
+// own sound is a separate opt-in toggle (off by default, so a room with a
+// TV/projector running the presentation doesn't also hear it from the
+// operator's laptop).
+function controllerSoundEnabled() {
+    return presenterSessionId ? customization.soundOnController : customization.sound;
+}
+function updateSoundRows() {
+    const presenting = !!presenterSessionId;
+    document.getElementById('czSoundRowSingle').style.display = presenting ? 'none' : '';
+    document.getElementById('czSoundRowPresenter').style.display = presenting ? '' : 'none';
+    document.getElementById('czSoundRowController').style.display = presenting ? '' : 'none';
+}
 let audioCtx = null;
 function ensureAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     return audioCtx;
 }
 function playTick() {
-    if (!customization.sound) return;
+    if (!controllerSoundEnabled()) return;
     try {
         const ctx = ensureAudio();
         const osc = ctx.createOscillator();
@@ -854,7 +881,7 @@ function playTick() {
     } catch (_) {}
 }
 function playWinChime() {
-    if (!customization.sound) return;
+    if (!controllerSoundEnabled()) return;
     try {
         const ctx = ensureAudio();
         [523.25, 659.25, 783.99].forEach((freq, i) => {
@@ -1176,6 +1203,7 @@ function openPresentPanel() {
     const url = `${location.origin}/giveaway-display.html?session=${presenterSessionId}`;
     document.getElementById('presentLinkInput').value = url;
     document.getElementById('presentOverlay').classList.add('show');
+    updateSoundRows();
     pollPresenterStatus();
     clearInterval(presenterPollTimer);
     presenterPollTimer = setInterval(pollPresenterStatus, 2000);
@@ -1188,6 +1216,7 @@ function stopPresenting() {
     presenterSessionId = null;
     closePresentPanel();
     updatePresentBtn(false);
+    updateSoundRows();
 }
 function copyPresentLink() {
     const input = document.getElementById('presentLinkInput');
@@ -1216,7 +1245,7 @@ async function broadcastSpin(payload) {
         await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'spin', payload: { ...payload, eventName: ev ? ev.name : '', theme: THEMES[customization.theme].accent } }),
+            body: JSON.stringify({ type: 'spin', payload: { ...payload, eventName: ev ? ev.name : '', theme: THEMES[customization.theme].accent, soundEnabled: customization.soundOnPresenter } }),
         });
     } catch (_) {}
 }

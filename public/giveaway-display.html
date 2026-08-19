@@ -24,6 +24,11 @@
         .live-dot span { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.25); }
         .live-dot.connected span { background: #34d399; box-shadow: 0 0 8px #34d399; }
 
+        .sound-hint {
+            position: fixed; bottom: 18px; left: 20px; display: flex; align-items: center; gap: 7px;
+            font-size: 12px; color: rgba(255,255,255,0.35); font-weight: 600;
+        }
+
         .event-name {
             font-size: clamp(18px, 2.4vw, 30px); font-weight: 700; color: rgba(255,255,255,0.55);
             text-align: center;
@@ -149,6 +154,7 @@
 <body>
 
 <div class="live-dot" id="liveDot"><span></span> connecting…</div>
+<div class="sound-hint" id="soundHint" style="display:none;">Tap anywhere to enable sound</div>
 <div class="event-name" id="eventName"></div>
 <div class="idle-msg" id="idleMsg">Get ready…</div>
 <div class="name-ticker" id="nameTicker"></div>
@@ -180,6 +186,67 @@ const sessionId = new URLSearchParams(location.search).get('session');
 if (!sessionId) document.body.innerHTML = '<div class="idle-msg">Missing session — open this link from the giveaway page\'s Present panel.</div>';
 
 const WHEEL_PALETTE = ['#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b'];
+
+// ── Sound (synthesized — no audio assets; must match giveaway.html) ────
+// Whether *this* screen should play sound, set by the controller's "Sound
+// on presentation screen" toggle (payload.soundEnabled) — on by default so
+// the display makes noise out of the box the moment someone presses Spin.
+let displaySoundEnabled = true;
+let audioCtx = null;
+let audioUnlocked = false;
+function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+}
+// Browsers refuse to run an AudioContext until the page has had a user
+// gesture — and a TV/projector display often gets opened and then never
+// touched again. Unlock on the first tap/click/key anywhere so whoever sets
+// the display up just has to touch the screen once before walking away.
+function tryUnlockAudio() {
+    if (audioUnlocked) return;
+    try {
+        const ctx = ensureAudio();
+        if (ctx.state === 'suspended') ctx.resume();
+        audioUnlocked = ctx.state === 'running';
+    } catch (_) {}
+    if (audioUnlocked) document.getElementById('soundHint').style.display = 'none';
+}
+['pointerdown', 'touchstart', 'keydown'].forEach(evt => document.addEventListener(evt, tryUnlockAudio, { passive: true }));
+function playTick() {
+    if (!displaySoundEnabled) return;
+    try {
+        const ctx = ensureAudio();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 900;
+        osc.type = 'square';
+        gain.gain.setValueAtTime(0.06, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(); osc.stop(ctx.currentTime + 0.05);
+    } catch (_) {}
+}
+function playWinChime() {
+    if (!displaySoundEnabled) return;
+    try {
+        const ctx = ensureAudio();
+        [523.25, 659.25, 783.99].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.frequency.value = freq;
+            osc.type = 'triangle';
+            const t0 = ctx.currentTime + i * 0.11;
+            gain.gain.setValueAtTime(0.0001, t0);
+            gain.gain.linearRampToValueAtTime(0.14, t0 + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.4);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(t0); osc.stop(t0 + 0.42);
+        });
+    } catch (_) {}
+}
+function updateSoundHint() {
+    document.getElementById('soundHint').style.display = (displaySoundEnabled && !audioUnlocked) ? 'flex' : 'none';
+}
 
 function esc(s) {
     const d = document.createElement('div');
@@ -308,7 +375,7 @@ function runClassicSpin(payload) {
         tickerEl.textContent = names[wedgeIndexAtPointer(delta, segDeg, n)] || '';
         // Offset by half a segment — labels sit at wedge centers, not dividers.
         const tickCount = Math.floor(Math.abs(delta) / segDeg + 0.5);
-        if (tickCount > lastTickCount) { lastTickCount = tickCount; flickPointer(); }
+        if (tickCount > lastTickCount) { lastTickCount = tickCount; flickPointer(); playTick(); }
         if (p < 1) rafId = requestAnimationFrame(frame);
         else finish();
     };
@@ -349,6 +416,8 @@ function runReelSpin(payload) {
 
     let lastOffset = 0;
     let lastFrameMs = performance.now();
+    let lastTickCount = 0;
+    let lastTickSoundMs = 0;
     let settled = false;
     const startTime = performance.now();
     let rafId;
@@ -372,6 +441,13 @@ function runReelSpin(payload) {
         lastOffset = offset;
         lastFrameMs = now;
         glowEl.style.opacity = reelGlowAmount(centerPosAt(offset), itemsPerSec).toFixed(3);
+        // At cruise, names cross the bar far faster than distinct ticks can
+        // be heard — floor the spacing so it doesn't degrade into a buzz.
+        const tickCount = Math.floor(Math.abs(offset) / itemH);
+        if (tickCount > lastTickCount) {
+            lastTickCount = tickCount;
+            if (now - lastTickSoundMs >= 40) { lastTickSoundMs = now; playTick(); }
+        }
         if (p < 1) rafId = requestAnimationFrame(frame);
         else finish();
     };
@@ -383,6 +459,7 @@ function showWinner(name, prizeLabel) {
     document.getElementById('winnerName').textContent = name || '(no name)';
     document.getElementById('winnerPrize').textContent = prizeLabel ? `Won: ${prizeLabel}` : '';
     document.getElementById('winnerWrap').classList.add('show');
+    playWinChime();
     fireConfetti();
 }
 
@@ -442,6 +519,8 @@ function connect() {
                 document.documentElement.style.setProperty('--accent', payload.theme);
                 document.documentElement.style.setProperty('--accent-soft', payload.theme + '22');
             }
+            displaySoundEnabled = payload.soundEnabled !== false;
+            updateSoundHint();
             if (payload.style === 'classic') runClassicSpin(payload);
             else runReelSpin(payload);
         } else if (msg.type === 'reset') {
@@ -449,6 +528,7 @@ function connect() {
         }
     };
 }
+updateSoundHint();
 connect();
 </script>
 </body>
