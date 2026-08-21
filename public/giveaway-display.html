@@ -140,6 +140,18 @@
         .reel-fade-top { top: 0; background: linear-gradient(#0a0a0c, transparent); }
         .reel-fade-bottom { bottom: 0; background: linear-gradient(transparent, #0a0a0c); }
 
+        .pot-wrap {
+            display: none;
+            position: relative; width: min(86vw, 1100px); height: min(78vh, 760px);
+        }
+        .pot-wrap.show { display: block; }
+        canvas#potCanvas { display: block; width: 100%; height: 100%; }
+        .pot-count {
+            display: none; font-size: clamp(14px, 1.8vw, 20px); font-weight: 700;
+            letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.4);
+        }
+        .pot-count.show { display: block; }
+
         .winner-wrap {
             display: none; flex-direction: column; align-items: center; gap: 8px; text-align: center;
         }
@@ -176,12 +188,18 @@
     <div class="reel-fade-bottom"></div>
 </div>
 
+<div class="pot-wrap" id="potWrap">
+    <canvas id="potCanvas"></canvas>
+</div>
+<div class="pot-count" id="potCount"></div>
+
 <div class="winner-wrap" id="winnerWrap">
     <div class="winner-label">🎉 Winner</div>
     <div class="winner-name" id="winnerName"></div>
     <div class="winner-prize" id="winnerPrize"></div>
 </div>
 
+<script src="giveaway-pot.js"></script>
 <script>
 const sessionId = new URLSearchParams(location.search).get('session');
 if (!sessionId) document.body.innerHTML = '<div class="idle-msg">Missing session — open this link from the giveaway page\'s Present panel.</div>';
@@ -227,6 +245,40 @@ function playTick() {
         osc.start(); osc.stop(ctx.currentTime + 0.05);
     } catch (_) {}
 }
+// Paper landing in the pot, and paper being shaken around inside it. Filtered
+// noise rather than the reel's mechanical tick — must match giveaway.html.
+let lastPaperMs = 0;
+function paperNoise(durSec, filterType, freq, volume) {
+    const ctx = ensureAudio();
+    const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * durSec), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    const decay = filterType === 'bandpass' ? 2.4 : 1.5;
+    for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, decay);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.value = freq;
+    if (filterType === 'bandpass') filter.Q.value = 0.9;
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start();
+}
+function playPaperDrop() {
+    if (!displaySoundEnabled) return;
+    const now = performance.now();
+    if (now - lastPaperMs < 45) return;
+    lastPaperMs = now;
+    try { paperNoise(0.07, 'bandpass', 1500 + Math.random() * 900, 0.09); } catch (_) {}
+}
+function playPaperRattle() {
+    if (!displaySoundEnabled) return;
+    try { paperNoise(0.12, 'highpass', 2200, 0.055); } catch (_) {}
+}
+
 function playWinChime() {
     if (!displaySoundEnabled) return;
     try {
@@ -256,12 +308,59 @@ function esc(s) {
 }
 
 function setIdle() {
-    document.getElementById('idleMsg').style.display = 'block';
     document.getElementById('wheelPointerMount').classList.remove('show');
     document.getElementById('wheelDiscWrap').classList.remove('show');
     document.getElementById('reelWrap').classList.remove('show');
     document.getElementById('winnerWrap').classList.remove('show');
     stopTicker();
+    // In pot mode "idle" is not a blank screen: the pot stays up with the
+    // entries in it, and names keep dropping in between draws. That standing
+    // view is the whole point of the style, so it survives a reset.
+    if (potMode) {
+        showPot();
+        if (pot) pot.reset();
+        document.getElementById('idleMsg').style.display = 'none';
+    } else {
+        hidePot();
+        document.getElementById('idleMsg').style.display = 'block';
+    }
+}
+
+// ── Paper pot ───────────────────────────────────────────────────
+// Mirrors the controller's pot: the same module, driven by the same numbers,
+// so both screens fill up and shake in step.
+let pot = null;
+let potMode = false;
+let potTotal = 0;
+
+function ensurePot() {
+    if (pot) { pot.resize(); return pot; }
+    pot = GiveawayPot.create(document.getElementById('potCanvas'), {
+        accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ffd400',
+        onEvent: (type) => {
+            if (type === 'land') playPaperDrop();
+            else if (type === 'rattle') playPaperRattle();
+        },
+    });
+    return pot;
+}
+
+function showPot() {
+    document.getElementById('potWrap').classList.add('show');
+    document.getElementById('potCount').classList.add('show');
+    ensurePot();
+    updatePotCount();
+}
+
+function hidePot() {
+    document.getElementById('potWrap').classList.remove('show');
+    document.getElementById('potCount').classList.remove('show');
+}
+
+function updatePotCount() {
+    const el = document.getElementById('potCount');
+    el.textContent = potTotal === 1 ? '1 name in the pot' : `${potTotal} names in the pot`;
+    if (pot) pot.setLabel(String(potTotal));
 }
 
 // ── Spin physics — must match giveaway.html exactly so the two screens
@@ -456,7 +555,35 @@ function runReelSpin(payload) {
     setTimeout(finish, payload.durationSec * 1000 + 800);
 }
 
+function runPotSpin(payload) {
+    document.getElementById('idleMsg').style.display = 'none';
+    document.getElementById('winnerWrap').classList.remove('show');
+    document.getElementById('wheelPointerMount').classList.remove('show');
+    document.getElementById('wheelDiscWrap').classList.remove('show');
+    document.getElementById('reelWrap').classList.remove('show');
+    potMode = true;
+    showPot();
+
+    const names = payload.winnerNames && payload.winnerNames.length ? payload.winnerNames : ['(no name)'];
+    if (typeof payload.potCount === 'number') { potTotal = payload.potCount; updatePotCount(); }
+    // Whatever is still fluttering down would be competing with the draw for
+    // attention, and the controller has stopped sending arrivals anyway.
+    pot.setResting(Math.max(0, potTotal));
+    pot.spin({
+        names,
+        churnNames: payload.churnNames || [],
+        durationMs: (payload.durationSec || 5.2) * 1000,
+        onDone: () => showWinner(names.join(', '), payload.prizeLabel),
+    });
+    setTimeout(() => { playWinChime(); fireConfetti(); }, (payload.durationSec || 5.2) * 1000 * 0.86);
+}
+
 function showWinner(name, prizeLabel) {
+    // The pot has done its job by now — the slip was held up face-on for the
+    // last beat of the draw. Leaving it on screen alongside the full-size
+    // winner name overflows the display, so hand over cleanly. setIdle() brings
+    // the pot back when the controller resets.
+    hidePot();
     document.getElementById('winnerName').textContent = name || '(no name)';
     document.getElementById('winnerPrize').textContent = prizeLabel ? `Won: ${prizeLabel}` : '';
     document.getElementById('winnerWrap').classList.add('show');
@@ -498,6 +625,13 @@ function fireConfetti() {
     requestAnimationFrame(frame);
 }
 
+function applyTheme(color) {
+    if (!color) return;
+    document.documentElement.style.setProperty('--accent', color);
+    document.documentElement.style.setProperty('--accent-soft', color + '22');
+    if (pot) pot.setAccent(color);
+}
+
 function connect() {
     if (!sessionId) return;
     const es = new EventSource(`/api/giveaway/stream/${sessionId}`);
@@ -513,17 +647,42 @@ function connect() {
         let msg;
         try { msg = JSON.parse(e.data); } catch (_) { return; }
         if (msg.type === 'connected') return;
+        // Every message shape carries a payload; the pot branches below read it
+        // too, so it can't live inside the spin branch.
+        const payload = msg.payload || {};
         if (msg.type === 'spin') {
-            const payload = msg.payload || {};
             if (payload.eventName) document.getElementById('eventName').textContent = payload.eventName;
-            if (payload.theme) {
-                document.documentElement.style.setProperty('--accent', payload.theme);
-                document.documentElement.style.setProperty('--accent-soft', payload.theme + '22');
-            }
+            applyTheme(payload.theme);
             displaySoundEnabled = payload.soundEnabled !== false;
             updateSoundHint();
-            if (payload.style === 'classic') runClassicSpin(payload);
-            else runReelSpin(payload);
+            if (payload.style === 'classic') { potMode = false; hidePot(); runClassicSpin(payload); }
+            else if (payload.style === 'pot') runPotSpin(payload);
+            else { potMode = false; hidePot(); runReelSpin(payload); }
+        } else if (msg.type === 'potMode') {
+            // Style switch on the controller, or a display that just connected
+            // and needs to be told what it's showing.
+            if (payload.eventName) document.getElementById('eventName').textContent = payload.eventName;
+            applyTheme(payload.theme);
+            if (typeof payload.soundEnabled === 'boolean') {
+                displaySoundEnabled = payload.soundEnabled;
+                updateSoundHint();
+            }
+            potMode = !!payload.active;
+            if (typeof payload.total === 'number') potTotal = payload.total;
+            if (potMode) {
+                showPot();
+                pot.setResting(Math.max(0, potTotal - pot.pendingCount()));
+                document.getElementById('idleMsg').style.display = 'none';
+            } else {
+                hidePot();
+                if (!document.getElementById('winnerWrap').classList.contains('show')) setIdle();
+            }
+        } else if (msg.type === 'potAdd') {
+            if (!potMode) return;
+            if (typeof payload.total === 'number') { potTotal = payload.total; updatePotCount(); }
+            showPot();
+            document.getElementById('idleMsg').style.display = 'none';
+            pot.addNames(payload.names || []);
         } else if (msg.type === 'reset') {
             setIdle();
         }

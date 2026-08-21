@@ -416,6 +416,14 @@ try {
     `);
 } catch {}
 
+// Boost sync: a temporary window during which the watcher polls every few
+// seconds instead of every few minutes, for the handful of minutes when a
+// whole room is filling the form in at once. boostUntil is an absolute time
+// so the boost expires on its own — a forgotten one can't keep hammering
+// Google forever, and a server restart doesn't lose or extend it.
+try { db.exec(`ALTER TABLE sheetWatchers ADD COLUMN boostUntil TEXT`); } catch {}
+try { db.exec(`ALTER TABLE sheetWatchers ADD COLUMN boostSeconds INTEGER DEFAULT 5`); } catch {}
+
 // ── One-time migration from db.json ──────────────────────────────────────────
 
 const migrationFlag = path.join(__dirname, 'db-migrated.flag');
@@ -825,6 +833,7 @@ export const stmt = {
         setEnabled: db.prepare(`UPDATE sheetWatchers SET enabled=? WHERE id=?`),
         setPollResult: db.prepare(`UPDATE sheetWatchers SET lastPolledAt=?, lastError=? WHERE id=?`),
         incrementIssued: db.prepare(`UPDATE sheetWatchers SET issuedCount = issuedCount + ? WHERE id=?`),
+        setBoost: db.prepare(`UPDATE sheetWatchers SET boostUntil=?, boostSeconds=? WHERE id=?`),
         deleteById: db.prepare(`DELETE FROM sheetWatchers WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM sheetWatchers WHERE eventId=?`),
     },

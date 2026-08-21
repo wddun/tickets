@@ -1511,7 +1511,16 @@ app.get('/dashboard.html', (req, res, next) => {
     if (!isAdmin && personalEventIdsForUser(req.session.userId).size === 0) return res.redirect('/');
     next();
 });
-app.use(express.static('public', { extensions: ['html'] }));
+app.use(express.static('public', {
+    extensions: ['html'],
+    maxAge: '1d',
+    setHeaders: (res, filePath) => {
+        // Documents stay revalidate-on-load (sw.js already serves them
+        // network-first); only static assets (css/js/images/fonts) get a
+        // browser cache lifetime, since none of them are content-hashed.
+        if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+    }
+}));
 app.get('/html5-qrcode.min.js', (req, res) => {
     res.sendFile(path.resolve(__dirname, 'node_modules/html5-qrcode/html5-qrcode.min.js'));
 });
@@ -4128,6 +4137,41 @@ app.get('/api/event/:id/tickets', requireAuthOrScanLink, (req, res) => {
     res.json(tickets);
 });
 
+// Giveaway pool feed: one small row per registration, cheap enough to poll
+// every few seconds while a form is filling up. /api/event/:id/tickets returns
+// the whole ticket record — QR token, custom fields, wallet/email timestamps,
+// last-seen scan — which is far too much to re-fetch at that rate once a few
+// hundred people have signed up. Same authorization as that route (any
+// capability on the event) since this returns a strict subset of it.
+app.get('/api/event/:id/giveaway/entrants', requireAuth, (req, res) => {
+    if (!stmt.events.byId.get(req.params.id) || !userEventCapabilities(req.session.userId, req.params.id).length) {
+        return res.status(401).json({ error: 'Unauthorized or not found' });
+    }
+    // One entrant per registration, not per ticket — a family of four bought
+    // one entry into the draw, not four.
+    const byRegistration = new Map();
+    for (const t of stmt.tickets.byEventId.all(req.params.id)) {
+        const rid = t.registrationId || t.id;
+        const existing = byRegistration.get(rid);
+        if (!existing) {
+            byRegistration.set(rid, {
+                registrationId: rid,
+                name: t.name || '',
+                email: t.email || '',
+                checkedIn: !!t.used_at,
+                createdAt: t.created_at || null,
+            });
+        } else if (t.used_at) {
+            existing.checkedIn = true;
+        }
+    }
+    const entrants = [...byRegistration.values()];
+    // Oldest first, so a client diffing against what it already has sees new
+    // arrivals in the order they actually signed up.
+    entrants.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    res.json({ entrants, total: entrants.length });
+});
+
 // Giveaway mode: email a spinner-drawn winner using their existing ticket(s)
 // for this event — reuses the standard ticket-confirmation email/QR flow
 // with a winner-specific intro, rather than a separate notification system.
@@ -6741,8 +6785,52 @@ async function pollSheetWatcher(watcher) {
     return summary;
 }
 
-// Scheduler: wakes every 30s, polls each enabled watcher whose interval has
-// elapsed. Cost per poll is one small HTTP GET + a few ms of parsing.
+// Boost sync: while boostUntil is in the future the watcher polls every
+// boostSeconds instead of every intervalMinutes. It exists for the few
+// minutes when a room full of people is filling the form in at once — a
+// 2-minute interval there means a hundred names land in one lump and then
+// nothing for another two minutes, which is exactly what the giveaway pot
+// can't smooth over. Bounds keep an over-eager boost from becoming a scraper:
+// at most one request every BOOST_MIN_SECONDS, for at most BOOST_MAX_MINUTES.
+const BOOST_MIN_SECONDS = 3;
+const BOOST_MAX_SECONDS = 60;
+const BOOST_MAX_MINUTES = 90;
+const SHEET_POLL_TICK_MS = 1000;
+
+function watcherBoostActive(w) {
+    return !!(w.boostUntil && Date.parse(w.boostUntil) > Date.now());
+}
+
+// How long since the last poll before this watcher is due again. The normal
+// path keeps its original 5s of slack so a 2-minute watcher isn't pushed to
+// 2.5 minutes by the tick granularity; a boosted one is already fine-grained.
+function watcherPollDueMs(w) {
+    if (watcherBoostActive(w)) {
+        const secs = Math.min(BOOST_MAX_SECONDS, Math.max(BOOST_MIN_SECONDS, w.boostSeconds || 5));
+        return secs * 1000;
+    }
+    return Math.max(0, (w.intervalMinutes || 2) * 60 * 1000 - 5000);
+}
+
+// What the dashboard and the giveaway page see: the row plus its parsed
+// config and the derived boost state, so no client has to re-implement the
+// expiry arithmetic (and disagree with the server about whether it's on).
+function sheetWatcherView(w) {
+    if (!w) return null;
+    const active = watcherBoostActive(w);
+    return {
+        ...w,
+        config: watcherConfig(w),
+        boostActive: active,
+        boostSecondsLeft: active ? Math.max(0, Math.round((Date.parse(w.boostUntil) - Date.now()) / 1000)) : 0,
+        pollEverySeconds: Math.round(watcherPollDueMs(w) / 1000) || 1,
+    };
+}
+
+// Scheduler: wakes every second and polls each enabled watcher whose interval
+// has elapsed. The tick is cheap (one indexed SELECT over a handful of rows);
+// the poll itself — one small HTTP GET plus a few ms of parsing — still only
+// happens when a watcher is actually due.
 let sheetPollBusy = false;
 setInterval(async () => {
     if (sheetPollBusy) return;
@@ -6750,16 +6838,15 @@ setInterval(async () => {
     try {
         const now = Date.now();
         for (const w of stmt.sheetWatchers.allEnabled.all()) {
-            const dueMs = (w.intervalMinutes || 2) * 60 * 1000;
             const last = w.lastPolledAt ? new Date(w.lastPolledAt).getTime() : 0;
-            if (now - last >= dueMs - 5000) await pollSheetWatcher(w);
+            if (now - last >= watcherPollDueMs(w)) await pollSheetWatcher(w);
         }
     } catch (err) {
         log('sheet-watch', `[ERR] Poll loop: ${err.message}`);
     } finally {
         sheetPollBusy = false;
     }
-}, 30 * 1000);
+}, SHEET_POLL_TICK_MS);
 
 // Fetch the sheet once and return headers + sample rows + auto-suggested
 // column mapping, so the dashboard can offer dropdowns instead of typing.
@@ -6796,7 +6883,7 @@ app.get('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
     if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
     const w = stmt.sheetWatchers.byEventId.get(req.params.id);
     if (!w) return res.json({ watcher: null });
-    res.json({ watcher: { ...w, config: watcherConfig(w), seenCount: stmt.sheetWatcherSeen.countByWatcherId.get(w.id).cnt } });
+    res.json({ watcher: { ...sheetWatcherView(w), seenCount: stmt.sheetWatcherSeen.countByWatcherId.get(w.id).cnt } });
 });
 
 // Create or update the event's watcher.
@@ -6876,7 +6963,40 @@ app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
     }
 
     logAudit(req, { eventId: req.params.id, action: isNew ? 'sheet_watch.connected' : 'sheet_watch.updated', details: { url: cleanUrl, conditionCount, intervalMinutes: interval } });
-    res.json({ success: true, watcher: { ...watcher, config: watcherConfig(watcher) } });
+    res.json({ success: true, watcher: sheetWatcherView(watcher) });
+});
+
+// Boost sync on/off. `minutes: 0` ends the boost immediately; anything else
+// starts (or extends) one running from now. Turning it on polls once straight
+// away so the operator sees the effect the moment they press the button rather
+// than up to boostSeconds later.
+app.post('/api/event/:id/sheet-watch/boost', requireAuth, async (req, res) => {
+    if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
+    const w = stmt.sheetWatchers.byEventId.get(req.params.id);
+    if (!w) return res.status(404).json({ error: 'No sheet watcher configured for this event' });
+
+    const minutes = Math.min(BOOST_MAX_MINUTES, Math.max(0, parseInt(req.body?.minutes, 10) || 0));
+    const seconds = Math.min(BOOST_MAX_SECONDS, Math.max(BOOST_MIN_SECONDS, parseInt(req.body?.seconds, 10) || 5));
+
+    if (!minutes) {
+        stmt.sheetWatchers.setBoost.run(null, seconds, w.id);
+        log('sheet-watch', `[boost] Off — watcher: ${w.id}  event: ${req.params.id}`);
+        logAudit(req, { eventId: req.params.id, action: 'sheet_watch.boostStopped', details: {} });
+        const off = stmt.sheetWatchers.byEventId.get(req.params.id);
+        return res.json({ success: true, watcher: sheetWatcherView(off) });
+    }
+
+    const until = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+    stmt.sheetWatchers.setBoost.run(until, seconds, w.id);
+    log('sheet-watch', `[boost] On — watcher: ${w.id}  every ${seconds}s until ${until}`);
+    logAudit(req, { eventId: req.params.id, action: 'sheet_watch.boostStarted', details: { minutes, seconds } });
+
+    let summary = null;
+    if (w.enabled) {
+        try { summary = await pollSheetWatcher(stmt.sheetWatchers.byEventId.get(req.params.id)); } catch (_) {}
+    }
+    const fresh = stmt.sheetWatchers.byEventId.get(req.params.id);
+    res.json({ success: true, summary, watcher: sheetWatcherView(fresh) });
 });
 
 // Manual "Check now".
@@ -6886,7 +7006,7 @@ app.post('/api/event/:id/sheet-watch/poll', requireAuth, async (req, res) => {
     if (!w) return res.status(404).json({ error: 'No sheet watcher configured for this event' });
     const summary = await pollSheetWatcher(w);
     const fresh = stmt.sheetWatchers.byEventId.get(req.params.id);
-    res.json({ success: true, summary, watcher: { ...fresh, config: watcherConfig(fresh) } });
+    res.json({ success: true, summary, watcher: sheetWatcherView(fresh) });
 });
 
 app.post('/api/event/:id/sheet-watch/toggle', requireAuth, (req, res) => {

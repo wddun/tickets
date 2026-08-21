@@ -59,7 +59,7 @@
             --red-dark:  #a02039;
             --red-text:  #c4294a;
             --text:      #1e293b;
-            --muted:     #64748b;
+            --muted:     #617188;
             --bg:        #f4f5f8;
             --white:     #ffffff;
             --border:    #dde3ed;
@@ -282,7 +282,7 @@
         .wallet-wrap .section-eyebrow { color: #e07b8e; margin-bottom: 10px; }
         .wallet-wrap .section-title   { color: white; margin: 0 auto 10px; max-width: 460px; }
         .wallet-sub  { font-size: 15px; color: rgba(255,255,255,.6); max-width: 440px; margin: 0 auto 28px; }
-        .wallet-note { font-size: 12px; color: rgba(255,255,255,.35); margin-top: 14px; }
+        .wallet-note { font-size: 12px; color: rgba(255,255,255,.5); margin-top: 14px; }
 
         /* Footer */
         footer { background: var(--navy-dark); padding: 32px 20px; }
@@ -296,7 +296,7 @@
         .footer-link { font-size: 13px; color: rgba(255,255,255,.5); transition: color .15s; }
         .footer-link:hover { color: #fff; }
         .footer-copy {
-            font-size: 12px; color: rgba(255,255,255,.28);
+            font-size: 12px; color: rgba(255,255,255,.48);
             width: 100%; text-align: center;
             margin-top: 14px; padding-top: 14px;
             border-top: 1px solid rgba(255,255,255,.07);
@@ -389,7 +389,7 @@
             display: flex; align-items: center; justify-content: center;
         }
         .rt-notif-icon-wrap svg { width: 16px; height: 16px; }
-        .rt-notif-app { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.4); margin-bottom: 2px; }
+        .rt-notif-app { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.55); margin-bottom: 2px; }
         .rt-notif-title { font-size: 13px; font-weight: 700; color: #fff; }
         .rt-notif-msg   { font-size: 13px; color: rgba(255,255,255,.75); line-height: 1.4; }
 
@@ -406,12 +406,13 @@
             transition: background .2s;
         }
         .rt-bar-peak { background: rgba(99,102,241,.9); }
-        .rt-bar span { font-size: 10px; color: rgba(255,255,255,.5); }
+        .rt-bar span { font-size: 10px; color: rgba(255,255,255,.7); }
+        .rt-bar-peak span { color: rgba(255,255,255,.97); }
         .rt-chart-stats {
             display: flex; gap: 16px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 12px;
         }
         .rt-cs-num   { font-size: 22px; font-weight: 800; color: #fff; }
-        .rt-cs-label { font-size: 11px; color: rgba(255,255,255,.4); margin-top: 1px; }
+        .rt-cs-label { font-size: 11px; color: rgba(255,255,255,.55); margin-top: 1px; }
 
         /* iOS app callout */
         .ios-app-section {
@@ -458,7 +459,7 @@
         }
         .ios-tab {
             flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
-            font-size: 9px; font-weight: 500; color: rgba(255,255,255,.4);
+            font-size: 9px; font-weight: 500; color: rgba(255,255,255,.5);
         }
         .ios-tab.active { color: #fff; }
         .ios-tab svg { width: 18px; height: 18px; }
@@ -499,6 +500,7 @@
         </div>
     </nav>
 
+    <main>
     <section class="hero">
         <div class="hero-eyebrow">Event Ticketing Platform</div>
         <h1>Tickets that <em>just work</em><br>for your events</h1>
@@ -818,6 +820,7 @@
         <img src="/apple-wallet-badge.png" alt="Add to Apple Wallet" style="height:48px;margin:0 auto;display:block;">
         <div class="wallet-note">Updates push automatically when event details change.</div>
     </section>
+    </main>
 
     <footer>
         <div class="footer-inner">

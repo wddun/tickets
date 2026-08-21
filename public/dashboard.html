@@ -5552,11 +5552,19 @@
                             <strong>Poll every:</strong> ${watcher.intervalMinutes || watcher.config.intervalMinutes || 2} min
                             <strong style="margin-left:20px;">Issued:</strong> ${watcher.issuedCount} ticket(s)
                         </div>
+                        ${watcher.boostActive ? `
+                        <div style="font-size:12px;padding:8px 10px;border-radius:6px;margin-bottom:8px;background:#fffbeb;border:1px solid #fcd34d;color:#78350f;">
+                            <strong>Boost sync on</strong> — checking every ${watcher.boostSeconds || 5}s for another ${Math.ceil((watcher.boostSecondsLeft || 0) / 60)} min.
+                        </div>` : ''}
                         ${watcher.lastError ? `<div style="font-size:11px;color:#991b1b;background:#fef2f2;padding:6px 8px;border-radius:4px;margin-bottom:8px;">Last error: ${esc(watcher.lastError)}</div>` : ''}
-                        <div style="display:flex;gap:6px;">
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
                             <button class="btn btn-secondary btn-sm" onclick="swPoll('${eventId}')">Check Now</button>
+                            <button class="btn btn-secondary btn-sm" onclick="swBoost('${eventId}', ${watcher.boostActive ? 'false' : 'true'})">${watcher.boostActive ? 'Stop Boost' : 'Boost Sync'}</button>
                             <button class="btn btn-secondary btn-sm" onclick="swEdit('${eventId}')">Edit</button>
                             <button class="btn btn-danger btn-sm" onclick="swDisconnect('${eventId}')">Disconnect</button>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
+                            Boost sync checks the sheet every few seconds for 15 minutes — for the few minutes when a whole room is filling the form in at once. It stops on its own.
                         </div>
                     </div>
                 </div>
@@ -5748,6 +5756,26 @@
         async function swPoll(eventId) {
             const res = await fetch(`/api/event/${eventId}/sheet-watch/poll`, {method: 'POST'});
             if (res.ok) { const r = await res.json(); showToast(`Found ${r.summary.matched}, issued ${r.summary.issued}, already seen ${r.summary.alreadySeen}.`); loadAccessData(eventId); } else { showToast('Poll failed.'); }
+        }
+
+        // Boost sync: a short window of near-continuous polling. The server
+        // expires it on its own, so an operator who walks away can't leave it
+        // hammering Google — the button is for turning it off early.
+        async function swBoost(eventId, on) {
+            const res = await fetch(`/api/event/${eventId}/sheet-watch/boost`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(on ? {minutes: 15, seconds: 5} : {minutes: 0}),
+            });
+            if (res.ok) {
+                const r = await res.json();
+                showToast(on
+                    ? `Boost sync on for 15 min${r.summary ? ` — issued ${r.summary.issued} just now.` : '.'}`
+                    : 'Boost sync stopped.');
+                loadAccessData(eventId);
+            } else {
+                showToast((await res.json().catch(() => ({}))).error || 'Boost failed.');
+            }
         }
 
         async function swEdit(eventId) {

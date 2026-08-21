@@ -1,0 +1,11 @@
+# WTS Tickets
+
+> Event ticketing platform by Will's Tech Support — Apple Wallet passes, QR code check-in, and real-time attendee tracking for organizers. Free tickets are fully supported; paid ticketing is a beta feature.
+
+Organizers create an event, import or add attendees, and check people in at the door by scanning a QR code with any phone or the iOS app. Attendees receive tickets by email as a real Apple Wallet pass — no app required to hold a ticket.
+
+## Docs
+
+- [Public HTTP API](https://tickets.willstechsupport.com/api.html): REST API for issuing and validating tickets programmatically, authenticated with a per-event API key.
+- [Support](https://tickets.willstechsupport.com/support.html): Help with event setup, QR check-in, Apple Wallet passes, and organizer accounts.
+- [Privacy Policy](https://tickets.willstechsupport.com/privacy.html): What attendee and organizer data is collected, how it's used, and how to request deletion.

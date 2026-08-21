@@ -237,6 +237,51 @@
         .reel-fade-top { top: 0; background: linear-gradient(#0a0a0c, transparent); }
         .reel-fade-bottom { bottom: 0; background: linear-gradient(transparent, #0a0a0c); }
 
+        /* ── Paper pot ── */
+        .pot-wrap {
+            display: none;
+            position: relative; width: min(88vw, 340px); height: 448px;
+            border-radius: 18px; overflow: hidden;
+            background: radial-gradient(ellipse at 50% 18%, rgba(255,255,255,0.07), transparent 62%), #050506;
+            box-shadow:
+                inset 0 0 34px rgba(0,0,0,0.65),
+                0 0 0 3px rgba(0,0,0,0.55),
+                0 0 0 6px var(--accent-soft),
+                0 20px 44px rgba(0,0,0,0.6);
+        }
+        .wheel-stage.style-pot .pot-wrap { display: block; }
+        .wheel-stage.style-pot .wheel-pointer-mount,
+        .wheel-stage.style-pot .wheel-disc-wrap { display: none; }
+        canvas#potCanvas { display: block; width: 100%; height: 100%; }
+        /* Bottom, not top: the top of the stage is where the slips fall
+           through, and a caption sitting in that path reads as clutter. */
+        .pot-hint {
+            position: absolute; left: 0; right: 0; bottom: 10px; text-align: center;
+            font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+            color: rgba(255,255,255,0.28); pointer-events: none;
+        }
+
+        /* ── Live entries bar ── */
+        .live-bar {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09);
+            border-radius: 14px; padding: 12px 14px; margin-bottom: 16px;
+        }
+        .live-bar .lb-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.25); flex-shrink: 0;
+        }
+        .live-bar.on .lb-dot { background: #34d399; box-shadow: 0 0 7px #34d399; }
+        .live-bar.boosting .lb-dot { background: var(--accent); box-shadow: 0 0 9px var(--accent); }
+        .lb-text { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.7); flex: 1; min-width: 150px; }
+        .lb-sub { font-size: 11px; color: rgba(255,255,255,0.38); margin-top: 2px; font-weight: 500; }
+        .lb-btn {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.14);
+            color: #fff; font-size: 12px; font-weight: 700; padding: 8px 13px; border-radius: 10px;
+            cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent;
+        }
+        .lb-btn:disabled { opacity: 0.35; cursor: default; }
+        .lb-btn.primary { background: var(--accent); border-color: transparent; color: #1a1f3c; }
+
         .spin-btn {
             margin-top: 22px; padding: 14px 44px; border-radius: 30px; border: none;
             background: var(--accent); color: #1a1f3c; font-size: 16px; font-weight: 800;
@@ -373,6 +418,7 @@
             <div class="style-seg">
                 <button id="styleBtnReel" onclick="setSpinnerStyle('reel')">Vertical Reel</button>
                 <button id="styleBtnClassic" onclick="setSpinnerStyle('classic')">Classic Spinner</button>
+                <button id="styleBtnPot" onclick="setSpinnerStyle('pot')">Paper Pot</button>
             </div>
             <div class="controls-right">
                 <label class="pool-toggle">
@@ -437,6 +483,16 @@
             </div>
         </div>
 
+        <div class="live-bar" id="liveBar">
+            <span class="lb-dot"></span>
+            <div class="lb-text">
+                <div id="lbText">Live entries off</div>
+                <div class="lb-sub" id="lbSub"></div>
+            </div>
+            <button class="lb-btn" id="lbLiveBtn" onclick="toggleLiveEntries()">Turn on</button>
+            <button class="lb-btn primary" id="lbBoostBtn" onclick="toggleBoost()">Boost sync</button>
+        </div>
+
         <input type="text" id="prizeInput" class="prize-input" placeholder="Prize (optional) — shown in the winner list and email, e.g. &quot;Front row seats&quot;">
 
         <div class="name-ticker" id="nameTicker"></div>
@@ -449,6 +505,10 @@
             <div class="wheel-disc-wrap">
                 <canvas id="wheelCanvas" width="600" height="600"></canvas>
                 <div class="wheel-hub"></div>
+            </div>
+            <div class="pot-wrap">
+                <canvas id="potCanvas"></canvas>
+                <div class="pot-hint" id="potHint">Entries drop in as they arrive</div>
             </div>
             <div class="reel-wrap">
                 <div class="reel-strip" id="reelStrip"></div>
@@ -496,10 +556,11 @@
     </div>
 </div>
 
+<script src="giveaway-pot.js"></script>
 <script>
 let events = [];
 let currentEventId = null;
-let allTickets = [];
+let allEntrants = [];   // one row per registration, oldest first
 let pool = [];          // entrants still eligible to win
 let winners = [];       // { registrationId, name, email, prizeLabel, emailed }
 let spinnerStyle = 'reel';
@@ -530,6 +591,23 @@ const SPEED_MULT = { slow: 1.35, normal: 1, fast: 0.68 };
 // Presenter/display pairing
 let presenterSessionId = null;
 let presenterPollTimer = null;
+
+// ── Live entries ────────────────────────────────────────────────
+// The pool used to be a snapshot taken when the page loaded, which is fine
+// for a closed guest list and useless for a room filling in a Google Form
+// while you watch. These poll the entrant feed and hand new names to the pot.
+let pot = null;
+let liveEntries = true;
+let livePollTimer = null;
+let livePollBusy = false;
+let knownRegistrationIds = new Set();
+let arrivalsDuringSpin = [];   // held back so nothing changes mid-draw
+let sheetWatcher = null;       // null when this event has no sheet connected
+let boostTicker = null;
+const LIVE_POLL_MS = 6000;
+const LIVE_POLL_BOOST_MS = 2500;
+const BOOST_MINUTES = 15;
+const BOOST_SECONDS = 5;
 
 const params = new URLSearchParams(location.search);
 
@@ -567,45 +645,67 @@ function esc(s) {
     buildSwatches();
     setSpinnerStyle('reel');
     await loadEntrants();
+    await loadWatcherState();
+    startLiveSync();
 })();
 
-function onEventChange() {
+async function onEventChange() {
     currentEventId = document.getElementById('eventSelect').value;
     winners = [];
     manuallyExcluded = new Set();
+    knownRegistrationIds = new Set();
+    arrivalsDuringSpin = [];
+    sheetWatcher = null;
+    // Names still queued for the old event's pot have no business fluttering
+    // into the new one's.
+    if (pot) pot.clear();
     renderWinners();
-    loadEntrants();
+    await loadEntrants();
+    await loadWatcherState();
+    restartLivePoll();
 }
 
+// The initial load is a snapshot: everyone already signed up is simply in the
+// pot. Only entries that arrive *while the page is open* get an animation —
+// nobody in the room watched the first two hundred arrive.
 async function loadEntrants() {
     document.getElementById('poolCount').textContent = 'Loading…';
-    try {
-        const r = await fetch(`/api/event/${currentEventId}/tickets`);
-        allTickets = r.ok ? await r.json() : [];
-    } catch (_) { allTickets = []; }
+    allEntrants = await fetchEntrants();
+    knownRegistrationIds = new Set(allEntrants.map(e => e.registrationId));
     rebuildPool();
+    if (pot) pot.setResting(pool.length);
+}
+
+async function fetchEntrants() {
+    try {
+        const r = await fetch(`/api/event/${currentEventId}/giveaway/entrants`);
+        if (!r.ok) return [];
+        const data = await r.json();
+        return Array.isArray(data.entrants) ? data.entrants : [];
+    } catch (_) { return []; }
 }
 
 function rebuildPool() {
     const checkedInOnly = document.getElementById('checkedInOnlyToggle').checked;
-    const groups = {};
-    for (const t of allTickets) {
-        const rid = t.registrationId || t.id;
-        if (!groups[rid]) {
-            groups[rid] = { registrationId: rid, name: t.name, email: t.email, checkedIn: false };
-        }
-        if (t.used_at) groups[rid].checkedIn = true;
-    }
     const winnerIds = new Set(winners.map(w => w.registrationId));
     // Shuffled, not in signup/API order — otherwise the wheel wedges and
     // reel always line up the same way every time you load the page.
-    pool = shuffled(Object.values(groups).filter(e =>
+    pool = shuffled(allEntrants.filter(e =>
         !winnerIds.has(e.registrationId) && !manuallyExcluded.has(e.registrationId) && (!checkedInOnly || e.checkedIn)
     ));
     renderPoolChips();
     updateSpinButton();
     if (spinnerStyle === 'classic') drawWheel(currentRotation);
+    else if (spinnerStyle === 'pot') syncPotCount();
     else renderReelAtRest();
+}
+
+// Keep the heap in the pot honest against the pool, without swallowing the
+// slips still on their way down — those add themselves as they land.
+function syncPotCount() {
+    if (!pot) return;
+    pot.setResting(Math.max(0, pool.length - pot.pendingCount()));
+    pot.setLabel(String(pool.length));
 }
 
 function excludeEntrant(registrationId) {
@@ -642,9 +742,36 @@ function setSpinnerStyle(style) {
     spinnerStyle = style;
     document.getElementById('styleBtnReel').classList.toggle('active', style === 'reel');
     document.getElementById('styleBtnClassic').classList.toggle('active', style === 'classic');
+    document.getElementById('styleBtnPot').classList.toggle('active', style === 'pot');
     document.getElementById('wheelStage').className = 'wheel-stage style-' + style;
-    if (style === 'classic') drawWheel(currentRotation);
+    if (style === 'pot') { ensurePot(); syncPotCount(); }
+    else if (style === 'classic') drawWheel(currentRotation);
     else renderReelAtRest();
+    broadcastPotMode();
+}
+
+// ── Paper pot ───────────────────────────────────────────────────
+// Created lazily: the canvas has no size until its wrapper is displayed, and
+// laying it out while hidden gives a 0x0 pot that never recovers.
+function ensurePot() {
+    if (pot) { pot.resize(); return pot; }
+    pot = GiveawayPot.create(document.getElementById('potCanvas'), {
+        accent: THEMES[customization.theme].accent,
+        onEvent: (type) => {
+            if (type === 'land') { playPaperDrop(); updatePotHint(); }
+            else if (type === 'rattle') playPaperRattle();
+        },
+    });
+    return pot;
+}
+
+function updatePotHint() {
+    const el = document.getElementById('potHint');
+    if (!el || !pot) return;
+    const waiting = pot.pendingCount();
+    el.textContent = waiting > 0
+        ? `${waiting} still fluttering in`
+        : 'Entries drop in as they arrive';
 }
 
 // ── Customize panel ─────────────────────────────────────────────
@@ -665,6 +792,7 @@ function setTheme(key) {
     document.documentElement.style.setProperty('--accent', t.accent);
     document.documentElement.style.setProperty('--accent-soft', t.soft);
     buildSwatches();
+    if (pot) pot.setAccent(t.accent);
     if (spinnerStyle === 'classic') drawWheel(currentRotation);
 }
 function setSpeed(v) {
@@ -678,6 +806,190 @@ function onWinnersPerSpinChange() {
     updateSpinButton();
 }
 setSpeed('normal');
+
+// ── Live entries + boost sync ───────────────────────────────────
+// Two separate rates, and they matter for different reasons:
+//   * this page's poll of the entrant feed — how quickly a ticket that already
+//     exists shows up in the pot;
+//   * the server's sheet-watch poll — how quickly a Google Form response
+//     becomes a ticket at all.
+// Speeding up only the first one just polls faster for rows the server hasn't
+// fetched yet, so Boost turns up both.
+function startLiveSync() {
+    updateLiveBar();
+    restartLivePoll();
+}
+
+function restartLivePoll() {
+    clearInterval(livePollTimer);
+    livePollTimer = null;
+    if (!liveEntries) { updateLiveBar(); return; }
+    const every = boostActive() ? LIVE_POLL_BOOST_MS : LIVE_POLL_MS;
+    livePollTimer = setInterval(pollLiveEntrants, every);
+    updateLiveBar();
+}
+
+function toggleLiveEntries() {
+    liveEntries = !liveEntries;
+    restartLivePoll();
+    if (liveEntries) pollLiveEntrants();
+}
+
+async function pollLiveEntrants() {
+    if (!liveEntries || livePollBusy || !currentEventId) return;
+    livePollBusy = true;
+    try {
+        const fresh = await fetchEntrants();
+        if (!fresh.length && !knownRegistrationIds.size) return;
+        const arrivals = fresh.filter(e => !knownRegistrationIds.has(e.registrationId));
+        // Check-in state and deletions still need to be picked up, but only the
+        // genuinely new rows get an animation.
+        allEntrants = fresh;
+        if (!arrivals.length) {
+            if (!spinning) rebuildPool();
+            return;
+        }
+        arrivals.forEach(e => knownRegistrationIds.add(e.registrationId));
+        if (spinning) {
+            // Mid-draw is the one moment the pool must not move under the
+            // spinner's feet, so hold these until it settles.
+            arrivalsDuringSpin.push(...arrivals);
+            return;
+        }
+        applyArrivals(arrivals);
+    } finally {
+        livePollBusy = false;
+    }
+}
+
+function applyArrivals(arrivals) {
+    if (!arrivals.length) return;
+    rebuildPool();
+    const names = arrivals.map(reelLabel);
+    if (spinnerStyle === 'pot') {
+        ensurePot();
+        pot.setLabel(String(pool.length));
+        pot.addNames(names);
+        updatePotHint();
+    }
+    broadcastPotAdd(names);
+    flashArrivalNote(arrivals.length);
+}
+
+function flashArrivalNote(n) {
+    const el = document.getElementById('lbSub');
+    el.dataset.flash = '1';
+    el.textContent = n === 1 ? '1 new entry just came in' : `${n} new entries just came in`;
+    clearTimeout(flashArrivalNote._t);
+    flashArrivalNote._t = setTimeout(() => { el.dataset.flash = ''; updateLiveBar(); }, 4000);
+}
+
+// ── Boost ───────────────────────────────────────────────────────
+function boostActive() {
+    return !!(sheetWatcher && sheetWatcher.boostActive && (sheetWatcher.boostEndsAt || 0) > Date.now());
+}
+
+async function loadWatcherState() {
+    sheetWatcher = null;
+    try {
+        const r = await fetch(`/api/event/${currentEventId}/sheet-watch`);
+        if (r.ok) {
+            const data = await r.json();
+            setWatcher(data.watcher);
+        }
+    } catch (_) { /* no watcher, or no permission to see it — Boost stays off */ }
+    updateLiveBar();
+}
+
+// The server sends seconds remaining; keep an absolute deadline locally so the
+// countdown doesn't jump every time a response arrives.
+function setWatcher(w) {
+    sheetWatcher = w || null;
+    if (sheetWatcher) {
+        sheetWatcher.boostEndsAt = sheetWatcher.boostActive
+            ? Date.now() + (sheetWatcher.boostSecondsLeft || 0) * 1000
+            : 0;
+    }
+    startBoostTicker();
+    restartLivePoll();
+}
+
+function startBoostTicker() {
+    clearInterval(boostTicker);
+    boostTicker = null;
+    if (!boostActive()) { updateLiveBar(); return; }
+    boostTicker = setInterval(() => {
+        if (!boostActive()) {
+            // Expired on its own — drop back to the normal poll rate rather
+            // than sitting on a stale "boosting" badge.
+            clearInterval(boostTicker);
+            boostTicker = null;
+            if (sheetWatcher) sheetWatcher.boostActive = false;
+            restartLivePoll();
+        }
+        updateLiveBar();
+    }, 1000);
+    updateLiveBar();
+}
+
+async function toggleBoost() {
+    if (!sheetWatcher) return;
+    const btn = document.getElementById('lbBoostBtn');
+    const turningOff = boostActive();
+    btn.disabled = true;
+    try {
+        const r = await fetch(`/api/event/${currentEventId}/sheet-watch/boost`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(turningOff ? { minutes: 0 } : { minutes: BOOST_MINUTES, seconds: BOOST_SECONDS }),
+        });
+        if (r.ok) {
+            const data = await r.json();
+            setWatcher(data.watcher);
+            // The boost request polls the sheet server-side before it answers,
+            // so anything it just issued is already there to pick up.
+            if (!turningOff) pollLiveEntrants();
+        }
+    } catch (_) {}
+    btn.disabled = false;
+    updateLiveBar();
+}
+
+function updateLiveBar() {
+    const bar = document.getElementById('liveBar');
+    const text = document.getElementById('lbText');
+    const sub = document.getElementById('lbSub');
+    const liveBtn = document.getElementById('lbLiveBtn');
+    const boostBtn = document.getElementById('lbBoostBtn');
+    const boosting = boostActive();
+
+    bar.classList.toggle('on', liveEntries);
+    bar.classList.toggle('boosting', liveEntries && boosting);
+    liveBtn.textContent = liveEntries ? 'Turn off' : 'Turn on';
+
+    if (!liveEntries) {
+        text.textContent = 'Live entries off';
+        if (sub.dataset.flash !== '1') sub.textContent = 'The pool stays as it was when this page loaded.';
+    } else if (boosting) {
+        const left = Math.max(0, Math.round((sheetWatcher.boostEndsAt - Date.now()) / 1000));
+        const mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, '0');
+        text.textContent = `Boost sync on — ${mm}:${ss} left`;
+        if (sub.dataset.flash !== '1') {
+            sub.textContent = `Checking the sheet every ${sheetWatcher.boostSeconds || BOOST_SECONDS}s and this page every ${LIVE_POLL_BOOST_MS / 1000}s.`;
+        }
+    } else {
+        text.textContent = 'Live entries on';
+        if (sub.dataset.flash !== '1') {
+            sub.textContent = sheetWatcher
+                ? `Sheet checked every ${sheetWatcher.intervalMinutes || 2} min. Boost drops that to ${BOOST_SECONDS}s for ${BOOST_MINUTES} minutes.`
+                : 'New tickets appear within a few seconds. Connect a Google Sheet in Settings to boost form responses too.';
+        }
+    }
+
+    boostBtn.disabled = !sheetWatcher;
+    boostBtn.textContent = boosting ? 'Stop boost' : 'Boost sync';
+    boostBtn.classList.toggle('primary', !boosting);
+}
 
 // ── Wheel drawing (Classic Spinner) ───────────────────────────
 const WHEEL_PALETTE = ['#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b'];
@@ -881,6 +1193,59 @@ function playTick() {
         osc.start(); osc.stop(ctx.currentTime + 0.05);
     } catch (_) {}
 }
+// A slip landing in the pot: a short filtered-noise thump, not the reel's
+// mechanical tick. With a hundred arriving at once these overlap constantly,
+// so it's quiet, short, and rate-limited by the caller's own pacing.
+let lastPaperMs = 0;
+function playPaperDrop() {
+    if (!controllerSoundEnabled()) return;
+    const now = performance.now();
+    if (now - lastPaperMs < 45) return;
+    lastPaperMs = now;
+    try {
+        const ctx = ensureAudio();
+        const dur = 0.07;
+        const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < data.length; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2.4);
+        }
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 1500 + Math.random() * 900;
+        filter.Q.value = 0.9;
+        const gain = ctx.createGain();
+        gain.gain.value = 0.09;
+        src.connect(filter).connect(gain).connect(ctx.destination);
+        src.start();
+    } catch (_) {}
+}
+// Paper being shaken around inside the pot — the same noise burst, lower and
+// brighter, so the shake reads as a rummage rather than a drum.
+function playPaperRattle() {
+    if (!controllerSoundEnabled()) return;
+    try {
+        const ctx = ensureAudio();
+        const dur = 0.12;
+        const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < data.length; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 1.5);
+        }
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'highpass';
+        filter.frequency.value = 2200;
+        const gain = ctx.createGain();
+        gain.gain.value = 0.055;
+        src.connect(filter).connect(gain).connect(ctx.destination);
+        src.start();
+    } catch (_) {}
+}
+
 function playWinChime() {
     if (!controllerSoundEnabled()) return;
     try {
@@ -954,7 +1319,55 @@ function spin() {
     updateSpinButton();
     const picked = pickWinners();
     if (spinnerStyle === 'classic') spinClassic(picked);
+    else if (spinnerStyle === 'pot') spinPot(picked);
     else spinReel(picked);
+}
+
+// Entries that landed while the spinner was running. Held back so the pool
+// can't change under a draw in progress, then dropped in the moment it ends.
+function flushArrivalsAfterSpin() {
+    if (!arrivalsDuringSpin.length) return;
+    const held = arrivalsDuringSpin;
+    arrivalsDuringSpin = [];
+    applyArrivals(held);
+}
+
+function spinPot(picked) {
+    const duration = 5.2 * SPEED_MULT[customization.speed];
+    const names = picked.map(reelLabel);
+    // Decoration for the slips that fly up during the shake — the winner was
+    // already chosen by pickWinners() over the whole pool.
+    const churnNames = shuffled(pool).slice(0, 24).map(reelLabel);
+
+    ensurePot();
+    broadcastSpin({
+        style: 'pot', durationSec: duration,
+        winnerNames: names, churnNames, potCount: pool.length,
+        prizeLabel: document.getElementById('prizeInput').value.trim(),
+    });
+
+    let settled = false;
+    const finish = () => {
+        if (settled) return;
+        settled = true;
+        spinning = false;
+        pendingWinners = picked;
+        showWinnerOverlay(pendingWinners);
+        updateSpinButton();
+        flushArrivalsAfterSpin();
+    };
+    pot.spin({
+        names,
+        churnNames,
+        durationMs: duration * 1000,
+        onDone: finish,
+    });
+    // The chime and confetti land with the slip coming to rest, ~0.7s before
+    // the overlay, so the room sees the name on the paper first.
+    const revealAt = setTimeout(() => { playWinChime(); fireConfetti(); }, duration * 1000 * 0.86);
+    // A backgrounded tab stalls rAF, and with it pot.spin's own completion —
+    // same fallback the reel and wheel use so the Spin button can't stick.
+    setTimeout(() => { clearTimeout(revealAt); finish(); }, duration * 1000 + 800);
 }
 
 function spinClassic(picked) {
@@ -995,6 +1408,7 @@ function spinClassic(picked) {
         fireConfetti();
         showWinnerOverlay(pendingWinners);
         updateSpinButton();
+        flushArrivalsAfterSpin();
     };
     const frame = (now) => {
         const p = Math.min((now - startTime) / (duration * 1000), 1);
@@ -1070,6 +1484,7 @@ function spinReel(picked) {
         fireConfetti();
         showWinnerOverlay(pendingWinners);
         updateSpinButton();
+        flushArrivalsAfterSpin();
     };
     const frame = (now) => {
         const p = Math.min((now - startTime) / (duration * 1000), 1);
@@ -1137,7 +1552,9 @@ function showWinnerOverlay(entrants) {
 function closeWinnerOverlay() {
     document.getElementById('winnerOverlay').classList.remove('show');
     pendingWinners = [];
+    if (pot) pot.reset();
     broadcastReset();
+    broadcastPotMode();
 }
 
 function rerollWinner() {
@@ -1237,7 +1654,12 @@ async function pollPresenterStatus() {
     } catch (_) {}
 }
 function updatePresentBtn(live) {
-    document.getElementById('presentBtn').classList.toggle('live', live);
+    const btn = document.getElementById('presentBtn');
+    const was = btn.classList.contains('live');
+    btn.classList.toggle('live', live);
+    // A display opened halfway through the evening has no idea what style is
+    // selected or how full the pot is — tell it as soon as it appears.
+    if (live && !was) broadcastPotMode();
 }
 async function broadcastSpin(payload) {
     if (!presenterSessionId) return;
@@ -1250,6 +1672,42 @@ async function broadcastSpin(payload) {
         });
     } catch (_) {}
 }
+// The pot is the one style that shows something between spins, so the display
+// needs its state (idle pot, how full) and not just spin events.
+async function broadcastPotMode() {
+    if (!presenterSessionId) return;
+    const ev = events.find(e => e.id === currentEventId);
+    try {
+        await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type: 'potMode',
+                payload: {
+                    active: spinnerStyle === 'pot',
+                    total: pool.length,
+                    eventName: ev ? ev.name : '',
+                    theme: THEMES[customization.theme].accent,
+                    soundEnabled: customization.soundOnPresenter,
+                },
+            }),
+        });
+    } catch (_) {}
+}
+
+// Names only — the display never sees emails or registration ids, same as
+// every other payload it receives.
+async function broadcastPotAdd(names) {
+    if (!presenterSessionId || !names.length) return;
+    try {
+        await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'potAdd', payload: { names, total: pool.length } }),
+        });
+    } catch (_) {}
+}
+
 async function broadcastReset() {
     if (!presenterSessionId) return;
     try {
