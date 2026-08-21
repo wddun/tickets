@@ -8,9 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Line endings
 
-`server.js` is stored with **CRLF** line endings; every other file in the repo is LF.
-Rewriting it with a tool that normalises newlines turns the whole file into one 8000-line
-diff and buries the real change. Check with `file server.js` after any scripted edit.
+**Every file in this repo is LF.** `server.js` was the lone CRLF holdout and was converted
+in one commit, precisely so no future edit has to preserve it. Don't reintroduce CRLF: a
+scripted edit that normalises newlines would otherwise rewrite all 8000 lines and bury the
+real change in the diff.
 
 ## Running the server
 
