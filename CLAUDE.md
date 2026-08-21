@@ -6,6 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **No emojis in code, UI text, comments, commit messages, or files unless the user explicitly asks or there's no alternative that fits.** Prefer inline SVG icons (the codebase already uses them widely — see scanner.html, checkin.html, dashboard.html) or plain text labels. When editing existing UI that already contains emojis, do not add more — leave the existing ones in place unless asked to clean them up.
 
+## Line endings
+
+`server.js` is stored with **CRLF** line endings; every other file in the repo is LF.
+Rewriting it with a tool that normalises newlines turns the whole file into one 8000-line
+diff and buries the real change. Check with `file server.js` after any scripted edit.
+
 ## Running the server
 
 ```bash
