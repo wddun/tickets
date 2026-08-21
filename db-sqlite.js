@@ -319,6 +319,13 @@ try { db.exec(`ALTER TABLE events ADD COLUMN timezone TEXT`); } catch {}
 // self-registration, checkout receipts, or waitlist notifications — those
 // stay on regardless, since they're the only confirmation the person gets.
 try { db.exec(`ALTER TABLE events ADD COLUMN skipConfirmationEmails INTEGER DEFAULT 0`); } catch {}
+// Per-source confirmation-email policy, superseding the single
+// skipConfirmationEmails flag (which only ever covered staff-issued tickets and
+// left the organiser no way to silence public sign-ups). JSON so adding a
+// source never needs another migration. NULL means "never configured" — see
+// eventEmailPolicy() in server.js, which falls back to the old flag so existing
+// events keep behaving exactly as they did.
+try { db.exec(`ALTER TABLE events ADD COLUMN emailPolicy TEXT`); } catch {}
 try {
     db.exec(`
         CREATE TABLE IF NOT EXISTS ticketScans (
@@ -572,6 +579,7 @@ export function rowToEvent(row) {
         blockDuplicateEmails: !!row.blockDuplicateEmails,
         shuttleLinkEnabled: !!row.shuttleLinkEnabled,
         skipConfirmationEmails: !!row.skipConfirmationEmails,
+        emailPolicy: (() => { try { return row.emailPolicy ? JSON.parse(row.emailPolicy) : null; } catch { return null; } })(),
         walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
         emailTemplate: (() => { try { return row.emailTemplate ? JSON.parse(row.emailTemplate) : null; } catch { return null; } })(),
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
@@ -634,6 +642,7 @@ export const stmt = {
         setAtDoorEnabled: db.prepare(`UPDATE events SET atDoorEnabled=? WHERE id=?`),
         setWaitlistEnabled: db.prepare(`UPDATE events SET waitlistEnabled=? WHERE id=?`),
         setSkipConfirmationEmails: db.prepare(`UPDATE events SET skipConfirmationEmails=? WHERE id=?`),
+        setEmailPolicy: db.prepare(`UPDATE events SET emailPolicy=? WHERE id=?`),
         setShuttleLinkEnabled: db.prepare(`UPDATE events SET shuttleLinkEnabled=? WHERE id=?`),
         setWalletLockScreenEnabled: db.prepare(`UPDATE events SET walletLockScreenEnabled=? WHERE id=?`),
         setEmailTemplate: db.prepare(`UPDATE events SET emailTemplate=? WHERE id=?`),

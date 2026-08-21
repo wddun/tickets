@@ -216,6 +216,69 @@ describe('turning confirmation emails off actually turns them off', () => {
         assert.equal(server.emails().filter(m => m.to === email).length, 0);
     });
 
+    test('public sign-ups can be silenced, which the old single flag could not do', async () => {
+        const ev = await createEvent(owner.client, { name: 'Quiet Public', publicRegistration: true });
+        const r = await owner.client.put(`/api/event/${ev.id}/email-policy`, { public: false });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.emailPolicy.public, false);
+        assert.equal(r.body.emailPolicy.import, true, 'the other sources must be left alone');
+
+        const email = uniqueEmail('quietpublic');
+        server.clearEmails();
+        const reg = await publicRegister(visitor(), ev.id, { name: 'Unmailed', email });
+        assert.equal(reg.status, 200, reg.text);
+        await new Promise(res => setTimeout(res, 400));
+        assert.equal(server.emails().filter(m => m.to === email).length, 0);
+    });
+
+    test('turning every source off emails nobody, whatever route they came in by', async () => {
+        const ev = await createEvent(owner.client, { name: 'Total Silence', publicRegistration: true });
+        await owner.client.put(`/api/event/${ev.id}/email-policy`, {
+            public: false, door: false, import: false, manual: false,
+        });
+        const apiKey = await eventApiKey(owner.client, ev.id);
+        const viaPublic = uniqueEmail('silent-public');
+        const viaImport = uniqueEmail('silent-import');
+        const viaManual = uniqueEmail('silent-manual');
+        server.clearEmails();
+
+        await publicRegister(visitor(), ev.id, { name: 'Public One', email: viaPublic });
+        await visitor().post('/api/register-bulk', {
+            firstName: 'Import', lastName: 'One', email: viaImport,
+            eventId: ev.id, ticketCount: 1, apiKey,
+        });
+        await addTicket(owner.client, ev.id, { name: 'Manual One', email: viaManual, noEmail: false });
+
+        await new Promise(res => setTimeout(res, 500));
+        const sent = server.emails().map(m => m.to);
+        for (const addr of [viaPublic, viaImport, viaManual]) {
+            assert.equal(sent.includes(addr), false, `${addr} should not have been emailed`);
+        }
+        // All three still got a ticket — this silences the email, not the signup.
+        assert.equal((await listTickets(owner.client, ev.id)).length, 3);
+    });
+
+    test('an event that predates the policy keeps behaving exactly as it did', async () => {
+        const ev = await createEvent(owner.client, { name: 'Legacy Flag', publicRegistration: true });
+        // The old switch, as an old cached dashboard still sends it.
+        await owner.client.put(`/api/event/${ev.id}/skip-confirmation-emails`, { enabled: true });
+
+        const apiKey = await eventApiKey(owner.client, ev.id);
+        const viaPublic = uniqueEmail('legacy-public');
+        const viaImport = uniqueEmail('legacy-import');
+        server.clearEmails();
+
+        await publicRegister(visitor(), ev.id, { name: 'Still Mailed', email: viaPublic });
+        await visitor().post('/api/register-bulk', {
+            firstName: 'Not', lastName: 'Mailed', email: viaImport,
+            eventId: ev.id, ticketCount: 1, apiKey,
+        });
+
+        await server.waitForEmail(m => m.to === viaPublic);
+        assert.equal(server.emails().filter(m => m.to === viaImport).length, 0,
+            'the legacy flag has always meant "staff-issued tickets only"');
+    });
+
     test("with no flag on the request, the event's own setting decides", async () => {
         const ev = await createEvent(owner.client, { name: 'Event Says No' });
         await owner.client.put(`/api/event/${ev.id}/skip-confirmation-emails`, { enabled: true });

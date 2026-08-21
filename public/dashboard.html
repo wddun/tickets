@@ -2660,10 +2660,9 @@
             'tab-registration': async (id) => {
                 const pub = document.getElementById('publicRegToggle');
                 const atDoor = document.getElementById('atDoorToggle');
-                const skipEmails = document.getElementById('skipEmailsToggle');
                 if (pub) await setPublicRegistration(id, pub.checked);
                 if (atDoor) await setAtDoorEnabled(id, atDoor.checked);
-                if (skipEmails) await setSkipConfirmationEmails(id, skipEmails.checked);
+                await saveEmailPolicy(id);
                 await saveRegistrationLimits(id);
             },
             'tab-waitlist': async (id) => {
@@ -5037,7 +5036,8 @@
             const ev = events.find(e => e.id === eventId);
             const enabled = !!ev?.allowPublicRegistration;
             const atDoor  = !!ev?.atDoorEnabled;
-            const skipEmails = !!ev?.skipConfirmationEmails;
+            const policy = eventEmailPolicy(ev);
+            const anyEmails = EMAIL_SOURCE_ROWS.some(r => policy[r.key] !== false);
             const allowMultiple = ev?.allowMultipleRegistrations !== false;
             const perDevice = !!ev?.oneRegistrationPerDevice;
             const blockDupes = !!ev?.blockDuplicateEmails;
@@ -5082,13 +5082,30 @@
                 </label>
 
                 <hr class="settings-divider">
+                <div class="settings-subhead">Confirmation Emails</div>
+                <div class="settings-hint" style="margin-bottom:10px;">
+                    Who gets emailed their ticket, by the way they got it. <strong id="emailPolicySummary">${esc(emailPolicySummary(policy))}</strong>
+                </div>
                 <label class="settings-toggle">
-                    <input type="checkbox" id="skipEmailsToggle" ${skipEmails ? 'checked' : ''}>
+                    <input type="checkbox" id="emailMasterToggle" ${anyEmails ? 'checked' : ''} onchange="onEmailMasterToggle()">
                     <div>
-                        <div class="settings-toggle-title">Skip Confirmation Emails</div>
-                        <div class="settings-toggle-desc">Default to not emailing a ticket when you manually add, CSV-import, or Google Sheets-import someone for this event — useful for giveaways where you don't want everyone entered getting an email. Doesn't affect public self-registration, checkout receipts, or waitlist notifications. Can still be overridden per-import.</div>
+                        <div class="settings-toggle-title">Send confirmation emails</div>
+                        <div class="settings-toggle-desc">Turn this off to email nobody a ticket for this event, however they signed up.</div>
                     </div>
                 </label>
+                <div class="settings-card" id="emailSourceRows" style="${anyEmails ? '' : 'opacity:0.45;pointer-events:none;'}">
+                    ${EMAIL_SOURCE_ROWS.map(r => `
+                    <label class="settings-toggle" style="align-items:flex-start;">
+                        <input type="checkbox" id="emailSrc-${r.key}" ${policy[r.key] !== false ? 'checked' : ''} onchange="onEmailSourceToggle()">
+                        <div>
+                            <div class="settings-toggle-title">${esc(r.title)}</div>
+                            <div class="settings-toggle-desc">${r.desc}</div>
+                        </div>
+                    </label>`).join('')}
+                </div>
+                <div class="settings-hint" style="margin-top:8px;">
+                    Sent either way: waitlist claim links (the email <em>is</em> the offer), password resets, and anything you send yourself with Resend, Direct Email or Bulk Email.
+                </div>
 
                 <hr class="settings-divider">
                 <div class="settings-subhead">Signup Limits</div>
@@ -5544,6 +5561,11 @@
                         <div style="font-size:12px;margin-bottom:6px;">
                             <strong>Dedupe:</strong> ${cfg.oneTicketPerEmail ? 'One ticket per email address' : 'One ticket per form submission'}
                         </div>
+                        <div style="font-size:12px;margin-bottom:6px;">
+                            <strong>Confirmation email:</strong> ${cfg.sendEmail === undefined || cfg.sendEmail === null
+                                ? `follows the event setting (currently ${eventEmailPolicy(events.find(e => e.id === eventId)).import !== false ? 'sends' : 'does not send'})`
+                                : (cfg.sendEmail ? 'always sends' : 'never sends')}
+                        </div>
                         ${cfg.extraColumns && cfg.extraColumns.length ? `
                         <div style="font-size:12px;margin-bottom:6px;">
                             <strong>Custom fields:</strong> ${cfg.extraColumns.map(c => esc((cfg.extraColumnLabels && cfg.extraColumnLabels[c]) ? cfg.extraColumnLabels[c] + ' (from "' + c + '")' : c)).join(', ')}
@@ -5626,6 +5648,11 @@
             const interval = suggested.intervalMinutes || (window.__swCurrent && window.__swCurrent.intervalMinutes) || 2;
             const colOptions = (selected) => data.headers.map(h => `<option value="${esc(h)}" ${selected === h ? 'selected' : ''}>${esc(h)}</option>`).join('');
             const intervalOpt = n => `<option value="${n}" ${interval == n ? 'selected' : ''}>${n} minute${n == 1 ? '' : 's'}</option>`;
+            // A watcher that has never expressed a preference inherits the
+            // event's policy; only an explicit always/never is an override.
+            const swEmailMode = !existingConfig || existingConfig.sendEmail === undefined || existingConfig.sendEmail === null
+                ? '' : (existingConfig.sendEmail ? 'always' : 'never');
+            const swEventDefaultSends = eventEmailPolicy(events.find(e => e.id === eventId)).import !== false;
             const area = document.getElementById('swPreviewArea');
             area.innerHTML = `
                 <div style="margin-bottom:12px;">
@@ -5691,10 +5718,17 @@
                         <input type="checkbox" id="swOneTicketPerEmail" ${existingConfig ? (existingConfig.oneTicketPerEmail ? 'checked' : '') : 'checked'}>
                         <span>Dedupe by email (only issue one ticket per email address, even if they submit the form more than once)</span>
                     </label>
-                    <label style="display:flex;gap:6px;font-size:12px;align-items:center;margin-bottom:8px;">
-                        <input type="checkbox" id="swSendEmail" ${existingConfig ? (existingConfig.sendEmail !== false ? 'checked' : '') : (events.find(e => e.id === eventId)?.skipConfirmationEmails ? '' : 'checked')}>
-                        <span>Send confirmation email to each attendee</span>
-                    </label>
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Confirmation email for attendees this watcher imports</label>
+                        <select id="swSendEmail" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+                            ${[
+                                ['', `Use the event's setting (currently: ${swEventDefaultSends ? 'sends' : 'does not send'})`],
+                                ['always', 'Always send, whatever the event says'],
+                                ['never', 'Never send'],
+                            ].map(([v, label]) => `<option value="${v}"${v === swEmailMode ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+                        </select>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Change the event-wide default under Settings &rarr; Registration &rarr; Confirmation Emails.</div>
+                    </div>
                     <button class="btn btn-primary btn-sm" onclick="swConnect('${eventId}')">${isEdit ? 'Save Changes' : 'Connect Sheet Watcher'}</button>
                 </div>
             `;
@@ -5732,7 +5766,11 @@
             const includeExistingEl = document.getElementById('swIncludeExisting');
             const includeExisting = includeExistingEl ? includeExistingEl.checked : false;
             const oneTicketPerEmail = document.getElementById('swOneTicketPerEmail').checked;
-            const sendEmail = document.getElementById('swSendEmail').checked;
+            // Three states, not two: leaving it on "use the event's setting"
+            // must send no flag at all, since the server reads an absent value
+            // as "no preference" and anything present as an override.
+            const swEmailChoice = document.getElementById('swSendEmail').value;
+            const sendEmail = swEmailChoice === 'always' ? true : swEmailChoice === 'never' ? false : undefined;
             if (!first || !email || !swGroupReady(window.__swGroup)) { showToast('Fill in every condition first.'); return; }
             if (ticketMode === 'column' && !ticketCountColumn) { showToast('Pick the column that holds the ticket count.'); return; }
             const res = await fetch(`/api/event/${eventId}/sheet-watch`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
@@ -6029,15 +6067,118 @@
             }
         }
 
-        async function setSkipConfirmationEmails(eventId, enabled) {
+        // ── Confirmation emails ─────────────────────────────────────────────────
+        // One row per way of getting a ticket. This replaced a single "Skip
+        // Confirmation Emails" switch that only ever governed staff-issued
+        // tickets — which meant an organiser running a giveaway could silence
+        // their own imports but had no way to stop the public form emailing
+        // every entrant, and no way to see which was which.
+        const EMAIL_SOURCE_ROWS = [
+            {
+                key: 'public',
+                title: 'Public sign-ups',
+                desc: 'Someone registering themselves through the public link or the kiosk. On a paid event this email carries their only copy of the ticket.',
+            },
+            {
+                key: 'door',
+                title: 'Door sales',
+                desc: 'Staff issuing a ticket on the spot from the iOS app\'s At Door tab.',
+            },
+            {
+                key: 'import',
+                title: 'Sheet & imports',
+                desc: 'The Google Sheet watcher, CSV import, and API imports. This is usually the one to turn off for a giveaway, where everyone who enters should not get a ticket email.',
+            },
+            {
+                key: 'manual',
+                title: 'Manual adds',
+                desc: 'Adding or editing an attendee yourself from the dashboard.',
+            },
+        ];
+
+        // Mirrors eventEmailPolicy() in server.js: an event that predates the
+        // per-source policy falls back to the old flag, which covered imports
+        // and manual adds only.
+        function eventEmailPolicy(ev) {
+            const stored = ev && ev.emailPolicy;
+            if (stored && typeof stored === 'object') {
+                const out = {};
+                EMAIL_SOURCE_ROWS.forEach(r => { out[r.key] = stored[r.key] !== false; });
+                return out;
+            }
+            const skip = !!(ev && ev.skipConfirmationEmails);
+            return { public: true, door: true, import: !skip, manual: !skip };
+        }
+
+        function emailPolicySummary(policy) {
+            const on = EMAIL_SOURCE_ROWS.filter(r => policy[r.key] !== false);
+            if (!on.length) return 'Nobody is emailed a ticket.';
+            if (on.length === EMAIL_SOURCE_ROWS.length) return 'Everyone is emailed a ticket.';
+            return 'Emailing: ' + on.map(r => r.title.toLowerCase()).join(', ') + '.';
+        }
+
+        function readEmailPolicyFromForm() {
+            const master = document.getElementById('emailMasterToggle');
+            const policy = {};
+            EMAIL_SOURCE_ROWS.forEach(r => {
+                const box = document.getElementById('emailSrc-' + r.key);
+                policy[r.key] = !!(master && master.checked) && !!(box && box.checked);
+            });
+            return policy;
+        }
+
+        function refreshEmailPolicySummary() {
+            const el = document.getElementById('emailPolicySummary');
+            if (el) el.textContent = emailPolicySummary(readEmailPolicyFromForm());
+        }
+
+        // The master switch is a bulk action, not a fifth stored value: turning
+        // it on restores every source rather than leaving four dimmed rows that
+        // all say off.
+        function onEmailMasterToggle() {
+            const on = document.getElementById('emailMasterToggle').checked;
+            const rows = document.getElementById('emailSourceRows');
+            if (rows) rows.style.cssText = on ? '' : 'opacity:0.45;pointer-events:none;';
+            if (on) {
+                EMAIL_SOURCE_ROWS.forEach(r => {
+                    const box = document.getElementById('emailSrc-' + r.key);
+                    if (box) box.checked = true;
+                });
+            }
+            refreshEmailPolicySummary();
+        }
+
+        // Unticking the last source is the same statement as turning the master
+        // off, so keep the two from disagreeing on screen.
+        function onEmailSourceToggle() {
+            const master = document.getElementById('emailMasterToggle');
+            const anyOn = EMAIL_SOURCE_ROWS.some(r => {
+                const box = document.getElementById('emailSrc-' + r.key);
+                return box && box.checked;
+            });
+            if (master && master.checked !== anyOn) {
+                master.checked = anyOn;
+                const rows = document.getElementById('emailSourceRows');
+                if (rows) rows.style.cssText = anyOn ? '' : 'opacity:0.45;pointer-events:none;';
+            }
+            refreshEmailPolicySummary();
+        }
+
+        async function saveEmailPolicy(eventId) {
+            if (!document.getElementById('emailMasterToggle')) return;
+            const policy = readEmailPolicyFromForm();
             try {
-                await fetch(`/api/event/${eventId}/skip-confirmation-emails`, {
+                const res = await fetch(`/api/event/${eventId}/email-policy`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled })
+                    body: JSON.stringify(policy),
                 });
+                if (!res.ok) throw new Error('save failed');
                 const ev = events.find(e => e.id === eventId);
-                if (ev) ev.skipConfirmationEmails = enabled;
+                if (ev) {
+                    ev.emailPolicy = policy;
+                    ev.skipConfirmationEmails = !policy.import && !policy.manual;
+                }
             } catch {
                 showToast('Failed to update email settings.');
             }
@@ -7427,7 +7568,7 @@
             document.getElementById('importValidationMsg').textContent = '';
             document.getElementById('importResultMsg').textContent = '';
             const importEv = events.find(e => e.id === selectedId);
-            document.getElementById('importNoEmail').checked = !!importEv?.skipConfirmationEmails;
+            document.getElementById('importNoEmail').checked = eventEmailPolicy(importEv).import === false;
             document.getElementById('importSubmitBtn').disabled = false;
             document.getElementById('importSubmitBtn').textContent = 'Import';
 

@@ -320,14 +320,45 @@ function sendVerificationEmail(email, verifyToken) {
     });
 }
 
-// Resolves whether an admin-issued ticket (manual add, CSV import, sheet
-// import, edit) should email a confirmation. An explicit flag on the request
-// always wins; otherwise falls back to the event's default. Never used for
-// public self-registration, checkout, or waitlist notifications — those
-// always send regardless of this setting.
-function shouldSendAdminEmail(explicitFlag, event) {
+// ── Confirmation-email policy ────────────────────────────────────────────────
+// Which ways of getting a ticket send the holder a confirmation. This used to
+// be one boolean, skipConfirmationEmails, which covered only staff-issued
+// tickets — an organiser running a giveaway could silence their own imports but
+// had no way at all to stop the public registration form emailing every entrant.
+// Now each source is switchable on its own.
+//
+//   public — someone registering themselves: the public link, the kiosk, and
+//            the paid checkout receipt (which carries their only ticket)
+//   door   — staff issuing a ticket at the door from the iOS app
+//   import — the Google Sheet watcher, CSV import, Apps Script, API imports
+//   manual — adding or editing an attendee from the dashboard
+//
+// Deliberately NOT covered, because switching them off would break the thing
+// they exist for rather than just quieten it: waitlist claim links (the email
+// *is* the promotion), password resets, and the operator's own Resend / Direct
+// email / Bulk email actions, which are an explicit instruction to send.
+const EMAIL_SOURCES = ['public', 'door', 'import', 'manual'];
+
+function eventEmailPolicy(event) {
+    const stored = event && event.emailPolicy;
+    if (stored && typeof stored === 'object') {
+        const out = {};
+        for (const src of EMAIL_SOURCES) out[src] = stored[src] !== false;
+        return out;
+    }
+    // Never configured: reproduce the old flag's behaviour exactly, so no
+    // existing event changes what it does the moment this ships.
+    const skip = !!(event && event.skipConfirmationEmails);
+    return { public: true, door: true, import: !skip, manual: !skip };
+}
+
+// `explicitFlag` is a per-request override (the sheet watcher's own setting, an
+// import's "don't email" tickbox) and always wins when present. A null `source`
+// means the caller is not a policy-governed confirmation at all.
+function shouldSendConfirmation(source, explicitFlag, event) {
     if (explicitFlag !== undefined && explicitFlag !== null) return explicitFlag !== false;
-    return !event.skipConfirmationEmails;
+    if (!source) return true;
+    return eventEmailPolicy(event)[source] !== false;
 }
 
 // Shared HTML email template used by all ticket confirmation emails
@@ -2742,7 +2773,7 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
 
     const qrDataUrl = await QRCode.toDataURL(`ticket:${token}`);
 
-    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID && shouldSendConfirmation('public', null, event)) {
         const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName,
             intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
@@ -2806,7 +2837,11 @@ function validateDiscountCode(eventId, rawCode, baseAmount) {
     return { discountCode, discountAmount, finalAmount: Math.max(0, baseAmount - discountAmount) };
 }
 
-async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
+// `source` decides whether the event's confirmation-email policy applies:
+// 'public' for checkout, 'door' for a staff at-door sale, and null for a
+// waitlist promotion, where the email is the promotion itself and suppressing
+// it would leave someone holding a seat they were never told about.
+async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 'public' }) {
     const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
     if (!dbEvent) return null;
 
@@ -2821,7 +2856,8 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail }) {
     stmt.tickets.insert.run(ticketId, eventId, token, registrationId, buyerName, firstName, lastName, buyerEmail, null, null, null, null, null, now, null, null);
     const ticket = rowToTicket(stmt.tickets.byToken.get(token));
 
-    if (buyerEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+    if (buyerEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID
+        && shouldSendConfirmation(source, null, dbEvent)) {
         const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName,
             intro: `You&rsquo;re all set for <strong>${dbEvent.name}</strong>! We&rsquo;ll see you there.`,
@@ -3092,6 +3128,7 @@ app.post('/api/event/:eventId/at-door-register', requireAuth, async (req, res) =
         eventId: event.id,
         buyerName: name.trim(),
         buyerEmail: email ? email.trim().toLowerCase() : null,
+        source: 'door',
     });
     if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
     log('at-door', `[free] Ticket issued — name: ${name}  event: ${event.name}  by: ${req.session.userId}`);
@@ -3256,17 +3293,41 @@ app.put('/api/event/:id/waitlist-enabled', requireAuth, (req, res) => {
     res.json({ success: true, waitlistEnabled: enabled });
 });
 
-// Default for admin-issued tickets (manual add, CSV import, sheet import,
-// edits) — does not affect public self-registration, checkout, or waitlist
-// notifications, which always send.
+// Which ways of getting a ticket send a confirmation. Body is one boolean per
+// source in EMAIL_SOURCES; an omitted source keeps whatever it resolves to now,
+// so a client that predates a newly added source can't silently reset it.
+app.put('/api/event/:id/email-policy', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
+
+    const current = eventEmailPolicy(event);
+    const policy = {};
+    for (const src of EMAIL_SOURCES) {
+        const sent = req.body ? req.body[src] : undefined;
+        policy[src] = sent === undefined || sent === null ? current[src] : !(sent === false || sent === 'false');
+    }
+    stmt.events.setEmailPolicy.run(JSON.stringify(policy), req.params.id);
+    // Keep the legacy column consistent so anything still reading it — an old
+    // cached dashboard, the import screen's default tickbox — agrees with the
+    // policy rather than contradicting it.
+    stmt.events.setSkipConfirmationEmails.run(policy.import || policy.manual ? 0 : 1, req.params.id);
+    logAudit(req, { eventId: event.id, action: 'emailPolicy.updated', details: policy });
+    res.json({ success: true, emailPolicy: policy });
+});
+
+// Superseded by /email-policy above; kept because an old dashboard still cached
+// in someone's browser calls it. Maps onto the two sources it used to govern.
 app.put('/api/event/:id/skip-confirmation-emails', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
     const enabled = req.body.enabled === true || req.body.enabled === 'true';
+    const policy = { ...eventEmailPolicy(event), import: !enabled, manual: !enabled };
+    stmt.events.setEmailPolicy.run(JSON.stringify(policy), req.params.id);
     stmt.events.setSkipConfirmationEmails.run(enabled ? 1 : 0, req.params.id);
     logAudit(req, { eventId: event.id, action: enabled ? 'skipConfirmationEmails.enabled' : 'skipConfirmationEmails.disabled' });
-    res.json({ success: true, skipConfirmationEmails: enabled });
+    res.json({ success: true, skipConfirmationEmails: enabled, emailPolicy: policy });
 });
 
 // See the shuttleLinkEnabled comment in db-sqlite.js — only for events whose
@@ -3360,7 +3421,7 @@ app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
         return res.json({ success: true, notified: true });
     }
 
-    const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email });
+    const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email, source: null });
     if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
     stmt.waitlist.setStatus.run('converted', entry.id);
     logAudit(req, { eventId: event.id, action: 'waitlist.promoted', details: { email: entry.email } });
@@ -3456,7 +3517,7 @@ app.post('/api/register-bulk', async (req, res) => {
         const registered = usage.taken;
         if (registered + count > event.capacity) {
             if (event.waitlistEnabled) {
-                const result = await joinWaitlist(event, `${firstName} ${lastName}`, email, shouldSendAdminEmail(req.body.sendEmail, event));
+                const result = await joinWaitlist(event, `${firstName} ${lastName}`, email, shouldSendConfirmation('import', req.body.sendEmail, event));
                 return res.json(result);
             }
             return res.status(409).json({ error: heldSeatMessage(usage, count) });
@@ -3602,7 +3663,7 @@ app.post('/api/register-bulk', async (req, res) => {
     <span style="color:#333;">${v}</span>
   </div>`).join('')}
 </div>` : '';
-            const shouldSendEmail = shouldSendAdminEmail(req.body.sendEmail, event) && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID;
+            const shouldSendEmail = shouldSendConfirmation('import', req.body.sendEmail, event) && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID;
             if (shouldSendEmail) {
                 const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
                     firstName,
@@ -4450,7 +4511,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
     });
 
     const explicitSendEmail = req.body.noEmail === true ? false : req.body.sendEmail;
-    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID && shouldSendAdminEmail(explicitSendEmail, event)) {
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID && shouldSendConfirmation('manual', explicitSendEmail, event)) {
         const actualCount = newTickets.length;
         const ticketLabel = actualCount === 1 ? 'Ticket' : `${actualCount} Tickets`;
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
@@ -4506,7 +4567,7 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
     log('ticket-edit', `[edit] Edited ${updatedTickets.length} ticket(s) — name: ${name}  email: ${email}  event: ${event.name} (${event.id})  regId: ${updatedTickets[0].registrationId}  by: ${req.session.userId}`);
 
     const editExplicitSendEmail = noEmail === true ? false : undefined;
-    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID && shouldSendAdminEmail(editExplicitSendEmail, event)) {
+    if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID && shouldSendConfirmation('manual', editExplicitSendEmail, event)) {
         const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
         const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName: updatedTickets[0].firstName,
@@ -8315,7 +8376,7 @@ app.post('/api/v1/waitlist/:id/promote', ...apiRoute('manage_waitlist'), async (
         return apiError(res, 409, 'paid_event',
             'Promoting on a paid event sends a personal checkout link, which only the dashboard can do — money changes hands through Stripe alone.');
     }
-    const issued = await issueTicketForPayment({ eventId: req.apiEvent.id, buyerName: entry.name, buyerEmail: entry.email });
+    const issued = await issueTicketForPayment({ eventId: req.apiEvent.id, buyerName: entry.name, buyerEmail: entry.email, source: null });
     if (!issued) return apiError(res, 500, 'promote_failed', 'Could not issue the ticket.');
     stmt.waitlist.setStatus.run('converted', entry.id);
     logApiAudit(req, 'api.waitlist_promoted', { email: entry.email });
