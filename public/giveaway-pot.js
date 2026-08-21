@@ -50,6 +50,13 @@
         return cut.length === text.length ? text : cut + '…';
     }
 
+    function lerpColor(a, b, t) {
+        const pa = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16));
+        const pb = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16));
+        const c = pa.map((v, i) => Math.round(v + (pb[i] - v) * t));
+        return `rgb(${c[0]},${c[1]},${c[2]})`;
+    }
+
     function create(canvas, opts) {
         opts = opts || {};
         const ctx = canvas.getContext('2d');
@@ -58,6 +65,18 @@
         let accent = opts.accent || '#ffd400';
         let W = 0, H = 0, dpr = 1;
         let seedCounter = 1;
+
+        // Fixed once, for the life of the pot — never reseeded by how many
+        // entrants are resting. A pile built from a FIXED number of stacked
+        // layers, each perturbed by these same points every frame, can grow or
+        // shrink smoothly without a single element ever changing where it sits
+        // relative to its neighbours. The old mound indexed every rectangle by
+        // its position among "however many are shown right now", so landing one
+        // more slip changed that denominator for every rectangle already there
+        // and the whole pile re-laid itself out in one frame — that's the
+        // flicker this replaces.
+        const MOUND_RIM_PTS = 16;
+        const moundRimNoise = Array.from({ length: MOUND_RIM_PTS }, (_, i) => hashRandom(i * 41 + 900) - 0.5);
 
         let queue = [];        // names waiting to be dropped in
         let flyers = [];       // slips currently on screen
@@ -334,11 +353,13 @@
         // is the dark the arriving slips sink into, and without it a slip lands
         // on a field of identical white paper and vanishes instantly instead of
         // being seen to go in.
+        function moundFillFrac() {
+            return resting <= 0 ? 0 : Math.min(1, Math.log10(resting + 1) / 2.4);
+        }
         function moundBottomY() { return L.my + L.ry * 0.30; }
         function moundTopY() {
             if (resting <= 0) return moundBottomY();
-            const fill = Math.min(1, Math.log10(resting + 1) / 2.4);
-            return moundBottomY() - L.ry * (0.30 + fill * 0.95);
+            return moundBottomY() - L.ry * (0.30 + moundFillFrac() * 0.95);
         }
 
         // Everything a slip on its way into the pot can still be seen through:
@@ -353,40 +374,95 @@
             ctx.clip();
         }
 
-        // The heap of slips already in the pot, seen through the mouth. Clipped
-        // to the interior so it can never spill over the rim, and seeded so it
-        // stops rearranging itself on every frame.
+        // A wobbly-rimmed ellipse — not a perfect one — traced through
+        // moundRimNoise so a heap of paper doesn't read as a stamped-out disc.
+        // `noiseOffset` walks a different slice of the same fixed array per
+        // layer, so the layers don't all wobble in lockstep.
+        function moundLayerPath(cx, cy, rx, ry, noiseOffset) {
+            ctx.beginPath();
+            for (let i = 0; i <= MOUND_RIM_PTS; i++) {
+                const a = (i / MOUND_RIM_PTS) * Math.PI * 2;
+                const n = moundRimNoise[(i + noiseOffset) % MOUND_RIM_PTS];
+                const rrx = rx * (1 + n * 0.16);
+                const rry = ry * (1 + n * 0.22);
+                const x = cx + Math.cos(a) * rrx;
+                const y = cy + Math.sin(a) * rry;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+        }
+
+        // The pile of slips already in the pot, seen through the mouth. Not
+        // individual pieces of paper any more — once a slip lands it's part of
+        // the pile, not a name anyone needs to keep reading — but a rounded
+        // volume built from a FIXED number of stacked, wobbly-rimmed layers.
+        // Only *where* the stack sits (between moundBottomY and moundTopY, both
+        // smooth functions of the count) depends on how many are resting; the
+        // layers themselves, their wobble and their shading never change shape,
+        // which is what keeps this from ever visibly reflowing.
+        const MOUND_LAYERS = 5;
         function drawMound() {
             if (resting <= 0) return;
-            const shown = Math.min(resting, 44);
             const bottom = moundBottomY();
             const top = moundTopY();
             ctx.save();
             ctx.beginPath();
             ctx.ellipse(L.cx, L.my, L.rx * 0.93, L.ry * 0.9, 0, 0, Math.PI * 2);
             ctx.clip();
-            // Back to front, so the slips nearest the viewer are drawn last.
-            for (let i = 0; i < shown; i++) {
-                const r1 = hashRandom(i * 31 + 5);
-                const r2 = hashRandom(i * 17 + 91);
-                const r3 = hashRandom(i * 53 + 7);
-                const w = L.rx * (0.26 + r1 * 0.26);
-                const h = Math.max(2.5, L.ry * 0.20);
-                const x = L.cx + (r2 - 0.5) * L.rx * 1.35;
-                const y = top + (bottom - top) * (i / Math.max(1, shown - 1)) + (r3 - 0.5) * L.ry * 0.22;
-                ctx.save();
-                ctx.translate(x, y);
-                ctx.rotate((r1 - 0.5) * 1.15);
-                roundRect(-w / 2, -h / 2, w, h, 1.5);
-                ctx.fillStyle = PAPER_TONES[i % PAPER_TONES.length];
+
+            // A handful of slips shouldn't span the same footprint as a few
+            // hundred — the width tapers with the same fill fraction that
+            // drives the height, so a near-empty pot shows a small heap in the
+            // middle rather than a full-width smear squashed flat.
+            const widthScale = 0.46 + moundFillFrac() * 0.54;
+            for (let i = 0; i < MOUND_LAYERS; i++) {
+                const t = i / (MOUND_LAYERS - 1);          // 0 = base, 1 = peak
+                const y = bottom + (top - bottom) * t;
+                const rx = L.rx * (0.82 - t * 0.34) * widthScale;
+                const ry = L.ry * (0.62 - t * 0.20) * widthScale;
+                moundLayerPath(L.cx, y, rx, ry, i * 5);
+                if (i === MOUND_LAYERS - 1) {
+                    // The peak catches the light — a radial highlight rather
+                    // than a flat fill is what makes it read as rounded instead
+                    // of as a lid sitting on top of the stack.
+                    const peak = ctx.createRadialGradient(
+                        L.cx - rx * 0.3, y - ry * 0.4, rx * 0.1,
+                        L.cx, y, rx * 1.1
+                    );
+                    peak.addColorStop(0, '#fffef8');
+                    peak.addColorStop(0.55, PAPER_TONES[1]);
+                    peak.addColorStop(1, lerpColor('#c9b98a', '#fdf8ec', 0.5));
+                    ctx.fillStyle = peak;
+                } else {
+                    ctx.fillStyle = lerpColor('#a8987a', '#fdf8ec', t);
+                }
                 ctx.fill();
-                ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+                ctx.strokeStyle = `rgba(0,0,0,${(0.22 - t * 0.10).toFixed(2)})`;
                 ctx.lineWidth = 1;
                 ctx.stroke();
-                ctx.restore();
             }
-            // Shade the heap toward the back of the pot so it sits in a hollow
-            // rather than floating as a flat sticker.
+
+            // A few fixed creases on the peak — texture, not clutter, and never
+            // reseeded by count since they belong to the layer, not to any one
+            // entrant.
+            const peakY = bottom + (top - bottom);
+            const peakRx = L.rx * 0.48, peakRy = L.ry * 0.42;
+            ctx.strokeStyle = 'rgba(120,105,70,0.28)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 7; i++) {
+                const fx = (hashRandom(i * 61 + 3) - 0.5) * 1.7;
+                const fy = (hashRandom(i * 61 + 7) - 0.5) * 1.7;
+                const len = 0.12 + hashRandom(i * 61 + 11) * 0.14;
+                const rot = hashRandom(i * 61 + 13) * Math.PI;
+                const cx0 = L.cx + fx * peakRx, cy0 = peakY + fy * peakRy;
+                ctx.beginPath();
+                ctx.moveTo(cx0 - Math.cos(rot) * len * peakRx, cy0 - Math.sin(rot) * len * peakRy);
+                ctx.lineTo(cx0 + Math.cos(rot) * len * peakRx, cy0 + Math.sin(rot) * len * peakRy);
+                ctx.stroke();
+            }
+
+            // Shade the whole pile toward the back of the pot so it sits in a
+            // hollow rather than floating as a flat sticker.
             const shade = ctx.createLinearGradient(0, L.my - L.ry, 0, L.my + L.ry);
             shade.addColorStop(0, 'rgba(0,0,0,0.55)');
             shade.addColorStop(0.55, 'rgba(0,0,0,0.05)');

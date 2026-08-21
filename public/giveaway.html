@@ -864,12 +864,22 @@ async function pollLiveEntrants() {
 
 function applyArrivals(arrivals) {
     if (!arrivals.length) return;
-    rebuildPool();
     const names = arrivals.map(reelLabel);
+    // Queue the new names in the pot BEFORE rebuildPool() — rebuildPool calls
+    // syncPotCount(), which resolves "resting" as pool.length minus whatever
+    // the pot already considers pending. If the new arrivals aren't queued
+    // yet, pool.length has grown to include them but pendingCount() hasn't,
+    // so syncPotCount() credited them to the pile as already landed — and
+    // then addNames() queued the very same names on top, so they landed a
+    // second time when their slip actually reached the bottom. That's what
+    // showed up as the pile jumping by one extra and then not settling back.
     if (spinnerStyle === 'pot') {
         ensurePot();
-        pot.setLabel(String(pool.length));
         pot.addNames(names);
+    }
+    rebuildPool();
+    if (spinnerStyle === 'pot') {
+        pot.setLabel(String(pool.length));
         updatePotHint();
     }
     broadcastPotAdd(names);
