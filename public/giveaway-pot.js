@@ -135,8 +135,10 @@
                 spinRate: 2.0 + hashRandom(seed + 11) * 1.6,
                 tilt: (hashRandom(seed + 5) - 0.5) * 0.5,
                 tone: PAPER_TONES[seed % PAPER_TONES.length],
-                sinking: 0,          // 0..1 once it passes the rim
+                settling: 0,         // 0..1 while it drops through the mouth
                 scale: 1,
+                squash: 1,           // vertical foreshortening as it tips away
+                shade: 0,            // how much of the pot's shadow has taken it
                 churn: false,        // a shake-loosened slip, not a new entry
             };
         }
@@ -183,18 +185,39 @@
                 const p = clamp(f.t * 1000 / f.fallMs, 0, 1);
                 // Gravity-ish on the way down, but drifting sideways toward the
                 // mouth the whole time so a slip that spawned at the edge of the
-                // stage still lands in the pot.
-                f.y = f.startY + (L.my - f.startY) * (p * p * 0.72 + p * 0.28);
+                // stage still lands in the pot. It aims at the far lip rather
+                // than the middle of the opening, so the descent that follows
+                // crosses the mouth from back to front — the same visible
+                // journey whether the pot is empty or nearly full.
+                const entryY = L.my - L.ry * 0.3;
+                f.y = f.startY + (entryY - f.startY) * (p * p * 0.72 + p * 0.28);
                 const wobble = Math.sin(f.phase * 1.1) * L.slipW * 0.16 * (1 - p * 0.6);
                 f.x += ((f.targetX + wobble) - f.x) * Math.min(1, dt * 3.2);
 
+                // Approach: the last stretch is the slip travelling away from
+                // the viewer and down into the opening, not just down the
+                // screen, so it starts to recede before it ever reaches the rim.
+                const approach = clamp((p - 0.72) / 0.28, 0, 1);
+                f.scale = 1 - approach * 0.14;
+                f.squash = 1 - approach * 0.20;
+
                 if (p >= 1) {
-                    // Past the rim: shrink away into the pot over a beat, so it
-                    // reads as dropping in rather than blinking out.
-                    f.sinking += dt / 0.22;
-                    f.y = L.my + f.sinking * L.ry * 0.9;
-                    f.scale = 1 - f.sinking * 0.45;
-                    if (f.sinking >= 1) {
+                    // Inside now. It carries on away from the camera: converging
+                    // on the middle of the opening, foreshortening hard as it
+                    // tips flat, and dropping into the shadow the front lip
+                    // casts — which is where it actually disappears. The rim
+                    // clips it on the way (see draw()), so it is cut off by the
+                    // pot rather than fading out on top of it.
+                    f.settling += dt / 0.42;
+                    const q = clamp(f.settling, 0, 1);
+                    f.x += (L.cx - f.x) * Math.min(1, dt * 2.6);
+                    f.y = entryY + q * L.ry * 1.05;
+                    f.scale = 0.88 - q * 0.33;
+                    f.squash = 0.78 - q * 0.46;
+                    // Held back at first so the name is still legible as it goes
+                    // over the rim, then plunging as it reaches the shadow.
+                    f.shade = 0.92 * q * q;
+                    if (f.settling >= 1) {
                         flyers.splice(i, 1);
                         resting++;
                         shake = Math.min(1, shake + 0.06);
@@ -222,27 +245,36 @@
         // A slip, drawn face-on at `turn`=1 and edge-on at `turn`=0. Squashing
         // the horizontal axis by the cosine of its tumble is what sells these as
         // pieces of paper turning over rather than sprites sliding down.
-        function drawSlip(x, y, w, h, rot, turn, tone, name, opacity) {
+        //
+        // `shade` (0..1) is how much of the pot's interior darkness has fallen
+        // over it. Nothing inside a pot is lit like something in front of one,
+        // and losing the light on the way down does more to sell the depth than
+        // the shrinking does.
+        function drawSlip(o) {
+            const w = o.w, h = o.h;
+            const turn = o.turn;
             const face = Math.abs(turn);
+            const shade = o.shade || 0;
             ctx.save();
-            ctx.globalAlpha = opacity == null ? 1 : opacity;
-            ctx.translate(x, y);
-            ctx.rotate(rot);
+            ctx.globalAlpha = o.opacity == null ? 1 : o.opacity;
+            ctx.translate(o.x, o.y);
+            ctx.rotate(o.rot);
 
             if (face < 0.1) {
                 // Edge-on: a lit sliver, no face, no text.
-                ctx.fillStyle = 'rgba(255,255,255,0.55)';
+                ctx.fillStyle = `rgba(255,255,255,${(0.55 * (1 - shade)).toFixed(3)})`;
                 ctx.fillRect(-Math.max(1.2, w * face * 0.5), -h / 2, Math.max(2.4, w * face), h);
                 ctx.restore();
                 return;
             }
 
             ctx.scale(face, 1);
+            const radius = Math.min(5, Math.abs(h) * 0.14);
             ctx.shadowColor = 'rgba(0,0,0,0.45)';
-            ctx.shadowBlur = h * 0.35;
-            ctx.shadowOffsetY = h * 0.12;
-            roundRect(-w / 2, -h / 2, w, h, Math.min(5, h * 0.14));
-            ctx.fillStyle = tone;
+            ctx.shadowBlur = Math.abs(h) * 0.35;
+            ctx.shadowOffsetY = Math.abs(h) * 0.12;
+            roundRect(-w / 2, -h / 2, w, h, radius);
+            ctx.fillStyle = o.tone;
             ctx.fill();
             ctx.shadowColor = 'transparent';
 
@@ -257,11 +289,18 @@
                     ctx.lineTo(w * 0.36, ly);
                     ctx.stroke();
                 }
+                if (shade > 0) {
+                    roundRect(-w / 2, -h / 2, w, h, radius);
+                    ctx.fillStyle = `rgba(3,5,11,${shade.toFixed(3)})`;
+                    ctx.fill();
+                }
                 ctx.restore();
                 return;
             }
 
-            // Torn-from-a-pad top edge, then the name.
+            // Torn-from-a-pad top edge, then the name. Below about a third of
+            // the slip's full height the text is a smudge rather than a name, so
+            // skip it and keep the paper clean.
             ctx.strokeStyle = 'rgba(0,0,0,0.07)';
             ctx.lineWidth = 1;
             ctx.beginPath();
@@ -269,12 +308,49 @@
             ctx.lineTo(w * 0.38, -h * 0.22);
             ctx.stroke();
 
-            const text = fitText(ctx, name || '', w * 0.82, h * 0.42, Math.max(7, h * 0.2));
-            ctx.fillStyle = INK;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(text, 0, h * 0.09);
+            if (h > L.slipH * 0.34) {
+                const text = fitText(ctx, o.name || '', w * 0.82, h * 0.42, Math.max(7, h * 0.2));
+                ctx.fillStyle = INK;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, 0, h * 0.09);
+            }
+
+            if (shade > 0) {
+                roundRect(-w / 2, -h / 2, w, h, radius);
+                ctx.fillStyle = `rgba(3,5,11,${shade.toFixed(3)})`;
+                ctx.fill();
+            }
             ctx.restore();
+        }
+
+        // Where the top of the heap sits inside the mouth. Logarithmic: the
+        // difference between 5 and 50 entries should be obvious, the difference
+        // between 300 and 350 need not be, and the heap must never reach the rim
+        // however many there are. Falling slips aim at this, so they land *on*
+        // the pile rather than through it.
+        // The heap stops well short of the near lip. That strip of empty shadow
+        // between the paper and the front of the opening is not decoration: it
+        // is the dark the arriving slips sink into, and without it a slip lands
+        // on a field of identical white paper and vanishes instantly instead of
+        // being seen to go in.
+        function moundBottomY() { return L.my + L.ry * 0.30; }
+        function moundTopY() {
+            if (resting <= 0) return moundBottomY();
+            const fill = Math.min(1, Math.log10(resting + 1) / 2.4);
+            return moundBottomY() - L.ry * (0.30 + fill * 0.95);
+        }
+
+        // Everything a slip on its way into the pot can still be seen through:
+        // the opening itself, plus the open air above the back of the rim, since
+        // a slip only half-swallowed still has its top sticking up over the far
+        // edge. Clipping to this is what makes a slip get *cut off* by the rim
+        // on the way down instead of fading out on top of the pot.
+        function clipToMouth() {
+            ctx.beginPath();
+            ctx.rect(-W, -H, W * 3, H + (L.my - L.ry));
+            ctx.ellipse(L.cx, L.my, L.rx * 0.94, L.ry * 0.92, 0, 0, Math.PI * 2);
+            ctx.clip();
         }
 
         // The heap of slips already in the pot, seen through the mouth. Clipped
@@ -283,12 +359,8 @@
         function drawMound() {
             if (resting <= 0) return;
             const shown = Math.min(resting, 44);
-            // Logarithmic: the difference between 5 and 50 entries should be
-            // obvious, the difference between 300 and 350 need not be, and the
-            // heap must never reach the rim however many there are.
-            const fill = Math.min(1, Math.log10(resting + 1) / 2.4);
-            const bottom = L.my + L.ry * 0.86;
-            const top = bottom - L.ry * (0.35 + fill * 1.05);
+            const bottom = moundBottomY();
+            const top = moundTopY();
             ctx.save();
             ctx.beginPath();
             ctx.ellipse(L.cx, L.my, L.rx * 0.93, L.ry * 0.9, 0, 0, Math.PI * 2);
@@ -337,13 +409,31 @@
             ctx.fillStyle = rim;
             ctx.fill();
 
+            // The inside. Lit from above and in front, so the far wall at the
+            // top of the opening catches a little and the near wall directly
+            // under the front lip is in the deepest shadow — that difference is
+            // most of what makes this read as a hole rather than a dark disc.
             ctx.beginPath();
             ctx.ellipse(L.cx, L.my, L.rx * 0.93, L.ry * 0.9, 0, 0, Math.PI * 2);
             const inner = ctx.createLinearGradient(0, L.my - L.ry, 0, L.my + L.ry);
-            inner.addColorStop(0, '#05060a');
-            inner.addColorStop(1, '#161a26');
+            inner.addColorStop(0, '#171d2a');
+            inner.addColorStop(0.45, '#0a0d14');
+            inner.addColorStop(1, '#020306');
             ctx.fillStyle = inner;
             ctx.fill();
+
+            // Wall thickness: a soft dark ring just inside the rim, so the lip
+            // has a near edge and a far edge instead of being a painted line.
+            ctx.save();
+            ctx.beginPath();
+            ctx.ellipse(L.cx, L.my, L.rx * 0.93, L.ry * 0.9, 0, 0, Math.PI * 2);
+            ctx.clip();
+            ctx.beginPath();
+            ctx.ellipse(L.cx, L.my, L.rx * 0.93, L.ry * 0.9, 0, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+            ctx.lineWidth = Math.max(2, L.ry * 0.30);
+            ctx.stroke();
+            ctx.restore();
             ctx.restore();
         }
 
@@ -368,6 +458,20 @@
             body.addColorStop(1, '#191c25');
             ctx.fillStyle = body;
             ctx.fill();
+
+            // Contact shadow the front lip casts back into the pot, drawn over
+            // the contents so anything dropping in passes under it.
+            ctx.save();
+            ctx.beginPath();
+            ctx.ellipse(L.cx, L.my, L.rx * 0.93, L.ry * 0.9, 0, 0, Math.PI * 2);
+            ctx.clip();
+            const ao = ctx.createLinearGradient(0, L.my - L.ry * 0.05, 0, L.my + L.ry * 0.85);
+            ao.addColorStop(0, 'rgba(0,0,0,0)');
+            ao.addColorStop(0.55, 'rgba(0,0,0,0.55)');
+            ao.addColorStop(1, 'rgba(0,0,0,0.95)');
+            ctx.fillStyle = ao;
+            ctx.fillRect(L.cx - L.rx, L.my - L.ry * 0.1, L.rx * 2, L.ry * 1.1);
+            ctx.restore();
 
             // Lip: a bright band along the front half of the rim.
             ctx.beginPath();
@@ -399,6 +503,28 @@
             ctx.restore();
         }
 
+        function slipDraw(f) {
+            const scale = f.scale || 1;
+            const squash = f.squash == null ? 1 : f.squash;
+            return {
+                x: f.x, y: f.y,
+                w: L.slipW * scale,
+                h: L.slipH * scale * squash,
+                rot: f.tilt + Math.sin(f.phase * 0.5) * 0.22,
+                turn: Math.cos(f.phase),
+                tone: f.tone,
+                name: f.name,
+                shade: f.shade || 0,
+            };
+        }
+
+        // A slip is "in the mouth" once it has dropped past the far edge of the
+        // rim — from there on it is seen *through* the opening and has to be
+        // clipped to it.
+        function inMouth(f) {
+            return f.settling > 0 || f.y > L.my - L.ry;
+        }
+
         function draw(now) {
             ctx.clearRect(0, 0, W, H);
 
@@ -406,35 +532,36 @@
             // so the pot moves under them the way a real one would.
             const wob = shake > 0 ? Math.sin(now / 1000 * 38) * shake * L.rx * 0.09 : 0;
             const wobY = shake > 0 ? Math.abs(Math.sin(now / 1000 * 22)) * shake * L.ry * 0.35 : 0;
+            const withPot = (fn) => {
+                ctx.save();
+                ctx.translate(wob, -wobY);
+                ctx.rotate(wob / (L.rx * 8));
+                fn();
+                ctx.restore();
+            };
 
-            ctx.save();
-            ctx.translate(wob, -wobY);
-            ctx.rotate(wob / (L.rx * 8));
-            drawPotBack();
-            drawMound();
-            ctx.restore();
+            withPot(() => { drawPotBack(); drawMound(); });
 
+            // Still in open air, in front of and above the pot.
             for (const f of flyers) {
-                if (f.churn || f.sinking > 0) continue;
-                drawSlip(f.x, f.y, L.slipW, L.slipH, f.tilt + Math.sin(f.phase * 0.5) * 0.22,
-                         Math.cos(f.phase), f.tone, f.name, 1);
+                if (inMouth(f)) continue;
+                drawSlip(slipDraw(f));
             }
-            // Sinking and churning slips draw last of the loose ones so they sit
-            // just above the mound but still behind the front of the pot.
-            for (const f of flyers) {
-                if (!f.churn && f.sinking <= 0) continue;
-                drawSlip(f.x, f.y, L.slipW * (f.scale || 1), L.slipH * (f.scale || 1),
-                         f.tilt + Math.sin(f.phase * 0.5) * 0.22, Math.cos(f.phase), f.tone, f.name,
-                         f.sinking > 0 ? 1 - f.sinking * 0.35 : 1);
-            }
+            // Going in. Clipped to the opening and moving with the pot, so a
+            // shaken pot takes its contents with it.
+            withPot(() => {
+                ctx.save();
+                clipToMouth();
+                for (const f of flyers) {
+                    if (!inMouth(f)) continue;
+                    drawSlip(slipDraw(f));
+                }
+                ctx.restore();
+            });
 
             if (spinState) drawSpinSlips();
 
-            ctx.save();
-            ctx.translate(wob, -wobY);
-            ctx.rotate(wob / (L.rx * 8));
-            drawPotFront();
-            ctx.restore();
+            withPot(drawPotFront);
 
             if (spinState && spinState.stage === 'reveal') drawRevealSlips();
         }
@@ -459,8 +586,14 @@
                 // Spins fast on the way up and eases to face-on at the top.
                 const turn = Math.cos(s.phase + (1 - e) * 14);
                 const settled = e * e;
-                drawSlip(x, y, w, w * 0.44, s.tilt * (1 - settled),
-                         turn * (1 - settled) + settled, s.tone, s.name, 1);
+                // Comes up out of the pot's shadow into the light as it rises.
+                drawSlip({
+                    x, y, w, h: w * 0.44,
+                    rot: s.tilt * (1 - settled),
+                    turn: turn * (1 - settled) + settled,
+                    tone: s.tone, name: s.name,
+                    shade: 0.7 * Math.pow(1 - e, 2),
+                });
             }
         }
 
@@ -471,7 +604,7 @@
                 ctx.save();
                 ctx.shadowColor = accent;
                 ctx.shadowBlur = 30 * pop;
-                drawSlip(s.endX, s.endY, w, w * 0.44, 0, 1, '#fffdf4', s.name, 1);
+                drawSlip({ x: s.endX, y: s.endY, w, h: w * 0.44, rot: 0, turn: 1, tone: '#fffdf4', name: s.name });
                 ctx.restore();
             }
         }
@@ -499,7 +632,7 @@
                         spinRate: 5 + hashRandom(seed + 8) * 5,
                         tilt: (hashRandom(seed + 9) - 0.5) * 0.6,
                         tone: PAPER_TONES[seed % PAPER_TONES.length],
-                        sinking: 0, scale: 0.82,
+                        settling: 0, scale: 0.82, squash: 1, shade: 0,
                     });
                     onEvent('rattle', {});
                 }
