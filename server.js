@@ -6760,7 +6760,12 @@ async function pollSheetWatcher(watcher) {
                     ticketCount,
                     apiKey,
                     customFields,
-                    sendEmail: cfg.sendEmail !== false,
+                    // Passed straight through, undefined included: register-bulk
+                    // treats an explicit flag as final and anything else as
+                    // "fall back to the event's skipConfirmationEmails". Sending
+                    // `cfg.sendEmail !== false` here would turn an unset watcher
+                    // into a hard `true` and silently override that setting.
+                    sendEmail: cfg.sendEmail,
                 }),
             });
             if (resp.ok) {
@@ -6889,7 +6894,7 @@ app.get('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
 // Create or update the event's watcher.
 app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
     if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
-    const { url, conditionGroup, conditions, firstNameColumn, lastNameColumn, emailColumn, extraColumns, extraColumnLabels, ticketCountColumn, intervalMinutes, ticketCount, includeExisting, oneTicketPerEmail } = req.body || {};
+    const { url, conditionGroup, conditions, firstNameColumn, lastNameColumn, emailColumn, extraColumns, extraColumnLabels, ticketCountColumn, intervalMinutes, ticketCount, includeExisting, oneTicketPerEmail, sendEmail } = req.body || {};
     // New grouped format (preferred); fall back to the old flat list if a
     // client still sends it.
     const cleanGroup = conditionGroup ? sanitizeGroup(conditionGroup) : null;
@@ -6932,6 +6937,11 @@ app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
         ticketCount: Math.min(10, Math.max(1, parseInt(ticketCount, 10) || 1)),
         oneTicketPerEmail: !!oneTicketPerEmail,
     };
+    // Deliberately tri-state, and deliberately only set when the client says
+    // so: absent means "no preference, use the event's own setting", which is
+    // not the same as false. JSON.stringify drops an undefined value, so an
+    // omitted flag leaves no key behind for pollSheetWatcher to read.
+    if (sendEmail !== undefined && sendEmail !== null) configObj.sendEmail = !!sendEmail;
     if (cleanGroup) configObj.conditionGroup = cleanGroup;
     else configObj.conditions = cleanConditions;
     const config = JSON.stringify(configObj);

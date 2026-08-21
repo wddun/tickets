@@ -6,7 +6,7 @@ import test, { before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer } from './helpers/server.js';
 import { createClient } from './helpers/client.js';
-import { newUser, createEvent, addTicket, listTickets, publicRegister, updateEvent, uniqueEmail, share } from './helpers/factories.js';
+import { newUser, createEvent, addTicket, listTickets, publicRegister, updateEvent, uniqueEmail, share, eventApiKey } from './helpers/factories.js';
 
 let server, owner;
 before(async () => {
@@ -168,6 +168,69 @@ describe('account emails', () => {
 
         const mail = await server.waitForEmail(m => m.to === user.email && /reset/i.test(m.subject));
         assert.match(mail.html, /token=/);
+    });
+});
+
+// The organiser has two ways to say "don't email these people": a per-import
+// flag on the request, and the event-wide skipConfirmationEmails setting. Both
+// were reachable from the UI and neither survived the trip — the sheet
+// watcher's "Send confirmation email to each attendee" checkbox was posted by
+// the dashboard, dropped by the save route, and then re-invented as a hard
+// `true` by the poller, which also stamped over the event-wide setting.
+describe('turning confirmation emails off actually turns them off', () => {
+    test('the sheet watcher stores the flag instead of discarding it', async () => {
+        const ev = await createEvent(owner.client, { name: 'Watcher Flag' });
+        const body = {
+            url: 'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit#gid=0',
+            conditions: [{ column: 'Attending', operator: 'contains', value: 'Yes' }],
+            firstNameColumn: 'Name',
+            emailColumn: 'Email',
+            sendEmail: false,
+        };
+        const saved = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, body);
+        assert.equal(saved.status, 200, saved.text);
+        assert.equal(saved.body.watcher.config.sendEmail, false, 'the save response already lost it');
+
+        const reread = await owner.client.get(`/api/event/${ev.id}/sheet-watch`);
+        assert.equal(reread.body.watcher.config.sendEmail, false,
+            'the flag has to survive being written to the database, not just echoed back');
+
+        // Absent is not the same as false: it means "use the event's setting".
+        const cleared = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, { ...body, sendEmail: undefined });
+        assert.equal('sendEmail' in cleared.body.watcher.config, false,
+            'an omitted flag must leave no key behind for the poller to read');
+    });
+
+    test('an import that asks for no email sends none', async () => {
+        const ev = await createEvent(owner.client, { name: 'Silent Import' });
+        const apiKey = await eventApiKey(owner.client, ev.id);
+        const email = uniqueEmail('silent');
+        server.clearEmails();
+
+        const r = await visitor().post('/api/register-bulk', {
+            firstName: 'Quiet', lastName: 'Import', email,
+            eventId: ev.id, ticketCount: 1, apiKey, sendEmail: false,
+        });
+        assert.equal(r.status, 200, r.text);
+        await new Promise(res => setTimeout(res, 400));   // sends are queued after the response
+        assert.equal(server.emails().filter(m => m.to === email).length, 0);
+    });
+
+    test("with no flag on the request, the event's own setting decides", async () => {
+        const ev = await createEvent(owner.client, { name: 'Event Says No' });
+        await owner.client.put(`/api/event/${ev.id}/skip-confirmation-emails`, { enabled: true });
+        const apiKey = await eventApiKey(owner.client, ev.id);
+        const email = uniqueEmail('eventoff');
+        server.clearEmails();
+
+        const r = await visitor().post('/api/register-bulk', {
+            firstName: 'Event', lastName: 'Default', email,
+            eventId: ev.id, ticketCount: 1, apiKey,
+        });
+        assert.equal(r.status, 200, r.text);
+        await new Promise(res => setTimeout(res, 400));
+        assert.equal(server.emails().filter(m => m.to === email).length, 0,
+            'skipConfirmationEmails has to hold when the caller expresses no preference');
     });
 });
 
