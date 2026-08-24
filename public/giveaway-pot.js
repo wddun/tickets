@@ -50,16 +50,6 @@
     function easeOutBack(p) { const c = 1.70158; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); }
     function easeInOutSine(p) { return 0.5 - Math.cos(Math.PI * p) / 2; }
 
-    // Lighten (k > 0) or darken (k < 0) a hex colour, staying in hex so the
-    // result can be fed straight back in for the next step of a gradient.
-    function tint(hex, k) {
-        const p = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
-        const t = k >= 0 ? 255 : 0;
-        const a = Math.abs(k);
-        const c = p.map(v => Math.round(v + (t - v) * a));
-        return '#' + c.map(v => clamp(v, 0, 255).toString(16).padStart(2, '0')).join('');
-    }
-
     // Shrink the name until it fits, wrap it if the caller allows more than one
     // line, and only then cut it. A giveaway pot full of "Christophe…" is worse
     // than one with slightly small type, and a winner's name is worth two lines.
@@ -167,6 +157,13 @@
             // Staggered above the top edge rather than all entering on the same
             // line, so consecutive releases don't descend the stage as a rank.
             const startY = -L.slipH * (1 + hashRandom(seed + 43) * 1.6);
+            const entryY = L.my - L.ry * 0.3;
+            // A big backlog falls faster — the shower has to clear before the
+            // next poll lands or the pot never catches up — but never so fast
+            // that a name is gone before it can be read. `vt` is the terminal
+            // speed the drag integration in updateFlyers settles toward, tuned
+            // so the whole fall still takes roughly this long.
+            const fallMs = clamp(1900 - backlog * 5, 850, 1900);
             return {
                 name: name,
                 seed: seed,
@@ -175,14 +172,26 @@
                 targetX: L.cx + (hashRandom(seed + 7) - 0.5) * L.rx * 1.1,
                 y: startY,
                 startY: startY,
-                // A big backlog falls faster — the shower has to clear before
-                // the next poll lands or the pot never catches up — but never
-                // so fast that a name is gone before it can be read.
-                fallMs: clamp(1900 - backlog * 5, 850, 1900),
+                vy: 0,
+                vx: (hashRandom(seed + 51) - 0.5) * L.slipW * 0.5,
+                // Boosted above the raw distance/time average: the drag
+                // integration below undershoots its own target speed at
+                // moderate face angles and loses ground again every time it
+                // ramps up from a stall, so aiming the ODE at the average
+                // itself arrives well past `fallMs`. This is tuned so the
+                // whole trip still lands close to it.
+                vt: (entryY - startY) / (fallMs / 1000) * 1.5,
+                drag: 3.4 + hashRandom(seed + 53) * 1.1,
+                fallMs: fallMs,
                 t: 0,
                 phase: hashRandom(seed + 3) * Math.PI * 2,
                 spinRate: 2.0 + hashRandom(seed + 11) * 1.6,
                 tilt: (hashRandom(seed + 5) - 0.5) * 0.5,
+                // A gentle warp across the card's width, oscillating with the
+                // same phase that drives its turn — paper caught in the air
+                // doesn't stay flat, it bows a little as it rocks.
+                curlSeed: hashRandom(seed + 61) * Math.PI * 2,
+                curlAmt: 0.05 + hashRandom(seed + 63) * 0.06,
                 tone: PAPER_TONES[seed % PAPER_TONES.length],
                 settling: 0,         // 0..1 while it drops through the mouth
                 fade: 0,             // 0..1, dissolving into the heap it lands on
@@ -235,68 +244,109 @@
             for (let i = flyers.length - 1; i >= 0; i--) {
                 const f = flyers[i];
                 f.t += dt;
-                f.phase += f.spinRate * dt;
 
                 if (f.churn) {
-                    // Shaken loose: pops up out of the mouth and drops back in.
+                    // Jostled inside a shaking bucket, not thrown on a clean
+                    // parabola: a random sideways kick lands every fraction of
+                    // a second on top of gravity, so it reads as being tumbled
+                    // around rather than tossed once and falling back.
+                    f.jitterAt = (f.jitterAt || 0) - dt;
+                    if (f.jitterAt <= 0) {
+                        f.jitterAt = 0.05 + hashRandom(seedCounter++) * 0.08;
+                        f.vx += (hashRandom(seedCounter++) - 0.5) * 300;
+                    }
                     f.vy += 2400 * dt;
                     f.y += f.vy * dt;
                     f.x += f.vx * dt;
+                    // Bounces off the inside of the rim instead of drifting
+                    // past it, so a burst of them visibly rattles in place.
+                    const bound = L.rx * 1.05;
+                    if (f.x < L.cx - bound) { f.x = L.cx - bound; f.vx = Math.abs(f.vx) * 0.5; }
+                    if (f.x > L.cx + bound) { f.x = L.cx + bound; f.vx = -Math.abs(f.vx) * 0.5; }
+                    f.phase += f.spinRate * dt;
                     if (f.y > L.my + L.ry * 0.4 && f.vy > 0) flyers.splice(i, 1);
                     continue;
                 }
 
-                const p = clamp(f.t * 1000 / f.fallMs, 0, 1);
-                // Gravity-ish on the way down, but drifting sideways toward the
-                // mouth the whole time so a slip that spawned at the edge of the
-                // stage still lands in the pot. It aims at the far lip rather
-                // than the middle of the opening, so the descent that follows
-                // crosses the mouth from back to front — the same visible
-                // journey whether the pot is empty or nearly full.
-                const entryY = L.my - L.ry * 0.3;
-                f.y = f.startY + (entryY - f.startY) * (p * p * 0.72 + p * 0.28);
-                const wobble = Math.sin(f.phase * 1.1) * L.slipW * 0.16 * (1 - p * 0.6);
-                f.x += ((f.targetX + wobble) - f.x) * Math.min(1, dt * 3.2);
+                if (f.settling <= 0) {
+                    const entryY = L.my - L.ry * 0.3;
+                    // Paper does not fall at one steady rate: it catches the
+                    // air most when it is turned flat toward it and slices
+                    // through with almost no resistance when edge-on, so drag
+                    // rises and falls with the turn. Integrating that (instead
+                    // of the fixed easing curve this replaced) is what gives
+                    // the descent its stall-and-swoop rhythm — slowing every
+                    // time it flattens out, picking up speed as it knifes
+                    // through — rather than one smooth glide to the pot.
+                    const face = Math.abs(Math.cos(f.phase));
+                    const k = f.drag * (0.82 + 0.36 * face);
+                    f.vy += (f.vt * f.drag - k * f.vy) * dt;
+                    f.y += f.vy * dt;
 
-                // Approach: the last stretch is the slip travelling away from
-                // the viewer and down into the opening, not just down the
-                // screen, so it starts to recede before it ever reaches the rim.
-                const approach = clamp((p - 0.72) / 0.28, 0, 1);
-                f.scale = 1 - approach * 0.14;
-                f.squash = 1 - approach * 0.20;
+                    // Sideways, the lean is the engine: a slip tipped one way
+                    // slides that way, the same reason dropped paper swoops
+                    // instead of falling straight down. A gentle pull keeps it
+                    // arriving over its lane rather than wandering the stage.
+                    f.vx += Math.sin(f.phase) * L.slipW * 2.4 * dt;
+                    f.vx += (f.targetX - f.x) * 1.8 * dt;
+                    f.vx -= f.vx * Math.min(1, 2.2 * dt);
+                    f.x += f.vx * dt;
+                    const limit = L.slipW * 0.8;
+                    if (f.x < f.targetX - limit) { f.x = f.targetX - limit; f.vx = Math.abs(f.vx) * 0.4; }
+                    if (f.x > f.targetX + limit) { f.x = f.targetX + limit; f.vx = -Math.abs(f.vx) * 0.4; }
 
-                if (p >= 1) {
-                    // Inside now. It carries on away from the camera: converging
-                    // on the middle of the opening, foreshortening hard as it
-                    // tips flat, and dropping into the shadow the front lip
-                    // casts — which is where it actually disappears. The rim
-                    // clips it on the way (see draw()), so it is cut off by the
-                    // pot rather than fading out on top of it.
-                    //
-                    // It goes all the way in and is not seen again. Three
-                    // things have to agree on that, or a slip blinks out instead
-                    // of sinking: it drops past the near edge of the opening so
-                    // the rim clip takes it, the pot's dark takes its colour,
-                    // and its own alpha reaches zero — the last of those because
-                    // the far wall inside the mouth is not actually black, so a
-                    // slip that has merely gone dark is still a black shape
-                    // against it.
-                    f.settling += dt / 0.52;
-                    const q = clamp(f.settling, 0, 1);
-                    f.x += (L.cx - f.x) * Math.min(1, dt * 2.6);
-                    f.y = entryY + q * L.ry * 1.4;
-                    f.scale = 0.88 - q * 0.40;
-                    // Only now does it foreshorten, tipping over as it drops —
-                    // by which point the name has stopped being drawn anyway.
-                    f.squash = 1 - q * 0.74;
-                    f.shade = Math.min(1, q * 1.1);
-                    f.fade = clamp((q - 0.55) / 0.45, 0, 1);
-                    if (f.settling >= 1) {
-                        flyers.splice(i, 1);
-                        resting++;
-                        shake = Math.min(1, shake + 0.06);
-                        onEvent('land', { name: f.name, resting: resting });
+                    // Faster fall, faster flip — a slip slicing edge-on through
+                    // the air spins faster than one stalled flat against it.
+                    f.phase += f.spinRate * (0.5 + 0.5 * (f.vy / f.vt)) * dt;
+
+                    // Approach: the last stretch is the slip travelling away
+                    // from the viewer and down into the opening, not just down
+                    // the screen, so it starts to recede before it ever
+                    // reaches the rim. Uniform, never squashed on one axis
+                    // alone — something further away shrinks in both
+                    // directions at once, and squashing only its height would
+                    // change the card's proportions while the name is still
+                    // being read.
+                    const approach = clamp((f.y - (entryY - L.slipH * 1.6)) / (L.slipH * 1.6), 0, 1);
+                    f.scale = 1 - approach * 0.14;
+
+                    if (f.y >= entryY) {
+                        f.y = entryY;
+                        f.settling = 0.0001;
                     }
+                    continue;
+                }
+
+                // Settling into the pot: converging on the middle of the
+                // opening, foreshortening hard as it tips flat, and dropping
+                // into the shadow the front lip casts — which is where it
+                // actually disappears. The rim clips it on the way (see
+                // draw()), so it is cut off by the pot rather than fading out
+                // on top of it.
+                //
+                // It goes all the way in and is not seen again. Three things
+                // have to agree on that, or a slip blinks out instead of
+                // sinking: it drops past the near edge of the opening so the
+                // rim clip takes it, the pot's dark takes its colour, and its
+                // own alpha reaches zero — the last of those because the far
+                // wall inside the mouth is not actually black, so a slip that
+                // has merely gone dark is still a black shape against it.
+                const entryY = L.my - L.ry * 0.3;
+                f.settling += dt / 0.52;
+                const q = clamp(f.settling, 0, 1);
+                f.x += (L.cx - f.x) * Math.min(1, dt * 2.6);
+                f.y = entryY + q * L.ry * 1.4;
+                f.scale = 0.88 - q * 0.40;
+                // Only now does it foreshorten, tipping over as it drops — by
+                // which point the name has stopped being drawn anyway.
+                f.squash = 1 - q * 0.74;
+                f.shade = Math.min(1, q * 1.1);
+                f.fade = clamp((q - 0.55) / 0.45, 0, 1);
+                if (f.settling >= 1) {
+                    flyers.splice(i, 1);
+                    resting++;
+                    shake = Math.min(1, shake + 0.06);
+                    onEvent('land', { name: f.name, resting: resting });
                 }
             }
         }
@@ -317,18 +367,25 @@
 
         // ── Drawing ─────────────────────────────────────────────────────
 
-        // ── Drawing ─────────────────────────────────────────────────────
-        function roundRect(x, y, w, h, r) {
+        // The card's outline, rounded at the corners and bowed by `curl` —
+        // a shallow, same-direction bulge in the top and bottom edges, like a
+        // sheet caught in a draft rather than a rigid rectangle. Real paper is
+        // never perfectly flat in the air; this is what keeps a stack of these
+        // from reading as cut-out cards sliding around.
+        const CARD_R = CARD_H * 0.07;
+        function cardPath(curl) {
+            const r = CARD_R;
+            const bow = (curl || 0) * CARD_H * 0.5;
             ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.lineTo(x + w - r, y);
-            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-            ctx.lineTo(x + w, y + h - r);
-            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-            ctx.lineTo(x + r, y + h);
-            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-            ctx.lineTo(x, y + r);
-            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.moveTo(-CARD_W / 2 + r, -CARD_H / 2 + bow * 0.2);
+            ctx.quadraticCurveTo(0, -CARD_H / 2 + bow, CARD_W / 2 - r, -CARD_H / 2 + bow * 0.2);
+            ctx.quadraticCurveTo(CARD_W / 2, -CARD_H / 2 + bow, CARD_W / 2, -CARD_H / 2 + bow * 0.2 + r);
+            ctx.lineTo(CARD_W / 2, CARD_H / 2 + bow * 0.2 - r);
+            ctx.quadraticCurveTo(CARD_W / 2, CARD_H / 2 + bow, CARD_W / 2 - r, CARD_H / 2 + bow * 0.2);
+            ctx.quadraticCurveTo(0, CARD_H / 2 + bow, -CARD_W / 2 + r, CARD_H / 2 + bow * 0.2);
+            ctx.quadraticCurveTo(-CARD_W / 2, CARD_H / 2 + bow, -CARD_W / 2, CARD_H / 2 + bow * 0.2 - r);
+            ctx.lineTo(-CARD_W / 2, -CARD_H / 2 + bow * 0.2 + r);
+            ctx.quadraticCurveTo(-CARD_W / 2, -CARD_H / 2 + bow, -CARD_W / 2 + r, -CARD_H / 2 + bow * 0.2);
             ctx.closePath();
         }
 
@@ -343,7 +400,13 @@
             const key = maxLines + '\u0000' + name;
             let fit = nameLayouts.get(key);
             if (!fit) {
-                fit = layoutName(ctx, name, CARD_W * 0.82, CARD_H * 0.42, CARD_H * 0.2, maxLines);
+                // The whole block of `maxLines` lines has to fit the card's
+                // text band, not just each line's width on its own. Picking
+                // the widest px that satisfies width alone — the old bug — can
+                // choose a size whose second line sits below the card's own
+                // bottom edge, which read as the name falling off the paper.
+                const startPx = Math.min(CARD_H * 0.42, (CARD_H * 0.58) / (maxLines * 1.14));
+                fit = layoutName(ctx, name, CARD_W * 0.82, startPx, CARD_H * 0.15, maxLines);
                 // A giveaway can run for hours with names arriving the whole
                 // time; this is a cache, not a ledger.
                 if (nameLayouts.size > 500) nameLayouts.clear();
@@ -394,8 +457,7 @@
             // Into card space. The `face` factor rides on the horizontal scale,
             // which is the turn; everything else is just how big the slip is.
             ctx.scale((o.w / CARD_W) * face, o.h / CARD_H);
-            const radius = CARD_H * 0.07;
-            roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, radius);
+            cardPath(o.curl);
             ctx.fillStyle = o.tone;
             ctx.fill();
             ctx.shadowColor = 'transparent';
@@ -443,7 +505,7 @@
             }
 
             if (shade > 0) {
-                roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, radius);
+                cardPath(o.curl);
                 ctx.fillStyle = `rgba(3,5,11,${shade.toFixed(3)})`;
                 ctx.fill();
             }
@@ -459,6 +521,11 @@
                 h: L.slipH * scale * squash,
                 rot: f.tilt + Math.sin(f.phase * 0.5) * 0.22,
                 turn: Math.cos(f.phase),
+                // Bends with the same phase that drives the turn, so the
+                // paper reads as flexing under the same motion that's tipping
+                // it, not as two unrelated effects layered on top of each
+                // other.
+                curl: f.curlAmt ? f.curlAmt * Math.sin(f.phase * 1.5 + f.curlSeed) : 0,
                 tone: f.tone,
                 name: f.name,
                 shade: f.shade || 0,
@@ -631,15 +698,17 @@
             ctx.fillRect(L.cx - L.rx, L.my - L.ry * 0.1, L.rx * 2, L.ry * 1.1);
             ctx.restore();
 
-            // The lip: an accent band around the front half of the rim, faded
-            // out at both ends into the shadowed sides instead of stopping dead
-            // where the ellipse does. A landing lights it up for a moment.
+            // The lip: a plain metal band around the front half of the rim —
+            // the same material as the body, just brighter, the way a bucket's
+            // rolled edge catches more light than its sides — faded out at
+            // both ends into the shadowed sides instead of stopping dead where
+            // the ellipse does.
             const lipW = Math.max(3, L.ry * 0.32);
             const band = ctx.createLinearGradient(L.cx - L.rx, 0, L.cx + L.rx, 0);
             band.addColorStop(0, 'rgba(0,0,0,0)');
-            band.addColorStop(0.16, accent);
-            band.addColorStop(0.5, tint(accent.length === 7 ? accent : '#ffd400', 0.25));
-            band.addColorStop(0.86, accent);
+            band.addColorStop(0.16, '#7c85a1');
+            band.addColorStop(0.5, '#c9d0e2');
+            band.addColorStop(0.86, '#7c85a1');
             band.addColorStop(1, 'rgba(0,0,0,0)');
             ctx.beginPath();
             ctx.ellipse(L.cx, L.my, L.rx, L.ry, 0, 0.04, Math.PI - 0.04);
@@ -689,17 +758,36 @@
             ctx.fillRect(0, 0, W, H);
         }
 
+        // What a gripped bucket does under a hand, not what a machine does: a
+        // slower sway carries the whole motion the way an arm does, a faster
+        // judder rides on top the way a grip trembles, and — since none of
+        // these periods share a common factor — the sum never lands on a beat
+        // the eye can anticipate. The single clean sine this replaced had
+        // exactly one frequency, so a shake read as a mechanism vibrating
+        // rather than a person shaking something.
+        function handShake(now) {
+            const t = now / 1000;
+            const x = 0.60 * Math.sin(t * 17.3 + 0.7)
+                    + 0.27 * Math.sin(t * 28.6 + 2.4)
+                    + 0.15 * Math.sin(t * 47.9 + 4.1);
+            const y = 0.58 * Math.abs(Math.sin(t * 14.1 + 1.3))
+                    + 0.28 * Math.abs(Math.sin(t * 36.5 + 3.6));
+            const twist = Math.sin(t * 21.4 + 1.9);
+            return { x, y, twist };
+        }
+
         function draw(now) {
             ctx.clearRect(0, 0, W, H);
 
             // The whole pot wobbles during a shake; the slips in the air do not,
             // so the pot moves under them the way a real one would.
-            const wob = shake > 0 ? Math.sin(now / 1000 * 38) * shake * L.rx * 0.09 : 0;
-            const wobY = shake > 0 ? Math.abs(Math.sin(now / 1000 * 22)) * shake * L.ry * 0.35 : 0;
+            const hs = shake > 0 ? handShake(now) : null;
+            const wob = hs ? hs.x * shake * L.rx * 0.10 : 0;
+            const wobY = hs ? hs.y * shake * L.ry * 0.32 : 0;
             const withPot = (fn) => {
                 ctx.save();
                 ctx.translate(wob, -wobY);
-                ctx.rotate(wob / (L.rx * 8));
+                ctx.rotate(hs ? (wob / (L.rx * 7) + hs.twist * shake * 0.03) : 0);
                 fn();
                 ctx.restore();
             };
@@ -770,7 +858,15 @@
                     rot: s.tilt * (1 - settled),
                     turn: turn * (1 - settled) + settled,
                     tone: s.tone, name: s.name,
-                    maxLines: 2,
+                    // One line, same as the small card the room watched fall —
+                    // the reveal is what unfolds it into the full name, not
+                    // this. Jumping straight to two lines here is what used to
+                    // make the switch from a truncated name to a full one look
+                    // like a swap instead of a reveal.
+                    maxLines: 1,
+                    // Settles flat as it arrives; still a little unsettled
+                    // mid-flight, the way paper flexes while it's moving.
+                    curl: 0.07 * Math.sin(s.phase * 1.5 + s.tilt) * (1 - settled),
                     // Comes up out of the pot's shadow into the light as it rises.
                     shade: 0.75 * Math.pow(1 - e, 2),
                 });
@@ -810,14 +906,33 @@
         function drawRevealSlips() {
             const pop = easeOutBack(clamp(spinState.revealP, 0, 1));
             const glow = clamp(spinState.revealP * 1.4, 0, 1);
+            // The card opens like a folded slip unfolding: height grows from a
+            // crease at the centre over the first part of the reveal, rather
+            // than the text just swapping from the truncated one-line name the
+            // room watched fall to the full two-line name — the same paper
+            // opening up, not a substitution.
+            const openP = easeOutCubic(clamp(spinState.revealP / 0.6, 0, 1));
             for (const s of spinState.slips) {
                 const w = s.endW * (0.94 + pop * 0.06);
+                const h = w * 0.44 * (0.10 + 0.90 * openP);
                 drawSlip({
-                    x: s.endX, y: s.endY, w: w, h: w * 0.44,
+                    x: s.endX, y: s.endY, w: w, h: h,
                     rot: 0, turn: 1,
                     tone: '#fffdf4', name: s.name, maxLines: 2,
                     glowColor: accent, glowBlur: 30 * glow,
                 });
+                if (openP < 0.999) {
+                    // The fold itself, fading out as the card opens flat.
+                    ctx.save();
+                    ctx.globalAlpha = 1 - openP;
+                    ctx.strokeStyle = 'rgba(110,96,60,0.55)';
+                    ctx.lineWidth = Math.max(1, h * 0.05);
+                    ctx.beginPath();
+                    ctx.moveTo(s.endX - w * 0.46, s.endY);
+                    ctx.lineTo(s.endX + w * 0.46, s.endY);
+                    ctx.stroke();
+                    ctx.restore();
+                }
             }
         }
 
@@ -882,9 +997,12 @@
                         y: L.my - L.ry * 0.2,
                         vx: (hashRandom(seed + 2) - 0.5) * 170,
                         vy: -(420 + hashRandom(seed + 4) * 380),
+                        jitterAt: 0,
                         t: 0, phase: hashRandom(seed + 6) * 6.28,
                         spinRate: 5 + hashRandom(seed + 8) * 5,
                         tilt: (hashRandom(seed + 9) - 0.5) * 0.6,
+                        curlSeed: hashRandom(seed + 62) * Math.PI * 2,
+                        curlAmt: 0.06 + hashRandom(seed + 64) * 0.07,
                         tone: PAPER_TONES[seed % PAPER_TONES.length],
                         settling: 0, scale: 0.82, squash: 1, shade: 0,
                     });
