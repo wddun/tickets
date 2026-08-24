@@ -173,7 +173,13 @@
             // controller stage and a projector a pot of sensible proportions,
             // with enough clear air above it for a slip to be read on the way
             // down. Capped so a very large screen doesn't get a silly bucket.
-            const potW = Math.min(W * 0.68, H * 0.62, 520);
+            // The height factor is deliberately smaller than the width one:
+            // on a wide/short stage (the projector display) it's height,
+            // not width, that decides the pot's size, and a factor as big
+            // as the width one there meant a taller container just grew a
+            // bigger pot instead of leaving more open air for the fall —
+            // exactly backwards from wanting slips visible for longer.
+            const potW = Math.min(W * 0.68, H * 0.52, 520);
             const rx = potW / 2;
             const ry = rx * 0.30;
             const bodyH = potW * 0.72;
@@ -227,6 +233,19 @@
                 omega: (hashRandom(seed + 11) < 0.5 ? -1 : 1) * (0.8 + hashRandom(seed + 13) * 1.4),
                 paceScale: paceScale,
                 t: 0,
+                // In-plane rotation (theta/omega, above) is the real
+                // simulated tumble; this is a second, independent turn
+                // about the vertical axis — the classic coin-flip a piece
+                // of paper does as it falls, alternating its printed face
+                // toward and away from the room. The two aren't the same
+                // motion and don't drive each other: a card can be turning
+                // in-plane fast or slow while still flipping face-to-back
+                // at its own rate, the way real dropped paper does both at
+                // once. Rate scales loosely with the real spin so a card
+                // that's tumbling hard also flips faster, without the flip
+                // becoming a second copy of the physics above.
+                flipPhase: hashRandom(seed + 71) * Math.PI * 2,
+                flipRate: 2.6 + hashRandom(seed + 73) * 2.2,
                 // The warp across the card's width — paper caught in the air
                 // doesn't stay flat, it flexes more the harder it's turning.
                 // Tied to the real angular velocity below, not a free-running
@@ -354,11 +373,23 @@
                         f.x += f.vx * sdt;
                         f.y += f.vy * sdt;
                     }
-                    // A soft nudge back toward the mouth so a long, lively
-                    // tumble still ends up over the pot instead of drifting
-                    // off the stage entirely — a real dropped card has a room
-                    // to land in; this one only has the width of the canvas.
-                    f.vx += (L.cx - f.x) * 0.6 * dt;
+                    // A real dropped card has a whole room to land in; this
+                    // one only has the width of the canvas, and the lift the
+                    // aerodynamics above generates is easily strong enough to
+                    // carry it well past the pot before it ever reaches
+                    // entryY — a weaker pull here just lost that tug-of-war
+                    // outright and let slips drift off the stage without
+                    // ever landing. This nudge is strong enough to win it,
+                    // and the hard bound below is the backstop for whatever
+                    // it doesn't catch in time.
+                    f.vx += (L.cx - f.x) * 2.4 * dt;
+                    const xBound = clamp(L.rx * 2.3, W * 0.18, W * 0.48);
+                    if (f.x < L.cx - xBound) { f.x = L.cx - xBound; f.vx = Math.abs(f.vx) * 0.35; }
+                    if (f.x > L.cx + xBound) { f.x = L.cx + xBound; f.vx = -Math.abs(f.vx) * 0.35; }
+
+                    // The face-to-back flip (see spawnFlyer) runs on its own
+                    // clock, a little faster when the real tumble is livelier.
+                    f.flipPhase += (f.flipRate + Math.abs(f.omega) * 0.3) * dt;
 
                     // Approach: the last stretch is the slip travelling away
                     // from the viewer and down into the opening, not just down
@@ -585,19 +616,19 @@
                 x: f.x, y: f.y,
                 w: L.slipW * scale,
                 h: L.slipH * scale * squash,
-                // `theta` is the slip's real orientation — the axis it
-                // tumbles about points straight out of the screen (the
-                // mechanism Mahadevan, Ryu & Samuel describe watching:
+                // `theta` is the slip's real, physically-simulated tumble —
+                // the axis it turns about points straight out of the screen
+                // (the mechanism Mahadevan, Ryu & Samuel describe watching:
                 // "the axis of rotation always points out of the plane of
-                // the paper"), so the card is drawn face-on and rotating in
-                // the screen plane, never squashed down to an edge-on
-                // sliver. A churned (shake-loosened) slip still gets a
-                // simple face/back flicker for visual chaos in the bucket;
-                // a falling slip always shows its printed face, which is
-                // also what keeps its name legible and un-clipped the
-                // whole way down.
+                // the paper") — so it's drawn rotating in the screen plane,
+                // never squashed down to an edge-on sliver by this angle.
+                // `turn` is the separate, independent face/back flip
+                // (`flipPhase` for a fall, `theta` reused for churn, which
+                // has no flip of its own) — the coin-flip alternation of
+                // which side faces the room, layered on top of the real
+                // in-plane spin rather than replacing it.
                 rot: f.theta,
-                turn: f.churn ? Math.cos(f.theta) : 1,
+                turn: Math.cos(f.churn ? f.theta : f.flipPhase),
                 // Bends with the real spin rate — a card that's mid-tumble
                 // visibly flexes, one that's slowed down goes flat, instead
                 // of an unrelated sine layered on top.
