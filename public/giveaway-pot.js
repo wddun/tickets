@@ -185,13 +185,21 @@
                 fallMs: fallMs,
                 t: 0,
                 phase: hashRandom(seed + 3) * Math.PI * 2,
-                spinRate: 2.0 + hashRandom(seed + 11) * 1.6,
+                // Fast enough to carry it through at least one full lean
+                // reversal over the length of an average fall — the earlier,
+                // slower rate span less than half a rotation end to end, so
+                // the sideways lean it drives never had time to swing back
+                // the other way and a slip just drifted one direction for
+                // its whole drop, reading as a straight diagonal slide
+                // instead of a flutter.
+                spinRate: 4.5 + hashRandom(seed + 11) * 3.5,
                 tilt: (hashRandom(seed + 5) - 0.5) * 0.5,
-                // A gentle warp across the card's width, oscillating with the
-                // same phase that drives its turn — paper caught in the air
-                // doesn't stay flat, it bows a little as it rocks.
+                // The warp across the card's width, oscillating with the same
+                // phase that drives its turn — paper caught in the air
+                // doesn't stay flat, it bends as it rocks. Wide enough to
+                // read as a card visibly bowing, not just a soft wobble.
                 curlSeed: hashRandom(seed + 61) * Math.PI * 2,
-                curlAmt: 0.16 + hashRandom(seed + 63) * 0.16,
+                curlAmt: 0.32 + hashRandom(seed + 63) * 0.30,
                 tone: PAPER_TONES[seed % PAPER_TONES.length],
                 settling: 0,         // 0..1 while it drops through the mouth
                 fade: 0,             // 0..1, dissolving into the heap it lands on
@@ -284,7 +292,7 @@
                     // reads as a flat glide with a slight wobble on top rather
                     // than orientation actually driving the speed.
                     const face = Math.abs(Math.cos(f.phase));
-                    const k = f.drag * (0.42 + 1.5 * face);
+                    const k = f.drag * (0.35 + 1.7 * face);
                     f.vy += (f.vt * f.drag - k * f.vy) * dt;
                     f.y += f.vy * dt;
 
@@ -387,7 +395,7 @@
         const CARD_R = CARD_H * 0.07;
         function cardPath(curl) {
             const r = CARD_R;
-            const bow = (curl || 0) * CARD_H * 0.4;
+            const bow = (curl || 0) * CARD_H * 0.55;
             ctx.beginPath();
             ctx.moveTo(-CARD_W / 2 + r, -CARD_H / 2);
             ctx.quadraticCurveTo(0, -CARD_H / 2 + bow, CARD_W / 2 - r, -CARD_H / 2);
@@ -531,7 +539,7 @@
                 x: f.x, y: f.y,
                 w: L.slipW * scale,
                 h: L.slipH * scale * squash,
-                rot: f.tilt + Math.sin(f.phase * 0.5) * 0.22,
+                rot: f.tilt + Math.sin(f.phase * 0.5) * 0.38,
                 turn: Math.cos(f.phase),
                 // Bends with the same phase that drives the turn, so the
                 // paper reads as flexing under the same motion that's tipping
@@ -869,13 +877,17 @@
                     x: x, y: y, w: w, h: w * 0.44,
                     rot: s.tilt * (1 - settled),
                     turn: turn * (1 - settled) + settled,
-                    tone: s.tone, name: s.name,
-                    // One line, same as the small card the room watched fall —
-                    // the reveal is what unfolds it into the full name, not
-                    // this. Jumping straight to two lines here is what used to
-                    // make the switch from a truncated name to a full one look
-                    // like a swap instead of a reveal.
-                    maxLines: 1,
+                    // Reveal draws this same card at maxLines:2 the instant
+                    // the rise ends — matching that here, instead of the
+                    // maxLines:1 this used to carry, is what removed the
+                    // "one line, then two" snap: a long name used to get
+                    // truncated with an ellipsis for the whole rise and then
+                    // re-wrap onto two lines at a smaller font in the same
+                    // frame the reveal took over. Same tone too, so nothing
+                    // about the card visibly swaps at that handoff — only
+                    // its size, position and glow keep animating.
+                    tone: '#fffdf4', name: s.name,
+                    maxLines: 2,
                     // Settles flat as it arrives; still a little unsettled
                     // mid-flight, the way paper flexes while it's moving.
                     curl: 0.07 * Math.sin(s.phase * 1.5 + s.tilt) * (1 - settled),
@@ -1169,7 +1181,6 @@
                             delay: Math.min(0.45, i * 0.08),
                             phase: hashRandom(i + 77) * 6.28,
                             tilt: (hashRandom(i + 13) - 0.5) * 0.8,
-                            tone: PAPER_TONES[i % PAPER_TONES.length],
                         };
                     }),
                 };
