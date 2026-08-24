@@ -50,6 +50,43 @@
     function easeOutBack(p) { const c = 1.70158; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); }
     function easeInOutSine(p) { return 0.5 - Math.cos(Math.PI * p) / 2; }
 
+    // A falling slip's tumble is a real quasi-steady flat-plate simulation,
+    // not a hand-tuned oscillator: each slip carries its own (vx, vy, theta,
+    // omega) and every frame integrates real lift and drag forces from it,
+    // the same way a falling card or leaf actually accelerates, stalls and
+    // spins. The lift/drag coefficient curves and centre-of-pressure offset
+    // are lifted directly from Pomerenk & Ristroph, "Equilibria and
+    // stability of plates in flowing soap films" (2024/2025, extending Li
+    // et al. 2022 and Andersen, Pesavento & Wang, J. Fluid Mech. 541, 2005;
+    // arxiv.org/abs/2408.08864, eq. 4.4) — CL1/CL2/CD0/CD1/CDPI2 and the
+    // stall-blend constants below are their published numbers, not guesses.
+    // The torque is not their exact centre-of-pressure formula, which needs
+    // a sign convention this file has no way to get right from the paper
+    // alone — it's the classical sin(2*alpha) destabilising-moment form
+    // used in the simplified "toy" falling-card models the same literature
+    // cites (e.g. Tanabe & Kaneko 1994), which reproduces the right
+    // qualitative behaviour: broadside is an unstable equilibrium a card
+    // is thrown past rather than settling into, exactly as described
+    // first-hand in Mahadevan, Ryu & Samuel, "Tumbling cards", Phys.
+    // Fluids 11, 1 (1999) — a card starting nearly vertical slices through
+    // the air, the pressure difference this creates rotates it toward
+    // broadside, and it carries on past broadside into a slice the other
+    // way rather than stopping there.
+    const AERO_CL1 = 5.2, AERO_CL2 = 0.95;
+    const AERO_CD0 = 0.1, AERO_CD1 = 5.0, AERO_CDPI2 = 1.9;
+    const AERO_ALPHA0 = 14 * Math.PI / 180, AERO_DELTA = 6 * Math.PI / 180;
+    const AERO_K = 0.003, AERO_TORQUE_K = 0.01, AERO_GRAVITY = 900, AERO_ROT_DAMP = 0.2;
+    // Lift/drag coefficients and centre-of-pressure offset as functions of
+    // the angle of attack, valid on alpha ∈ [0, π/2] — folded into that
+    // range by the caller, per the symmetry the source paper describes.
+    function aeroCoeffs(aFold) {
+        const blend = 0.5 * (1 - Math.tanh((aFold - AERO_ALPHA0) / AERO_DELTA));
+        const CL = blend * AERO_CL1 * Math.sin(aFold) + (1 - blend) * AERO_CL2 * Math.sin(2 * aFold);
+        const s2 = Math.sin(aFold) * Math.sin(aFold);
+        const CD = blend * (AERO_CD0 + AERO_CD1 * s2) + (1 - blend) * AERO_CDPI2 * s2;
+        return { CL: CL, CD: CD };
+    }
+
     // Shrink the name until it fits, wrap it if the caller allows more than one
     // line, and only then cut it. A giveaway pot full of "Christophe…" is worse
     // than one with slightly small type, and a winner's name is worth two lines.
@@ -157,48 +194,34 @@
             // Staggered above the top edge rather than all entering on the same
             // line, so consecutive releases don't descend the stage as a rank.
             const startY = -L.slipH * (1 + hashRandom(seed + 43) * 1.6);
-            const entryY = L.my - L.ry * 0.3;
             // A big backlog falls faster — the shower has to clear before the
             // next poll lands or the pot never catches up — but never so fast
-            // that a name is gone before it can be read. `vt` is the terminal
-            // speed the drag integration in updateFlyers settles toward, tuned
-            // so the whole fall still takes roughly this long.
-            const fallMs = clamp(1900 - backlog * 5, 850, 1900);
+            // that a name is gone before it can be read. Scales gravity and
+            // the aerodynamic force together, which is the same trick the
+            // source model uses to non-dimensionalise time: push every force
+            // in the simulation up by the same factor and the whole fall
+            // plays out faster without changing its character.
+            const paceScale = clamp(1 + backlog * 0.0035, 1, 2.3);
             return {
                 name: name,
                 seed: seed,
                 x: laneX + (hashRandom(seed) - 0.5) * (spread / lanes) * 0.7,
-                // Aim somewhere across the mouth, not always dead centre.
-                targetX: L.cx + (hashRandom(seed + 7) - 0.5) * L.rx * 1.1,
                 y: startY,
                 startY: startY,
-                vy: 0,
-                vx: (hashRandom(seed + 51) - 0.5) * L.slipW * 0.5,
-                // Boosted above the raw distance/time average: the drag
-                // integration below undershoots its own target speed at
-                // moderate face angles and loses ground again every time it
-                // ramps up from a stall, so aiming the ODE at the average
-                // itself arrives well past `fallMs`. This is tuned so the
-                // whole trip still lands close to it.
-                vt: (entryY - startY) / (fallMs / 1000) * 2.0,
-                drag: 3.4 + hashRandom(seed + 53) * 1.1,
-                fallMs: fallMs,
+                vy: 40 + hashRandom(seed + 51) * 40,
+                vx: (hashRandom(seed + 7) - 0.5) * L.slipW * 0.6,
+                // Orientation and spin it's released with — a slip doesn't
+                // enter perfectly edge-on and still, it's tossed with some
+                // tumble already on it, the way a card leaves your fingers.
+                theta: hashRandom(seed + 3) * Math.PI * 2,
+                omega: (hashRandom(seed + 11) < 0.5 ? -1 : 1) * (1.6 + hashRandom(seed + 13) * 3.2),
+                paceScale: paceScale,
                 t: 0,
-                phase: hashRandom(seed + 3) * Math.PI * 2,
-                // Fast enough to carry it through at least one full lean
-                // reversal over the length of an average fall — the earlier,
-                // slower rate span less than half a rotation end to end, so
-                // the sideways lean it drives never had time to swing back
-                // the other way and a slip just drifted one direction for
-                // its whole drop, reading as a straight diagonal slide
-                // instead of a flutter.
-                spinRate: 4.5 + hashRandom(seed + 11) * 3.5,
-                tilt: (hashRandom(seed + 5) - 0.5) * 0.5,
-                // The warp across the card's width, oscillating with the same
-                // phase that drives its turn — paper caught in the air
-                // doesn't stay flat, it bends as it rocks. Wide enough to
-                // read as a card visibly bowing, not just a soft wobble.
-                curlSeed: hashRandom(seed + 61) * Math.PI * 2,
+                // The warp across the card's width — paper caught in the air
+                // doesn't stay flat, it flexes more the harder it's turning.
+                // Tied to the real angular velocity below, not a free-running
+                // sine, so a slip that's mid-tumble visibly bows and one
+                // that's settled down goes flat.
                 curlAmt: 0.32 + hashRandom(seed + 63) * 0.30,
                 tone: PAPER_TONES[seed % PAPER_TONES.length],
                 settling: 0,         // 0..1 while it drops through the mouth
@@ -271,48 +294,61 @@
                     const bound = L.rx * 1.05;
                     if (f.x < L.cx - bound) { f.x = L.cx - bound; f.vx = Math.abs(f.vx) * 0.5; }
                     if (f.x > L.cx + bound) { f.x = L.cx + bound; f.vx = -Math.abs(f.vx) * 0.5; }
-                    f.phase += f.spinRate * dt;
+                    f.theta += f.omega * dt;
                     if (f.y > L.my + L.ry * 0.4 && f.vy > 0) flyers.splice(i, 1);
                     continue;
                 }
 
                 if (f.settling <= 0) {
                     const entryY = L.my - L.ry * 0.3;
-                    // Paper does not fall at one steady rate: it catches the
-                    // air most when it is turned flat toward it and slices
-                    // through with almost no resistance when edge-on, so drag
-                    // rises and falls with the turn. Integrating that (instead
-                    // of the fixed easing curve this replaced) is what gives
-                    // the descent its stall-and-swoop rhythm — slowing every
-                    // time it flattens out, picking up speed as it knifes
-                    // through — rather than one smooth glide to the pot.
-                    // Wide on purpose: edge-on it should visibly knife through
-                    // (drag near its floor) and face-on it should visibly
-                    // stall (drag well over triple that) — a narrow range here
-                    // reads as a flat glide with a slight wobble on top rather
-                    // than orientation actually driving the speed.
-                    const face = Math.abs(Math.cos(f.phase));
-                    const k = f.drag * (0.35 + 1.7 * face);
-                    f.vy += (f.vt * f.drag - k * f.vy) * dt;
-                    f.y += f.vy * dt;
-
-                    // Sideways, the lean is the engine: a slip tipped one way
-                    // slides that way, the same reason dropped paper swoops
-                    // instead of falling straight down. A gentle pull keeps it
-                    // arriving over its lane rather than wandering the stage.
-                    f.vx += Math.sin(f.phase) * L.slipW * 2.4 * dt;
-                    f.vx += (f.targetX - f.x) * 1.8 * dt;
-                    f.vx -= f.vx * Math.min(1, 2.2 * dt);
-                    f.x += f.vx * dt;
-                    const limit = L.slipW * 0.8;
-                    if (f.x < f.targetX - limit) { f.x = f.targetX - limit; f.vx = Math.abs(f.vx) * 0.4; }
-                    if (f.x > f.targetX + limit) { f.x = f.targetX + limit; f.vx = -Math.abs(f.vx) * 0.4; }
-
-                    // Faster fall, faster flip — a slip slicing edge-on through
-                    // the air spins visibly faster than one stalled flat
-                    // against it, instead of turning at roughly the same rate
-                    // throughout regardless of how fast it's actually falling.
-                    f.phase += f.spinRate * (0.2 + 1.1 * (f.vy / f.vt)) * dt;
+                    // Real lift and drag, integrated in the slip's own body
+                    // frame each substep (see aeroCoeffs above for where the
+                    // coefficient curves come from) — this is what replaced a
+                    // hand-tuned sine oscillator with an actual falling-plate
+                    // simulation. Substepped rather than integrated once at
+                    // the frame's own dt: the forces are quadratic in speed
+                    // and this is a stiff enough system that a single ~16ms
+                    // step visibly misbehaves (it's how the very first version
+                    // of this blew up into a multi-hundred-rad/s spin).
+                    const SUBSTEPS = 4;
+                    const sdt = dt / SUBSTEPS;
+                    const g = AERO_GRAVITY * f.paceScale;
+                    const aeroK = AERO_K * f.paceScale;
+                    for (let sub = 0; sub < SUBSTEPS; sub++) {
+                        const uCx = Math.sin(f.theta), uCy = -Math.cos(f.theta);
+                        const uWx = Math.cos(f.theta), uWy = Math.sin(f.theta);
+                        // Body-frame velocity: x' along the chord (the card's
+                        // short/tumbling axis), y' perpendicular to it.
+                        const vxp = f.vx * uCx + f.vy * uCy;
+                        const vyp = f.vx * uWx + f.vy * uWy;
+                        const q = Math.hypot(vxp, vyp);
+                        let tau = -AERO_ROT_DAMP * f.paceScale * f.omega * Math.abs(f.omega);
+                        if (q > 1e-4) {
+                            const a = Math.atan2(vyp, vxp);
+                            const b = Math.abs(a) % Math.PI;
+                            const aFold = Math.min(b, Math.PI - b);
+                            const co = aeroCoeffs(aFold);
+                            // Lift perpendicular to the relative flow, drag
+                            // opposing it — same construction as the source,
+                            // in body-frame components.
+                            const liftX = co.CL * q * vyp, liftY = -co.CL * q * vxp;
+                            const dragX = -co.CD * q * vxp, dragY = -co.CD * q * vyp;
+                            const Fxp = liftX + dragX, Fyp = liftY + dragY;
+                            f.vx += (Fxp * uCx + Fyp * uWx) * aeroK * sdt;
+                            f.vy += (Fxp * uCy + Fyp * uWy) * aeroK * sdt;
+                            tau += AERO_TORQUE_K * f.paceScale * q * q * Math.sin(2 * a);
+                        }
+                        f.vy += g * sdt;
+                        f.omega += tau * sdt;
+                        f.theta += f.omega * sdt;
+                        f.x += f.vx * sdt;
+                        f.y += f.vy * sdt;
+                    }
+                    // A soft nudge back toward the mouth so a long, lively
+                    // tumble still ends up over the pot instead of drifting
+                    // off the stage entirely — a real dropped card has a room
+                    // to land in; this one only has the width of the canvas.
+                    f.vx += (L.cx - f.x) * 0.6 * dt;
 
                     // Approach: the last stretch is the slip travelling away
                     // from the viewer and down into the opening, not just down
@@ -539,13 +575,23 @@
                 x: f.x, y: f.y,
                 w: L.slipW * scale,
                 h: L.slipH * scale * squash,
-                rot: f.tilt + Math.sin(f.phase * 0.5) * 0.38,
-                turn: Math.cos(f.phase),
-                // Bends with the same phase that drives the turn, so the
-                // paper reads as flexing under the same motion that's tipping
-                // it, not as two unrelated effects layered on top of each
-                // other.
-                curl: f.curlAmt ? f.curlAmt * Math.sin(f.phase * 1.5 + f.curlSeed) : 0,
+                // `theta` is the slip's real orientation — the axis it
+                // tumbles about points straight out of the screen (the
+                // mechanism Mahadevan, Ryu & Samuel describe watching:
+                // "the axis of rotation always points out of the plane of
+                // the paper"), so the card is drawn face-on and rotating in
+                // the screen plane, never squashed down to an edge-on
+                // sliver. A churned (shake-loosened) slip still gets a
+                // simple face/back flicker for visual chaos in the bucket;
+                // a falling slip always shows its printed face, which is
+                // also what keeps its name legible and un-clipped the
+                // whole way down.
+                rot: f.theta,
+                turn: f.churn ? Math.cos(f.theta) : 1,
+                // Bends with the real spin rate — a card that's mid-tumble
+                // visibly flexes, one that's slowed down goes flat, instead
+                // of an unrelated sine layered on top.
+                curl: f.curlAmt ? clamp(f.curlAmt * f.omega * 0.05, -0.65, 0.65) : 0,
                 tone: f.tone,
                 name: f.name,
                 shade: f.shade || 0,
@@ -1009,10 +1055,8 @@
                         vx: (hashRandom(seed + 2) - 0.5) * 170,
                         vy: -(420 + hashRandom(seed + 4) * 380),
                         jitterAt: 0,
-                        t: 0, phase: hashRandom(seed + 6) * 6.28,
-                        spinRate: 5 + hashRandom(seed + 8) * 5,
-                        tilt: (hashRandom(seed + 9) - 0.5) * 0.6,
-                        curlSeed: hashRandom(seed + 62) * Math.PI * 2,
+                        t: 0, theta: hashRandom(seed + 6) * 6.28,
+                        omega: 5 + hashRandom(seed + 8) * 5,
                         curlAmt: 0.18 + hashRandom(seed + 64) * 0.18,
                         tone: PAPER_TONES[seed % PAPER_TONES.length],
                         settling: 0, scale: 0.82, squash: 1, shade: 0,
