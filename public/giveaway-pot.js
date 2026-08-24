@@ -27,6 +27,11 @@
     'use strict';
 
     const PAPER_TONES = ['#fdf8ec', '#fbf3e2', '#fdfaf2', '#f7efdd', '#fffdf6'];
+
+    // Every slip is drawn in these coordinates and scaled onto the screen in one
+    // step, whatever size it is on screen. Only the ratio matters; it is the
+    // slips' own 0.44.
+    const CARD_W = 200, CARD_H = 88;
     const INK = '#2b2a26';
     const FONT_STACK = 'ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, sans-serif';
 
@@ -53,13 +58,6 @@
         const a = Math.abs(k);
         const c = p.map(v => Math.round(v + (t - v) * a));
         return '#' + c.map(v => clamp(v, 0, 255).toString(16).padStart(2, '0')).join('');
-    }
-
-    function lerpColor(a, b, t) {
-        const pa = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16));
-        const pb = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16));
-        const c = pa.map((v, i) => Math.round(v + (pb[i] - v) * t));
-        return `rgb(${c[0]},${c[1]},${c[2]})`;
     }
 
     // Shrink the name until it fits, wrap it if the caller allows more than one
@@ -103,14 +101,10 @@
         let queue = [];        // names waiting to be dropped in
         let flyers = [];       // slips currently on screen
         let motes = [];        // celebratory paper thrown up on the reveal
-        let resting = 0;       // slips settled in the pot (drives the mound)
-        // What the heap is *drawn* from, chasing `resting` over a few frames.
-        // The heap's height and spread are smooth functions of the count, so a
-        // count that jumps by a whole slip moves every piece already in the pot
-        // a little, all in one frame. Easing the number the drawing reads makes
-        // that a settle instead of a twitch.
-        let shownResting = 0;
-        let label = '';
+        // Slips that have gone in. Nothing is drawn from this — a slip that
+        // reaches the pot is inside it and out of sight, the way a name dropped
+        // into a bucket is — but the count is still the pot's to report.
+        let resting = 0;
 
         let lastReleaseAt = 0;
         // Consecutive slips take consecutive lanes across the stage, so a run of
@@ -118,21 +112,12 @@
         const LANES = 5;
         let releaseLane = 0;
         let shake = 0;         // 0..1, decaying pot wobble
-        let landFlash = 0;     // 0..1, decaying glint along the lip on a landing
         let spinState = null;  // set while a draw is running
         let running = false;
         let rafId = null;
         let lastFrame = 0;
         let loopGen = 0;       // see kick()/onVisibility
         let destroyed = false;
-
-        // Fixed once, for the life of the pot — never reseeded by how many
-        // entrants are resting. A pile built from a FIXED number of stacked
-        // layers, each perturbed by these same points every frame, can grow or
-        // shrink smoothly without a single element ever changing where it sits
-        // relative to its neighbours.
-        const MOUND_RIM_PTS = 16;
-        const moundRimNoise = Array.from({ length: MOUND_RIM_PTS }, (_, i) => hashRandom(i * 41 + 900) - 0.5);
 
         // ── Layout ──────────────────────────────────────────────────────
         // Recomputed on resize; everything else works in these numbers so the
@@ -288,30 +273,28 @@
                     // clips it on the way (see draw()), so it is cut off by the
                     // pot rather than fading out on top of it.
                     //
-                    // It has to end up *gone*, and it has to go by merging into
-                    // the heap rather than by darkening on top of it. Driving
-                    // the shade to black instead just trades one visible slip
-                    // for another: a black card silhouetted against a pale pile
-                    // of paper, which is if anything easier to see. So the slip
-                    // keeps roughly the colour of what it is landing among, and
-                    // fades out over the second half of the drop while the pot's
-                    // own shadow takes it — it is indistinguishable from the
-                    // heap before it is removed, and nothing blinks out.
-                    f.settling += dt / 0.42;
+                    // It goes all the way in and is not seen again. Three
+                    // things have to agree on that, or a slip blinks out instead
+                    // of sinking: it drops past the near edge of the opening so
+                    // the rim clip takes it, the pot's dark takes its colour,
+                    // and its own alpha reaches zero — the last of those because
+                    // the far wall inside the mouth is not actually black, so a
+                    // slip that has merely gone dark is still a black shape
+                    // against it.
+                    f.settling += dt / 0.52;
                     const q = clamp(f.settling, 0, 1);
                     f.x += (L.cx - f.x) * Math.min(1, dt * 2.6);
-                    f.y = entryY + q * L.ry * 1.3;
+                    f.y = entryY + q * L.ry * 1.4;
                     f.scale = 0.88 - q * 0.40;
-                    f.squash = 0.78 - q * 0.52;
-                    f.shade = 0.34 * q;
-                    // Held back at first so the name is still legible as it goes
-                    // over the rim; gone entirely before the slip is spliced out.
-                    f.fade = clamp((q - 0.45) / 0.5, 0, 1);
+                    // Only now does it foreshorten, tipping over as it drops —
+                    // by which point the name has stopped being drawn anyway.
+                    f.squash = 1 - q * 0.74;
+                    f.shade = Math.min(1, q * 1.1);
+                    f.fade = clamp((q - 0.55) / 0.45, 0, 1);
                     if (f.settling >= 1) {
                         flyers.splice(i, 1);
                         resting++;
                         shake = Math.min(1, shake + 0.06);
-                        landFlash = 1;
                         onEvent('land', { name: f.name, resting: resting });
                     }
                 }
@@ -349,9 +332,34 @@
             ctx.closePath();
         }
 
+        // A name is laid out ONCE, in the card's own coordinates, and cached.
+        // Fitting it to the slip's current on-screen size every frame is what
+        // made the type look like it was swelling and shrinking against the
+        // paper: the fitter picks a whole-pixel size, the slip's height changes
+        // a little on every frame of its fall, and the name jumps a size at each
+        // threshold it crosses. Type printed on a card does not do that.
+        const nameLayouts = new Map();
+        function cardName(name, maxLines) {
+            const key = maxLines + '\u0000' + name;
+            let fit = nameLayouts.get(key);
+            if (!fit) {
+                fit = layoutName(ctx, name, CARD_W * 0.82, CARD_H * 0.42, CARD_H * 0.2, maxLines);
+                // A giveaway can run for hours with names arriving the whole
+                // time; this is a cache, not a ledger.
+                if (nameLayouts.size > 500) nameLayouts.clear();
+                nameLayouts.set(key, fit);
+            }
+            return fit;
+        }
+
         // A slip, drawn face-on at `turn`=1 and edge-on at `turn`=0. Squashing
         // the horizontal axis by the cosine of its tumble is what sells these as
         // pieces of paper turning over rather than sprites sliding down.
+        //
+        // The card and everything printed on it are drawn in one fixed
+        // coordinate system and scaled onto the screen in a single step, so the
+        // name is fixed to the paper: it turns with it, recedes with it, and
+        // keeps exactly the same place on it however big the slip is drawn.
         //
         // `shade` (0..1) is how much of the pot's interior darkness has fallen
         // over it. Nothing inside a pot is lit like something in front of one,
@@ -361,9 +369,7 @@
         // `glowColor`/`glowBlur` replace the paper's own cast shadow, for the
         // one slip that is being held up as the winner rather than falling.
         function drawSlip(o) {
-            const w = o.w, h = o.h;
-            const turn = o.turn;
-            const face = Math.abs(turn);
+            const face = Math.abs(o.turn);
             const shade = o.shade || 0;
             ctx.save();
             ctx.globalAlpha = o.opacity == null ? 1 : o.opacity;
@@ -373,66 +379,71 @@
             if (face < 0.1) {
                 // Edge-on: a lit sliver, no face, no text.
                 ctx.fillStyle = `rgba(255,255,255,${(0.55 * (1 - shade)).toFixed(3)})`;
-                ctx.fillRect(-Math.max(1.2, w * face * 0.5), -h / 2, Math.max(2.4, w * face), h);
+                ctx.fillRect(-Math.max(1.2, o.w * face * 0.5), -o.h / 2,
+                    Math.max(2.4, o.w * face), o.h);
                 ctx.restore();
                 return;
             }
 
-            ctx.scale(face, 1);
-            const radius = Math.min(5, Math.abs(h) * 0.14);
+            // Set from the on-screen size, not the card's: canvas shadow offsets
+            // and blurs are in device space and ignore the transform below.
             ctx.shadowColor = o.glowColor || 'rgba(0,0,0,0.45)';
-            ctx.shadowBlur = o.glowBlur != null ? o.glowBlur : Math.abs(h) * 0.35;
-            ctx.shadowOffsetY = o.glowColor ? 0 : Math.abs(h) * 0.12;
-            roundRect(-w / 2, -h / 2, w, h, radius);
+            ctx.shadowBlur = o.glowBlur != null ? o.glowBlur : Math.abs(o.h) * 0.35;
+            ctx.shadowOffsetY = o.glowColor ? 0 : Math.abs(o.h) * 0.12;
+
+            // Into card space. The `face` factor rides on the horizontal scale,
+            // which is the turn; everything else is just how big the slip is.
+            ctx.scale((o.w / CARD_W) * face, o.h / CARD_H);
+            const radius = CARD_H * 0.07;
+            roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, radius);
             ctx.fillStyle = o.tone;
             ctx.fill();
             ctx.shadowColor = 'transparent';
             ctx.shadowBlur = 0;
             ctx.shadowOffsetY = 0;
 
-            // Backs of slips get no text — you're looking at the reverse side.
-            if (turn < 0) {
+            if (o.turn < 0) {
+                // Backs of slips get no text — you're looking at the reverse side.
                 ctx.strokeStyle = 'rgba(0,0,0,0.10)';
-                ctx.lineWidth = 1;
+                ctx.lineWidth = CARD_H * 0.012;
                 for (let i = 1; i <= 3; i++) {
-                    const ly = -h / 2 + (h * i) / 4;
+                    const ly = -CARD_H / 2 + (CARD_H * i) / 4;
                     ctx.beginPath();
-                    ctx.moveTo(-w * 0.36, ly);
-                    ctx.lineTo(w * 0.36, ly);
+                    ctx.moveTo(-CARD_W * 0.36, ly);
+                    ctx.lineTo(CARD_W * 0.36, ly);
                     ctx.stroke();
                 }
-                if (shade > 0) {
-                    roundRect(-w / 2, -h / 2, w, h, radius);
-                    ctx.fillStyle = `rgba(3,5,11,${shade.toFixed(3)})`;
-                    ctx.fill();
+            } else {
+                // Torn-from-a-pad top edge, then the name.
+                ctx.strokeStyle = 'rgba(0,0,0,0.07)';
+                ctx.lineWidth = CARD_H * 0.012;
+                ctx.beginPath();
+                ctx.moveTo(-CARD_W * 0.38, -CARD_H * 0.22);
+                ctx.lineTo(CARD_W * 0.38, -CARD_H * 0.22);
+                ctx.stroke();
+
+                // Below about a third of a slip's full size the text is a
+                // smudge rather than a name, so it is faded off rather than cut
+                // off — a hard threshold takes the name away while the paper is
+                // still plainly there, which looks like a rendering fault.
+                const textAlpha = clamp((Math.abs(o.h) / L.slipH - 0.22) / 0.20, 0, 1);
+                if (o.name && textAlpha > 0.01) {
+                    const base = o.opacity == null ? 1 : o.opacity;
+                    ctx.globalAlpha = base * textAlpha;
+                    const fit = cardName(o.name, o.maxLines || 1);
+                    ctx.font = `700 ${fit.px}px ${FONT_STACK}`;
+                    ctx.fillStyle = INK;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    const lh = fit.px * 1.14;
+                    const y0 = CARD_H * 0.09 - (fit.lines.length - 1) * lh / 2;
+                    fit.lines.forEach((line, i) => ctx.fillText(line, 0, y0 + i * lh));
+                    ctx.globalAlpha = base;
                 }
-                ctx.restore();
-                return;
-            }
-
-            // Torn-from-a-pad top edge, then the name. Below about a third of
-            // the slip's full height the text is a smudge rather than a name, so
-            // skip it and keep the paper clean.
-            ctx.strokeStyle = 'rgba(0,0,0,0.07)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(-w * 0.38, -h * 0.22);
-            ctx.lineTo(w * 0.38, -h * 0.22);
-            ctx.stroke();
-
-            if (h > L.slipH * 0.34) {
-                const fit = layoutName(ctx, o.name || '', w * 0.82, h * 0.42,
-                    Math.max(7, h * 0.2), o.maxLines || 1);
-                ctx.fillStyle = INK;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                const lh = fit.px * 1.14;
-                const y0 = h * 0.09 - (fit.lines.length - 1) * lh / 2;
-                fit.lines.forEach((line, i) => ctx.fillText(line, 0, y0 + i * lh));
             }
 
             if (shade > 0) {
-                roundRect(-w / 2, -h / 2, w, h, radius);
+                roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, radius);
                 ctx.fillStyle = `rgba(3,5,11,${shade.toFixed(3)})`;
                 ctx.fill();
             }
@@ -455,14 +466,6 @@
             };
         }
 
-        // Where the top of the heap sits inside the mouth. Logarithmic: the
-        // difference between 5 and 50 entries should be obvious, the difference
-        // between 300 and 350 need not be, and the heap must never reach the rim
-        // however many there are.
-        function moundFillFrac() {
-            return shownResting <= 0 ? 0 : Math.min(1, Math.log10(shownResting + 1) / 2.4);
-        }
-
         // Everything a slip on its way into the pot can still be seen through:
         // the opening itself, plus the open air above the back of the rim, since
         // a slip only half-swallowed still has its top sticking up over the far
@@ -473,110 +476,6 @@
             ctx.rect(-W, -H, W * 3, H + (L.my - L.ry));
             ctx.ellipse(L.cx, L.my, L.rx * 0.94, L.ry * 0.92, 0, 0, Math.PI * 2);
             ctx.clip();
-        }
-
-        function moundBottomY() { return L.my + L.ry * 0.30; }
-        function moundTopY() {
-            if (shownResting <= 0) return moundBottomY();
-            return moundBottomY() - L.ry * (0.30 + moundFillFrac() * 0.95);
-        }
-
-        // A wobbly-rimmed ellipse — not a perfect one — traced through
-        // moundRimNoise so a heap of paper doesn't read as a stamped-out disc.
-        // `noiseOffset` walks a different slice of the same fixed array per
-        // layer, so the layers don't all wobble in lockstep.
-        function moundLayerPath(cx, cy, rx, ry, noiseOffset) {
-            ctx.beginPath();
-            for (let i = 0; i <= MOUND_RIM_PTS; i++) {
-                const a = (i / MOUND_RIM_PTS) * Math.PI * 2;
-                const n = moundRimNoise[(i + noiseOffset) % MOUND_RIM_PTS];
-                const rrx = rx * (1 + n * 0.16);
-                const rry = ry * (1 + n * 0.22);
-                const x = cx + Math.cos(a) * rrx;
-                const y = cy + Math.sin(a) * rry;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            }
-            ctx.closePath();
-        }
-
-        // The pile of slips already in the pot, seen through the mouth. Not
-        // individual pieces of paper any more — once a slip lands it's part of
-        // the pile, not a name anyone needs to keep reading — but a rounded
-        // volume built from a FIXED number of stacked, wobbly-rimmed layers.
-        // Only *where* the stack sits (between moundBottomY and moundTopY, both
-        // smooth functions of the count) depends on how many are resting; the
-        // layers themselves, their wobble and their shading never change shape,
-        // which is what keeps this from ever visibly reflowing.
-        const MOUND_LAYERS = 5;
-        function drawMound() {
-            if (shownResting <= 0.01) return;
-            const bottom = moundBottomY();
-            const top = moundTopY();
-            ctx.save();
-            ctx.beginPath();
-            ctx.ellipse(L.cx, L.my, L.rx * 0.93, L.ry * 0.9, 0, 0, Math.PI * 2);
-            ctx.clip();
-
-            // A handful of slips shouldn't span the same footprint as a few
-            // hundred — the width tapers with the same fill fraction that
-            // drives the height, so a near-empty pot shows a small heap in the
-            // middle rather than a full-width smear squashed flat.
-            const widthScale = 0.46 + moundFillFrac() * 0.54;
-            for (let i = 0; i < MOUND_LAYERS; i++) {
-                const t = i / (MOUND_LAYERS - 1);          // 0 = base, 1 = peak
-                const y = bottom + (top - bottom) * t;
-                const rx = L.rx * (0.82 - t * 0.34) * widthScale;
-                const ry = L.ry * (0.62 - t * 0.20) * widthScale;
-                moundLayerPath(L.cx, y, rx, ry, i * 5);
-                if (i === MOUND_LAYERS - 1) {
-                    // The peak catches the light — a radial highlight rather
-                    // than a flat fill is what makes it read as rounded instead
-                    // of as a lid sitting on top of the stack.
-                    const peak = ctx.createRadialGradient(
-                        L.cx - rx * 0.3, y - ry * 0.4, rx * 0.1,
-                        L.cx, y, rx * 1.1
-                    );
-                    peak.addColorStop(0, '#fffef8');
-                    peak.addColorStop(0.55, PAPER_TONES[1]);
-                    peak.addColorStop(1, lerpColor('#c9b98a', '#fdf8ec', 0.5));
-                    ctx.fillStyle = peak;
-                } else {
-                    ctx.fillStyle = lerpColor('#a8987a', '#fdf8ec', t);
-                }
-                ctx.fill();
-                ctx.strokeStyle = `rgba(0,0,0,${(0.22 - t * 0.10).toFixed(2)})`;
-                ctx.lineWidth = 1;
-                ctx.stroke();
-            }
-
-            // A few fixed creases on the peak — texture, not clutter, and never
-            // reseeded by count since they belong to the layer, not to any one
-            // entrant.
-            const peakY = bottom + (top - bottom);
-            const peakRx = L.rx * 0.48, peakRy = L.ry * 0.42;
-            ctx.strokeStyle = 'rgba(120,105,70,0.28)';
-            ctx.lineWidth = 1;
-            for (let i = 0; i < 7; i++) {
-                const fx = (hashRandom(i * 61 + 3) - 0.5) * 1.7;
-                const fy = (hashRandom(i * 61 + 7) - 0.5) * 1.7;
-                const len = 0.12 + hashRandom(i * 61 + 11) * 0.14;
-                const rot = hashRandom(i * 61 + 13) * Math.PI;
-                const cx0 = L.cx + fx * peakRx, cy0 = peakY + fy * peakRy;
-                ctx.beginPath();
-                ctx.moveTo(cx0 - Math.cos(rot) * len * peakRx, cy0 - Math.sin(rot) * len * peakRy);
-                ctx.lineTo(cx0 + Math.cos(rot) * len * peakRx, cy0 + Math.sin(rot) * len * peakRy);
-                ctx.stroke();
-            }
-
-            // Shade the whole pile toward the back of the pot so it sits in a
-            // hollow rather than floating as a flat sticker.
-            const shade = ctx.createLinearGradient(0, L.my - L.ry, 0, L.my + L.ry);
-            shade.addColorStop(0, 'rgba(0,0,0,0.55)');
-            shade.addColorStop(0.55, 'rgba(0,0,0,0.05)');
-            shade.addColorStop(1, 'rgba(0,0,0,0.35)');
-            ctx.fillStyle = shade;
-            ctx.fillRect(L.cx - L.rx, L.my - L.ry, L.rx * 2, L.ry * 2);
-            ctx.restore();
         }
 
         // The pot's own shadow on the floor it stands on. Without it the pot
@@ -716,7 +615,6 @@
                 ctx.stroke();
             });
 
-            drawLabel();
             ctx.restore();
 
             // Contact shadow the front lip casts back into the pot, drawn over
@@ -748,13 +646,7 @@
             ctx.lineWidth = lipW;
             ctx.strokeStyle = band;
             ctx.globalAlpha = 0.9;
-            if (landFlash > 0.01) {
-                ctx.shadowColor = accent;
-                ctx.shadowBlur = 26 * landFlash;
-            }
             ctx.stroke();
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
             ctx.globalAlpha = 1;
 
             // A hairline of true highlight along the top of that band — the one
@@ -772,38 +664,6 @@
             ctx.strokeStyle = hair;
             ctx.stroke();
             ctx.restore();
-        }
-
-        // The running count, engraved into the pot rather than printed on it:
-        // a dark impression with a lit lower edge. When the label is a plain
-        // number — which is all either page ever sends — it gets a caption, so
-        // a bare "37" on the side of a bucket reads as something.
-        function drawLabel() {
-            if (!label) return;
-            const y = L.my + (L.baseY - L.my) * 0.48;
-            const px = Math.max(13, L.rx * 0.30);
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.font = `800 ${px}px ${FONT_STACK}`;
-            ctx.fillStyle = 'rgba(0,0,0,0.55)';
-            ctx.fillText(label, L.cx, y);
-            ctx.fillStyle = 'rgba(226,234,255,0.30)';
-            ctx.fillText(label, L.cx, y + Math.max(1, px * 0.045));
-
-            // Only on a pot big enough to read it. On the controller's phone-
-            // width stage the caption comes out at eight pixels of letterspaced
-            // capitals, which is a grey smudge, and that page carries its own
-            // caption under the canvas anyway.
-            if (L.rx >= 120 && /^\d+$/.test(label)) {
-                const cap = Math.max(8, px * 0.26);
-                ctx.font = `700 ${cap}px -apple-system, BlinkMacSystemFont, sans-serif`;
-                ctx.letterSpacing = '0.18em';
-                ctx.fillStyle = 'rgba(0,0,0,0.45)';
-                ctx.fillText('IN THE POT', L.cx, y + px * 0.72);
-                ctx.fillStyle = 'rgba(226,234,255,0.20)';
-                ctx.fillText('IN THE POT', L.cx, y + px * 0.72 + 1);
-                ctx.letterSpacing = '0px';
-            }
         }
 
         // A slip is "in the mouth" once it has dropped past the far edge of the
@@ -844,7 +704,11 @@
                 ctx.restore();
             };
 
-            withPot(() => { drawFloor(); drawPotBack(); drawMound(); });
+            // Nothing is drawn inside the pot but the pot: a name that has
+            // gone in is in, the way one dropped into a real bucket is out of
+            // sight the moment it clears the rim. The count lives on the page
+            // around the canvas, which is where it can actually be read.
+            withPot(() => { drawFloor(); drawPotBack(); });
 
             // Still in open air, in front of and above the pot — including a
             // slip the shake has thrown clear of the rim, which is above the
@@ -1051,8 +915,7 @@
         // has no business burning a projector laptop's battery at 60fps.
         function busy() {
             return !!(spinState || flyers.length || queue.length || motes.length
-                || shake > 0.002 || landFlash > 0.002
-                || Math.abs(resting - shownResting) > 0.01);
+                || shake > 0.002);
         }
 
         function frame(now, gen) {
@@ -1062,8 +925,6 @@
 
             if (spinState) updateSpin(now, dt);
             else shake = Math.max(0, shake - dt * 1.8);
-            shownResting += (resting - shownResting) * Math.min(1, dt * 6);
-            landFlash = Math.max(0, landFlash - dt * 2.2);
 
             releaseDue(now);
             updateFlyers(dt);
@@ -1131,14 +992,19 @@
             },
             // Slips already in the pot when the page loaded — no animation, the
             // room didn't watch those arrive.
+            // Slips already in the pot when the page loaded. Nothing to draw —
+            // they are inside it — but the pot still owns the number.
             setResting(n) {
                 resting = Math.max(0, n | 0);
-                // Straight to it, with no settle: this is the pot's state when
-                // the page loaded, not something the room watched arrive.
-                shownResting = resting;
                 redraw();
             },
-            setLabel(text) { label = text || ''; redraw(); },
+            // Accepted and ignored. The pot no longer prints anything on
+            // itself — a number pressed into the side of the bucket competed
+            // with the names, and both pages already show the count in their own
+            // markup, in type meant to be read. Kept because both of them call
+            // it, and a caller shouldn't have to know which of the pot's styles
+            // has a place to put a caption.
+            setLabel() {},
             setAccent(color) { accent = color || accent; redraw(); },
             // Everything the pot still owes the count: queued names plus the
             // slips currently in the air. A caller resyncing the resting heap
@@ -1206,9 +1072,7 @@
                 motes = [];
                 spinState = null;
                 resting = 0;
-                shownResting = 0;
                 shake = 0;
-                landFlash = 0;
                 redraw();
             },
             resize() { layout(); redraw(); },
