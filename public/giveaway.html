@@ -1372,15 +1372,9 @@ function spinPot(picked) {
         durationMs: duration * 1000,
         onDone: finish,
     });
-    // The chime and confetti land with the slip coming to rest, after the
-    // POT_REVEAL_UNFOLD_MS the winning card spends unfolding — not at the
-    // instant the reveal starts, or they'd land on top of the unfold and the
-    // room would see the name jump from one line to two rather than watch it
-    // open. Must match giveaway-pot.js's REVEAL_OPEN_WINDOW (in seconds of
-    // real time, since revealP itself advances at dt/0.4: 1.6 * 0.4 = 0.64s).
-    const POT_REVEAL_UNFOLD_MS = 650;
-    const revealAt = setTimeout(() => { playWinChime(); fireConfetti(); },
-        duration * 1000 * 0.86 + POT_REVEAL_UNFOLD_MS);
+    // The chime and confetti land with the slip coming to rest, ~0.7s before
+    // the overlay, so the room sees the name on the paper first.
+    const revealAt = setTimeout(() => { playWinChime(); fireConfetti(); }, duration * 1000 * 0.86);
     // A backgrounded tab stalls rAF, and with it pot.spin's own completion —
     // same fallback the reel and wheel use so the Spin button can't stick.
     setTimeout(() => { clearTimeout(revealAt); finish(); }, duration * 1000 + 800);

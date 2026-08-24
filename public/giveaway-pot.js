@@ -180,7 +180,7 @@
                 // ramps up from a stall, so aiming the ODE at the average
                 // itself arrives well past `fallMs`. This is tuned so the
                 // whole trip still lands close to it.
-                vt: (entryY - startY) / (fallMs / 1000) * 1.5,
+                vt: (entryY - startY) / (fallMs / 1000) * 2.0,
                 drag: 3.4 + hashRandom(seed + 53) * 1.1,
                 fallMs: fallMs,
                 t: 0,
@@ -278,8 +278,13 @@
                     // the descent its stall-and-swoop rhythm — slowing every
                     // time it flattens out, picking up speed as it knifes
                     // through — rather than one smooth glide to the pot.
+                    // Wide on purpose: edge-on it should visibly knife through
+                    // (drag near its floor) and face-on it should visibly
+                    // stall (drag well over triple that) — a narrow range here
+                    // reads as a flat glide with a slight wobble on top rather
+                    // than orientation actually driving the speed.
                     const face = Math.abs(Math.cos(f.phase));
-                    const k = f.drag * (0.82 + 0.36 * face);
+                    const k = f.drag * (0.42 + 1.5 * face);
                     f.vy += (f.vt * f.drag - k * f.vy) * dt;
                     f.y += f.vy * dt;
 
@@ -296,8 +301,10 @@
                     if (f.x > f.targetX + limit) { f.x = f.targetX + limit; f.vx = -Math.abs(f.vx) * 0.4; }
 
                     // Faster fall, faster flip — a slip slicing edge-on through
-                    // the air spins faster than one stalled flat against it.
-                    f.phase += f.spinRate * (0.5 + 0.5 * (f.vy / f.vt)) * dt;
+                    // the air spins visibly faster than one stalled flat
+                    // against it, instead of turning at roughly the same rate
+                    // throughout regardless of how fast it's actually falling.
+                    f.phase += f.spinRate * (0.2 + 1.1 * (f.vy / f.vt)) * dt;
 
                     // Approach: the last stretch is the slip travelling away
                     // from the viewer and down into the opening, not just down
@@ -367,25 +374,30 @@
 
         // ── Drawing ─────────────────────────────────────────────────────
 
-        // The card's outline, rounded at the corners and bowed by `curl` —
-        // a shallow, same-direction bulge in the top and bottom edges, like a
-        // sheet caught in a draft rather than a rigid rectangle. Real paper is
-        // never perfectly flat in the air; this is what keeps a stack of these
-        // from reading as cut-out cards sliding around.
+        // The card's outline, rounded at the corners and bowed by `curl` — the
+        // top and bottom edges flex toward or away from each other at their
+        // midpoint (a pinch or a barrel, depending on curl's sign) while the
+        // corners stay exactly where a flat card's would be. That "corners
+        // anchored, midline flexes" shape is what keeps the card's own centre
+        // — which is where the name is drawn — from moving: a bow that instead
+        // shifted the top and bottom edges the same direction (an earlier
+        // version of this did) translates the whole visible card while the
+        // text drawn on it stays put in card-space, so the name visibly slides
+        // and re-centres against the paper every time curl changes sign.
         const CARD_R = CARD_H * 0.07;
         function cardPath(curl) {
             const r = CARD_R;
-            const bow = (curl || 0) * CARD_H;
+            const bow = (curl || 0) * CARD_H * 0.4;
             ctx.beginPath();
-            ctx.moveTo(-CARD_W / 2 + r, -CARD_H / 2 + bow * 0.2);
-            ctx.quadraticCurveTo(0, -CARD_H / 2 + bow, CARD_W / 2 - r, -CARD_H / 2 + bow * 0.2);
-            ctx.quadraticCurveTo(CARD_W / 2, -CARD_H / 2 + bow, CARD_W / 2, -CARD_H / 2 + bow * 0.2 + r);
-            ctx.lineTo(CARD_W / 2, CARD_H / 2 + bow * 0.2 - r);
-            ctx.quadraticCurveTo(CARD_W / 2, CARD_H / 2 + bow, CARD_W / 2 - r, CARD_H / 2 + bow * 0.2);
-            ctx.quadraticCurveTo(0, CARD_H / 2 + bow, -CARD_W / 2 + r, CARD_H / 2 + bow * 0.2);
-            ctx.quadraticCurveTo(-CARD_W / 2, CARD_H / 2 + bow, -CARD_W / 2, CARD_H / 2 + bow * 0.2 - r);
-            ctx.lineTo(-CARD_W / 2, -CARD_H / 2 + bow * 0.2 + r);
-            ctx.quadraticCurveTo(-CARD_W / 2, -CARD_H / 2 + bow, -CARD_W / 2 + r, -CARD_H / 2 + bow * 0.2);
+            ctx.moveTo(-CARD_W / 2 + r, -CARD_H / 2);
+            ctx.quadraticCurveTo(0, -CARD_H / 2 + bow, CARD_W / 2 - r, -CARD_H / 2);
+            ctx.quadraticCurveTo(CARD_W / 2, -CARD_H / 2, CARD_W / 2, -CARD_H / 2 + r);
+            ctx.lineTo(CARD_W / 2, CARD_H / 2 - r);
+            ctx.quadraticCurveTo(CARD_W / 2, CARD_H / 2, CARD_W / 2 - r, CARD_H / 2);
+            ctx.quadraticCurveTo(0, CARD_H / 2 - bow, -CARD_W / 2 + r, CARD_H / 2);
+            ctx.quadraticCurveTo(-CARD_W / 2, CARD_H / 2, -CARD_W / 2, CARD_H / 2 - r);
+            ctx.lineTo(-CARD_W / 2, -CARD_H / 2 + r);
+            ctx.quadraticCurveTo(-CARD_W / 2, -CARD_H / 2, -CARD_W / 2 + r, -CARD_H / 2);
             ctx.closePath();
         }
 
@@ -838,9 +850,6 @@
         // their own `now`, still land together.
         const SHAKE_END = 0.42;
         const RISE_END = 0.86;
-        // In units of `revealP`, which itself advances at dt/0.4 — so this is
-        // 1.6 * 0.4 = 0.64s of real time for the winning card to unfold.
-        const REVEAL_OPEN_WINDOW = 1.6;
 
         function drawSpinSlips() {
             if (spinState.stage !== 'rise') return;
@@ -909,37 +918,20 @@
         function drawRevealSlips() {
             const pop = easeOutBack(clamp(spinState.revealP, 0, 1));
             const glow = clamp(spinState.revealP * 1.4, 0, 1);
-            // The card opens like a folded slip unfolding: height grows from a
-            // crease at the centre over REVEAL_OPEN_WINDOW, rather than the
-            // text just swapping from the truncated one-line name the room
-            // watched fall to the full two-line name — the same paper opening
-            // up, not a substitution. Has to actually take a while: an earlier
-            // 0.24s window was over before the eye registered it had started,
-            // which is exactly what read as an instant swap. giveaway.html and
-            // giveaway-display.html hold their chime/confetti back to wait for
-            // it — see POT_REVEAL_UNFOLD_MS in both.
-            const openP = easeOutCubic(clamp(spinState.revealP / REVEAL_OPEN_WINDOW, 0, 1));
+            // Full height from the first frame of reveal — the rise this
+            // hands off from already ends with the card open (see the
+            // `settled` ramp in drawSpinSlips), so animating height here too
+            // snapped it shut and back open again: unfolded once at the top
+            // of the rise, then a second, spurious fold-and-unfold right on
+            // top of it. One unfold per draw, not two.
             for (const s of spinState.slips) {
                 const w = s.endW * (0.94 + pop * 0.06);
-                const h = w * 0.44 * (0.10 + 0.90 * openP);
                 drawSlip({
-                    x: s.endX, y: s.endY, w: w, h: h,
+                    x: s.endX, y: s.endY, w: w, h: w * 0.44,
                     rot: 0, turn: 1,
                     tone: '#fffdf4', name: s.name, maxLines: 2,
                     glowColor: accent, glowBlur: 30 * glow,
                 });
-                if (openP < 0.999) {
-                    // The fold itself, fading out as the card opens flat.
-                    ctx.save();
-                    ctx.globalAlpha = 1 - openP;
-                    ctx.strokeStyle = 'rgba(110,96,60,0.55)';
-                    ctx.lineWidth = Math.max(1, h * 0.05);
-                    ctx.beginPath();
-                    ctx.moveTo(s.endX - w * 0.46, s.endY);
-                    ctx.lineTo(s.endX + w * 0.46, s.endY);
-                    ctx.stroke();
-                    ctx.restore();
-                }
             }
         }
 
