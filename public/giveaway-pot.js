@@ -191,7 +191,7 @@
                 // same phase that drives its turn — paper caught in the air
                 // doesn't stay flat, it bows a little as it rocks.
                 curlSeed: hashRandom(seed + 61) * Math.PI * 2,
-                curlAmt: 0.05 + hashRandom(seed + 63) * 0.06,
+                curlAmt: 0.16 + hashRandom(seed + 63) * 0.16,
                 tone: PAPER_TONES[seed % PAPER_TONES.length],
                 settling: 0,         // 0..1 while it drops through the mouth
                 fade: 0,             // 0..1, dissolving into the heap it lands on
@@ -375,7 +375,7 @@
         const CARD_R = CARD_H * 0.07;
         function cardPath(curl) {
             const r = CARD_R;
-            const bow = (curl || 0) * CARD_H * 0.5;
+            const bow = (curl || 0) * CARD_H;
             ctx.beginPath();
             ctx.moveTo(-CARD_W / 2 + r, -CARD_H / 2 + bow * 0.2);
             ctx.quadraticCurveTo(0, -CARD_H / 2 + bow, CARD_W / 2 - r, -CARD_H / 2 + bow * 0.2);
@@ -838,6 +838,9 @@
         // their own `now`, still land together.
         const SHAKE_END = 0.42;
         const RISE_END = 0.86;
+        // In units of `revealP`, which itself advances at dt/0.4 — so this is
+        // 1.6 * 0.4 = 0.64s of real time for the winning card to unfold.
+        const REVEAL_OPEN_WINDOW = 1.6;
 
         function drawSpinSlips() {
             if (spinState.stage !== 'rise') return;
@@ -907,11 +910,15 @@
             const pop = easeOutBack(clamp(spinState.revealP, 0, 1));
             const glow = clamp(spinState.revealP * 1.4, 0, 1);
             // The card opens like a folded slip unfolding: height grows from a
-            // crease at the centre over the first part of the reveal, rather
-            // than the text just swapping from the truncated one-line name the
-            // room watched fall to the full two-line name — the same paper
-            // opening up, not a substitution.
-            const openP = easeOutCubic(clamp(spinState.revealP / 0.6, 0, 1));
+            // crease at the centre over REVEAL_OPEN_WINDOW, rather than the
+            // text just swapping from the truncated one-line name the room
+            // watched fall to the full two-line name — the same paper opening
+            // up, not a substitution. Has to actually take a while: an earlier
+            // 0.24s window was over before the eye registered it had started,
+            // which is exactly what read as an instant swap. giveaway.html and
+            // giveaway-display.html hold their chime/confetti back to wait for
+            // it — see POT_REVEAL_UNFOLD_MS in both.
+            const openP = easeOutCubic(clamp(spinState.revealP / REVEAL_OPEN_WINDOW, 0, 1));
             for (const s of spinState.slips) {
                 const w = s.endW * (0.94 + pop * 0.06);
                 const h = w * 0.44 * (0.10 + 0.90 * openP);
@@ -1002,7 +1009,7 @@
                         spinRate: 5 + hashRandom(seed + 8) * 5,
                         tilt: (hashRandom(seed + 9) - 0.5) * 0.6,
                         curlSeed: hashRandom(seed + 62) * Math.PI * 2,
-                        curlAmt: 0.06 + hashRandom(seed + 64) * 0.07,
+                        curlAmt: 0.18 + hashRandom(seed + 64) * 0.18,
                         tone: PAPER_TONES[seed % PAPER_TONES.length],
                         settling: 0, scale: 0.82, squash: 1, shade: 0,
                     });

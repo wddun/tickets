@@ -575,7 +575,12 @@ function runPotSpin(payload) {
         durationMs: (payload.durationSec || 5.2) * 1000,
         onDone: () => showWinner(names.join(', '), payload.prizeLabel),
     });
-    setTimeout(() => { playWinChime(); fireConfetti(); }, (payload.durationSec || 5.2) * 1000 * 0.86);
+    // Held back past the instant the reveal starts, until the winning card
+    // has actually finished unfolding — see the matching constant and comment
+    // in giveaway.html's spinPot().
+    const POT_REVEAL_UNFOLD_MS = 650;
+    setTimeout(() => { playWinChime(); fireConfetti(); },
+        (payload.durationSec || 5.2) * 1000 * 0.86 + POT_REVEAL_UNFOLD_MS);
 }
 
 function showWinner(name, prizeLabel) {
