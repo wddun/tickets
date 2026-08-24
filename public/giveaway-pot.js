@@ -75,7 +75,17 @@
     const AERO_CL1 = 5.2, AERO_CL2 = 0.95;
     const AERO_CD0 = 0.1, AERO_CD1 = 5.0, AERO_CDPI2 = 1.9;
     const AERO_ALPHA0 = 14 * Math.PI / 180, AERO_DELTA = 6 * Math.PI / 180;
-    const AERO_K = 0.003, AERO_TORQUE_K = 0.01, AERO_GRAVITY = 900, AERO_ROT_DAMP = 0.2;
+    const AERO_K = 0.003, AERO_TORQUE_K = 0.0003, AERO_GRAVITY = 900, AERO_ROT_DAMP = 0.45;
+    // A real card's tumbling frequency is on the order of 1-2 Hz (Mahadevan,
+    // Ryu & Samuel measure ~15 Hz for a 75mm card, scaling down with size —
+    // ours is a much smaller, slower-tumbling shape). The first tuning pass
+    // used a torque strong enough relative to its damping that the sign of
+    // omega was flipping several times a second — mechanically correct, but
+    // a 4-6 Hz wobble reads to the eye as the card vibrating in place, not
+    // falling like paper. This is the same physics turned down to a rate a
+    // person actually perceives as tumbling; the cap is a plain numerical
+    // safety net against a rare stiff initial condition, not a fake limit.
+    const AERO_OMEGA_CAP = 5;
     // Lift/drag coefficients and centre-of-pressure offset as functions of
     // the angle of attack, valid on alpha ∈ [0, π/2] — folded into that
     // range by the caller, per the symmetry the source paper describes.
@@ -214,7 +224,7 @@
                 // enter perfectly edge-on and still, it's tossed with some
                 // tumble already on it, the way a card leaves your fingers.
                 theta: hashRandom(seed + 3) * Math.PI * 2,
-                omega: (hashRandom(seed + 11) < 0.5 ? -1 : 1) * (1.6 + hashRandom(seed + 13) * 3.2),
+                omega: (hashRandom(seed + 11) < 0.5 ? -1 : 1) * (0.8 + hashRandom(seed + 13) * 1.4),
                 paceScale: paceScale,
                 t: 0,
                 // The warp across the card's width — paper caught in the air
@@ -339,7 +349,7 @@
                             tau += AERO_TORQUE_K * f.paceScale * q * q * Math.sin(2 * a);
                         }
                         f.vy += g * sdt;
-                        f.omega += tau * sdt;
+                        f.omega = clamp(f.omega + tau * sdt, -AERO_OMEGA_CAP, AERO_OMEGA_CAP);
                         f.theta += f.omega * sdt;
                         f.x += f.vx * sdt;
                         f.y += f.vy * sdt;
@@ -591,7 +601,7 @@
                 // Bends with the real spin rate — a card that's mid-tumble
                 // visibly flexes, one that's slowed down goes flat, instead
                 // of an unrelated sine layered on top.
-                curl: f.curlAmt ? clamp(f.curlAmt * f.omega * 0.05, -0.65, 0.65) : 0,
+                curl: f.curlAmt ? clamp(f.curlAmt * f.omega * 0.11, -0.65, 0.65) : 0,
                 tone: f.tone,
                 name: f.name,
                 shade: f.shade || 0,
