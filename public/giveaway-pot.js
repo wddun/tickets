@@ -607,7 +607,7 @@
                 drawSlip({
                     x: x, y: y, w: L.slipW, h: L.slipH,
                     rot: hashRandom(i * 7 + 9) * Math.PI * 2, turn: 1, tumble: 1, curl: 0,
-                    tone: PAPER_TONES[i % PAPER_TONES.length], name: null, shade: 0.5,
+                    tone: PAPER_TONES[i % PAPER_TONES.length], name: null,
                 });
             }
             ctx = saved;
@@ -998,6 +998,16 @@
             ctx.clip();
         }
 
+        // Just the opening itself, no allowance above the rim — for the
+        // heap and live pile, which should never be visible outside the
+        // pot at all, not even a corner (see the comment where this is
+        // used in draw()).
+        function clipToMouthStrict() {
+            ctx.beginPath();
+            ctx.ellipse(L.cx, L.my, L.rx * 0.94, L.ry * 0.92, 0, 0, Math.PI * 2);
+            ctx.clip();
+        }
+
         // The pot's own shadow on the floor it stands on. Without it the pot
         // hangs in the middle of a black rectangle; with it there is a room.
         function drawFloor() {
@@ -1260,16 +1270,29 @@
             // opening — clipped to the mouth and moving with the pot as one,
             // so a shaken pot takes its contents with it.
             withPot(() => {
+                // The heap and live pile get the strict ellipse only, not
+                // the permissive clip below — that one leaves anything
+                // above the rim's own top edge fully unclipped (deliberately,
+                // for a single slip still arriving), and a resting piece's
+                // rotated corner reaching a little past its own centre
+                // point (see L.cardReach) rendered there in full instead of
+                // being cut off. With a whole pile's worth of pieces doing
+                // that at once it read as a jagged fringe standing up above
+                // the rim rather than paper sitting inside the pot.
                 ctx.save();
-                clipToMouth();
+                clipToMouthStrict();
                 if (heapCanvas) ctx.drawImage(heapCanvas, 0, 0, W, H);
                 for (const p of livePile) {
                     drawSlip({
                         x: p.x, y: p.y, w: L.slipW, h: L.slipH,
                         rot: p.theta, turn: 1, tumble: 1, curl: 0,
-                        tone: p.tone, name: null, shade: 0.5,
+                        tone: p.tone, name: null,
                     });
                 }
+                ctx.restore();
+
+                ctx.save();
+                clipToMouth();
                 for (const f of flyers) {
                     if (!inMouth(f)) continue;
                     drawSlip(slipDraw(f));
