@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Seed Test Data | WTS Tickets</title>
+<meta name="theme-color" content="#000000">
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+        --bg: #0b0d16; --card: #151829; --border: #262b45; --text: #e9ecf5;
+        --text-muted: #8890ab; --accent: #6366f1; --accent-soft: rgba(99,102,241,0.16);
+        --ok: #34d399; --warn: #f59e0b; --err: #f43f5e;
+    }
+    body {
+        background: var(--bg); color: var(--text); min-height: 100vh;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        padding: 28px 20px 60px;
+    }
+    .wrap { max-width: 880px; margin: 0 auto; }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; line-height: 1.5; }
+    .card {
+        background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+        padding: 18px 20px; margin-bottom: 16px;
+    }
+    .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 12px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .row:last-child { margin-bottom: 0; }
+    label { font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px; }
+    input[type=text], input[type=number], select {
+        background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 8px;
+        color: var(--text); padding: 9px 10px; font-size: 13px; min-width: 0;
+    }
+    input[type=number] { width: 90px; }
+    select { min-width: 260px; }
+    button {
+        background: var(--accent); color: #fff; border: none; border-radius: 8px;
+        padding: 9px 16px; font-size: 13px; font-weight: 700; cursor: pointer;
+    }
+    button:hover { filter: brightness(1.1); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.danger { background: var(--err); }
+    button.ghost { background: rgba(255,255,255,0.08); }
+    .desc { color: var(--text-muted); font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
+    .pill {
+        display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+        padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
+    }
+    .pill.on { background: rgba(52,211,153,0.16); color: var(--ok); }
+    .pill.off { background: rgba(148,163,184,0.16); color: var(--text-muted); }
+    #sessionBar { display: none; }
+    #sessionBar.show { display: block; }
+    #gate { display: none; }
+    #gate.show { display: block; }
+    #main { display: none; }
+    #main.show { display: block; }
+    #log {
+        background: #05060c; border: 1px solid var(--border); border-radius: 10px;
+        padding: 12px 14px; font-family: ui-monospace, 'SF Mono', monospace; font-size: 12px;
+        height: 220px; overflow-y: auto; white-space: pre-wrap; line-height: 1.6;
+    }
+    .log-ok { color: var(--ok); }
+    .log-err { color: var(--err); }
+    .log-warn { color: var(--warn); }
+    .log-info { color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <h1>Seed Test Data</h1>
+    <p class="sub">Creates real registrations against a real event, through the same public API any integration uses &mdash; no private routes, no disabled rate limits. Admin only.</p>
+
+    <div id="gate" class="card"><p id="gateMsg">Checking access&hellip;</p></div>
+
+    <div id="main">
+        <div class="card">
+            <h2>Event</h2>
+            <div class="row">
+                <select id="eventSelect"></select>
+                <button id="startBtn">Start session</button>
+                <span id="sessionPill" class="pill off">no session</span>
+            </div>
+        </div>
+
+        <div id="sessionBar">
+            <div class="card">
+                <h2>Standard batch</h2>
+                <p class="desc">William Dunning{n} / willdunning01+{n}@gmail.com &mdash; lands in one real inbox via Gmail's + aliasing.</p>
+                <div class="row">
+                    <div><label>Count</label><input type="number" id="batchCount" value="200" min="1" max="500"></div>
+                    <div><label>Start at</label><input type="number" id="batchStart" value="1" min="1"></div>
+                    <button id="batchBtn">Create batch</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Edge-case names</h2>
+                <p class="desc">A fixed batch: unicode, emoji, HTML/script tags, quotes, a SQL-injection-shaped string, RTL text, embedded newlines, and more &mdash; stresses name handling and rendering.</p>
+                <div class="row"><button id="edgeBtn">Create edge-case batch</button></div>
+            </div>
+
+            <div class="card">
+                <h2>Concurrent burst</h2>
+                <p class="desc">Fires registrations simultaneously instead of one at a time, to see how capacity/waitlist holds up under a race.</p>
+                <div class="row">
+                    <div><label>Count</label><input type="number" id="burstCount" value="20" min="1" max="200"></div>
+                    <div><label>Start at</label><input type="number" id="burstStart" value="9000" min="1"></div>
+                    <button id="burstBtn">Fire burst</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Check-in</h2>
+                <p class="desc">Checks in a random slice of whatever this session has created so far.</p>
+                <div class="row">
+                    <div><label>Percent</label><input type="number" id="checkinPct" value="50" min="0" max="100"></div>
+                    <button id="checkinBtn">Check in subset</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Stats &amp; email policy</h2>
+                <div class="row">
+                    <button id="statsBtn" class="ghost">Refresh count</button>
+                    <span id="statsPill" class="pill off">&mdash;</span>
+                </div>
+                <div class="row">
+                    <span style="font-size:13px;">Public-registration confirmation emails:</span>
+                    <button id="emailOnBtn" class="ghost">Turn on</button>
+                    <button id="emailOffBtn" class="ghost">Turn off</button>
+                    <span id="emailPill" class="pill off">&mdash;</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Cleanup</h2>
+                <div class="row">
+                    <button id="deleteSessionBtn" class="danger">Delete everything this session created</button>
+                </div>
+                <div class="row">
+                    <input type="text" id="searchTerm" placeholder="willdunning01+" style="flex:1;">
+                    <button id="searchDeleteBtn" class="danger">Find &amp; delete by search</button>
+                </div>
+                <div class="row">
+                    <button id="revokeBtn" class="ghost">Revoke API key &amp; finish</button>
+                </div>
+                <p class="desc">Leaving without revoking leaves the key active &mdash; clean it up here or from the event's API keys panel in the dashboard.</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Log</h2>
+            <div id="log"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+let apiKeyId = null;
+let apiKey = null;
+let apiEvent = null;
+const createdRegistrationIds = [];
+
+function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s ?? '';
+    return d.innerHTML;
+}
+
+function log(msg, level = 'info') {
+    const el = document.getElementById('log');
+    const time = new Date().toLocaleTimeString();
+    el.innerHTML += `<span class="log-${level}">[${time}] ${esc(msg)}</span>\n`;
+    el.scrollTop = el.scrollHeight;
+}
+
+async function api(method, path, { body, auth = 'session' } = {}) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (auth === 'key') headers.Authorization = `Bearer ${apiKey}`;
+    const res = await fetch(path, {
+        method, headers, credentials: 'same-origin',
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    let data = null;
+    try { data = await res.json(); } catch (_) { /* empty body */ }
+    return { ok: res.ok, status: res.status, data };
+}
+
+async function registerOne(name, email, opts = {}) {
+    return api('POST', '/api/v1/registrations', {
+        auth: 'key',
+        body: { name, email, ticketCount: 1, sendEmail: false, ...opts },
+    });
+}
+
+// ── Gate & bootstrap ────────────────────────────────────────────
+(async function init() {
+    const me = await api('GET', '/api/auth/me');
+    if (!me.ok || !me.data?.user?.isAdmin) {
+        document.getElementById('gate').classList.add('show');
+        document.getElementById('gateMsg').textContent = 'Admin only. Redirecting…';
+        setTimeout(() => { location.href = '/'; }, 1200);
+        return;
+    }
+    document.getElementById('main').classList.add('show');
+
+    const events = await api('GET', '/api/events');
+    if (!events.ok || !events.data.length) {
+        log('No events on this account.', 'err');
+        return;
+    }
+    const sel = document.getElementById('eventSelect');
+    sel.innerHTML = events.data.map(e =>
+        `<option value="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)} (capacity: ${e.capacity ?? 'unlimited'})</option>`
+    ).join('');
+    log(`Signed in as admin. ${events.data.length} event(s) available.`);
+})();
+
+// ── Session ─────────────────────────────────────────────────────
+document.getElementById('startBtn').onclick = async () => {
+    const sel = document.getElementById('eventSelect');
+    const eventId = sel.value;
+    if (!eventId) return;
+    const eventName = sel.options[sel.selectedIndex].dataset.name;
+    log(`Minting an API key for "${eventName}"...`);
+    const res = await api('POST', `/api/event/${eventId}/api-keys`, {
+        body: { name: `seed-test-data ${new Date().toISOString()}`, scopes: ['manage_tickets', 'checkin', 'undo_checkin'] },
+    });
+    if (!res.ok) { log(`Could not create a key: ${JSON.stringify(res.data)}`, 'err'); return; }
+    apiKeyId = res.data.id;
+    apiKey = res.data.key;
+    apiEvent = { id: eventId, name: eventName };
+    createdRegistrationIds.length = 0;
+    document.getElementById('sessionBar').classList.add('show');
+    document.getElementById('sessionPill').textContent = 'session active';
+    document.getElementById('sessionPill').className = 'pill on';
+    log(`Session started for "${eventName}". Confirmation emails stay off unless you turn them on below.`, 'ok');
+    refreshEmailPolicyPill();
+    refreshStats();
+};
+
+async function refreshStats() {
+    if (!apiEvent) return;
+    const res = await api('GET', '/api/v1/registrations?limit=1', { auth: 'key' });
+    const pill = document.getElementById('statsPill');
+    if (res.ok) { pill.textContent = `${res.data.total} total registrations`; pill.className = 'pill on'; }
+    else { pill.textContent = 'error'; pill.className = 'pill off'; }
+}
+document.getElementById('statsBtn').onclick = () => refreshStats();
+
+async function refreshEmailPolicyPill() {
+    const events = await api('GET', '/api/events');
+    const ev = events.ok ? events.data.find(e => e.id === apiEvent.id) : null;
+    const on = !!(ev && ev.emailPolicy && ev.emailPolicy.public);
+    const pill = document.getElementById('emailPill');
+    pill.textContent = on ? 'emails ON' : 'emails OFF';
+    pill.className = 'pill ' + (on ? 'on' : 'off');
+}
+document.getElementById('emailOnBtn').onclick = () => setEmailPolicy(true);
+document.getElementById('emailOffBtn').onclick = () => setEmailPolicy(false);
+async function setEmailPolicy(on) {
+    if (!apiEvent) return;
+    const res = await api('PUT', `/api/event/${apiEvent.id}/email-policy`, { body: { public: on } });
+    if (res.ok) log(`Public confirmation emails are now ${on ? 'ON' : 'OFF'}.`, on ? 'warn' : 'ok');
+    else log(`Failed: ${JSON.stringify(res.data)}`, 'err');
+    refreshEmailPolicyPill();
+}
+
+// ── Standard batch ──────────────────────────────────────────────
+document.getElementById('batchBtn').onclick = async () => {
+    if (!apiEvent) return;
+    const btn = document.getElementById('batchBtn');
+    const count = Math.max(1, parseInt(document.getElementById('batchCount').value, 10) || 200);
+    const start = Math.max(1, parseInt(document.getElementById('batchStart').value, 10) || 1);
+    btn.disabled = true;
+    log(`Creating ${count}: willdunning01+${start}@gmail.com .. willdunning01+${start + count - 1}@gmail.com`);
+    let created = 0, waitlisted = 0, failed = 0;
+    for (let i = 0; i < count; i++) {
+        const n = start + i;
+        const res = await registerOne(`William Dunning${n}`, `willdunning01+${n}@gmail.com`);
+        if (res.status === 201) { created++; createdRegistrationIds.push(res.data.id); }
+        else if (res.status === 202) waitlisted++;
+        else { failed++; log(`  [${n}] failed: ${res.status} ${JSON.stringify(res.data)}`, 'err'); }
+        if ((i + 1) % 25 === 0) log(`  ...${i + 1}/${count}`);
+    }
+    log(`Done. created=${created} waitlisted=${waitlisted} failed=${failed}`, failed ? 'warn' : 'ok');
+    btn.disabled = false;
+    refreshStats();
+};
+
+// ── Edge cases ──────────────────────────────────────────────────
+const EDGE_CASES = [
+    { tag: 'long', name: 'Alexandra '.repeat(12).trim() + ' Longname' },
+    { tag: 'unicode', name: 'José García-Muñoz' },
+    { tag: 'emoji', name: '🎉 Party Person 🎊' },
+    // The closing half of this tag is split with a backslash below. The
+    // HTML parser ends the page's own enclosing script block on sight of
+    // that closing-tag byte sequence, with no awareness that it's sitting
+    // inside a quoted string here — an unescaped copy silently truncates
+    // this entire script and dumps everything after it as raw text.
+    { tag: 'html', name: '<script>alert(1)<\/script>' },
+    { tag: 'html2', name: '<img src=x onerror=alert(1)>' },
+    { tag: 'quotes', name: `O'Brien "The Great"` },
+    { tag: 'whitespace', name: '   Spacey   Name   ' },
+    { tag: 'sqlish', name: "Robert'); DROP TABLE tickets;--" },
+    { tag: 'rtl', name: 'محمد أحمد' },
+    { tag: 'single-char', name: 'X' },
+    { tag: 'newline', name: 'Line1\nLine2' },
+    { tag: 'ampersand', name: 'Smith & Sons <b>Co</b>' },
+    { tag: 'one-word', name: 'Cher' },
+    { tag: 'numeric', name: '12345' },
+    { tag: 'mixed-emoji', name: 'Test 😀 User' },
+    { tag: 'multi-space', name: 'John    Doe' },
+];
+document.getElementById('edgeBtn').onclick = async () => {
+    if (!apiEvent) return;
+    const btn = document.getElementById('edgeBtn');
+    btn.disabled = true;
+    log(`Creating ${EDGE_CASES.length} edge-case attendees...`);
+    let created = 0, waitlisted = 0, failed = 0;
+    for (const c of EDGE_CASES) {
+        const res = await registerOne(c.name, `willdunning01+edge-${c.tag}@gmail.com`);
+        if (res.status === 201) { created++; createdRegistrationIds.push(res.data.id); log(`  ok   [${c.tag}]`, 'ok'); }
+        else if (res.status === 202) { waitlisted++; log(`  wait [${c.tag}]`, 'warn'); }
+        else { failed++; log(`  ERR  [${c.tag}] ${res.status} ${JSON.stringify(res.data)}`, 'err'); }
+    }
+    log(`Done. created=${created} waitlisted=${waitlisted} failed=${failed}`, failed ? 'warn' : 'ok');
+    btn.disabled = false;
+    refreshStats();
+};
+
+// ── Concurrent burst ────────────────────────────────────────────
+document.getElementById('burstBtn').onclick = async () => {
+    if (!apiEvent) return;
+    const btn = document.getElementById('burstBtn');
+    const count = Math.max(1, parseInt(document.getElementById('burstCount').value, 10) || 20);
+    const start = Math.max(1, parseInt(document.getElementById('burstStart').value, 10) || 9000);
+    btn.disabled = true;
+    log(`Firing ${count} registrations simultaneously...`);
+    const results = await Promise.all(
+        Array.from({ length: count }, (_, i) => {
+            const n = start + i;
+            return registerOne(`William Dunning${n}`, `willdunning01+${n}@gmail.com`);
+        })
+    );
+    let created = 0, waitlisted = 0, failed = 0;
+    for (const res of results) {
+        if (res.status === 201) { created++; createdRegistrationIds.push(res.data.id); }
+        else if (res.status === 202) waitlisted++;
+        else failed++;
+    }
+    log(`Done. created=${created} waitlisted=${waitlisted} failed=${failed}`, failed ? 'warn' : 'ok');
+    btn.disabled = false;
+    refreshStats();
+};
+
+// ── Check-in ────────────────────────────────────────────────────
+document.getElementById('checkinBtn').onclick = async () => {
+    if (!createdRegistrationIds.length) { log('Nothing created this session yet.', 'warn'); return; }
+    const pct = Math.min(100, Math.max(0, parseInt(document.getElementById('checkinPct').value, 10) || 50)) / 100;
+    const shuffled = [...createdRegistrationIds].sort(() => Math.random() - 0.5);
+    const subset = shuffled.slice(0, Math.round(shuffled.length * pct));
+    const res = await api('POST', '/api/checkin/bulk', { body: { registrationIds: subset } });
+    if (res.ok) log(`Checked in ${res.data.checkedIn} tickets.`, 'ok');
+    else log(`Check-in failed: ${JSON.stringify(res.data)}`, 'err');
+};
+
+// ── Cleanup ─────────────────────────────────────────────────────
+document.getElementById('deleteSessionBtn').onclick = async () => {
+    if (!createdRegistrationIds.length) { log('Nothing created this session yet.', 'warn'); return; }
+    if (!confirm(`Delete all ${createdRegistrationIds.length} registrations created this session?`)) return;
+    let deleted = 0, failed = 0;
+    for (const id of createdRegistrationIds) {
+        const res = await api('DELETE', `/api/v1/registrations/${id}`, { auth: 'key' });
+        if (res.ok) deleted++; else failed++;
+    }
+    createdRegistrationIds.length = 0;
+    log(`Deleted ${deleted}, failed ${failed}.`, failed ? 'warn' : 'ok');
+    refreshStats();
+};
+
+document.getElementById('searchDeleteBtn').onclick = async () => {
+    if (!apiEvent) return;
+    const needle = document.getElementById('searchTerm').value.trim();
+    if (!needle) return;
+    let all = [], offset = 0;
+    for (;;) {
+        const res = await api('GET', `/api/v1/registrations?search=${encodeURIComponent(needle)}&limit=500&offset=${offset}`, { auth: 'key' });
+        if (!res.ok) { log(`Search failed: ${JSON.stringify(res.data)}`, 'err'); return; }
+        all = all.concat(res.data.registrations);
+        offset += res.data.registrations.length;
+        if (!res.data.registrations.length || offset >= res.data.total) break;
+    }
+    log(`Found ${all.length} matching "${needle}".`);
+    if (!all.length) return;
+    if (!confirm(`Delete all ${all.length} matches?`)) return;
+    let deleted = 0, failed = 0;
+    for (const reg of all) {
+        const res = await api('DELETE', `/api/v1/registrations/${reg.id}`, { auth: 'key' });
+        if (res.ok) deleted++; else failed++;
+    }
+    log(`Deleted ${deleted}, failed ${failed}.`, failed ? 'warn' : 'ok');
+    refreshStats();
+};
+
+document.getElementById('revokeBtn').onclick = async () => {
+    if (!apiKeyId) return;
+    await api('DELETE', `/api/api-keys/${apiKeyId}`);
+    log('API key revoked.', 'ok');
+    apiKeyId = null; apiKey = null;
+    document.getElementById('sessionPill').textContent = 'no session';
+    document.getElementById('sessionPill').className = 'pill off';
+};
+</script>
+</body>
+</html>

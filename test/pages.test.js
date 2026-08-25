@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './helpers/server.js';
 import { createClient } from './helpers/client.js';
-import { newUser, createEvent, share } from './helpers/factories.js';
+import { newUser, newAdmin, createEvent, share } from './helpers/factories.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readPublic = (f) => fs.readFileSync(path.join(REPO_ROOT, 'public', f), 'utf8');
@@ -123,6 +123,29 @@ describe('who may open the dashboard', () => {
         await createEvent(user.client, { name: 'Now They Have One' });
         assert.equal((await user.client.get('/api/auth/me')).body.user.hasRooms, true);
         assert.equal((await user.client.get('/dashboard.html')).status, 200);
+    });
+});
+
+describe('who may open the seed-test-data tool', () => {
+    // Bulk-creates and bulk-deletes real registrations and mints a real API
+    // key — admin only, not just "has a room" like the dashboard.
+    test('a signed-out visitor is sent to the login page', async () => {
+        const r = await anon().get('/seed-test-data.html');
+        assert.equal(r.status, 302);
+        assert.match(r.headers.get('location'), /login\.html/);
+    });
+
+    test('an event owner who is not the admin is sent to the public site', async () => {
+        await createEvent(owner.client, { name: 'Not An Admin Room' });
+        const r = await owner.client.get('/seed-test-data.html');
+        assert.equal(r.status, 302);
+        assert.equal(r.headers.get('location'), '/');
+    });
+
+    test('the admin gets the page', async () => {
+        const admin = await newAdmin(server);
+        const r = await admin.client.get('/seed-test-data.html');
+        assert.equal(r.status, 200);
     });
 });
 

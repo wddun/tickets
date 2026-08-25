@@ -1542,6 +1542,15 @@ app.get('/dashboard.html', (req, res, next) => {
     if (!isAdmin && personalEventIdsForUser(req.session.userId).size === 0) return res.redirect('/');
     next();
 });
+// A bulk-seed/delete tool for QA — real registrations, real deletes, a
+// minted API key. Admin only, not just "has a room": every other gated page
+// is for running an event, this one is for testing the app itself.
+app.get('/seed-test-data.html', (req, res, next) => {
+    if (!req.session.userId) return res.redirect('/login.html');
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    if (!user || user.email !== process.env.ADMIN_EMAIL) return res.redirect('/');
+    next();
+});
 app.use(express.static('public', {
     extensions: ['html'],
     maxAge: '1d',
