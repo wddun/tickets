@@ -376,10 +376,6 @@
         .present-card h3 { font-size: 17px; margin-bottom: 6px; }
         .present-card p { font-size: 13px; color: rgba(255,255,255,0.5); margin-bottom: 16px; line-height: 1.5; }
         .present-link-group { margin-bottom: 14px; }
-        .present-link-group label {
-            display: block; font-size: 11px; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 0.04em; color: rgba(255,255,255,0.4); margin-bottom: 5px;
-        }
         .present-link-row {
             display: flex; gap: 8px;
         }
@@ -548,26 +544,11 @@
 <div class="present-overlay" id="presentOverlay">
     <div class="present-card">
         <h3>Present on another screen</h3>
-        <p>Open the matching link on the TV, projector, or second device &mdash; it shows just the spinner and the winner, no controls, no attendee list, no emails. Pick the link for the style you're using; the display still follows every style switch and spin you make afterward, this just decides what it shows before that.</p>
+        <p>Open this link on the TV, projector, or second device &mdash; it shows just the spinner and the winner, no controls, no attendee list, no emails. It always shows whatever style is selected here, including on the moment it connects, and follows every switch and spin you make afterward.</p>
         <div class="present-link-group">
-            <label>Vertical Reel</label>
             <div class="present-link-row">
-                <input type="text" id="presentLinkInput-reel" readonly onclick="this.select()">
-                <button onclick="copyPresentLink('reel')">Copy</button>
-            </div>
-        </div>
-        <div class="present-link-group">
-            <label>Classic Spinner</label>
-            <div class="present-link-row">
-                <input type="text" id="presentLinkInput-classic" readonly onclick="this.select()">
-                <button onclick="copyPresentLink('classic')">Copy</button>
-            </div>
-        </div>
-        <div class="present-link-group">
-            <label>Paper Pot</label>
-            <div class="present-link-row">
-                <input type="text" id="presentLinkInput-pot" readonly onclick="this.select()">
-                <button onclick="copyPresentLink('pot')">Copy</button>
+                <input type="text" id="presentLinkInput" readonly onclick="this.select()">
+                <button onclick="copyPresentLink()">Copy</button>
             </div>
         </div>
         <div class="present-status" id="presentStatus"><span class="present-dot"></span> Waiting for the display to connect&hellip;</div>
@@ -665,7 +646,8 @@ function esc(s) {
 
     document.getElementById('mainContent').style.display = 'block';
     buildSwatches();
-    setSpinnerStyle('reel');
+    const wantedStyle = params.get('style');
+    setSpinnerStyle(['reel', 'classic', 'pot'].includes(wantedStyle) ? wantedStyle : 'reel');
     await loadEntrants();
     await loadWatcherState();
     startLiveSync();
@@ -769,6 +751,13 @@ function setSpinnerStyle(style) {
     if (style === 'pot') { ensurePot(); syncPotCount(); }
     else if (style === 'classic') drawWheel(currentRotation);
     else renderReelAtRest();
+    // Reflected in this page's own URL — not to drive the display link
+    // (that's one link that always shows the controller's current style,
+    // see openPresentPanel), but so reloading or bookmarking the
+    // controller itself comes back to the style it was left on.
+    const url = new URL(location.href);
+    url.searchParams.set('style', style);
+    history.replaceState(null, '', url);
     broadcastPotMode();
 }
 
@@ -1649,16 +1638,17 @@ function renderWinners() {
 
 // ── Presenter/display pairing ───────────────────────────────────
 function openPresentPanel() {
-    if (!presenterSessionId) presenterSessionId = crypto.randomUUID();
-    // One session, three links — `style` only sets what the display shows
-    // before the first live message arrives (see giveaway-display.html), so
-    // all three still pair to the same screen and follow the same switches.
-    ['reel', 'classic', 'pot'].forEach(style => {
-        const url = `${location.origin}/giveaway-display.html?session=${presenterSessionId}&style=${style}`;
-        document.getElementById(`presentLinkInput-${style}`).value = url;
-    });
+    const isNewSession = !presenterSessionId;
+    if (isNewSession) presenterSessionId = crypto.randomUUID();
+    document.getElementById('presentLinkInput').value = `${location.origin}/giveaway-display.html?session=${presenterSessionId}`;
     document.getElementById('presentOverlay').classList.add('show');
     updateSoundRows();
+    // A newly minted session has told no display anything yet — record the
+    // current style/theme/count server-side now (see broadcastPotMode and
+    // the stream route in server.js) so a display connecting to this link
+    // shows the right thing on the very first frame, not just after the
+    // next poll or the next real style switch.
+    if (isNewSession) broadcastPotMode();
     pollPresenterStatus();
     clearInterval(presenterPollTimer);
     presenterPollTimer = setInterval(pollPresenterStatus, 2000);
@@ -1673,8 +1663,8 @@ function stopPresenting() {
     updatePresentBtn(false);
     updateSoundRows();
 }
-function copyPresentLink(style) {
-    const input = document.getElementById(`presentLinkInput-${style}`);
+function copyPresentLink() {
+    const input = document.getElementById('presentLinkInput');
     input.select();
     navigator.clipboard?.writeText(input.value).catch(() => document.execCommand('copy'));
 }

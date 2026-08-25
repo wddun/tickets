@@ -155,11 +155,6 @@
         // available; no amount of collision tuning fixes that, only fewer
         // and smaller pieces does.
         const PILE_CAP = 24;
-        // Deliberately smaller than a falling slip — these are meant to
-        // read as a heap of paper scraps, not a stack of readable cards,
-        // and small pieces are also what makes PILE_CAP of them fit the
-        // mouth's shallow depth at all.
-        const PILE_ITEM_SCALE = 0.22;
 
         let lastReleaseAt = 0;
         // Consecutive slips fan out across the stage in mirrored pairs (see
@@ -199,9 +194,13 @@
             // as the width one there meant a taller container just grew a
             // bigger pot instead of leaving more open air for the fall —
             // exactly backwards from wanting slips visible for longer.
-            const potW = Math.min(W * 0.68, H * 0.52, 520);
+            // Wider than a pot sized purely for looks would be — landed
+            // pieces stay full ticket size (see spawnPileItem), and a pot
+            // that stayed this narrow gave them nowhere to go but stacked
+            // on top of each other.
+            const potW = Math.min(W * 0.84, H * 0.66, 680);
             const rx = potW / 2;
-            const ry = rx * 0.30;
+            const ry = rx * 0.34;
             const bodyH = potW * 0.72;
             const my = H - bodyH - ry - H * 0.08;   // mouth centre
             L = {
@@ -217,6 +216,15 @@
                 slipW: clamp(W * 0.38, 88, 230),
             };
             L.slipH = L.slipW * 0.44;
+            // How far a piece's own rotated corner can reach from its
+            // centre point — half its diagonal. A full ticket-sized piece
+            // (see spawnPileItem) turned to any old fall angle has a visual
+            // footprint far bigger than the tiny scrap this pile used to
+            // hold, so every containment bound below is inset by a share of
+            // this, not just placed at the pot's own geometry — clamping
+            // only the centre point left corners free to swing well outside
+            // the rim regardless of how tightly the centre was held.
+            L.cardReach = 0.5 * Math.hypot(L.slipW, L.slipH);
             // Where the pile's visible surface can sit: from just above the
             // pot's own floor up to just shy of the rim, so it never looks
             // like it's overflowing out of the opening.
@@ -510,7 +518,18 @@
                 const entryY = L.my - L.ry * 0.3;
                 f.settling += dt / 0.52;
                 const q = clamp(f.settling, 0, 1);
-                f.x += (L.cx - f.x) * Math.min(1, dt * 2.6);
+                // Real motion, not a scripted glide to centre: it keeps the
+                // sideways velocity it entered with and gravity keeps
+                // pulling on it, so a slip that comes in off-axis actually
+                // catches the inside of the rim and bounces off — the same
+                // wall bound and restitution updatePile uses for the pile
+                // it's about to join, just applied one frame early.
+                f.vy += 500 * dt;
+                f.x += f.vx * dt;
+                const wallBound = Math.max(L.rx * 0.30, L.rx * 0.90 - L.cardReach * 0.55);
+                if (f.x < L.cx - wallBound) { f.x = L.cx - wallBound; f.vx = Math.abs(f.vx) * 0.35; }
+                if (f.x > L.cx + wallBound) { f.x = L.cx + wallBound; f.vx = -Math.abs(f.vx) * 0.35; }
+                f.vx *= Math.max(0, 1 - 3 * dt);
                 f.y = entryY + q * L.ry * 1.4;
                 f.scale = 0.88 - q * 0.40;
                 // Only now does it foreshorten, tipping over as it drops — by
@@ -521,7 +540,7 @@
                 if (f.settling >= 1) {
                     flyers.splice(i, 1);
                     resting++;
-                    livePile.push(spawnPileItem());
+                    livePile.push(spawnPileItem(f));
                     if (livePile.length > PILE_CAP) {
                         livePile.shift();
                         rebuildHeapVisual();
@@ -556,24 +575,23 @@
             return L.pileBaseY - t * (L.pileBaseY - L.pileTopY);
         }
 
-        function spawnPileItem() {
-            const seed = seedCounter++;
+        // Takes over from the flyer that just finished settling (see
+        // updateFlyers) — its actual x and spin at the moment it landed,
+        // not a freshly rolled random one, so a slip comes to rest however
+        // it happened to be turned when it hit the pile, the way a real
+        // dropped card does.
+        function spawnPileItem(f) {
             const fillY = pileFillY(resting);
-            // Scattered across most of the pile's own width, not clustered
-            // near the centre — cramming new arrivals into a tight spot is
-            // what made the first version of this pile blow itself apart:
-            // 40 overlapping circles fighting to separate every frame
-            // compounds fast. Falling from a bit above the surface gives
-            // gravity and separation room to settle it out naturally instead
-            // of starting from maximum overlap.
             return {
-                x: L.cx + (hashRandom(seed) - 0.5) * L.rx * 1.3,
-                y: fillY - 20 - hashRandom(seed + 2) * 30,
-                vx: (hashRandom(seed + 4) - 0.5) * 60,
+                x: f.x,
+                y: fillY - 20 - hashRandom(seedCounter++) * 30,
+                vx: f.vx * 0.5,
                 vy: 0,
-                theta: hashRandom(seed + 6) * Math.PI * 2,
-                omega: (hashRandom(seed + 8) - 0.5) * 3,
-                tone: PAPER_TONES[seed % PAPER_TONES.length],
+                theta: f.theta,
+                omega: f.omega * 0.4,
+                tone: f.tone,
+                asleep: false,
+                quietFor: 0,
             };
         }
 
@@ -593,12 +611,19 @@
             const fillY = pileFillY(resting);
             const saved = ctx;
             ctx = heapCtx;
+            // Inset the same way updatePile's own bounds are (see
+            // L.cardReach) — a rotated full-size piece's corner reaches
+            // well past its own centre point, and this heap is baked once
+            // and composited every frame rather than collision-checked, so
+            // nothing else catches a centre placed too close to the rim.
+            const xBound = Math.max(L.rx * 0.30, L.rx * 0.90 - L.cardReach * 0.55);
+            const yTop = Math.max(L.pileTopY - L.ry * 0.15, L.my - L.ry * 0.55 - L.cardReach * 0.15);
             for (let i = 0; i < n; i++) {
                 const t = n <= 1 ? 0 : i / (n - 1);
-                const x = clamp(L.cx + (hashRandom(i * 7 + 3) - 0.5) * L.rx * 1.6, L.cx - L.rx * 0.85, L.cx + L.rx * 0.85);
-                const y = L.pileBaseY - t * (L.pileBaseY - fillY) + (hashRandom(i * 7 + 5) - 0.5) * 14;
+                const x = clamp(L.cx + (hashRandom(i * 7 + 3) - 0.5) * L.rx * 1.6, L.cx - xBound, L.cx + xBound);
+                const y = Math.max(yTop, L.pileBaseY - t * (L.pileBaseY - fillY) + (hashRandom(i * 7 + 5) - 0.5) * 14);
                 drawSlip({
-                    x: x, y: y, w: L.slipW * PILE_ITEM_SCALE, h: L.slipH * PILE_ITEM_SCALE,
+                    x: x, y: y, w: L.slipW, h: L.slipH,
                     rot: hashRandom(i * 7 + 9) * Math.PI * 2, turn: 1, tumble: 1, curl: 0,
                     tone: PAPER_TONES[i % PAPER_TONES.length], name: null, shade: 0.5,
                 });
@@ -628,11 +653,31 @@
         // allowed to end the frame outside the pile's own region.
         function updatePile(dt) {
             if (!livePile.length) return;
-            const bound = L.rx * 0.85;
+            // Inset from the pot's own radius by a share of the piece's
+            // rotated reach (see L.cardReach) — clamping only the centre
+            // point left a rotated corner free to swing past the rim
+            // regardless of how tightly the centre was held.
+            const bound = Math.max(L.rx * 0.30, L.rx * 0.90 - L.cardReach * 0.55);
             const floorY = pileFillY(resting);
             const jostling = shake > 0.02;
             const VMAX = 500;
             for (const p of livePile) {
+                // A piece that has come fully to rest is skipped outright
+                // rather than integrated to a velocity of exactly zero every
+                // frame — positional collision correction alone never quite
+                // gets there on a densely packed pile, so without this a
+                // "resting" pile trembled forever instead of actually
+                // stopping. A live shake (see below) wakes it straight back
+                // up; nothing else does.
+                if (p.asleep) {
+                    if (!jostling) continue;
+                    p.asleep = false;
+                    p.quietFor = 0;
+                }
+                // Position before this step's own motion, so velocity can be
+                // re-derived from where collision resolution actually put it
+                // (see below) rather than trusted at face value.
+                p.prevX = p.x; p.prevY = p.y;
                 p.vy += 640 * dt;
                 if (jostling) {
                     // A shaken pile doesn't drift, it jumps — small kicks
@@ -647,14 +692,6 @@
                 p.y += p.vy * dt;
                 p.theta += p.omega * dt;
                 p.omega *= Math.max(0, 1 - 2.4 * dt);
-                p.vx *= Math.max(0, 1 - 2.6 * dt);
-                if (p.y > floorY) {
-                    p.y = floorY;
-                    if (p.vy > 0) p.vy = -p.vy * 0.22;
-                    if (Math.abs(p.vy) < 6) p.vy = 0;
-                }
-                if (p.x < L.cx - bound) { p.x = L.cx - bound; p.vx = Math.abs(p.vx) * 0.3; }
-                if (p.x > L.cx + bound) { p.x = L.cx + bound; p.vx = -Math.abs(p.vx) * 0.3; }
             }
             // Real collisions, not an overlap-hiding trick: every pair of
             // live pieces closer than two card-radii is pushed apart, split
@@ -662,18 +699,24 @@
             // a piece touching several neighbours only gets pushed clear of
             // one per pass, so a single pass leaves a densely packed pile
             // visibly still overlapping. O(n^2) over at most PILE_CAP items,
-            // three times over, is still trivial at this scale.
-            // Overlap tolerated up to touching, not pushed apart until
-            // there's clear air between them — a real paper pile overlaps
-            // itself constantly, and demanding full separation on pieces
-            // this size is exactly the overcrowding this was rewritten to
-            // avoid.
-            const rad = L.slipW * PILE_ITEM_SCALE * 0.55;
-            const minDist = rad * 1.1;
+            // three times over, is still trivial at this scale. A pair that
+            // is asleep on both sides is skipped — nothing is moving them
+            // apart, so there is nothing to resolve.
+            //
+            // Overlap tolerated well past touching, not pushed apart until
+            // there's clear air between them — these are full ticket-sized
+            // pieces now (see spawnPileItem), and demanding real separation
+            // at that size in a shallow pot mouth is exactly the
+            // overcrowding an earlier version of this was rewritten to
+            // avoid. A real heap of paper overlaps itself constantly; this
+            // reads the same way.
+            const rad = L.slipW * 0.55;
+            const minDist = rad * 0.42;
             for (let pass = 0; pass < 3; pass++) {
                 for (let i = 0; i < livePile.length; i++) {
                     for (let j = i + 1; j < livePile.length; j++) {
                         const a = livePile[i], b = livePile[j];
+                        if (a.asleep && b.asleep) continue;
                         const dx = b.x - a.x, dy = b.y - a.y;
                         const dist = Math.hypot(dx, dy) || 0.001;
                         if (dist >= minDist) continue;
@@ -684,9 +727,64 @@
                     }
                 }
             }
+            // Velocity is re-derived from what collision resolution actually
+            // did to each piece's position, not kept as whatever gravity
+            // integrated it to before that ran — the standard position-based
+            // fix for exactly this class of pile. Without it, a piece
+            // resting mid-stack (held up by an overlapping neighbour, not by
+            // touching the pot's own floor line) never trips the floor
+            // check below at all, and nothing else ever bleeds its fall
+            // speed off: gravity keeps adding to it every frame forever,
+            // and it sits pinned at terminal velocity while collision
+            // resolution keeps shoving it back to roughly the same spot —
+            // stationary on screen but "falling" at full speed underneath,
+            // which is also why it never reads as settled. Re-deriving
+            // velocity from the real displacement means whatever collision
+            // resolution cancelled this frame is actually gone, not just
+            // hidden until the next one — a piece resolves toward zero the
+            // moment its neighbours stop moving it, whether or not it ever
+            // literally reaches the floor line itself.
+            for (const p of livePile) {
+                if (p.asleep) continue;
+                // Clamped the same as any other velocity in this system — a
+                // heavily overlapped piece can need a large one-frame
+                // correction, and an unclamped derived velocity is exactly
+                // the unbounded-energy failure mode positional correction
+                // was chosen to avoid in the first place (see the collision
+                // pass above).
+                p.vx = clamp((p.x - p.prevX) / dt, -VMAX, VMAX);
+                p.vy = clamp((p.y - p.prevY) / dt, -VMAX, VMAX);
+                if (p.y > floorY) {
+                    p.y = floorY;
+                    if (p.vy > 0) p.vy = -p.vy * 0.22;
+                }
+                if (Math.abs(p.vy) < 6) p.vy = 0;
+                // The bucket wall: a real bounce (velocity reflects, damped),
+                // not a hard stop — the same bound and restitution the
+                // falling slip catches on its way in, one frame earlier (see
+                // updateFlyers), so the two hand off without a visible seam.
+                if (p.x < L.cx - bound) { p.x = L.cx - bound; p.vx = Math.abs(p.vx) * 0.3; }
+                if (p.x > L.cx + bound) { p.x = L.cx + bound; p.vx = -Math.abs(p.vx) * 0.3; }
+
+                if (!jostling && Math.abs(p.vx) < 2 && Math.abs(p.vy) < 2 && Math.abs(p.omega) < 0.05) {
+                    p.quietFor += dt;
+                    if (p.quietFor > 0.3) { p.asleep = true; p.vx = 0; p.vy = 0; p.omega = 0; }
+                } else {
+                    p.quietFor = 0;
+                }
+            }
             // The backstop: no piece leaves this frame outside the pile's
-            // own patch of the pot, whatever produced its position.
-            const padX = bound + rad, padYLo = L.pileTopY - rad * 2, padYHi = floorY + rad * 2;
+            // own patch of the pot, whatever produced its position. Sized
+            // off the pot's own opening, not off the piece radius — a pad
+            // of `rad` was a small, sensible margin back when pile pieces
+            // were scaled-down scraps, but at full ticket size `rad` is
+            // itself a meaningful fraction of the whole pot, and padding by
+            // it let heavily jostled pieces get pushed clean above the rim
+            // into open air, where the mouth clip in draw() doesn't hide
+            // them — visible floating outside the pot entirely.
+            const padX = Math.min(bound + rad * 0.3, L.rx * 0.92 - L.cardReach * 0.4);
+            const padYLo = Math.max(L.pileTopY - L.ry * 0.15, L.my - L.ry * 0.55 - L.cardReach * 0.15);
+            const padYHi = Math.min(floorY + L.ry * 0.15, L.pileBaseY + L.ry * 0.15);
             for (const p of livePile) {
                 p.x = clamp(p.x, L.cx - padX, L.cx + padX);
                 p.y = clamp(p.y, padYLo, padYHi);
@@ -698,7 +796,7 @@
         // busy() below.
         function pileAwake() {
             for (const p of livePile) {
-                if (Math.abs(p.vx) > 1 || Math.abs(p.vy) > 1 || Math.abs(p.omega) > 0.05) return true;
+                if (!p.asleep) return true;
             }
             return false;
         }
@@ -1185,7 +1283,7 @@
                 if (heapCanvas) ctx.drawImage(heapCanvas, 0, 0, W, H);
                 for (const p of livePile) {
                     drawSlip({
-                        x: p.x, y: p.y, w: L.slipW * PILE_ITEM_SCALE, h: L.slipH * PILE_ITEM_SCALE,
+                        x: p.x, y: p.y, w: L.slipW, h: L.slipH,
                         rot: p.theta, turn: 1, tumble: 1, curl: 0,
                         tone: p.tone, name: null, shade: 0.5,
                     });

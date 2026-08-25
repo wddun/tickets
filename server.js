@@ -4308,6 +4308,13 @@ app.get('/api/giveaway/stream/:sessionId', (req, res) => {
     if (prev && prev !== res) { try { prev.end(); } catch (_) { } }
     giveawayChannels.set(sessionId, res);
     res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+    // Replays whatever style/state the controller last broadcast, so a
+    // display opened after the operator has already switched styles (or
+    // one that reconnects) shows the right thing immediately instead of
+    // sitting idle until the next spin or the controller's own poll
+    // happens to notice it connected.
+    const last = giveawayLastState.get(sessionId);
+    if (last) res.write(`data: ${JSON.stringify(last)}\n\n`);
 
     const keepAlive = setInterval(() => {
         try { res.write(': ping\n\n'); } catch (_) { clearInterval(keepAlive); }
@@ -4325,10 +4332,14 @@ app.get('/api/giveaway/status/:sessionId', requireAuth, (req, res) => {
 
 app.post('/api/giveaway/broadcast/:sessionId', requireAuth, (req, res) => {
     const { sessionId } = req.params;
+    const msg = { type: req.body?.type, payload: req.body?.payload };
+    // Recorded even if nothing is connected yet — a display opened later
+    // (see the stream route above) still needs to catch up to it.
+    if (msg.type === 'potMode') giveawayLastState.set(sessionId, msg);
     const ch = giveawayChannels.get(sessionId);
     if (!ch) return res.status(404).json({ error: 'No display connected for this session' });
     try {
-        ch.write(`data: ${JSON.stringify({ type: req.body?.type, payload: req.body?.payload })}\n\n`);
+        ch.write(`data: ${JSON.stringify(msg)}\n\n`);
     } catch (_) {
         giveawayChannels.delete(sessionId);
         return res.status(410).json({ error: 'Display disconnected' });
@@ -7454,6 +7465,7 @@ const scannerChannels     = new Map(); // pairToken → res           (scanner's
 const scannerRegistry     = new Map(); // pairToken → flat scanner data object
 const monitorClients      = new Set(); // { res, eventIds: Set<string> }
 const giveawayChannels    = new Map(); // sessionId → res           (giveaway presenter-display SSE channel)
+const giveawayLastState   = new Map(); // sessionId → last 'potMode' message (replayed to a display that connects after it was sent)
 
 function broadcastToMonitors(eventId, payload) {
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;
