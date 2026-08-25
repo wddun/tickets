@@ -138,10 +138,12 @@
         let resting = 0;
 
         let lastReleaseAt = 0;
-        // Consecutive slips take consecutive lanes across the stage, so a run of
-        // arrivals fans out instead of queueing down one column.
-        const LANES = 5;
-        let releaseLane = 0;
+        // Consecutive slips fan out across the stage in mirrored pairs (see
+        // releaseDue) rather than queueing down one column. `releaseIndex`
+        // counts every release ever made, `releaseMags` is the sequence of
+        // distances-from-centre each pair steps through before repeating.
+        let releaseIndex = 0;
+        const releaseMags = [0.4, 0.16, 0.28];
         let shake = 0;         // 0..1, decaying pot wobble
         let spinState = null;  // set while a draw is running
         let running = false;
@@ -194,12 +196,14 @@
         }
 
         // ── Slips ───────────────────────────────────────────────────────
-        function spawnFlyer(name, lane, lanes) {
+        // `offsetFrac` is a signed fraction of the spread (±0.5 at the
+        // extremes, 0 dead centre) — see releaseDue for how it's chosen.
+        function spawnFlyer(name, offsetFrac) {
             const seed = seedCounter++;
-            // Lanes fan a burst out across the stage so several names are
+            // Fans a burst out across the stage so several names are
             // readable side by side instead of stacking on one column.
             const spread = clamp(W * 0.78, 120, 620);
-            const laneX = W / 2 - spread / 2 + spread * ((lane + 0.5) / lanes);
+            const laneX = W / 2 + spread * offsetFrac;
             const backlog = queue.length;
             // Staggered above the top edge rather than all entering on the same
             // line, so consecutive releases don't descend the stage as a rank.
@@ -215,7 +219,7 @@
             return {
                 name: name,
                 seed: seed,
-                x: laneX + (hashRandom(seed) - 0.5) * (spread / lanes) * 0.7,
+                x: laneX + (hashRandom(seed) - 0.5) * spread * 0.14,
                 y: startY,
                 startY: startY,
                 vy: 40 + hashRandom(seed + 51) * 40,
@@ -238,12 +242,21 @@
                 // A second, independent turn about the vertical axis — the
                 // coin-flip a piece of paper does as it falls, alternating
                 // its printed face toward and away from the room. Not the
-                // same motion as the end-over-end tumble above and doesn't
-                // drive it: a card can be turning fast or slow while still
-                // flipping face-to-back at its own rate, the way real
+                // same motion as the end-over-end tumble above (theta) and
+                // doesn't drive it: a card can be turning fast or slow while
+                // still flipping face-to-back at its own rate, the way real
                 // dropped paper does both at once.
                 flipPhase: hashRandom(seed + 71) * Math.PI * 2,
                 flipRate: 1.8 + hashRandom(seed + 73) * 1.6,
+                // A third, also independent turn — about the card's own
+                // long (horizontal) axis this time, so the long top and
+                // bottom edges swap places over the card's short dimension,
+                // rather than the short left/right edges swapping over the
+                // long one the way flipPhase does. Combined with the other
+                // two this is what makes a slip read as genuinely tumbling
+                // in every direction instead of spinning on one fixed axis.
+                tumblePhase: hashRandom(seed + 81) * Math.PI * 2,
+                tumbleRate: 2.0 + hashRandom(seed + 83) * 1.8,
                 tone: PAPER_TONES[seed % PAPER_TONES.length],
                 settling: 0,         // 0..1 while it drops through the mouth
                 fade: 0,             // 0..1, dissolving into the heap it lands on
@@ -285,10 +298,17 @@
             // release back for it leaves a visible gap in the shower.
             const live = flyers.filter(f => !f.churn && f.settling <= 0).length;
             if (live >= plan.maxInFlight) return;
-            // Not left-to-right: consecutive slips jump two lanes across, so a
-            // steady stream doesn't sweep the stage like a printer head.
-            releaseLane = (releaseLane + 2) % LANES;
-            flyers.push(spawnFlyer(queue.shift(), releaseLane, LANES));
+            // Every pair of releases lands mirrored across the centre line —
+            // one left, one right, at the same distance — so any run of
+            // slips balances itself as it goes instead of drifting to one
+            // side. The distance cycles through releaseMags pair by pair,
+            // which is what keeps a long stream from reading as two fixed
+            // columns either side of the pot.
+            const pairIdx = Math.floor(releaseIndex / 2);
+            const mag = releaseMags[pairIdx % releaseMags.length];
+            const side = releaseIndex % 2 === 0 ? 1 : -1;
+            releaseIndex++;
+            flyers.push(spawnFlyer(queue.shift(), side * mag));
             lastReleaseAt = now;
         }
 
@@ -405,9 +425,10 @@
                     if (f.x < L.cx - xBound) { f.x = L.cx - xBound; f.vx = Math.abs(f.vx) * 0.35; }
                     if (f.x > L.cx + xBound) { f.x = L.cx + xBound; f.vx = -Math.abs(f.vx) * 0.35; }
 
-                    // The face-to-back flip (see spawnFlyer) runs on its own
-                    // clock, a little faster when the real tumble is livelier.
+                    // The two coin-flips (see spawnFlyer) run on their own
+                    // clocks, a little faster when the real tumble is livelier.
                     f.flipPhase += (f.flipRate + Math.abs(f.omega) * 0.12) * dt;
+                    f.tumblePhase += (f.tumbleRate + Math.abs(f.omega) * 0.1) * dt;
 
                     // Approach: the last stretch is the slip travelling away
                     // from the viewer and down into the opening, not just down
@@ -548,17 +569,28 @@
         // one slip that is being held up as the winner rather than falling.
         function drawSlip(o) {
             const face = Math.abs(o.turn);
+            // `tumble` is the second, independent flip axis (see slipDraw) —
+            // callers that don't set it (the winner rising out of the pot,
+            // the reveal, the celebration motes) get 1, i.e. no extra
+            // squash, so this is a no-op for every draw path except a
+            // falling slip.
+            const tumble = o.tumble == null ? 1 : Math.abs(o.tumble);
             const shade = o.shade || 0;
             ctx.save();
             ctx.globalAlpha = o.opacity == null ? 1 : o.opacity;
             ctx.translate(o.x, o.y);
             ctx.rotate(o.rot);
 
-            if (face < 0.1) {
-                // Edge-on: a lit sliver, no face, no text.
+            if (face < 0.1 || tumble < 0.1) {
+                // Edge-on: a lit sliver, no face, no text. Whichever axis is
+                // the one currently edge-on decides which dimension collapses
+                // — turn takes the width to a vertical sliver, tumble takes
+                // the height to a horizontal one.
+                const thin = face < tumble;
+                const w = thin ? Math.max(2.4, o.w * face) : o.w;
+                const h = thin ? o.h : Math.max(2.4, o.h * tumble);
                 ctx.fillStyle = `rgba(255,255,255,${(0.55 * (1 - shade)).toFixed(3)})`;
-                ctx.fillRect(-Math.max(1.2, o.w * face * 0.5), -o.h / 2,
-                    Math.max(2.4, o.w * face), o.h);
+                ctx.fillRect(-w / 2, -h / 2, w, h);
                 ctx.restore();
                 return;
             }
@@ -569,9 +601,9 @@
             ctx.shadowBlur = o.glowBlur != null ? o.glowBlur : Math.abs(o.h) * 0.35;
             ctx.shadowOffsetY = o.glowColor ? 0 : Math.abs(o.h) * 0.12;
 
-            // Into card space. The `face` factor rides on the horizontal scale,
-            // which is the turn; everything else is just how big the slip is.
-            ctx.scale((o.w / CARD_W) * face, o.h / CARD_H);
+            // Into card space. `face` rides the horizontal scale and `tumble`
+            // the vertical one — two independent flip axes, not one.
+            ctx.scale((o.w / CARD_W) * face, (o.h / CARD_H) * tumble);
             cardPath(o.curl);
             ctx.fillStyle = o.tone;
             ctx.fill();
@@ -579,7 +611,11 @@
             ctx.shadowBlur = 0;
             ctx.shadowOffsetY = 0;
 
-            if (o.turn < 0) {
+            // Which side is showing is whichever face an ODD number of the
+            // two flips has turned up — two half-flips cancel out, one
+            // doesn't, same as physically turning a card over twice.
+            const showingBack = (o.turn < 0) !== (o.tumble < 0);
+            if (showingBack) {
                 // Backs of slips get no text — you're looking at the reverse side.
                 ctx.strokeStyle = 'rgba(0,0,0,0.10)';
                 ctx.lineWidth = CARD_H * 0.012;
@@ -644,9 +680,14 @@
                 // (`flipPhase` for a fall, `theta` reused for churn, which
                 // has no flip of its own) — the coin-flip alternation of
                 // which side faces the room, layered on top of the real
-                // in-plane spin rather than replacing it.
+                // in-plane spin rather than replacing it. `tumble` is a
+                // third, independent turn about the card's long axis — its
+                // long top and bottom edges swapping over its short
+                // dimension, the "end over end" companion to turn's
+                // short-edges-over-long-dimension flip.
                 rot: f.theta,
                 turn: Math.cos(f.churn ? f.theta : f.flipPhase),
+                tumble: f.churn ? 1 : Math.cos(f.tumblePhase),
                 // No bow: a falling slip stays a flat, crisp card. It used
                 // to flex with its spin rate, but that read as bending
                 // across the wrong axis more often than it read as paper.
