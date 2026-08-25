@@ -352,8 +352,29 @@
                             const co = aeroCoeffs(aFold);
                             // Lift perpendicular to the relative flow, drag
                             // opposing it — same construction as the source,
-                            // in body-frame components.
-                            const liftX = co.CL * q * vyp, liftY = -co.CL * q * vxp;
+                            // in body-frame components. Lift also carries a
+                            // cos(theta) sign: converting a body-frame force
+                            // to world coordinates using the card's own
+                            // current rotation, then folding CL/CD's angle
+                            // into [0, pi/2] for magnitude only, otherwise
+                            // makes the lift's WORLD-frame direction come out
+                            // independent of theta entirely — it collapses to
+                            // "whatever's 90 degrees off the world velocity,"
+                            // full stop. For a fall that's dominated by
+                            // straight-down gravity, that's the same
+                            // direction for every slip, every frame: a
+                            // constant sideways push, not a wobble — which
+                            // is exactly the rightward drift this fixes. A
+                            // real plate's lift direction flips with which
+                            // face is presented to the flow, i.e. with a
+                            // period of pi, not 2*pi (turning it 180 degrees
+                            // is the same physical shape) — cos(theta) is
+                            // the missing piece of that symmetry, and
+                            // reintroducing it is what makes the sideways
+                            // push flip with the tumble instead of pointing
+                            // one way for the whole fall.
+                            const liftSign = Math.cos(f.theta);
+                            const liftX = liftSign * co.CL * q * vyp, liftY = -liftSign * co.CL * q * vxp;
                             const dragX = -co.CD * q * vxp, dragY = -co.CD * q * vyp;
                             const Fxp = liftX + dragX, Fyp = liftY + dragY;
                             f.vx += (Fxp * uCx + Fyp * uWx) * aeroK * sdt;
