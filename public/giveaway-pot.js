@@ -122,7 +122,11 @@
 
     function create(canvas, opts) {
         opts = opts || {};
-        const ctx = canvas.getContext('2d');
+        // Not const: rebuildHeapVisual() below briefly repoints this at an
+        // offscreen canvas so the same drawSlip()/cardPath() drawing code
+        // can paint the baked heap texture, instead of a second copy of
+        // that drawing logic that only ever draws flat, static cards.
+        let ctx = canvas.getContext('2d');
         const onEvent = typeof opts.onEvent === 'function' ? opts.onEvent : function () {};
 
         let accent = opts.accent || '#ffd400';
@@ -132,10 +136,30 @@
         let queue = [];        // names waiting to be dropped in
         let flyers = [];       // slips currently on screen
         let motes = [];        // celebratory paper thrown up on the reveal
-        // Slips that have gone in. Nothing is drawn from this — a slip that
-        // reaches the pot is inside it and out of sight, the way a name dropped
-        // into a bucket is — but the count is still the pot's to report.
+        // A landed slip counts toward `resting` forever, but only the most
+        // recent PILE_CAP of them stay live physics objects in `livePile`,
+        // bumping each other and getting jostled by a shake — a giveaway
+        // can run to hundreds of entries and simulating all of them forever
+        // is not something worth paying for when nobody can tell one static
+        // paper scrap from another a few layers deep. Everything older than
+        // that is baked once into `heapCanvas`, an offscreen image redrawn
+        // only when the baked count changes, and composited for free every
+        // frame after that.
         let resting = 0;
+        let livePile = [];
+        let heapCanvas = null, heapCtx = null;
+        // The pot's mouth is a shallow, foreshortened ellipse — there just
+        // isn't much visual depth to pile card-sized pieces into. The first
+        // version of this tried to fit 40 near-full-size cards into that
+        // shallow band and needed roughly 30x the floor space actually
+        // available; no amount of collision tuning fixes that, only fewer
+        // and smaller pieces does.
+        const PILE_CAP = 24;
+        // Deliberately smaller than a falling slip — these are meant to
+        // read as a heap of paper scraps, not a stack of readable cards,
+        // and small pieces are also what makes PILE_CAP of them fit the
+        // mouth's shallow depth at all.
+        const PILE_ITEM_SCALE = 0.22;
 
         let lastReleaseAt = 0;
         // Consecutive slips fan out across the stage in mirrored pairs (see
@@ -193,6 +217,24 @@
                 slipW: clamp(W * 0.38, 88, 230),
             };
             L.slipH = L.slipW * 0.44;
+            // Where the pile's visible surface can sit: from just above the
+            // pot's own floor up to just shy of the rim, so it never looks
+            // like it's overflowing out of the opening.
+            L.pileBaseY = L.my + L.ry * 0.75;
+            L.pileTopY = L.my - L.ry * 0.75;
+
+            // The heap texture is sized in lockstep with the main canvas —
+            // it has to be, since it's composited straight onto it — so it
+            // has to be rebuilt whenever layout() runs, not just once. That
+            // does mean a mid-giveaway window resize loses the exact pixel
+            // history of the baked pile; rebuildHeapVisual() redraws it from
+            // `resting` and `livePile` instead, which is visually
+            // consistent with what was there, just not identical brushwork.
+            if (!heapCanvas) { heapCanvas = document.createElement('canvas'); heapCtx = heapCanvas.getContext('2d'); }
+            heapCanvas.width = canvas.width;
+            heapCanvas.height = canvas.height;
+            heapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            rebuildHeapVisual();
         }
 
         // ── Slips ───────────────────────────────────────────────────────
@@ -455,11 +497,14 @@
                 // draw()), so it is cut off by the pot rather than fading out
                 // on top of it.
                 //
-                // It goes all the way in and is not seen again. Three things
-                // have to agree on that, or a slip blinks out instead of
-                // sinking: it drops past the near edge of the opening so the
-                // rim clip takes it, the pot's dark takes its colour, and its
-                // own alpha reaches zero — the last of those because the far
+                // This particular flying slip is not seen again — it hands
+                // off to a pile object (see spawnPileItem) the instant it
+                // finishes settling, rather than staying around itself.
+                // Three things have to agree on the handoff being invisible,
+                // or the fade reads as a glitch instead of a landing: it
+                // drops past the near edge of the opening so the rim clip
+                // takes it, the pot's dark takes its colour, and its own
+                // alpha reaches zero — the last of those because the far
                 // wall inside the mouth is not actually black, so a slip that
                 // has merely gone dark is still a black shape against it.
                 const entryY = L.my - L.ry * 0.3;
@@ -476,6 +521,11 @@
                 if (f.settling >= 1) {
                     flyers.splice(i, 1);
                     resting++;
+                    livePile.push(spawnPileItem());
+                    if (livePile.length > PILE_CAP) {
+                        livePile.shift();
+                        rebuildHeapVisual();
+                    }
                     shake = Math.min(1, shake + 0.06);
                     onEvent('land', { name: f.name, resting: resting });
                 }
@@ -494,6 +544,163 @@
                 m.tumble += m.tumbleRate * dt;
                 m.yaw += m.yawRate * dt;
             }
+        }
+
+        // ── Pile ────────────────────────────────────────────────────────
+        // How full the pot looks for a given landed count — rises from the
+        // floor toward the rim and saturates rather than climbing forever,
+        // since a thousand-entry giveaway shouldn't try to stack paper above
+        // the opening it fell through.
+        function pileFillY(count) {
+            const t = clamp(count / 220, 0, 1);
+            return L.pileBaseY - t * (L.pileBaseY - L.pileTopY);
+        }
+
+        function spawnPileItem() {
+            const seed = seedCounter++;
+            const fillY = pileFillY(resting);
+            // Scattered across most of the pile's own width, not clustered
+            // near the centre — cramming new arrivals into a tight spot is
+            // what made the first version of this pile blow itself apart:
+            // 40 overlapping circles fighting to separate every frame
+            // compounds fast. Falling from a bit above the surface gives
+            // gravity and separation room to settle it out naturally instead
+            // of starting from maximum overlap.
+            return {
+                x: L.cx + (hashRandom(seed) - 0.5) * L.rx * 1.3,
+                y: fillY - 20 - hashRandom(seed + 2) * 30,
+                vx: (hashRandom(seed + 4) - 0.5) * 60,
+                vy: 0,
+                theta: hashRandom(seed + 6) * Math.PI * 2,
+                omega: (hashRandom(seed + 8) - 0.5) * 3,
+                tone: PAPER_TONES[seed % PAPER_TONES.length],
+            };
+        }
+
+        // Redraws the static heap image from scratch — cheap enough (well
+        // under a hundred simple flat shapes even at the visual cap) to just
+        // call whenever the baked count changes rather than trying to paint
+        // incrementally. Deterministic per index, so the texture doesn't
+        // rearrange itself between rebuilds the way real paper would if it
+        // were actually re-simulated.
+        const PILE_VISUAL_CAP = 150;
+        function rebuildHeapVisual() {
+            if (!heapCtx) return;
+            heapCtx.clearRect(0, 0, W, H);
+            const bakedCount = Math.max(0, resting - livePile.length);
+            if (bakedCount <= 0) return;
+            const n = Math.min(bakedCount, PILE_VISUAL_CAP);
+            const fillY = pileFillY(resting);
+            const saved = ctx;
+            ctx = heapCtx;
+            for (let i = 0; i < n; i++) {
+                const t = n <= 1 ? 0 : i / (n - 1);
+                const x = clamp(L.cx + (hashRandom(i * 7 + 3) - 0.5) * L.rx * 1.6, L.cx - L.rx * 0.85, L.cx + L.rx * 0.85);
+                const y = L.pileBaseY - t * (L.pileBaseY - fillY) + (hashRandom(i * 7 + 5) - 0.5) * 14;
+                drawSlip({
+                    x: x, y: y, w: L.slipW * PILE_ITEM_SCALE, h: L.slipH * PILE_ITEM_SCALE,
+                    rot: hashRandom(i * 7 + 9) * Math.PI * 2, turn: 1, tumble: 1, curl: 0,
+                    tone: PAPER_TONES[i % PAPER_TONES.length], name: null, shade: 0.5,
+                });
+            }
+            ctx = saved;
+        }
+
+        // The live pile: real collision physics for the most recent landings
+        // — gravity toward the pile's current surface, pairwise separation
+        // so they don't overlap, and (see the shake term below) genuine
+        // jostling when the pot is being shaken for a draw, not just a
+        // decorative wobble applied on top.
+        //
+        // The first version of this fixed overlaps by also kicking a
+        // velocity into each colliding pair, on top of moving them apart —
+        // with up to PILE_CAP items arriving into a small area, a piece
+        // touching several neighbours at once got that kick several times
+        // in the same frame, several frames in a row, and the pile
+        // detonated: pieces found flung across the whole canvas within a
+        // couple of seconds. Purely positional correction (move the
+        // overlap apart, let next frame's own gravity/damping decide the
+        // resulting velocity) doesn't have that feedback loop, and is the
+        // standard way to resolve this — velocity injection is for things
+        // that should visibly bounce off each other, not paper settling
+        // into a heap. `boundClamp` below is a second, independent
+        // backstop: whatever the physics produces, a piece is still never
+        // allowed to end the frame outside the pile's own region.
+        function updatePile(dt) {
+            if (!livePile.length) return;
+            const bound = L.rx * 0.85;
+            const floorY = pileFillY(resting);
+            const jostling = shake > 0.02;
+            const VMAX = 500;
+            for (const p of livePile) {
+                p.vy += 640 * dt;
+                if (jostling) {
+                    // A shaken pile doesn't drift, it jumps — small kicks
+                    // every frame the shake is live, scaled by how hard.
+                    p.vx += (hashRandom(seedCounter++) - 0.5) * shake * 55;
+                    p.vy -= hashRandom(seedCounter++) * shake * 40;
+                    p.omega += (hashRandom(seedCounter++) - 0.5) * shake * 3;
+                }
+                p.vx = clamp(p.vx, -VMAX, VMAX);
+                p.vy = clamp(p.vy, -VMAX, VMAX);
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.theta += p.omega * dt;
+                p.omega *= Math.max(0, 1 - 2.4 * dt);
+                p.vx *= Math.max(0, 1 - 2.6 * dt);
+                if (p.y > floorY) {
+                    p.y = floorY;
+                    if (p.vy > 0) p.vy = -p.vy * 0.22;
+                    if (Math.abs(p.vy) < 6) p.vy = 0;
+                }
+                if (p.x < L.cx - bound) { p.x = L.cx - bound; p.vx = Math.abs(p.vx) * 0.3; }
+                if (p.x > L.cx + bound) { p.x = L.cx + bound; p.vx = -Math.abs(p.vx) * 0.3; }
+            }
+            // Real collisions, not an overlap-hiding trick: every pair of
+            // live pieces closer than two card-radii is pushed apart, split
+            // evenly between them. Three relaxation passes rather than one —
+            // a piece touching several neighbours only gets pushed clear of
+            // one per pass, so a single pass leaves a densely packed pile
+            // visibly still overlapping. O(n^2) over at most PILE_CAP items,
+            // three times over, is still trivial at this scale.
+            // Overlap tolerated up to touching, not pushed apart until
+            // there's clear air between them — a real paper pile overlaps
+            // itself constantly, and demanding full separation on pieces
+            // this size is exactly the overcrowding this was rewritten to
+            // avoid.
+            const rad = L.slipW * PILE_ITEM_SCALE * 0.55;
+            const minDist = rad * 1.1;
+            for (let pass = 0; pass < 3; pass++) {
+                for (let i = 0; i < livePile.length; i++) {
+                    for (let j = i + 1; j < livePile.length; j++) {
+                        const a = livePile[i], b = livePile[j];
+                        const dx = b.x - a.x, dy = b.y - a.y;
+                        const dist = Math.hypot(dx, dy) || 0.001;
+                        if (dist >= minDist) continue;
+                        const push = (minDist - dist) / 2;
+                        const nx = dx / dist, ny = dy / dist;
+                        a.x -= nx * push; a.y -= ny * push;
+                        b.x += nx * push; b.y += ny * push;
+                    }
+                }
+            }
+            // The backstop: no piece leaves this frame outside the pile's
+            // own patch of the pot, whatever produced its position.
+            const padX = bound + rad, padYLo = L.pileTopY - rad * 2, padYHi = floorY + rad * 2;
+            for (const p of livePile) {
+                p.x = clamp(p.x, L.cx - padX, L.cx + padX);
+                p.y = clamp(p.y, padYLo, padYHi);
+            }
+        }
+
+        // True while any live pile piece still has enough motion to be worth
+        // another frame — an idle pile is a still image, same reasoning as
+        // busy() below.
+        function pileAwake() {
+            for (const p of livePile) {
+                if (Math.abs(p.vx) > 1 || Math.abs(p.vy) > 1 || Math.abs(p.omega) > 0.05) return true;
+            }
+            return false;
         }
 
         // ── Drawing ─────────────────────────────────────────────────────
@@ -958,10 +1165,6 @@
                 ctx.restore();
             };
 
-            // Nothing is drawn inside the pot but the pot: a name that has
-            // gone in is in, the way one dropped into a real bucket is out of
-            // sight the moment it clears the rim. The count lives on the page
-            // around the canvas, which is where it can actually be read.
             withPot(() => { drawFloor(); drawPotBack(); });
 
             // Still in open air, in front of and above the pot — including a
@@ -972,11 +1175,21 @@
                 if (inMouth(f)) continue;
                 drawSlip(slipDraw(f));
             }
-            // Going in. Clipped to the opening and moving with the pot, so a
-            // shaken pot takes its contents with it.
+            // Everything actually inside the pot — the baked heap, the live
+            // pile on top of it, and whatever's still on its way through the
+            // opening — clipped to the mouth and moving with the pot as one,
+            // so a shaken pot takes its contents with it.
             withPot(() => {
                 ctx.save();
                 clipToMouth();
+                if (heapCanvas) ctx.drawImage(heapCanvas, 0, 0, W, H);
+                for (const p of livePile) {
+                    drawSlip({
+                        x: p.x, y: p.y, w: L.slipW * PILE_ITEM_SCALE, h: L.slipH * PILE_ITEM_SCALE,
+                        rot: p.theta, turn: 1, tumble: 1, curl: 0,
+                        tone: p.tone, name: null, shade: 0.5,
+                    });
+                }
                 for (const f of flyers) {
                     if (!inMouth(f)) continue;
                     drawSlip(slipDraw(f));
@@ -1187,7 +1400,7 @@
         // has no business burning a projector laptop's battery at 60fps.
         function busy() {
             return !!(spinState || flyers.length || queue.length || motes.length
-                || shake > 0.002);
+                || shake > 0.002 || pileAwake());
         }
 
         function frame(now, gen) {
@@ -1201,6 +1414,7 @@
             releaseDue(now);
             updateFlyers(dt);
             updateMotes(dt);
+            updatePile(dt);
             draw(now);
 
             if (busy()) rafId = requestAnimationFrame(t => frame(t, gen));
@@ -1262,12 +1476,14 @@
                 }
                 kick();
             },
-            // Slips already in the pot when the page loaded — no animation, the
-            // room didn't watch those arrive.
-            // Slips already in the pot when the page loaded. Nothing to draw —
-            // they are inside it — but the pot still owns the number.
+            // Slips already in the pot when the page loaded — no animation,
+            // the room didn't watch those arrive, so they go straight into
+            // the baked heap at whatever fill level that count implies
+            // rather than being simulated in one by one.
             setResting(n) {
                 resting = Math.max(0, n | 0);
+                livePile = [];
+                rebuildHeapVisual();
                 redraw();
             },
             // Accepted and ignored. The pot no longer prints anything on
@@ -1341,9 +1557,11 @@
                 queue = [];
                 flyers = [];
                 motes = [];
+                livePile = [];
                 spinState = null;
                 resting = 0;
                 shake = 0;
+                rebuildHeapVisual();
                 redraw();
             },
             resize() { layout(); redraw(); },

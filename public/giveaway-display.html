@@ -203,6 +203,13 @@
 <script>
 const sessionId = new URLSearchParams(location.search).get('session');
 if (!sessionId) document.body.innerHTML = '<div class="idle-msg">Missing session — open this link from the giveaway page\'s Present panel.</div>';
+// Which style the Present panel's link was for — just the starting picture
+// this screen shows before the controller says anything. It still follows
+// every live style switch and spin after that; this only decides what's on
+// screen in the gap between opening the link and the first message arriving
+// (which, for the pot's standing view of entries already inside it, is worth
+// getting right immediately rather than flashing blank first).
+const initialStyle = new URLSearchParams(location.search).get('style');
 
 const WHEEL_PALETTE = ['#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b'];
 
@@ -689,6 +696,11 @@ function connect() {
     };
 }
 updateSoundHint();
+if (initialStyle === 'pot') {
+    potMode = true;
+    showPot();
+    document.getElementById('idleMsg').style.display = 'none';
+}
 connect();
 </script>
 </body>
