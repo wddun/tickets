@@ -573,13 +573,18 @@
             ctx.rotate(o.rot);
 
             if (face < 0.1 || tumble < 0.1) {
-                // Edge-on: a lit sliver, no face, no text. Whichever axis is
-                // the one currently edge-on decides which dimension collapses
-                // — turn takes the width to a vertical sliver, tumble takes
-                // the height to a horizontal one.
+                // Edge-on: a lit sliver, no face, no text. Both dimensions
+                // still scale continuously with face/tumble, same as the
+                // normal card render below (ctx.scale by face and tumble) —
+                // only the axis actually going edge-on gets floored to a
+                // minimum visible width, or it snaps from a scaled height
+                // straight to the full unscaled one right at this
+                // threshold, which read as the slip suddenly growing
+                // *longer* the instant it went thin.
                 const thin = face < tumble;
-                const w = thin ? Math.max(2.4, o.w * face) : o.w;
-                const h = thin ? o.h : Math.max(2.4, o.h * tumble);
+                let w = o.w * face;
+                let h = o.h * tumble;
+                if (thin) w = Math.max(2.4, w); else h = Math.max(2.4, h);
                 ctx.fillStyle = `rgba(255,255,255,${(0.55 * (1 - shade)).toFixed(3)})`;
                 ctx.fillRect(-w / 2, -h / 2, w, h);
                 ctx.restore();
@@ -687,20 +692,22 @@
             };
         }
 
-        // Everything a slip on its way into the pot can still be seen through:
-        // the opening itself, plus the open air above the back of the rim, since
-        // a slip only half-swallowed still has its top sticking up over the far
-        // edge. Clipping to this is what makes a slip get *cut off* by the rim
-        // on the way down instead of fading out on top of the pot.
-        //
-        // The rect's bottom edge has to reach the ellipse's own top edge
-        // (L.ry * 0.92, not L.ry) or the two leave a sliver of the canvas
-        // between them that neither region covers — a slip crossing that
-        // band got a thin horizontal slice clipped out of it every time,
-        // reading as a glitch right at the rim rather than a clean entry.
+        // Just the opening itself. This used to be a compound path — this
+        // ellipse unioned with a big rect covering the open air above the
+        // rim, so a slip only half-swallowed could still show its top
+        // sticking up over the far edge instead of getting a hard clip line
+        // across it. That relied on canvas engines treating an oversized
+        // rect and an ellipse subpath as one clean union under the nonzero
+        // winding rule, and on Safari specifically it didn't hold: slips
+        // flickered behind the back wall and a visible black box appeared
+        // above the pot, neither reproducible in Chromium. A single simple
+        // shape has no unioning to get wrong. inMouth() below now delays
+        // the switch into this clip until a slip is already comfortably
+        // inside the ellipse's own width, not right at its pinched-shut top
+        // edge, which is what made the plain rect unnecessary in the first
+        // place — see the comment there.
         function clipToMouth() {
             ctx.beginPath();
-            ctx.rect(-W, -H, W * 3, H + (L.my - L.ry * 0.92));
             ctx.ellipse(L.cx, L.my, L.rx * 0.94, L.ry * 0.92, 0, 0, Math.PI * 2);
             ctx.clip();
         }
@@ -895,11 +902,19 @@
             ctx.restore();
         }
 
-        // A slip is "in the mouth" once it has dropped past the far edge of the
-        // rim — from there on it is seen *through* the opening and has to be
-        // clipped to it.
+        // A slip switches to being clipped through the opening (see
+        // clipToMouth) once it's dropped a bit past the rim's own top edge
+        // — not the instant it crosses it. The mouth ellipse pinches to
+        // zero width at its very top point, so clipping a slip in there
+        // right away would crop nearly the whole card in one frame; by
+        // L.ry * 0.6 below centre the ellipse is already better than
+        // three-quarters as wide as at its middle, wide enough that the
+        // switch from fully visible to clipped doesn't read as a pop. Above
+        // this line a slip is still drawn in full, unclipped, in front of
+        // the pot's own back wall — close enough to the opening that the
+        // difference isn't visible for the brief moment it takes to cross.
         function inMouth(f) {
-            return f.y > L.my - L.ry;
+            return f.y > L.my - L.ry * 0.6;
         }
 
         // The room's lights going down. Everything outside the pot dims while a
