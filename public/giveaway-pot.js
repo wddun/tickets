@@ -308,11 +308,17 @@
                 tumblePhase: hashRandom(seed + 81) * Math.PI * 2,
                 tumbleRate: 2.0 + hashRandom(seed + 83) * 1.8,
                 tone: PAPER_TONES[seed % PAPER_TONES.length],
-                settling: 0,         // 0..1 while it drops through the mouth
-                fade: 0,             // 0..1, dissolving into the heap it lands on
+                // Never advance past their starting values below — a flyer
+                // hands straight off to a live pile object the instant it
+                // reaches the pot (see updateFlyers/spawnPileItem) rather
+                // than running its own shrink/fade animation first, so
+                // nothing here ever needs to move. Left in place, at their
+                // no-op defaults, because slipDraw() still reads them.
+                settling: 0,
+                fade: 0,
                 scale: 1,
-                squash: 1,           // vertical foreshortening as it tips away
-                shade: 0,            // how much of the pot's shadow has taken it
+                squash: 1,
+                shade: 0,
                 churn: false,        // a shake-loosened slip, not a new entry
             };
         }
@@ -491,61 +497,30 @@
                     const approach = clamp((f.y - (entryY - L.slipH * 1.6)) / (L.slipH * 1.6), 0, 1);
                     f.scale = 1 - approach * 0.14;
 
+                    // Hands straight off to a live pile object (see
+                    // spawnPileItem) the instant it reaches the opening,
+                    // instead of running a separate scripted shrink/darken/
+                    // fade animation first and creating a new object after
+                    // it finishes. That two-stage handoff was the actual
+                    // glitch: the pile object it swapped to didn't start at
+                    // the same size, shade or position the flyer had just
+                    // faded to, so it read as popping into existence inside
+                    // the bucket rather than landing in it. This way the
+                    // exact same x/y/velocity/spin a moment ago just keeps
+                    // going, under updatePile's own gravity, into the heap —
+                    // one continuous fall, not a fall then a teleport.
                     if (f.y >= entryY) {
-                        f.y = entryY;
-                        f.settling = 0.0001;
+                        flyers.splice(i, 1);
+                        resting++;
+                        livePile.push(spawnPileItem(f));
+                        if (livePile.length > PILE_CAP) {
+                            livePile.shift();
+                            rebuildHeapVisual();
+                        }
+                        shake = Math.min(1, shake + 0.06);
+                        onEvent('land', { name: f.name, resting: resting });
                     }
                     continue;
-                }
-
-                // Settling into the pot: converging on the middle of the
-                // opening, foreshortening hard as it tips flat, and dropping
-                // into the shadow the front lip casts — which is where it
-                // actually disappears. The rim clips it on the way (see
-                // draw()), so it is cut off by the pot rather than fading out
-                // on top of it.
-                //
-                // This particular flying slip is not seen again — it hands
-                // off to a pile object (see spawnPileItem) the instant it
-                // finishes settling, rather than staying around itself.
-                // Three things have to agree on the handoff being invisible,
-                // or the fade reads as a glitch instead of a landing: it
-                // drops past the near edge of the opening so the rim clip
-                // takes it, the pot's dark takes its colour, and its own
-                // alpha reaches zero — the last of those because the far
-                // wall inside the mouth is not actually black, so a slip that
-                // has merely gone dark is still a black shape against it.
-                const entryY = L.my - L.ry * 0.3;
-                f.settling += dt / 0.52;
-                const q = clamp(f.settling, 0, 1);
-                // A smooth glide to centre, not real velocity carried
-                // through a wall bounce — this whole phase is a fast (0.52s)
-                // cosmetic dive into shadow, and reflecting off a bounds
-                // check mid-fade read as a stutter right where the eye is
-                // most sensitive to one (shrinking, darkening, about to
-                // vanish). The actual "hits the side of the bucket" physics
-                // still happens: spawnPileItem hands this slip's real x and
-                // vx to a live pile object the instant this phase ends, and
-                // that pile object gets genuine wall collisions in
-                // updatePile from its very next frame.
-                f.x += (L.cx - f.x) * Math.min(1, dt * 2.6);
-                f.y = entryY + q * L.ry * 1.4;
-                f.scale = 0.88 - q * 0.40;
-                // Only now does it foreshorten, tipping over as it drops — by
-                // which point the name has stopped being drawn anyway.
-                f.squash = 1 - q * 0.74;
-                f.shade = Math.min(1, q * 1.1);
-                f.fade = clamp((q - 0.55) / 0.45, 0, 1);
-                if (f.settling >= 1) {
-                    flyers.splice(i, 1);
-                    resting++;
-                    livePile.push(spawnPileItem(f));
-                    if (livePile.length > PILE_CAP) {
-                        livePile.shift();
-                        rebuildHeapVisual();
-                    }
-                    shake = Math.min(1, shake + 0.06);
-                    onEvent('land', { name: f.name, resting: resting });
                 }
             }
         }
@@ -580,12 +555,20 @@
         // it happened to be turned when it hit the pile, the way a real
         // dropped card does.
         function spawnPileItem(f) {
-            const fillY = pileFillY(resting);
+            // The exact position and motion the flyer had a moment ago —
+            // not a freshly chosen spot near the pile's current surface.
+            // Jumping it there was the other half of the old landing
+            // glitch: even once the shrink/fade mismatch above was fixed,
+            // the piece would still teleport from wherever it actually was
+            // to a point near the heap. Continuing from here means
+            // updatePile's own gravity carries it the rest of the way down
+            // through the pot's throat itself, in view, rather than resuming
+            // mid-fall somewhere the eye never saw it travel to.
             return {
                 x: f.x,
-                y: fillY - 20 - hashRandom(seedCounter++) * 30,
+                y: f.y,
                 vx: f.vx * 0.5,
-                vy: 0,
+                vy: f.vy * 0.6,
                 theta: f.theta,
                 omega: f.omega * 0.4,
                 tone: f.tone,
