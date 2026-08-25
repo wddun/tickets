@@ -50,42 +50,36 @@
     function easeOutBack(p) { const c = 1.70158; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); }
     function easeInOutSine(p) { return 0.5 - Math.cos(Math.PI * p) / 2; }
 
-    // A falling slip's tumble is a real quasi-steady flat-plate simulation,
-    // not a hand-tuned oscillator: each slip carries its own (vx, vy, theta,
-    // omega) and every frame integrates real lift and drag forces from it,
-    // the same way a falling card or leaf actually accelerates, stalls and
-    // spins. The lift/drag coefficient curves and centre-of-pressure offset
-    // are lifted directly from Pomerenk & Ristroph, "Equilibria and
-    // stability of plates in flowing soap films" (2024/2025, extending Li
-    // et al. 2022 and Andersen, Pesavento & Wang, J. Fluid Mech. 541, 2005;
-    // arxiv.org/abs/2408.08864, eq. 4.4) — CL1/CL2/CD0/CD1/CDPI2 and the
-    // stall-blend constants below are their published numbers, not guesses.
-    // The torque is not their exact centre-of-pressure formula, which needs
-    // a sign convention this file has no way to get right from the paper
-    // alone — it's the classical sin(2*alpha) destabilising-moment form
-    // used in the simplified "toy" falling-card models the same literature
-    // cites (e.g. Tanabe & Kaneko 1994), which reproduces the right
-    // qualitative behaviour: broadside is an unstable equilibrium a card
-    // is thrown past rather than settling into, exactly as described
-    // first-hand in Mahadevan, Ryu & Samuel, "Tumbling cards", Phys.
-    // Fluids 11, 1 (1999) — a card starting nearly vertical slices through
-    // the air, the pressure difference this creates rotates it toward
-    // broadside, and it carries on past broadside into a slice the other
-    // way rather than stopping there.
+    // A falling slip's glide is real: each one carries (vx, vy) and every
+    // frame integrates actual lift and drag from its current velocity and
+    // orientation, the same way a falling card or leaf accelerates and
+    // stalls. The lift/drag coefficient curves are lifted directly from
+    // Pomerenk & Ristroph, "Equilibria and stability of plates in flowing
+    // soap films" (2024/2025, extending Li et al. 2022 and Andersen,
+    // Pesavento & Wang, J. Fluid Mech. 541, 2005; arxiv.org/abs/2408.08864,
+    // eq. 4.4) — CL1/CL2/CD0/CD1/CDPI2 and the stall-blend constants below
+    // are their published numbers, not guesses.
+    //
+    // The *rotation* deliberately is not derived from that model. A torque
+    // driven off the real aerodynamics (the sin(2*alpha) destabilising
+    // moment classically used for this — see Tanabe & Kaneko 1994, and the
+    // firsthand description in Mahadevan, Ryu & Samuel, "Tumbling cards",
+    // Phys. Fluids 11, 1, 1999) is the physically honest choice, but across
+    // three tuning passes it was never reliable at this scale: too strong
+    // and it read as buzzing, too weak and half the slips barely turned at
+    // all, and it could never be pointed at a specific look ("tumble end
+    // over end, no bending") on request. A slip's spin is instead a fixed
+    // rate chosen at release, gently modulated so it never reads as
+    // mechanical — see spawnFlyer. It still turns through real orientations
+    // that feed the lift/drag above, it's just not fighting a torque to get
+    // there.
     const AERO_CL1 = 5.2, AERO_CL2 = 0.95;
     const AERO_CD0 = 0.1, AERO_CD1 = 5.0, AERO_CDPI2 = 1.9;
     const AERO_ALPHA0 = 14 * Math.PI / 180, AERO_DELTA = 6 * Math.PI / 180;
-    const AERO_K = 0.003, AERO_TORQUE_K = 0.0003, AERO_GRAVITY = 900, AERO_ROT_DAMP = 0.45;
-    // A real card's tumbling frequency is on the order of 1-2 Hz (Mahadevan,
-    // Ryu & Samuel measure ~15 Hz for a 75mm card, scaling down with size —
-    // ours is a much smaller, slower-tumbling shape). The first tuning pass
-    // used a torque strong enough relative to its damping that the sign of
-    // omega was flipping several times a second — mechanically correct, but
-    // a 4-6 Hz wobble reads to the eye as the card vibrating in place, not
-    // falling like paper. This is the same physics turned down to a rate a
-    // person actually perceives as tumbling; the cap is a plain numerical
-    // safety net against a rare stiff initial condition, not a fake limit.
-    const AERO_OMEGA_CAP = 5;
+    // Gravity tuned for a slow, watchable drop — this is a deliberately
+    // floaty descent, not a realistic terminal velocity, so there's time to
+    // actually see a slip tumble and read its name before it's gone.
+    const AERO_K = 0.0034, AERO_GRAVITY = 260;
     // Lift/drag coefficients and centre-of-pressure offset as functions of
     // the angle of attack, valid on alpha ∈ [0, π/2] — folded into that
     // range by the caller, per the symmetry the source paper describes.
@@ -229,29 +223,27 @@
                 // Orientation and spin it's released with — a slip doesn't
                 // enter perfectly edge-on and still, it's tossed with some
                 // tumble already on it, the way a card leaves your fingers.
+                // The rate is fixed at release rather than driven by torque
+                // (see the comment above aeroCoeffs) — a slow, steady spin
+                // one direction the whole way down, which is what reads as
+                // tumbling end over end instead of rocking in place.
                 theta: hashRandom(seed + 3) * Math.PI * 2,
-                omega: (hashRandom(seed + 11) < 0.5 ? -1 : 1) * (0.8 + hashRandom(seed + 13) * 1.4),
+                omega: (hashRandom(seed + 11) < 0.5 ? -1 : 1) * (3.0 + hashRandom(seed + 13) * 2.6),
+                // A slow drift so the rate isn't perfectly mechanical —
+                // never enough to flatten out or reverse direction.
+                omegaWobble: 0.7 + hashRandom(seed + 17) * 0.5,
+                omegaWobbleSeed: hashRandom(seed + 19) * Math.PI * 2,
                 paceScale: paceScale,
                 t: 0,
-                // In-plane rotation (theta/omega, above) is the real
-                // simulated tumble; this is a second, independent turn
-                // about the vertical axis — the classic coin-flip a piece
-                // of paper does as it falls, alternating its printed face
-                // toward and away from the room. The two aren't the same
-                // motion and don't drive each other: a card can be turning
-                // in-plane fast or slow while still flipping face-to-back
-                // at its own rate, the way real dropped paper does both at
-                // once. Rate scales loosely with the real spin so a card
-                // that's tumbling hard also flips faster, without the flip
-                // becoming a second copy of the physics above.
+                // A second, independent turn about the vertical axis — the
+                // coin-flip a piece of paper does as it falls, alternating
+                // its printed face toward and away from the room. Not the
+                // same motion as the end-over-end tumble above and doesn't
+                // drive it: a card can be turning fast or slow while still
+                // flipping face-to-back at its own rate, the way real
+                // dropped paper does both at once.
                 flipPhase: hashRandom(seed + 71) * Math.PI * 2,
-                flipRate: 2.6 + hashRandom(seed + 73) * 2.2,
-                // The warp across the card's width — paper caught in the air
-                // doesn't stay flat, it flexes more the harder it's turning.
-                // Tied to the real angular velocity below, not a free-running
-                // sine, so a slip that's mid-tumble visibly bows and one
-                // that's settled down goes flat.
-                curlAmt: 0.32 + hashRandom(seed + 63) * 0.30,
+                flipRate: 1.8 + hashRandom(seed + 73) * 1.6,
                 tone: PAPER_TONES[seed % PAPER_TONES.length],
                 settling: 0,         // 0..1 while it drops through the mouth
                 fade: 0,             // 0..1, dissolving into the heap it lands on
@@ -334,11 +326,13 @@
                     // frame each substep (see aeroCoeffs above for where the
                     // coefficient curves come from) — this is what replaced a
                     // hand-tuned sine oscillator with an actual falling-plate
-                    // simulation. Substepped rather than integrated once at
-                    // the frame's own dt: the forces are quadratic in speed
-                    // and this is a stiff enough system that a single ~16ms
-                    // step visibly misbehaves (it's how the very first version
-                    // of this blew up into a multi-hundred-rad/s spin).
+                    // simulation for the glide. Substepped rather than
+                    // integrated once at the frame's own dt: the forces are
+                    // quadratic in speed and this is a stiff enough system
+                    // that a single ~16ms step visibly misbehaves (it's how
+                    // the very first version of this blew up into a
+                    // multi-hundred-rad/s spin, back when rotation was also
+                    // driven through this loop).
                     const SUBSTEPS = 4;
                     const sdt = dt / SUBSTEPS;
                     const g = AERO_GRAVITY * f.paceScale;
@@ -351,7 +345,6 @@
                         const vxp = f.vx * uCx + f.vy * uCy;
                         const vyp = f.vx * uWx + f.vy * uWy;
                         const q = Math.hypot(vxp, vyp);
-                        let tau = -AERO_ROT_DAMP * f.paceScale * f.omega * Math.abs(f.omega);
                         if (q > 1e-4) {
                             const a = Math.atan2(vyp, vxp);
                             const b = Math.abs(a) % Math.PI;
@@ -365,14 +358,18 @@
                             const Fxp = liftX + dragX, Fyp = liftY + dragY;
                             f.vx += (Fxp * uCx + Fyp * uWx) * aeroK * sdt;
                             f.vy += (Fxp * uCy + Fyp * uWy) * aeroK * sdt;
-                            tau += AERO_TORQUE_K * f.paceScale * q * q * Math.sin(2 * a);
                         }
                         f.vy += g * sdt;
-                        f.omega = clamp(f.omega + tau * sdt, -AERO_OMEGA_CAP, AERO_OMEGA_CAP);
-                        f.theta += f.omega * sdt;
                         f.x += f.vx * sdt;
                         f.y += f.vy * sdt;
                     }
+                    // The end-over-end tumble — a fixed rate, not aerodynamic
+                    // torque (see the comment above aeroCoeffs for why) —
+                    // with a slow modulation so it doesn't read as a motor.
+                    // The wobble factor stays well clear of zero, so the spin
+                    // never stalls or reverses; it just breathes a little.
+                    const wobble = 0.82 + 0.24 * Math.sin(f.t * f.omegaWobble + f.omegaWobbleSeed);
+                    f.theta += f.omega * wobble * dt;
                     // A real dropped card has a whole room to land in; this
                     // one only has the width of the canvas, and the lift the
                     // aerodynamics above generates is easily strong enough to
@@ -389,7 +386,7 @@
 
                     // The face-to-back flip (see spawnFlyer) runs on its own
                     // clock, a little faster when the real tumble is livelier.
-                    f.flipPhase += (f.flipRate + Math.abs(f.omega) * 0.3) * dt;
+                    f.flipPhase += (f.flipRate + Math.abs(f.omega) * 0.12) * dt;
 
                     // Approach: the last stretch is the slip travelling away
                     // from the viewer and down into the opening, not just down
@@ -629,10 +626,10 @@
                 // in-plane spin rather than replacing it.
                 rot: f.theta,
                 turn: Math.cos(f.churn ? f.theta : f.flipPhase),
-                // Bends with the real spin rate — a card that's mid-tumble
-                // visibly flexes, one that's slowed down goes flat, instead
-                // of an unrelated sine layered on top.
-                curl: f.curlAmt ? clamp(f.curlAmt * f.omega * 0.11, -0.65, 0.65) : 0,
+                // No bow: a falling slip stays a flat, crisp card. It used
+                // to flex with its spin rate, but that read as bending
+                // across the wrong axis more often than it read as paper.
+                curl: 0,
                 tone: f.tone,
                 name: f.name,
                 shade: f.shade || 0,
@@ -1098,7 +1095,6 @@
                         jitterAt: 0,
                         t: 0, theta: hashRandom(seed + 6) * 6.28,
                         omega: 5 + hashRandom(seed + 8) * 5,
-                        curlAmt: 0.18 + hashRandom(seed + 64) * 0.18,
                         tone: PAPER_TONES[seed % PAPER_TONES.length],
                         settling: 0, scale: 0.82, squash: 1, shade: 0,
                     });
