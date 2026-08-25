@@ -454,6 +454,14 @@
                 const wallBound = L.rx * 0.85;
                 if (f.x < L.cx - wallBound) { f.x = L.cx - wallBound; f.vx = Math.abs(f.vx) * 0.4; }
                 if (f.x > L.cx + wallBound) { f.x = L.cx + wallBound; f.vx = -Math.abs(f.vx) * 0.4; }
+                // Keeps turning at the same rate it was spinning at the
+                // instant it crossed the rim — freezing it here instead
+                // read as a glitch of its own: a card visibly tumbling the
+                // whole way down would suddenly lock still while continuing
+                // to fall and disappear.
+                f.theta += f.omega * dt;
+                f.flipPhase += f.flipRate * dt;
+                f.tumblePhase += f.tumbleRate * dt;
 
                 const goneY = L.my + L.ry * 1.3;
                 if (f.y >= goneY) {
@@ -684,9 +692,15 @@
         // a slip only half-swallowed still has its top sticking up over the far
         // edge. Clipping to this is what makes a slip get *cut off* by the rim
         // on the way down instead of fading out on top of the pot.
+        //
+        // The rect's bottom edge has to reach the ellipse's own top edge
+        // (L.ry * 0.92, not L.ry) or the two leave a sliver of the canvas
+        // between them that neither region covers — a slip crossing that
+        // band got a thin horizontal slice clipped out of it every time,
+        // reading as a glitch right at the rim rather than a clean entry.
         function clipToMouth() {
             ctx.beginPath();
-            ctx.rect(-W, -H, W * 3, H + (L.my - L.ry));
+            ctx.rect(-W, -H, W * 3, H + (L.my - L.ry * 0.92));
             ctx.ellipse(L.cx, L.my, L.rx * 0.94, L.ry * 0.92, 0, 0, Math.PI * 2);
             ctx.clip();
         }
