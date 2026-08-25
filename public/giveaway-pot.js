@@ -518,18 +518,17 @@
                 const entryY = L.my - L.ry * 0.3;
                 f.settling += dt / 0.52;
                 const q = clamp(f.settling, 0, 1);
-                // Real motion, not a scripted glide to centre: it keeps the
-                // sideways velocity it entered with and gravity keeps
-                // pulling on it, so a slip that comes in off-axis actually
-                // catches the inside of the rim and bounces off — the same
-                // wall bound and restitution updatePile uses for the pile
-                // it's about to join, just applied one frame early.
-                f.vy += 500 * dt;
-                f.x += f.vx * dt;
-                const wallBound = Math.max(L.rx * 0.30, L.rx * 0.90 - L.cardReach * 0.55);
-                if (f.x < L.cx - wallBound) { f.x = L.cx - wallBound; f.vx = Math.abs(f.vx) * 0.35; }
-                if (f.x > L.cx + wallBound) { f.x = L.cx + wallBound; f.vx = -Math.abs(f.vx) * 0.35; }
-                f.vx *= Math.max(0, 1 - 3 * dt);
+                // A smooth glide to centre, not real velocity carried
+                // through a wall bounce — this whole phase is a fast (0.52s)
+                // cosmetic dive into shadow, and reflecting off a bounds
+                // check mid-fade read as a stutter right where the eye is
+                // most sensitive to one (shrinking, darkening, about to
+                // vanish). The actual "hits the side of the bucket" physics
+                // still happens: spawnPileItem hands this slip's real x and
+                // vx to a live pile object the instant this phase ends, and
+                // that pile object gets genuine wall collisions in
+                // updatePile from its very next frame.
+                f.x += (L.cx - f.x) * Math.min(1, dt * 2.6);
                 f.y = entryY + q * L.ry * 1.4;
                 f.scale = 0.88 - q * 0.40;
                 // Only now does it foreshorten, tipping over as it drops — by
