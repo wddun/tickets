@@ -3415,7 +3415,7 @@
             <div>
                 <div class="attendee-name">${esc(g.name)}</div>
                 <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap;">
-                    ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : `<span title="Email not opened" style="font-size:10px;font-weight:600;color:var(--text-muted);">Sent</span>`}
+                    ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : g.tickets[0]?.confirmation_sent_at ? `<span title="Email not opened" style="font-size:10px;font-weight:600;color:var(--text-muted);">Sent</span>` : ''}
                     ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:var(--text-muted);">Downloaded to Wallet</span>` : ''}
                     ${lastSeenBadge}
                 </div>
@@ -7890,7 +7890,9 @@
             const emailOpenedAt = t.email_opened_at ? new Date(t.email_opened_at).toLocaleString() : null;
             const emailBadge = emailOpenedAt
                 ? `<span style="background:#d1fae5;color:#065f46;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;" title="Opened ${emailOpenedAt}">Opened</span>`
-                : `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Sent</span>`;
+                : t.confirmation_sent_at
+                    ? `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Sent</span>`
+                    : `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Not sent</span>`;
 
             const infoBar = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px;font-size:12px;color:var(--text-muted);">
                 <span>${createdStr ? `Registered ${createdStr}` : ''}</span>

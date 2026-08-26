@@ -2797,6 +2797,8 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
             html,
             attachments,
             registrationId,
+        }).then(() => {
+            stmt.tickets.setConfirmationSent.run(new Date().toISOString(), registrationId);
         }).catch(() => {});
     }
 
@@ -2881,6 +2883,8 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 
             html,
             attachments,
             registrationId,
+        }).then(() => {
+            stmt.tickets.setConfirmationSent.run(new Date().toISOString(), registrationId);
         }).catch(() => {});
     }
 
@@ -3693,6 +3697,7 @@ app.post('/api/register-bulk', async (req, res) => {
                     attachments,
                     registrationId: ticketsToSend[0].registrationId
                 });
+                stmt.tickets.setConfirmationSent.run(new Date().toISOString(), ticketsToSend[0].registrationId);
                 log('bulk-register', `[email] Email ${isUpdate ? 'updated' : 'sent'} → ${email}  name: ${fullName}  tickets: ${actualCount}  event: ${event.name}  regId: ${ticketsToSend[0].registrationId}`);
             }
         }
@@ -4285,6 +4290,7 @@ app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) 
             attachments,
             registrationId,
         });
+        stmt.tickets.setConfirmationSent.run(new Date().toISOString(), registrationId);
     } catch (err) {
         log('giveaway', `[ERR] Email send failed — email: ${winner.email}  err: ${err.message}`);
         return res.status(502).json({ error: 'Failed to send the winner email' });
@@ -4550,6 +4556,8 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
             html,
             attachments,
             registrationId
+        }).then(() => {
+            stmt.tickets.setConfirmationSent.run(new Date().toISOString(), registrationId);
         }).catch(err => {
             log('ticket-create', `[ERR] Email send failed — email: ${email}  err: ${err.message}`);
         });
@@ -4603,6 +4611,8 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
             html,
             attachments,
             registrationId: updatedTickets[0].registrationId
+        }).then(() => {
+            stmt.tickets.setConfirmationSent.run(new Date().toISOString(), updatedTickets[0].registrationId);
         }).catch(err => {
             log('ticket-edit', `[ERR] Email send failed — email: ${email}  err: ${err.message}`);
         });
@@ -4722,6 +4732,7 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
         attachments,
         registrationId: ticket.registrationId
     }).then(() => {
+        stmt.tickets.setConfirmationSent.run(new Date().toISOString(), ticket.registrationId);
         res.json({ success: true, count: actualCount });
     }).catch(err => {
         log('resend-email', `[ERR] Send failed — email: ${ticket.email}  err: ${err.message}`);
@@ -5145,6 +5156,7 @@ app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
                 attachments,
                 registrationId: regId
             });
+            stmt.tickets.setConfirmationSent.run(new Date().toISOString(), regId);
             sent++;
         } catch (err) {
             failed++;
@@ -8256,7 +8268,9 @@ app.post('/api/v1/registrations', ...apiRoute('manage_tickets'), async (req, res
             replyTo: REPLY_TO_EMAIL,
             subject: subject || `Your ticket for ${event.name}`,
             html, attachments, registrationId,
-        })).catch(err => log('api', `[warn] Ticket email failed — ${err.message}`));
+        })).then(() => {
+            stmt.tickets.setConfirmationSent.run(new Date().toISOString(), registrationId);
+        }).catch(err => log('api', `[warn] Ticket email failed — ${err.message}`));
     }
 
     const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);

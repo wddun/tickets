@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     updated_at TEXT,
     created_at TEXT,
     wallet_downloaded_at TEXT,
-    email_opened_at TEXT
+    email_opened_at TEXT,
+    confirmation_sent_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sheetLinks (
@@ -430,6 +431,19 @@ try {
 // Google forever, and a server restart doesn't lose or extend it.
 try { db.exec(`ALTER TABLE sheetWatchers ADD COLUMN boostUntil TEXT`); } catch {}
 try { db.exec(`ALTER TABLE sheetWatchers ADD COLUMN boostSeconds INTEGER DEFAULT 5`); } catch {}
+// When a confirmation email carrying this ticket was actually sent (first
+// send only — see setConfirmationSent). Existing rows predate this column
+// and there's no way to know after the fact whether their email went out, so
+// on the migration that adds it they're backfilled to created_at — the same
+// "assume it was sent" behaviour the dashboard's Sent/Opened badge already
+// had. Only rows created from here on can genuinely be NULL (never sent).
+{
+    let addedConfirmationSentAt = false;
+    try { db.exec(`ALTER TABLE tickets ADD COLUMN confirmation_sent_at TEXT`); addedConfirmationSentAt = true; } catch {}
+    if (addedConfirmationSentAt) {
+        db.exec(`UPDATE tickets SET confirmation_sent_at = created_at WHERE confirmation_sent_at IS NULL`);
+    }
+}
 
 // ── One-time migration from db.json ──────────────────────────────────────────
 
@@ -672,6 +686,7 @@ export const stmt = {
         setPassHash: db.prepare(`UPDATE tickets SET passHash=?, updated_at=? WHERE id=?`),
         setWalletDownloaded: db.prepare(`UPDATE tickets SET wallet_downloaded_at=? WHERE token=?`),
         setEmailOpened: db.prepare(`UPDATE tickets SET email_opened_at=? WHERE registrationId=? AND email_opened_at IS NULL`),
+        setConfirmationSent: db.prepare(`UPDATE tickets SET confirmation_sent_at=? WHERE registrationId=? AND confirmation_sent_at IS NULL`),
         deleteById: db.prepare(`DELETE FROM tickets WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM tickets WHERE eventId=?`),
     },
