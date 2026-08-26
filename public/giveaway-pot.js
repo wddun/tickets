@@ -178,11 +178,11 @@
             // as the width one there meant a taller container just grew a
             // bigger pot instead of leaving more open air for the fall —
             // exactly backwards from wanting slips visible for longer.
-            const potW = Math.min(W * 0.84, H * 0.66, 680);
+            const potW = Math.min(W * 0.60, H * 0.42, 680);
             const rx = potW / 2;
             const ry = rx * 0.34;
             const bodyH = potW * 0.72;
-            const my = H - bodyH - ry - H * 0.08;   // mouth centre
+            const my = H - bodyH - ry - H * 0.015;   // mouth centre
             L = {
                 cx: W / 2,
                 my,
