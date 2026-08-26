@@ -733,6 +733,7 @@ function renderPoolChips() {
 function updateSpinButton() {
     const need = Math.max(2, customization.winnersPerSpin + (customization.winnersPerSpin > 1 ? 0 : 1));
     document.getElementById('spinBtn').disabled = pool.length < 2 || spinning;
+    document.getElementById('spinBtn').textContent = spinnerStyle === 'pot' ? 'Pick' : 'Spin';
     document.getElementById('poolCount').textContent = pool.length === 1
         ? '1 entrant left'
         : `${pool.length} entrants in the pool`;
@@ -751,6 +752,7 @@ function setSpinnerStyle(style) {
     if (style === 'pot') { ensurePot(); syncPotCount(); }
     else if (style === 'classic') drawWheel(currentRotation);
     else renderReelAtRest();
+    updateSpinButton();
     // Reflected in this page's own URL — not to drive the display link
     // (that's one link that always shows the controller's current style,
     // see openPresentPanel), but so reloading or bookmarking the
@@ -1096,21 +1098,27 @@ function renderReelAtRest() {
     strip.style.transform = `translateY(${offset}px)`;
 }
 
-// Bounded decoy sequence so 500+ entrants still render/animate cheaply —
-// fairness comes from the random pick over the full pool, not from every
-// name appearing while it scrolls by. The winner sits a few rows before
-// the end (not the very last item) so real names are still visible below
-// it once the reel comes to rest, not blank space.
+// Every entrant scrolls past at least once — fairness reads as fairness
+// when the reel actually shows the field it drew from, not a random
+// handful standing in for it. Bounded so a pool of thousands doesn't turn
+// into an unreadable blur or a sequence too large to render/animate
+// cheaply: past REEL_DISTINCT_CAP names, a random sample stands in for the
+// rest (the winner is still a genuine random pick over the *full* pool —
+// this only bounds what's shown scrolling past). Below the cap, the shown
+// set is repeated enough times to give even a tiny pool a proper-length
+// spin instead of visibly looping within a second or two.
+const REEL_DISTINCT_CAP = 400;
+const REEL_MIN_SEQUENCE_LEN = 180;
 function buildReelSequence(winnerEntrant) {
-    const sampleSize = Math.min(pool.length, 30);
-    const loops = pool.length <= 6 ? 6 : (pool.length <= 60 ? 4 : 3);
+    const others = shuffled(pool.filter(e => e.registrationId !== winnerEntrant.registrationId));
+    const shown = others.slice(0, Math.min(others.length, REEL_DISTINCT_CAP));
+    const loops = shown.length ? Math.max(1, Math.ceil(REEL_MIN_SEQUENCE_LEN / shown.length)) : 1;
     const sequence = [];
-    for (let i = 0; i < loops; i++) sequence.push(...shuffled(pool).slice(0, sampleSize));
+    for (let i = 0; i < loops; i++) sequence.push(...shuffled(shown));
     const targetIndex = sequence.length;
     sequence.push(winnerEntrant);
-    const tailPool = pool.filter(e => e.registrationId !== winnerEntrant.registrationId);
-    const tailCount = Math.min(tailPool.length, 8);
-    sequence.push(...shuffled(tailPool).slice(0, tailCount));
+    const tailCount = Math.min(shown.length, 8);
+    sequence.push(...shuffled(shown).slice(0, tailCount));
     return { sequence, targetIndex };
 }
 
@@ -1465,7 +1473,11 @@ function spinReel(picked) {
     strip.style.transform = 'translateY(0px)';
 
     const targetOffset = -(targetIndex * REEL_ITEM_H + REEL_ITEM_H / 2) + REEL_WINDOW_H / 2;
-    const duration = 5.8 * SPEED_MULT[customization.speed];
+    // A longer sequence (a bigger pool) gets a longer spin, not just a
+    // faster one, up to a cap — the whole point of showing more names is
+    // for them to be seen going by, not to blur past in the same 5.8s a
+    // small pool gets.
+    const duration = Math.min(9, Math.max(5.8, sequence.length / 40)) * SPEED_MULT[customization.speed];
     const seqNames = sequence.map(reelLabel);
     const tickerEl = document.getElementById('nameTicker');
     const nameAtOffset = (off) =>
