@@ -201,7 +201,7 @@
                 // Big enough that a name is readable at a glance while it falls
                 // — the whole point of the style — without a burst of them
                 // becoming one solid sheet of paper.
-                slipW: clamp(W * 0.38, 88, 230),
+                slipW: clamp(W * 0.32, 76, 196),
             };
             L.slipH = L.slipW * 0.44;
         }
