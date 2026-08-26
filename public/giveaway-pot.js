@@ -178,7 +178,15 @@
             // as the width one there meant a taller container just grew a
             // bigger pot instead of leaving more open air for the fall —
             // exactly backwards from wanting slips visible for longer.
-            const potW = Math.min(W * 0.60, H * 0.42, 680);
+            // The 0.78 zooms the whole pot out from its original size, applied
+            // after the axis caps rather than baked into them separately —
+            // tweaking the two caps unevenly shrank the pot by a different
+            // proportion on a phone-width controller stage (width-bound) than
+            // on a wide projector display (height-bound), so the same "zoom
+            // out" read as barely-changed on one stage and much-too-small on
+            // the other. A single multiplier after the min() keeps both
+            // stages shrinking by the same fraction.
+            const potW = Math.min(W * 0.84, H * 0.66, 680) * 0.78;
             const rx = potW / 2;
             const ry = rx * 0.34;
             const bodyH = potW * 0.72;
