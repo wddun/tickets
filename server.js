@@ -6766,7 +6766,19 @@ function sheetRedirectAllowed(url) {
     } catch { return false; }
 }
 
+// Test-only escape hatch, mirroring the other five (TICKETS_DB,
+// SESSIONS_DIR, PASS_CACHE_DIR, EMAIL_SINK, DISABLE_RATE_LIMITS — see
+// test/README.md): unset in production, so this branch never runs there.
+// The sheet watcher only ever fetches from Google by design (SSRF
+// protection — see sheetHostAllowed), which makes it untestable at scale
+// through the real HTTP path without either hitting the live network or
+// weakening that protection. A `test-fixture:<file>` URL instead reads a
+// local CSV under SHEET_TEST_FIXTURES_DIR, so a test can exercise the exact
+// preview/condition-matching code a 10,000+ row sheet would hit, with
+// nothing mocked past the fetch itself.
+const SHEET_TEST_FIXTURE_SCHEME = 'test-fixture:';
 function sheetCsvUrl(shareUrl) {
+    if (process.env.SHEET_TEST_FIXTURES_DIR && shareUrl.startsWith(SHEET_TEST_FIXTURE_SCHEME)) return shareUrl;
     if (!/^https?:\/\//i.test(shareUrl)) return null;
     if (!sheetHostAllowed(shareUrl)) return null;
     if (shareUrl.includes('/spreadsheets/d/e/')) {
@@ -6782,6 +6794,13 @@ function sheetCsvUrl(shareUrl) {
 }
 
 async function fetchSheetRows(csvUrl) {
+    if (process.env.SHEET_TEST_FIXTURES_DIR && csvUrl.startsWith(SHEET_TEST_FIXTURE_SCHEME)) {
+        const file = path.join(process.env.SHEET_TEST_FIXTURES_DIR, csvUrl.slice(SHEET_TEST_FIXTURE_SCHEME.length));
+        const text = fs.readFileSync(file, 'utf8');
+        const rows = parseCsv(text);
+        if (!rows.length) throw new Error('The sheet appears to be empty.');
+        return { headers: rows[0].map(h => String(h).trim()), rows: rows.slice(1) };
+    }
     if (!sheetHostAllowed(csvUrl)) {
         throw new Error('Only Google Sheets links are supported here.');
     }
@@ -6928,6 +6947,24 @@ function sanitizeGroup(node, depth = 0, budget = { nodes: 0 }) {
 function watcherRowKey(row, rowIndex, tsIdx, email, cfg) {
     if (cfg?.oneTicketPerEmail) return email.toLowerCase();
     return `${tsIdx >= 0 ? String(row[tsIdx]).trim() : 'row' + rowIndex}|${email.toLowerCase()}`;
+}
+
+// A poll processes rows one at a time, each through a real internal HTTP
+// round-trip (see below) — on a large sheet that easily runs past the
+// scheduler's own 1-second tick, and lastPolledAt isn't written until the
+// whole pass finishes. Left alone, that means a slow poll is still "due" the
+// next time the tick (or a manual "Check now", or Boost) checks — starting
+// a second, fully concurrent pass over the same watcher, which races the
+// first on `sheetWatcherSeen` and double-issues whichever rows land in the
+// gap between the two. pollSheetWatcherOnce coalesces every caller onto the
+// same in-flight run per watcher instead.
+const sheetPollInFlight = new Map(); // watcherId -> in-flight poll promise
+function pollSheetWatcherOnce(watcher) {
+    const existing = sheetPollInFlight.get(watcher.id);
+    if (existing) return existing;
+    const p = pollSheetWatcher(watcher).finally(() => sheetPollInFlight.delete(watcher.id));
+    sheetPollInFlight.set(watcher.id, p);
+    return p;
 }
 
 async function pollSheetWatcher(watcher) {
@@ -7092,7 +7129,7 @@ setInterval(async () => {
         const now = Date.now();
         for (const w of stmt.sheetWatchers.allEnabled.all()) {
             const last = w.lastPolledAt ? new Date(w.lastPolledAt).getTime() : 0;
-            if (now - last >= watcherPollDueMs(w)) await pollSheetWatcher(w);
+            if (now - last >= watcherPollDueMs(w)) await pollSheetWatcherOnce(w);
         }
     } catch (err) {
         log('sheet-watch', `[ERR] Poll loop: ${err.message}`);
@@ -7101,8 +7138,15 @@ setInterval(async () => {
     }
 }, SHEET_POLL_TICK_MS);
 
-// Fetch the sheet once and return headers + sample rows + auto-suggested
-// column mapping, so the dashboard can offer dropdowns instead of typing.
+// Fetch the sheet once and return headers + rows + auto-suggested column
+// mapping, so the dashboard can offer dropdowns instead of typing. Used to
+// cap at 10 rows, which was fine for spot-checking a handful of test
+// submissions but told the organiser nothing about how a real, several
+// -thousand-row response sheet would actually be handled — the cap below is
+// a payload sanity limit, not a "sample," so an event's real row count (up
+// to this many) always comes back and the match-count preview in
+// dashboard.html is accurate, not just a guess extrapolated from 10 rows.
+const SHEET_PREVIEW_ROW_CAP = 50000;
 app.post('/api/event/:id/sheet-watch/preview', requireAuth, async (req, res) => {
     if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
     const url = String(req.body?.url || '').trim();
@@ -7118,8 +7162,9 @@ app.post('/api/event/:id/sheet-watch/preview', requireAuth, async (req, res) => 
         };
         res.json({
             headers,
-            sampleRows: rows.slice(0, 10),
+            sampleRows: rows.slice(0, SHEET_PREVIEW_ROW_CAP),
             rowCount: rows.length,
+            truncated: rows.length > SHEET_PREVIEW_ROW_CAP,
             suggested: {
                 conditionColumn: findH('check any', 'apply', 'interest'),
                 firstNameColumn: findH('first name') || findH('name'),
@@ -7251,7 +7296,7 @@ app.post('/api/event/:id/sheet-watch/boost', requireAuth, async (req, res) => {
 
     let summary = null;
     if (w.enabled) {
-        try { summary = await pollSheetWatcher(stmt.sheetWatchers.byEventId.get(req.params.id)); } catch (_) {}
+        try { summary = await pollSheetWatcherOnce(stmt.sheetWatchers.byEventId.get(req.params.id)); } catch (_) {}
     }
     const fresh = stmt.sheetWatchers.byEventId.get(req.params.id);
     res.json({ success: true, summary, watcher: sheetWatcherView(fresh) });
@@ -7262,7 +7307,7 @@ app.post('/api/event/:id/sheet-watch/poll', requireAuth, async (req, res) => {
     if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
     const w = stmt.sheetWatchers.byEventId.get(req.params.id);
     if (!w) return res.status(404).json({ error: 'No sheet watcher configured for this event' });
-    const summary = await pollSheetWatcher(w);
+    const summary = await pollSheetWatcherOnce(w);
     const fresh = stmt.sheetWatchers.byEventId.get(req.params.id);
     res.json({ success: true, summary, watcher: sheetWatcherView(fresh) });
 });

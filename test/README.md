@@ -27,8 +27,9 @@ Every file gets its own throwaway world under `os.tmpdir()`:
 | `PASS_CACHE_DIR` | its own wallet-pass cache |
 | `EMAIL_SINK` | every outgoing email, written to a JSONL file instead of SES |
 | `DISABLE_RATE_LIMITS` | the login/scan limiters, which a test run would otherwise trip |
+| `SHEET_TEST_FIXTURES_DIR` | lets a `test-fixture:<file>` sheet-watch URL read a local CSV instead of fetching Google Sheets |
 
-These are the only test hooks in the application code. All five are unset in
+These are the only test hooks in the application code. All six are unset in
 production, where the extra branches are dead.
 
 **No test can send real mail or reach a live Stripe account.** `EMAIL_SINK`
@@ -68,6 +69,7 @@ that path for real.
 | `admin.test.js` | admin-only routes, per-event metrics, the audit trail |
 | `pages.test.js` | which pages are served to whom, the service-worker contract, `?fresh=1` on generated links |
 | `rate-limits.test.js` | the login/reset/scan limiters — this file boots its own server with them left on |
+| `sheet-watch.test.js` | sheet import preview: row cap/truncation, condition matching correctness at 10,000+ rows |
 
 ## Writing a new test
 
