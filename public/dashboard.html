@@ -2020,7 +2020,43 @@
            primary action needs its own accent to read as a button at all. */
         .eb-topbar .btn-primary { background: #6366f1; }
         .eb-topbar .btn-primary:hover:not(:disabled) { background: #4f46e5; }
-        .eb-status { font-size: 12px; color: rgba(255,255,255,0.65); white-space: nowrap; }
+
+        /* Which of the two independent templates (ticket confirmation vs.
+           giveaway winner) is being edited — a full-width bar so the choice
+           reads as "you're in a different document now", not a minor toggle
+           buried in the preview pane. */
+        .eb-variant-bar {
+            display: flex; flex-shrink: 0;
+            background: var(--bg); border-bottom: 1px solid var(--border);
+        }
+        .eb-variant-tab {
+            flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px;
+            padding: 11px 16px; border: none; background: none; cursor: pointer;
+            border-bottom: 3px solid transparent; color: var(--text-muted); text-align: left;
+        }
+        .eb-variant-tab:hover { background: var(--card); }
+        .eb-variant-tab svg { flex-shrink: 0; }
+        .eb-variant-tab-title { font-size: 13px; font-weight: 700; color: var(--text); }
+        .eb-variant-tab-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+        .eb-variant-tab.active { background: var(--card); color: var(--navy); }
+        .eb-variant-tab.active#ebTabTicket { border-bottom-color: #6366f1; }
+        .eb-variant-tab.active#ebTabWinner { border-bottom-color: #f59e0b; }
+
+        /* Full-screen flash on switching templates — deliberately unmissable,
+           not a subtle status change, since editing the wrong one of two
+           independent templates is an easy mistake otherwise. */
+        .eb-variant-flash {
+            position: absolute; inset: 0; z-index: 50;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity .16s ease;
+        }
+        .eb-variant-flash.show { opacity: 1; }
+        .eb-variant-flash-ticket { background: linear-gradient(135deg, #1a1f3c, #3730a3); }
+        .eb-variant-flash-winner { background: linear-gradient(135deg, #b45309, #f59e0b); }
+        .eb-variant-flash-inner { display: flex; flex-direction: column; align-items: center; gap: 12px; color: #fff; }
+        .eb-variant-flash-inner svg { width: 42px; height: 42px; }
+        .eb-variant-flash-inner span { font-size: 17px; font-weight: 800; letter-spacing: .2px; }
+
         .eb-body { flex: 1; display: grid; grid-template-columns: 210px minmax(300px, 380px) 1fr; min-height: 0; }
         .eb-pane { overflow-y: auto; padding: 14px; min-height: 0; }
         .eb-pane + .eb-pane { border-left: 1px solid var(--border); }
@@ -2117,7 +2153,7 @@
             .eb-topbar-sub, .eb-topbar-spacer { display: none; }
             .eb-topbar-actions { width: 100%; }
             .eb-topbar-actions .btn { flex: 1; padding-left: 4px; padding-right: 4px; min-width: 0; }
-            .eb-status { margin-left: auto; }
+            .eb-variant-tab-sub { display: none; }
             .eb-body { grid-template-columns: 1fr; }
             .eb-pane + .eb-pane { border-left: none; border-top: 1px solid var(--border); }
             .eb-pane-palette { display: none; }
@@ -3438,9 +3474,7 @@
                         ${unchecked > 1 ? `<button class="btn btn-secondary btn-sm" onclick="openTicketPicker(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Check In 1</button>` : ''}
                         <button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">${unchecked > 1 ? 'Check In All' : 'Check In'}</button>`;
                 const editBtn = `<button class="btn btn-secondary btn-sm" onclick="openEditTicketModal(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Edit</button>`;
-                const latestWin = (g.tickets[0]?.giveawayWins || [])[0];
-                const resendWinnerBtn = latestWin ? `<button class="btn btn-secondary btn-sm" onclick="resendWinnerEmail('${g.registrationId}', ${JSON.stringify(latestWin.id).replace(/"/g, '&quot;')}, ${JSON.stringify(latestWin.prizeLabel).replace(/"/g, '&quot;')}, this)">Resend Winner Email</button>` : '';
-                const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap">${checkInBtns}${undoBtn}${editBtn}${resendWinnerBtn}</div>`;
+                const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap">${checkInBtns}${undoBtn}${editBtn}</div>`;
                 return `
         <div class="attendee-row${isChecked ? ' row-selected' : ''}" data-regid="${g.registrationId}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
@@ -7485,10 +7519,15 @@
             <div id="editTicketCustomFields" style="margin-bottom:16px;"></div>
             <input type="hidden" id="editTicketId" />
             <input type="hidden" id="editRegId" />
-            <button class="btn btn-primary" style="width:100%;margin-bottom:8px;" onclick="submitEditTicket(true)">Save Changes</button>
-            <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Ticket</button>
-                <button class="btn btn-secondary" style="flex:1;" onclick="openDirectEmailModal()">Custom Email</button>
+            <input type="hidden" id="editTicketWinnerId" />
+            <input type="hidden" id="editTicketPrizeLabel" />
+            <div style="display:flex;justify-content:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="submitEditTicket(true)">Save Changes</button>
+                <button class="btn btn-secondary" id="resendWinnerEmailBtn" style="display:none;" onclick="resendWinnerEmailFromModal(this)">Resend Winner Email</button>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:8px;justify-content:center;">
+                <button class="btn btn-secondary" style="flex:0 1 auto;" onclick="resendTicketEmail(this)">Resend Ticket</button>
+                <button class="btn btn-secondary" style="flex:0 1 auto;" onclick="openDirectEmailModal()">Custom Email</button>
             </div>
             <button class="btn btn-danger" style="width:100%;margin-top:4px;"
                 onclick="deleteRegistrationFromModal()">Delete Registration</button>
@@ -7978,6 +8017,16 @@
             document.getElementById('editTicketId').value = t.id;
             document.getElementById('editRegId').value = regId;
 
+            const latestWin = (t.giveawayWins || [])[0];
+            const resendWinnerBtn = document.getElementById('resendWinnerEmailBtn');
+            if (latestWin) {
+                document.getElementById('editTicketWinnerId').value = latestWin.id || '';
+                document.getElementById('editTicketPrizeLabel').value = latestWin.prizeLabel || '';
+                resendWinnerBtn.style.display = '';
+            } else {
+                resendWinnerBtn.style.display = 'none';
+            }
+
             renderCustomFieldsInputs('editTicketCustomFields', t.customFields || {});
             const _origCf = t.customFields || {};
             const _sortedCf = Object.fromEntries(Object.keys(_origCf).sort().map(k => [k, _origCf[k]]));
@@ -8147,6 +8196,13 @@
                 btn.disabled = false;
                 btn.textContent = originalText;
             }
+        }
+
+        function resendWinnerEmailFromModal(btn) {
+            const regId = document.getElementById('editRegId').value;
+            const winnerId = document.getElementById('editTicketWinnerId').value;
+            const prizeLabel = document.getElementById('editTicketPrizeLabel').value;
+            resendWinnerEmail(regId, winnerId, prizeLabel, btn);
         }
 
         function initLogsPanel() {
@@ -8349,6 +8405,8 @@
             copy: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
             trash: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
             chev: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
+            ticket: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4V9z"/><line x1="13" y1="7" x2="13" y2="17" stroke-dasharray="2,2"/></svg>',
+            trophy: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 5H4a1 1 0 0 0-1 1v1a4 4 0 0 0 4 4M17 5h3a1 1 0 0 1 1 1v1a4 4 0 0 1-4 4"/></svg>',
         };
 
         // `dynamic` blocks render server-supplied content (tickets, event
@@ -8395,28 +8453,46 @@
         let ebPreviewSeq = 0;
 
         async function renderEmailTemplateSection(eventId) {
-            let customized = false;
+            let customized = false, winnerCustomized = false;
             try {
                 const r = await fetch(`/api/event/${eventId}/email-template`);
                 if (r.status === 403) {
                     return '<div class="modal-section-title">Ticket Email</div>' +
                         '<div class="settings-empty">Only the event owner can edit the ticket email.</div>';
                 }
-                if (r.ok) customized = (await r.json()).customized;
+                if (r.ok) {
+                    const data = await r.json();
+                    customized = data.customized;
+                    winnerCustomized = data.winnerCustomized;
+                }
             } catch {
                 return '<div class="modal-section-title">Ticket Email</div>' +
                     '<div class="settings-empty">Could not load the ticket email settings.</div>';
             }
             return `
                 <div class="modal-section-title">Ticket Email</div>
-                <div class="settings-hint">Design the email attendees receive with their ticket &mdash; drag blocks to reorder, edit the wording, and add a calendar invite. The same layout is also used for giveaway winner notifications; preview that version with the Winner Email toggle inside the editor.</div>
+                <div class="settings-hint">Design the email attendees receive with their ticket &mdash; drag blocks to reorder, edit the wording, and add a calendar invite. Giveaway winner notifications use their own independent layout, edited on the Winner Email tab inside the editor.</div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;">
                     <button class="btn btn-primary" onclick="openEmailEditor('${eventId}')">Open email editor</button>
                     <span style="font-size:13px;color:${customized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
-                        ${customized ? 'Using a custom layout' : 'Using the default layout'}
+                        Ticket: ${customized ? 'custom layout' : 'default layout'}
+                    </span>
+                    <span style="font-size:13px;color:${winnerCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
+                        Winner: ${winnerCustomized ? 'custom layout' : 'mirrors ticket email'}
                     </span>
                 </div>`;
         }
+
+        const EB_VARIANT_META = {
+            ticket: { title: 'Ticket email', tabTitle: 'Ticket Email', tabSub: 'Sent with every registration', icon: 'ticket' },
+            winner: { title: 'Winner email', tabTitle: 'Winner Email', tabSub: 'Sent to giveaway winners', icon: 'trophy' },
+        };
+
+        // The two independent templates (regular ticket confirmation vs.
+        // giveaway winner notification) share one editor instance. `ebActive()`
+        // is the single seam every render/edit function goes through so the
+        // rest of the editor doesn't need to know which one is open.
+        function ebActive() { return ebState?.variants[ebState.activeVariant]; }
 
         async function openEmailEditor(eventId) {
             const ev = events.find(e => e.id === eventId);
@@ -8431,17 +8507,21 @@
 
             ebState = {
                 eventId,
-                template: payload.template,
-                defaultTemplate: payload.defaultTemplate,
-                customized: payload.customized,
-                selectedId: null,
-                dirty: false,
-                // Which send-context the live preview shows — the blocks
-                // being edited are identical either way, only the status-line
-                // text at the top differs (see giveawayWinnerIntroHtml
-                // server-side, which both the real winner send and this
-                // preview toggle go through).
-                variant: 'ticket',
+                activeVariant: 'ticket',
+                variants: {
+                    ticket: {
+                        template: payload.template,
+                        customized: payload.customized,
+                        selectedId: null,
+                        dirty: false,
+                    },
+                    winner: {
+                        template: payload.winnerTemplate,
+                        customized: payload.winnerCustomized,
+                        selectedId: null,
+                        dirty: false,
+                    },
+                },
             };
 
             const overlay = document.createElement('div');
@@ -8450,11 +8530,10 @@
             overlay.innerHTML = `
                 <div class="eb-topbar">
                     <div>
-                        <h2>Ticket email</h2>
+                        <h2 id="ebTitle">${EB_VARIANT_META.ticket.title}</h2>
                         <div class="eb-topbar-sub">${ev ? esc(ev.name) : ''}</div>
                     </div>
                     <div class="eb-topbar-spacer"></div>
-                    <span class="eb-status" id="ebStatus"></span>
                     <div class="eb-topbar-actions">
                         <button class="btn btn-secondary btn-sm eb-mobile-toggle" onclick="ebToggleMobilePane('palette')">Blocks</button>
                         <button class="btn btn-secondary btn-sm eb-mobile-toggle" onclick="ebToggleMobilePane('preview')">Preview</button>
@@ -8462,6 +8541,16 @@
                         <button class="btn btn-secondary btn-sm" onclick="closeEmailEditor()">Close</button>
                         <button class="btn btn-primary btn-sm" id="ebSaveBtn" onclick="ebSaveTemplate()">Save</button>
                     </div>
+                </div>
+                <div class="eb-variant-bar">
+                    ${Object.entries(EB_VARIANT_META).map(([key, m]) => `
+                        <button class="eb-variant-tab ${key === 'ticket' ? 'active' : ''}" id="ebTab${key === 'ticket' ? 'Ticket' : 'Winner'}" onclick="ebSetActiveVariant('${key}')">
+                            ${EB_ICONS[m.icon]}
+                            <div>
+                                <div class="eb-variant-tab-title">${m.tabTitle}</div>
+                                <div class="eb-variant-tab-sub">${m.tabSub}</div>
+                            </div>
+                        </button>`).join('')}
                 </div>
                 <div class="eb-body">
                     <div class="eb-pane eb-pane-palette">
@@ -8478,10 +8567,6 @@
                         <div class="eb-preview-wrap">
                             <div class="eb-preview-head">
                                 <div class="eb-pane-title" style="margin:0;">Live preview</div>
-                                <div class="eb-seg" id="ebSegVariant" title="The header, footer and every other block are shared — only this status line changes between the two.">
-                                    <button class="active" id="ebSegTicket" onclick="ebSetPreviewVariant('ticket')">Ticket Email</button>
-                                    <button id="ebSegWinner" onclick="ebSetPreviewVariant('winner')">Winner Email</button>
-                                </div>
                                 <div class="eb-seg">
                                     <button class="active" id="ebSegDesktop" onclick="ebSetPreviewWidth('desktop')">Desktop</button>
                                     <button id="ebSegMobile" onclick="ebSetPreviewWidth('mobile')">Mobile</button>
@@ -8502,7 +8587,8 @@
         }
 
         function closeEmailEditor() {
-            if (ebState?.dirty && !confirm('Discard unsaved changes to the ticket email?')) return;
+            const dirty = ebState && (ebState.variants.ticket.dirty || ebState.variants.winner.dirty);
+            if (dirty && !confirm('Discard unsaved changes to the email templates?')) return;
             document.getElementById('ebOverlay')?.remove();
             ebState = null;
         }
@@ -8522,24 +8608,46 @@
             document.getElementById('ebSegMobile')?.classList.toggle('active', mode === 'mobile');
         }
 
-        function ebSetPreviewVariant(mode) {
-            if (!ebState || ebState.variant === mode) return;
-            ebState.variant = mode;
-            document.getElementById('ebSegTicket')?.classList.toggle('active', mode !== 'winner');
-            document.getElementById('ebSegWinner')?.classList.toggle('active', mode === 'winner');
+        // Switching between the ticket and winner templates is a full
+        // document swap, not a preview toggle — a brief full-screen flash
+        // makes that unmistakable instead of leaving it to a small tab
+        // highlight someone can miss.
+        function ebSetActiveVariant(mode) {
+            if (!ebState || ebState.activeVariant === mode) return;
+            ebFlashVariantSwitch(mode);
+            ebState.activeVariant = mode;
+            const title = document.getElementById('ebTitle');
+            if (title) title.textContent = EB_VARIANT_META[mode].title;
+            document.getElementById('ebTabTicket')?.classList.toggle('active', mode === 'ticket');
+            document.getElementById('ebTabWinner')?.classList.toggle('active', mode === 'winner');
+            ebRenderPalette();
+            ebRenderDesign();
+            ebRenderCanvas();
             ebRefreshPreview();
+        }
+
+        function ebFlashVariantSwitch(mode) {
+            const body = document.querySelector('#ebOverlay .eb-body');
+            if (!body) return;
+            const flash = document.createElement('div');
+            flash.className = `eb-variant-flash eb-variant-flash-${mode}`;
+            flash.innerHTML = `<div class="eb-variant-flash-inner">${EB_ICONS[EB_VARIANT_META[mode].icon]}<span>Switching to ${EB_VARIANT_META[mode].tabTitle}&hellip;</span></div>`;
+            body.appendChild(flash);
+            requestAnimationFrame(() => flash.classList.add('show'));
+            setTimeout(() => {
+                flash.classList.remove('show');
+                setTimeout(() => flash.remove(), 200);
+            }, 380);
         }
 
         function ebMarkDirty() {
             if (!ebState) return;
-            ebState.dirty = true;
-            const s = document.getElementById('ebStatus');
-            if (s) s.textContent = 'Unsaved changes';
+            ebActive().dirty = true;
             ebSchedulePreview();
         }
 
         function ebRenderPalette() {
-            const used = new Set(ebState.template.blocks.map(b => b.type));
+            const used = new Set(ebActive().template.blocks.map(b => b.type));
             document.getElementById('ebPalette').innerHTML = Object.entries(EB_BLOCK_DEFS).map(([type, def]) => {
                 const disabled = def.singleton && used.has(type);
                 return `<button class="eb-palette-btn" ${disabled ? 'disabled' : ''} title="${esc(def.desc)}"
@@ -8548,7 +8656,7 @@
         }
 
         function ebRenderDesign() {
-            const s = ebState.template.settings;
+            const s = ebActive().template.settings;
             document.getElementById('ebDesign').innerHTML = `
                 <div class="eb-field">
                     <label>Subject line</label>
@@ -8585,12 +8693,12 @@
         }
 
         function ebSetSetting(key, value) {
-            ebState.template.settings[key] = value;
+            ebActive().template.settings[key] = value;
             ebMarkDirty();
         }
 
         function ebSetAccentMode(mode) {
-            ebState.template.settings.accent = mode === 'auto'
+            ebActive().template.settings.accent = mode === 'auto'
                 ? 'auto'
                 : (document.getElementById('ebAccentColor')?.value || '#6366f1');
             ebRenderDesign();
@@ -8614,9 +8722,9 @@
 
         function ebRenderCanvas() {
             const canvas = document.getElementById('ebCanvas');
-            canvas.innerHTML = ebState.template.blocks.map(b => {
+            canvas.innerHTML = ebActive().template.blocks.map(b => {
                 const def = EB_BLOCK_DEFS[b.type] || { label: b.type };
-                const open = ebState.selectedId === b.id;
+                const open = ebActive().selectedId === b.id;
                 return `
                 <div class="eb-card ${open ? 'selected' : ''}" data-id="${esc(b.id)}">
                     <div class="eb-card-head" onclick="ebToggleBlock('${esc(b.id)}')">
@@ -8699,10 +8807,10 @@
             }
         }
 
-        function ebFindBlock(id) { return ebState.template.blocks.find(b => b.id === id); }
+        function ebFindBlock(id) { return ebActive().template.blocks.find(b => b.id === id); }
 
         function ebToggleBlock(id) {
-            ebState.selectedId = ebState.selectedId === id ? null : id;
+            ebActive().selectedId = ebActive().selectedId === id ? null : id;
             ebRenderCanvas();
         }
 
@@ -8724,10 +8832,10 @@
                 props: JSON.parse(JSON.stringify(EB_DEFAULT_PROPS[type] || {})),
             };
             // New blocks land above the footer, which should stay last.
-            const footerIdx = ebState.template.blocks.findIndex(b => b.type === 'footerNote');
-            if (type !== 'footerNote' && footerIdx >= 0) ebState.template.blocks.splice(footerIdx, 0, block);
-            else ebState.template.blocks.push(block);
-            ebState.selectedId = block.id;
+            const footerIdx = ebActive().template.blocks.findIndex(b => b.type === 'footerNote');
+            if (type !== 'footerNote' && footerIdx >= 0) ebActive().template.blocks.splice(footerIdx, 0, block);
+            else ebActive().template.blocks.push(block);
+            ebActive().selectedId = block.id;
             ebRenderPalette();
             ebRenderCanvas();
             ebMarkDirty();
@@ -8735,18 +8843,18 @@
         }
 
         function ebDuplicateBlock(id) {
-            const i = ebState.template.blocks.findIndex(b => b.id === id);
+            const i = ebActive().template.blocks.findIndex(b => b.id === id);
             if (i < 0) return;
-            const copy = JSON.parse(JSON.stringify(ebState.template.blocks[i]));
+            const copy = JSON.parse(JSON.stringify(ebActive().template.blocks[i]));
             copy.id = `b-${copy.type}-${Date.now().toString(36)}`;
-            ebState.template.blocks.splice(i + 1, 0, copy);
+            ebActive().template.blocks.splice(i + 1, 0, copy);
             ebRenderCanvas();
             ebMarkDirty();
         }
 
         function ebRemoveBlock(id) {
-            ebState.template.blocks = ebState.template.blocks.filter(b => b.id !== id);
-            if (ebState.selectedId === id) ebState.selectedId = null;
+            ebActive().template.blocks = ebActive().template.blocks.filter(b => b.id !== id);
+            if (ebActive().selectedId === id) ebActive().selectedId = null;
             ebRenderPalette();
             ebRenderCanvas();
             ebMarkDirty();
@@ -8785,9 +8893,9 @@
                     window.removeEventListener('pointercancel', onUp);
                     card.classList.remove('dragging');
                     const order = [...list.querySelectorAll('.eb-card')].map(c => c.dataset.id);
-                    const before = ebState.template.blocks.map(b => b.id).join(',');
-                    ebState.template.blocks.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-                    if (ebState.template.blocks.map(b => b.id).join(',') !== before) ebMarkDirty();
+                    const before = ebActive().template.blocks.map(b => b.id).join(',');
+                    ebActive().template.blocks.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+                    if (ebActive().template.blocks.map(b => b.id).join(',') !== before) ebMarkDirty();
                 };
                 window.addEventListener('pointermove', onMove);
                 window.addEventListener('pointerup', onUp);
@@ -8803,16 +8911,18 @@
         async function ebRefreshPreview() {
             if (!ebState) return;
             const seq = ++ebPreviewSeq;
+            const variant = ebState.activeVariant;
             try {
                 const r = await fetch(`/api/event/${ebState.eventId}/email-template/preview`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ template: ebState.template, ticketCount: 1, variant: ebState.variant }),
+                    body: JSON.stringify({ template: ebActive().template, ticketCount: 1, variant }),
                 });
                 if (!r.ok) throw new Error();
                 const { html } = await r.json();
-                // A slower earlier request must not overwrite a newer preview.
-                if (seq !== ebPreviewSeq || !ebState) return;
+                // A slower earlier request, or one for a variant the user has
+                // since switched away from, must not overwrite a newer preview.
+                if (seq !== ebPreviewSeq || !ebState || ebState.activeVariant !== variant) return;
                 const frame = document.getElementById('ebPreviewFrame');
                 if (frame) frame.srcdoc = html;
             } catch {
@@ -8821,50 +8931,55 @@
         }
 
         async function ebSaveTemplate() {
+            const variant = ebState.activeVariant;
+            const label = EB_VARIANT_META[variant].title;
             const btn = document.getElementById('ebSaveBtn');
             btn.disabled = true; btn.textContent = 'Saving…';
             try {
                 const r = await fetch(`/api/event/${ebState.eventId}/email-template`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ template: ebState.template }),
+                    body: JSON.stringify({ template: ebActive().template, variant }),
                 });
                 if (!r.ok) throw new Error();
                 const data = await r.json();
-                ebState.template = data.template;
-                ebState.customized = true;
-                ebState.dirty = false;
-                document.getElementById('ebStatus').textContent = 'Saved';
-                showToast('Ticket email saved.');
+                ebActive().template = data.template;
+                ebActive().customized = true;
+                ebActive().dirty = false;
+                showToast(`${label} saved.`);
                 ebRenderCanvas();
                 ebRefreshPreview();
             } catch {
-                showToast('Could not save the ticket email.');
+                showToast(`Could not save the ${label.toLowerCase()}.`);
             } finally {
                 btn.disabled = false; btn.textContent = 'Save';
             }
         }
 
         async function ebResetTemplate() {
-            if (!await confirmDialog('Reset the ticket email back to the default layout?', { confirmText: 'Reset' })) return;
+            const variant = ebState.activeVariant;
+            const isWinner = variant === 'winner';
+            const confirmMsg = isWinner
+                ? 'Reset the winner email so it goes back to mirroring the ticket email?'
+                : 'Reset the ticket email back to the default layout?';
+            if (!await confirmDialog(confirmMsg, { confirmText: 'Reset' })) return;
             try {
                 const r = await fetch(`/api/event/${ebState.eventId}/email-template`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ template: null }),
+                    body: JSON.stringify({ template: null, variant }),
                 });
                 if (!r.ok) throw new Error();
                 const data = await r.json();
-                ebState.template = JSON.parse(JSON.stringify(data.template));
-                ebState.customized = false;
-                ebState.dirty = false;
-                ebState.selectedId = null;
-                document.getElementById('ebStatus').textContent = 'Reset to default';
+                ebActive().template = JSON.parse(JSON.stringify(data.template));
+                ebActive().customized = false;
+                ebActive().dirty = false;
+                ebActive().selectedId = null;
                 ebRenderPalette();
                 ebRenderDesign();
                 ebRenderCanvas();
                 ebRefreshPreview();
-                showToast('Reset to the default layout.');
+                showToast(isWinner ? 'Winner email now mirrors the ticket email.' : 'Reset to the default layout.');
             } catch {
                 showToast('Could not reset the template.');
             }

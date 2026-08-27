@@ -703,6 +703,17 @@ function giveawayWinnerIntroHtml(eventName, customMessage, prizeLabel) {
         : `&#127881; Congratulations, you're a winner of the <strong>${escEmailText(eventName)}</strong> giveaway!${prizeHtml}`;
 }
 
+// The winner email is a fully independent template (own blocks, own design)
+// once an organiser saves one — events.winnerEmailTemplate. Until then it
+// mirrors whatever the ticket email currently is (customised or default),
+// so a giveaway run before anyone's touched the Winner Email tab still gets
+// a sensible layout instead of the bare built-in default.
+function resolveWinnerEmailTemplate(event) {
+    return event.winnerEmailTemplate
+        ? normalizeEmailTemplate(event.winnerEmailTemplate)
+        : normalizeEmailTemplate(event.emailTemplate);
+}
+
 // Only http(s)/mailto get through — a template is authored by an event owner,
 // but the rendered result is mailed to third parties, so javascript:/data:
 // URLs must never survive into the output.
@@ -860,8 +871,8 @@ function renderEmailBlock(block, ctx) {
     switch (block.type) {
         case 'header':
             return `<tr><td style="background:${ctx.accentHex};padding:28px 32px;text-align:center;">
-    ${p.eyebrow ? `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgba(${ctx.accentTextRgb},0.7);text-transform:uppercase;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.eyebrow, ctx.vars)}</p>` : ''}
-    <h1 style="margin:0;font-size:26px;font-weight:800;color:${ctx.accentTextColor};line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.title, ctx.vars)}</h1>
+    ${p.eyebrow ? `<p style="margin:0 0 6px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.eyebrow, ctx.vars)}</p>` : ''}
+    <h1 style="margin:0;font-size:26px;font-weight:800;color:#ffffff;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${renderEmailInline(p.title, ctx.vars)}</h1>
   </td></tr>`;
 
         case 'text':
@@ -916,7 +927,7 @@ function renderEmailBlock(block, ctx) {
             const url = safeEmailUrl(applyEmailVars(p.url, ctx.vars));
             if (!url || !p.label) return '';
             return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="${p.align}">
-    <a href="${url}" style="display:inline-block;padding:13px 26px;background:${ctx.accentHex};color:${ctx.accentTextColor};font-size:15px;font-weight:700;border-radius:10px;text-decoration:none;">${renderEmailInline(p.label, ctx.vars)}</a>
+    <a href="${url}" style="display:inline-block;padding:13px 26px;background:${ctx.accentHex};color:#ffffff;font-size:15px;font-weight:700;border-radius:10px;text-decoration:none;">${renderEmailInline(p.label, ctx.vars)}</a>
     </td></tr></table>`;
         }
 
@@ -964,7 +975,7 @@ function renderEmailBlock(block, ctx) {
 // get an image to always render without a live fetch, on Gmail included.
 // Returns { html, attachments, subject } — attachments must be passed to
 // sendEmail(); subject is non-empty only when the template overrides it.
-async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '' }) {
+async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '', template: templateOverride = null }) {
     const dateStr = formatEventDateRange(event);
     const dateRowHtml = dateStr ? `
         <tr>
@@ -995,7 +1006,7 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         ? '#' + rawColor.match(/\d+/g).map(n => parseInt(n).toString(16).padStart(2, '0')).join('')
         : rawColor;
 
-    const template = normalizeEmailTemplate(event.emailTemplate);
+    const template = templateOverride || normalizeEmailTemplate(event.emailTemplate);
     const accentHex = template.settings.accent === 'auto' ? eventAccentHex : template.settings.accent;
     // Header/button/badge blocks paint text over accentHex — pick black or
     // white so it stays readable when an organiser picks a light event color.
@@ -1035,7 +1046,7 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         attachments.push({ cid: qrCid, content: qrBuffer, contentType: 'image/png', filename: `ticket-qr-${i}.png` });
         return `
 <div style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:16px;background:#fff;">
-  ${n > 1 ? `<div style="background:${accentHex};padding:7px 16px;"><p style="font-size:11px;font-weight:700;color:rgba(${accentTextRgb},0.9);text-transform:uppercase;letter-spacing:1px;margin:0;">Ticket ${i + 1} of ${n}</p></div>` : ''}
+  ${n > 1 ? `<div style="background:${accentHex};padding:7px 16px;"><p style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.9);text-transform:uppercase;letter-spacing:1px;margin:0;">Ticket ${i + 1} of ${n}</p></div>` : ''}
   <div style="padding:24px;text-align:center;">
     <p style="font-size:15px;font-weight:600;color:#111;margin:0 0 16px;">${t.name}</p>
     <table role="presentation" width="200" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 12px;">
@@ -4304,6 +4315,7 @@ app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) 
         intro,
         event,
         tickets,
+        template: resolveWinnerEmailTemplate(event),
     });
     try {
         await sendEmail({
@@ -4808,6 +4820,8 @@ app.get('/api/event/:id/email-template', requireAuth, (req, res) => {
         customized: !!event.emailTemplate,
         template: normalizeEmailTemplate(event.emailTemplate),
         defaultTemplate: DEFAULT_TICKET_EMAIL_TEMPLATE,
+        winnerCustomized: !!event.winnerEmailTemplate,
+        winnerTemplate: resolveWinnerEmailTemplate(event),
     });
 });
 
@@ -4816,17 +4830,26 @@ app.put('/api/event/:id/email-template', requireAuth, (req, res) => {
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!canManageEvent(req, event.id)) return res.status(403).json({ error: 'Not authorized' });
 
-    // An explicit null resets the event back to the built-in default rather
-    // than persisting a copy of it, so future default changes still apply.
+    // Two independent templates share this route, picked by `variant` — the
+    // ticket-confirmation layout (default) and the giveaway winner layout.
+    const isWinner = req.body?.variant === 'winner';
+    const setStmt = isWinner ? stmt.events.setWinnerEmailTemplate : stmt.events.setEmailTemplate;
+    const auditAction = isWinner ? 'winner_email_template' : 'email_template';
+
+    // An explicit null resets back to the fallback rather than persisting a
+    // copy of it, so future changes to that fallback still apply: the
+    // built-in default for the ticket email, or the current ticket email
+    // for the winner email (its "not customised" state).
     if (req.body?.template === null) {
-        stmt.events.setEmailTemplate.run(null, event.id);
-        logAudit(req, { eventId: event.id, action: 'email_template_reset' });
-        return res.json({ success: true, customized: false, template: DEFAULT_TICKET_EMAIL_TEMPLATE });
+        setStmt.run(null, event.id);
+        logAudit(req, { eventId: event.id, action: `${auditAction}_reset` });
+        const fallback = isWinner ? normalizeEmailTemplate(event.emailTemplate) : DEFAULT_TICKET_EMAIL_TEMPLATE;
+        return res.json({ success: true, customized: false, template: fallback });
     }
 
     const template = normalizeEmailTemplate(req.body?.template);
-    stmt.events.setEmailTemplate.run(JSON.stringify(template), event.id);
-    logAudit(req, { eventId: event.id, action: 'email_template_update', details: { blocks: template.blocks.length } });
+    setStmt.run(JSON.stringify(template), event.id);
+    logAudit(req, { eventId: event.id, action: `${auditAction}_update`, details: { blocks: template.blocks.length } });
     res.json({ success: true, customized: true, template });
 });
 
@@ -4852,12 +4875,14 @@ app.post('/api/event/:id/email-template/preview', requireAuth, async (req, res) 
     const intro = isWinnerVariant
         ? giveawayWinnerIntroHtml(event.name, null, 'a $50 gift card')
         : `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`;
+
     try {
         const { html } = await buildTicketEmailHtml({
             firstName: sample[0].firstName || 'Jane',
             intro,
-            event: { ...event, emailTemplate: template },
+            event,
             tickets: sample,
+            template,
         });
         // Inline images are cid: references that only resolve inside a real
         // message, so swap in a live QR endpoint for the preview only.

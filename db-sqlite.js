@@ -310,6 +310,10 @@ try { db.exec(`ALTER TABLE events ADD COLUMN walletLockScreenEnabled INTEGER DEF
 // built-in default template is used, so existing events keep their current
 // emails untouched.
 try { db.exec(`ALTER TABLE events ADD COLUMN emailTemplate TEXT`); } catch {}
+// Independent layout for giveaway winner notifications, same shape as
+// emailTemplate. NULL means "not customised" — the winner email mirrors
+// whatever the ticket email currently is until an organiser diverges it.
+try { db.exec(`ALTER TABLE events ADD COLUMN winnerEmailTemplate TEXT`); } catch {}
 // IANA zone the event physically happens in (e.g. America/New_York). Times are
 // stored as true UTC instants; this is what they get rendered back into. NULL
 // falls back to DEFAULT_EVENT_TIMEZONE — without it every render used the
@@ -619,6 +623,7 @@ export function rowToEvent(row) {
         emailPolicy: (() => { try { return row.emailPolicy ? JSON.parse(row.emailPolicy) : null; } catch { return null; } })(),
         walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
         emailTemplate: (() => { try { return row.emailTemplate ? JSON.parse(row.emailTemplate) : null; } catch { return null; } })(),
+        winnerEmailTemplate: (() => { try { return row.winnerEmailTemplate ? JSON.parse(row.winnerEmailTemplate) : null; } catch { return null; } })(),
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
     };
 }
@@ -688,6 +693,7 @@ export const stmt = {
         setShuttleLinkEnabled: db.prepare(`UPDATE events SET shuttleLinkEnabled=? WHERE id=?`),
         setWalletLockScreenEnabled: db.prepare(`UPDATE events SET walletLockScreenEnabled=? WHERE id=?`),
         setEmailTemplate: db.prepare(`UPDATE events SET emailTemplate=? WHERE id=?`),
+        setWinnerEmailTemplate: db.prepare(`UPDATE events SET winnerEmailTemplate=? WHERE id=?`),
         setTimezone: db.prepare(`UPDATE events SET timezone=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         setOwner: db.prepare(`UPDATE events SET userId=? WHERE id=?`),
