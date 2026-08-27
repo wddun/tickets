@@ -5242,11 +5242,21 @@
             { value: 'lessThan',       label: 'Less than' },
             { value: 'greaterOrEqual', label: 'Greater than or equal to' },
             { value: 'lessOrEqual',    label: 'Less than or equal to' },
+            { value: 'dateAfter',      label: 'Date is after' },
+            { value: 'dateBefore',     label: 'Date is before' },
             { value: 'isEmpty',        label: 'Is empty' },
             { value: 'isNotEmpty',     label: 'Is not empty' },
         ];
         const SW_OPERATOR_LABEL = Object.fromEntries(SW_OPERATORS.map(o => [o.value, o.label]));
+        const SW_DATE_OPERATORS = new Set(['dateAfter', 'dateBefore']);
         const swNeedsValue = op => op !== 'isEmpty' && op !== 'isNotEmpty';
+
+        // Mirrors parseSheetDate/cellMatchesCondition in server.js.
+        function swParseSheetDate(value) {
+            if (!value) return null;
+            const d = new Date(value);
+            return isNaN(d.getTime()) ? null : d;
+        }
 
         // Mirrors cellMatchesCondition/evaluateConditions in server.js — kept
         // in sync deliberately so the "X of N sample rows match" preview
@@ -5263,6 +5273,14 @@
                 case 'lessThan': return parseFloat(value) < parseFloat(target);
                 case 'greaterOrEqual': return parseFloat(value) >= parseFloat(target);
                 case 'lessOrEqual': return parseFloat(value) <= parseFloat(target);
+                case 'dateAfter': {
+                    const cellDate = swParseSheetDate(value), targetDate = swParseSheetDate(target);
+                    return !!cellDate && !!targetDate && cellDate.getTime() > targetDate.getTime();
+                }
+                case 'dateBefore': {
+                    const cellDate = swParseSheetDate(value), targetDate = swParseSheetDate(target);
+                    return !!cellDate && !!targetDate && cellDate.getTime() < targetDate.getTime();
+                }
                 case 'isEmpty': return value === '';
                 case 'isNotEmpty': return value !== '';
                 default: return false;
@@ -5370,7 +5388,9 @@
                             ${SW_OPERATORS.map(o => `<option value="${o.value}" ${node.operator === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
                         </select>
                         ${swNeedsValue(node.operator)
-                            ? `<input type="text" value="${esc(node.value)}" oninput="swLeafSetValue('${path}',this.value)" placeholder="value" style="flex:1 1 100%;min-width:0;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;box-sizing:border-box;">`
+                            ? (SW_DATE_OPERATORS.has(node.operator)
+                                ? `<input type="datetime-local" value="${esc(node.value)}" oninput="swLeafSetValue('${path}',this.value)" style="flex:1 1 100%;min-width:0;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;box-sizing:border-box;">`
+                                : `<input type="text" value="${esc(node.value)}" oninput="swLeafSetValue('${path}',this.value)" placeholder="value" style="flex:1 1 100%;min-width:0;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;box-sizing:border-box;">`)
                             : ''}
                     </div>
                 </div>`;
@@ -5446,49 +5466,104 @@
         // Updates both the "N of X match" line and the sample-rows table.
         // Called on every edit to conditions or the column mapping so the
         // organizer sees exactly what the watcher would do before saving.
+        //
+        // sampleRows is the sheet's entire row count — the preview endpoint
+        // holds nothing back — so the table below only ever builds DOM for
+        // the rows actually scrolled into view (see swRenderSampleTable),
+        // not one <tr> per row.
         function swUpdateMatchPreview() {
             const preview = document.getElementById('swMatchPreview');
             const table = document.getElementById('swSampleTable');
             if (!preview) return;
-            const { headers, sampleRows } = window.__swPreview;
+            const { headers, sampleRows, rowCount, truncated } = window.__swPreview;
             const ready = swGroupReady(window.__swGroup);
             if (!ready || !sampleRows.length) {
                 preview.textContent = 'Fill in every condition to preview matches.';
                 if (table) table.innerHTML = '';
+                swVirtual = null;
                 return;
             }
             const map = swReadCurrentMapping();
             const matchFlags = sampleRows.map(row => swEvaluateNode(window.__swGroup, headers, row));
             const matchCount = matchFlags.filter(Boolean).length;
-            preview.innerHTML = `<strong>${matchCount}</strong> of ${sampleRows.length} sample rows would trigger a ticket right now.`;
+            const coverageNote = truncated
+                ? ` (checked the first ${sampleRows.length.toLocaleString()} of ${rowCount.toLocaleString()} rows — the sheet is too large to check in full)`
+                : '';
+            preview.innerHTML = `<strong>${matchCount}</strong> of ${sampleRows.length.toLocaleString()} rows would trigger a ticket right now${coverageNote}.`;
+            if (table) swRenderSampleTable(headers, sampleRows, matchFlags, map);
+        }
 
-            if (table) {
-                const gv = (row, col) => { const i = headers.indexOf(col); return i >= 0 ? String(row[i] || '') : ''; };
-                const rowsHtml = sampleRows.map((row, ri) => {
-                    const matched = matchFlags[ri];
-                    const name = [gv(row, map.first), gv(row, map.last)].filter(Boolean).join(' ') || '—';
-                    const count = matched ? swResolveTicketCount(map, headers, row) : '';
-                    return `<tr style="background:${matched ? '#ecfdf5' : 'transparent'};">
-                        <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center;">${matched ? '<span style="color:#059669;font-weight:700;">&#10003;</span>' : '<span style="color:var(--border);">&mdash;</span>'}</td>
-                        <td style="padding:4px 6px;border-bottom:1px solid var(--border);white-space:nowrap;">${esc(name)}</td>
-                        <td style="padding:4px 6px;border-bottom:1px solid var(--border);color:var(--text-muted);white-space:nowrap;">${esc(gv(row, map.email)) || '—'}</td>
-                        <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center;">${count ? '&times;' + count : ''}</td>
-                    </tr>`;
-                }).join('');
-                table.innerHTML = `
-                    <div style="font-size:11px;color:var(--text-muted);margin:8px 0 4px;">Preview of first ${sampleRows.length} rows (matches highlighted):</div>
-                    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:6px;">
-                      <table style="width:100%;border-collapse:collapse;font-size:11px;">
-                        <thead><tr style="background:var(--surface-soft);">
-                          <th style="padding:4px 6px;text-align:center;font-weight:600;">Match</th>
-                          <th style="padding:4px 6px;text-align:left;font-weight:600;">Name</th>
-                          <th style="padding:4px 6px;text-align:left;font-weight:600;">Email</th>
-                          <th style="padding:4px 6px;text-align:center;font-weight:600;">Tickets</th>
-                        </tr></thead>
-                        <tbody>${rowsHtml}</tbody>
-                      </table>
-                    </div>`;
+        // ── Virtualized sample-rows table ──────────────────────────────────
+        // Renders only the rows currently scrolled into view (plus a small
+        // overscan buffer) instead of one <tr> per row — at 10,000+ rows,
+        // building the whole table on every keystroke (swUpdateMatchPreview
+        // runs on every condition/value edit) was visibly janky, and most of
+        // those rows are never looked at. A tall spacer keeps the scrollbar
+        // proportional to the real row count so scrolling still feels normal.
+        const SW_ROW_H = 26; // px — must match the row height used below
+        let swVirtual = null; // { headers, sampleRows, matchFlags, map, scrollEl, sizer }
+
+        function swRenderSampleTable(headers, sampleRows, matchFlags, map) {
+            const table = document.getElementById('swSampleTable');
+            if (!table) return;
+            // Same data set already has its scroll container built — just
+            // refresh the match flags/mapping and redraw what's on screen,
+            // so an edit's re-render doesn't reset the operator's scroll
+            // position back to the top.
+            if (swVirtual && swVirtual.sampleRows === sampleRows) {
+                swVirtual.headers = headers;
+                swVirtual.matchFlags = matchFlags;
+                swVirtual.map = map;
+                swRenderVirtualRows();
+                return;
             }
+
+            table.innerHTML = `
+                <div style="font-size:11px;color:var(--text-muted);margin:8px 0 4px;">Preview of ${sampleRows.length.toLocaleString()} row${sampleRows.length === 1 ? '' : 's'} (matches highlighted) &mdash; scroll for more:</div>
+                <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+                    <div style="display:flex;background:var(--surface-soft);font-weight:600;border-bottom:1px solid var(--border);">
+                        <div style="width:44px;flex-shrink:0;padding:4px 6px;text-align:center;">Match</div>
+                        <div style="flex:1;min-width:0;padding:4px 6px;">Name</div>
+                        <div style="flex:1;min-width:0;padding:4px 6px;">Email</div>
+                        <div style="width:56px;flex-shrink:0;padding:4px 6px;text-align:center;">Tickets</div>
+                    </div>
+                    <div id="swSampleScroll" style="max-height:320px;overflow-y:auto;position:relative;">
+                        <div id="swSampleSizer" style="position:relative;"></div>
+                    </div>
+                </div>`;
+
+            const scrollEl = document.getElementById('swSampleScroll');
+            const sizer = document.getElementById('swSampleSizer');
+            sizer.style.height = (sampleRows.length * SW_ROW_H) + 'px';
+
+            swVirtual = { headers, sampleRows, matchFlags, map, scrollEl, sizer };
+            scrollEl.onscroll = swRenderVirtualRows;
+            swRenderVirtualRows();
+        }
+
+        function swRenderVirtualRows() {
+            if (!swVirtual) return;
+            const { headers, sampleRows, matchFlags, map, scrollEl, sizer } = swVirtual;
+            const OVERSCAN = 10;
+            const viewH = scrollEl.clientHeight || 320;
+            const start = Math.max(0, Math.floor(scrollEl.scrollTop / SW_ROW_H) - OVERSCAN);
+            const end = Math.min(sampleRows.length, start + Math.ceil(viewH / SW_ROW_H) + OVERSCAN * 2);
+
+            const gv = (row, col) => { const i = headers.indexOf(col); return i >= 0 ? String(row[i] || '') : ''; };
+            let html = '';
+            for (let ri = start; ri < end; ri++) {
+                const row = sampleRows[ri];
+                const matched = matchFlags[ri];
+                const name = [gv(row, map.first), gv(row, map.last)].filter(Boolean).join(' ') || '—';
+                const count = matched ? swResolveTicketCount(map, headers, row) : '';
+                html += `<div style="position:absolute;top:${ri * SW_ROW_H}px;left:0;right:0;height:${SW_ROW_H}px;display:flex;align-items:center;font-size:11px;background:${matched ? '#ecfdf5' : 'transparent'};border-bottom:1px solid var(--border);box-sizing:border-box;">
+                    <div style="width:44px;flex-shrink:0;text-align:center;">${matched ? '<span style="color:#059669;font-weight:700;">&#10003;</span>' : '<span style="color:var(--border);">&mdash;</span>'}</div>
+                    <div style="flex:1;min-width:0;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(name)}</div>
+                    <div style="flex:1;min-width:0;padding:0 6px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(gv(row, map.email)) || '—'}</div>
+                    <div style="width:56px;flex-shrink:0;text-align:center;">${count ? '&times;' + count : ''}</div>
+                </div>`;
+            }
+            sizer.innerHTML = html;
         }
 
         function swGroupAddCondition(path) {

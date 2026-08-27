@@ -72,15 +72,22 @@ describe('sheet preview at scale', () => {
         assert.equal(r.body.sampleRows[11999][3], 'person11999@sheetfixture.test.local');
     });
 
-    test('caps and flags an extreme sheet instead of returning it whole', async () => {
+    test('returns a sheet whole even past the old 50,000-row cap', async () => {
+        // The preview used to stop at 50,000 rows as a payload sanity limit —
+        // dropped once the dashboard's match-preview table became virtualized
+        // (renders only the rows scrolled into view, so a huge sample no
+        // longer costs anything to display) and the live watcher itself was
+        // already scanning every row uncapped, making the preview the only
+        // place that couldn't show what the watcher would actually do.
         writeFixture('huge.csv', 60000, 5);
         const ev = await createEvent(owner.client);
 
         const r = await owner.client.post(`/api/event/${ev.id}/sheet-watch/preview`, { url: 'test-fixture:huge.csv' });
         assert.equal(r.status, 200, r.text);
         assert.equal(r.body.rowCount, 60000);
-        assert.equal(r.body.sampleRows.length, 50000, 'should stop at the payload sanity cap');
-        assert.equal(r.body.truncated, true);
+        assert.equal(r.body.sampleRows.length, 60000, 'every row should come back, no cap');
+        assert.equal(r.body.truncated, false);
+        assert.equal(r.body.sampleRows[59999][3], 'person59999@sheetfixture.test.local');
     });
 });
 
@@ -174,5 +181,79 @@ describe('condition matching at scale (10,000+ rows)', () => {
         assert.equal(tickets.body.length, expectedMatches, 'concurrent polls must not double-issue');
         const uniqueEmails = new Set(tickets.body.map(t => t.email));
         assert.equal(uniqueEmails.size, expectedMatches, 'every issued ticket should be for a distinct row');
+    });
+});
+
+describe('date conditions ("only rows after a given date/time")', () => {
+    test('dateAfter matches only rows timestamped later than the picked value', async () => {
+        const lines = ['Timestamp,First Name,Last Name,Email'];
+        const rows = [
+            ['8/25/2026 9:00:00', 'Alice', 'Anderson', 'alice@sheetfixture.test.local'],
+            ['8/26/2026 10:30:00', 'Bob', 'Brown', 'bob@sheetfixture.test.local'],
+            ['8/27/2026 18:45:00', 'Carol', 'Clark', 'carol@sheetfixture.test.local'],
+            ['8/28/2026 6:15:00', 'Dave', 'Davis', 'dave@sheetfixture.test.local'],
+        ];
+        for (const r of rows) lines.push(r.join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'dates.csv'), lines.join('\n'));
+
+        const ev = await createEvent(owner.client);
+        const connect = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, {
+            url: 'test-fixture:dates.csv',
+            // Everything strictly after midnight at the start of 8/27 — should
+            // catch Carol (8/27 18:45) and Dave (8/28 6:15) but not Alice or Bob.
+            conditionGroup: { match: 'all', children: [{ column: 'Timestamp', operator: 'dateAfter', value: '2026-08-27T00:00' }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            includeExisting: true,
+            sendEmail: false,
+            intervalMinutes: 15,
+        });
+        assert.equal(connect.status, 200, connect.text);
+
+        const poll = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(poll.status, 200, poll.text);
+        assert.equal(poll.body.summary.matched, 2);
+        assert.equal(poll.body.summary.issued, 2);
+
+        const tickets = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        const emails = new Set(tickets.body.map(t => t.email));
+        assert.ok(emails.has('carol@sheetfixture.test.local'));
+        assert.ok(emails.has('dave@sheetfixture.test.local'));
+        assert.ok(!emails.has('alice@sheetfixture.test.local'));
+        assert.ok(!emails.has('bob@sheetfixture.test.local'));
+    });
+
+    test('dateBefore matches only rows timestamped earlier than the picked value, and an unparseable cell never matches either way', async () => {
+        const lines = [
+            'Timestamp,First Name,Last Name,Email',
+            '8/25/2026 9:00:00,Eve,Evans,eve@sheetfixture.test.local',
+            '8/28/2026 6:15:00,Frank,Foster,frank@sheetfixture.test.local',
+            'not a date,Gina,Garcia,gina@sheetfixture.test.local',
+        ];
+        fs.writeFileSync(path.join(fixturesDir, 'dates-before.csv'), lines.join('\n'));
+
+        const ev = await createEvent(owner.client);
+        const connect = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, {
+            url: 'test-fixture:dates-before.csv',
+            conditionGroup: { match: 'all', children: [{ column: 'Timestamp', operator: 'dateBefore', value: '2026-08-27T00:00' }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            includeExisting: true,
+            sendEmail: false,
+            intervalMinutes: 15,
+        });
+        assert.equal(connect.status, 200, connect.text);
+
+        const poll = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(poll.status, 200, poll.text);
+        assert.equal(poll.body.summary.matched, 1, 'only the row before the cutoff — the unparseable row matches neither dateBefore nor dateAfter');
+
+        const tickets = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        const emails = new Set(tickets.body.map(t => t.email));
+        assert.ok(emails.has('eve@sheetfixture.test.local'));
+        assert.ok(!emails.has('frank@sheetfixture.test.local'));
+        assert.ok(!emails.has('gina@sheetfixture.test.local'));
     });
 });

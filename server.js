@@ -6830,8 +6830,21 @@ function watcherConfig(w) {
 const CONDITION_OPERATORS = new Set([
     'equals', 'notEquals', 'contains', 'notContains',
     'greaterThan', 'lessThan', 'greaterOrEqual', 'lessOrEqual',
+    'dateAfter', 'dateBefore',
     'isEmpty', 'isNotEmpty',
 ]);
+
+// Best-effort parse of a sheet cell as a date/time — covers both a Google
+// Forms auto-timestamp ("8/27/2026 16:12:06", locale-dependent) and the
+// datetime-local value the condition builder's date picker produces
+// ("2026-08-27T16:12"). No timezone is attached to either side, so this
+// compares in whatever timezone the machine parsing it is in — good enough
+// for "pull the ones after this point," not a source of truth across zones.
+function parseSheetDate(value) {
+    if (!value) return null;
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+}
 
 function cellMatchesCondition(cell, operator, targetValue) {
     const value = String(cell || '').trim();
@@ -6845,6 +6858,14 @@ function cellMatchesCondition(cell, operator, targetValue) {
         case 'lessThan': return parseFloat(value) < parseFloat(target);
         case 'greaterOrEqual': return parseFloat(value) >= parseFloat(target);
         case 'lessOrEqual': return parseFloat(value) <= parseFloat(target);
+        case 'dateAfter': {
+            const cellDate = parseSheetDate(value), targetDate = parseSheetDate(target);
+            return !!cellDate && !!targetDate && cellDate.getTime() > targetDate.getTime();
+        }
+        case 'dateBefore': {
+            const cellDate = parseSheetDate(value), targetDate = parseSheetDate(target);
+            return !!cellDate && !!targetDate && cellDate.getTime() < targetDate.getTime();
+        }
         case 'isEmpty': return value === '';
         case 'isNotEmpty': return value !== '';
         default: return false;
@@ -7142,11 +7163,14 @@ setInterval(async () => {
 // mapping, so the dashboard can offer dropdowns instead of typing. Used to
 // cap at 10 rows, which was fine for spot-checking a handful of test
 // submissions but told the organiser nothing about how a real, several
-// -thousand-row response sheet would actually be handled — the cap below is
-// a payload sanity limit, not a "sample," so an event's real row count (up
-// to this many) always comes back and the match-count preview in
-// dashboard.html is accurate, not just a guess extrapolated from 10 rows.
-const SHEET_PREVIEW_ROW_CAP = 50000;
+// -thousand-row response sheet would actually be handled. Later raised to a
+// 50,000-row cap, then dropped entirely: the live watcher itself already
+// scans every row of the sheet with no cap on every poll (see
+// pollSheetWatcher), so a preview that stopped short of the real count was
+// the only place in the feature that couldn't show what the watcher would
+// actually do — and dashboard.html's match-preview table is virtualized
+// (renders only the rows scrolled into view), so there's no longer a
+// DOM-cost reason to hold anything back either.
 app.post('/api/event/:id/sheet-watch/preview', requireAuth, async (req, res) => {
     if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
     const url = String(req.body?.url || '').trim();
@@ -7162,9 +7186,9 @@ app.post('/api/event/:id/sheet-watch/preview', requireAuth, async (req, res) => 
         };
         res.json({
             headers,
-            sampleRows: rows.slice(0, SHEET_PREVIEW_ROW_CAP),
+            sampleRows: rows,
             rowCount: rows.length,
-            truncated: rows.length > SHEET_PREVIEW_ROW_CAP,
+            truncated: false,
             suggested: {
                 conditionColumn: findH('check any', 'apply', 'interest'),
                 firstNameColumn: findH('first name') || findH('name'),
