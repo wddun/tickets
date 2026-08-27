@@ -517,6 +517,7 @@
             text-decoration: none;
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 6px;
             -webkit-touch-callout: none;
         }
@@ -7521,7 +7522,7 @@
             <input type="hidden" id="editRegId" />
             <input type="hidden" id="editTicketWinnerId" />
             <input type="hidden" id="editTicketPrizeLabel" />
-            <div style="display:flex;justify-content:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+            <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
                 <button class="btn btn-primary" onclick="submitEditTicket(true)">Save Changes</button>
                 <button class="btn btn-secondary" id="resendWinnerEmailBtn" style="display:none;" onclick="resendWinnerEmailFromModal(this)">Resend Winner Email</button>
             </div>

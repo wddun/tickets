@@ -254,7 +254,10 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
             <p style="margin:0 0 12px; color:#6b7280;">Questions? Reply to this email or visit <a href="${BASE_URL}" style="color:#0284c7; text-decoration:none;">our support page</a></p>
             <p style="margin:0; color:#9ca3af; font-size:11px;">&copy; 2026 Will's Tech Support. All rights reserved.<br>This is an automated message — please do not reply with sensitive information.</p>
         </div>`;
-        const withFooter = html + footer;
+        // Most callers pass a bare fragment (footer just appends), but the
+        // ticket/winner email is a full document (see buildTicketEmailHtml) —
+        // appending after </html> would put the footer outside the document.
+        const withFooter = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${footer}</body>`) : html + footer;
         const text = htmlToPlainText(withFooter);
 
         const sesFrom = (process.env.SES_FROM || '').trim();
@@ -1131,7 +1134,27 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
     }
     flushBody();
 
-    const html = `
+    // Every color here (page/card background, block text, an organiser's
+    // custom accent) is authored assuming light mode and never adapts —
+    // there's no dark-mode palette to switch into. Left undeclared, Apple
+    // Mail's automatic dark-mode conversion "corrects" colors it judges too
+    // light or too dark block-by-block rather than holistically, which is
+    // exactly wrong for a branded header: a dark accent (an organiser's
+    // black, say) with white text already has full contrast, but Apple Mail
+    // sees a dark background and force-lightens it, taking the white text's
+    // background out from under it and leaving white-on-white. Declaring
+    // color-scheme/supported-color-schemes as light-only is the standard
+    // fix — it tells clients that honor it (Apple Mail, Outlook.com) to
+    // render exactly as authored instead of reinterpreting it.
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+</head>
+<body style="margin:0;padding:0;background:${template.settings.pageBackground};">
 <div style="margin:0;padding:0;background:${template.settings.pageBackground};">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:${template.settings.pageBackground};">
 <tr><td align="center" style="padding:24px 16px;">
@@ -1140,7 +1163,9 @@ ${rows.join('\n')}
 </table>
 </td></tr>
 </table>
-</div>`;
+</div>
+</body>
+</html>`;
 
     const subject = template.settings.subject
         ? applyEmailVars(template.settings.subject, ctx.vars).trim()
