@@ -29,6 +29,12 @@
             --bg: #f4f5f7; --card: #ffffff; --text: #1e293b; --text-muted: #888888;
             --border: #dde3ed; --navy: #1a1f3c; --navy-mid: #252b52; --red-text: #c4294a;
             --surface-soft: #f9fafb; --accent-indigo: #4f46e5;
+            /* "This row matches" highlight in the sheet-watch preview table.
+               A flat light-green fill reads fine against light text on white,
+               but against dark mode's near-white --text it was nearly
+               unreadable — see the dark block below for why these aren't
+               the same values. */
+            --match-bg: #ecfdf5; --match-check: #059669;
             /* Header/topbar: its own surface, distinct from --navy (which
                stays a fixed brand color for buttons/badges in both themes —
                see the dark block below). Previously the topbar always used
@@ -47,6 +53,13 @@
             --text-muted: #94a3b8;
             --border: #252b52; --navy: #1a1f3c; --navy-mid: #252b52; --red-text: #e78098;
             --surface-soft: var(--navy-mid); --accent-indigo: #a5b4fc;
+            /* A translucent tint over the card instead of light mode's flat
+               fill — a solid light green here would fight the dark surface
+               the same way the old hardcoded #ecfdf5 fought --text: e9ecf5
+               (near-white on near-white). The checkmark moves to emerald-400
+               for the same reason emerald-600 stops reading clearly once the
+               background darkens. */
+            --match-bg: rgba(16, 185, 129, 0.16); --match-check: #34d399;
             /* Unchanged from before this pass — dark mode's topbar already
                matched the rest of the dark surface, only light mode needed
                its own values. */
@@ -5583,8 +5596,8 @@
                     const v = String(row[hi] ?? '').trim();
                     return `<div style="width:${SW_FIELD_COL_W}px;flex:0 0 auto;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(v)}">${esc(v) || '&mdash;'}</div>`;
                 }).join('');
-                html += `<div style="position:absolute;top:${ri * SW_ROW_H}px;left:0;height:${SW_ROW_H}px;width:${totalWidth}px;display:flex;align-items:center;font-size:11px;background:${matched ? '#ecfdf5' : 'transparent'};border-bottom:1px solid var(--border);box-sizing:border-box;">
-                    <div style="width:${SW_MATCH_COL_W}px;flex:0 0 auto;text-align:center;">${matched ? '<span style="color:#059669;font-weight:700;">&#10003;</span>' : '<span style="color:var(--border);">&mdash;</span>'}</div>
+                html += `<div style="position:absolute;top:${ri * SW_ROW_H}px;left:0;height:${SW_ROW_H}px;width:${totalWidth}px;display:flex;align-items:center;font-size:11px;background:${matched ? 'var(--match-bg)' : 'transparent'};border-bottom:1px solid var(--border);box-sizing:border-box;">
+                    <div style="width:${SW_MATCH_COL_W}px;flex:0 0 auto;text-align:center;">${matched ? '<span style="color:var(--match-check);font-weight:700;">&#10003;</span>' : '<span style="color:var(--border);">&mdash;</span>'}</div>
                     ${fieldCells}
                     <div style="width:${SW_TICKETS_COL_W}px;flex:0 0 auto;text-align:center;">${count ? '&times;' + count : ''}</div>
                 </div>`;
