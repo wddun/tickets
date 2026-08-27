@@ -257,3 +257,57 @@ describe('date conditions ("only rows after a given date/time")', () => {
         assert.ok(!emails.has('gina@sheetfixture.test.local'));
     });
 });
+
+describe('case-sensitive matching', () => {
+    test('caseSensitive:true only matches an exact-case answer; the default stays case-insensitive', async () => {
+        const lines = [
+            'Timestamp,First Name,Last Name,Email,Interested',
+            '2024-01-01T00:00:00,Alice,Anderson,alice@sheetfixture.test.local,YES',
+            '2024-01-01T00:00:01,Bob,Brown,bob@sheetfixture.test.local,yes',
+            '2024-01-01T00:00:02,Carol,Clark,carol@sheetfixture.test.local,No',
+        ];
+        fs.writeFileSync(path.join(fixturesDir, 'case.csv'), lines.join('\n'));
+
+        const ev = await createEvent(owner.client);
+        const connect = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, {
+            url: 'test-fixture:case.csv',
+            conditionGroup: { match: 'all', children: [{ column: 'Interested', operator: 'equals', value: 'YES', caseSensitive: true }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            includeExisting: true,
+            sendEmail: false,
+            intervalMinutes: 15,
+        });
+        assert.equal(connect.status, 200, connect.text);
+
+        const poll = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(poll.status, 200, poll.text);
+        assert.equal(poll.body.summary.matched, 1, 'only the exact-case "YES" — lowercase "yes" should not match');
+
+        const tickets = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        const emails = new Set(tickets.body.map(t => t.email));
+        assert.ok(emails.has('alice@sheetfixture.test.local'));
+        assert.ok(!emails.has('bob@sheetfixture.test.local'), 'lowercase "yes" must not match a case-sensitive "YES"');
+        assert.ok(!emails.has('carol@sheetfixture.test.local'));
+
+        // Same sheet, same condition, but without the flag — should now catch
+        // both "YES" and "yes" the way every other condition always has.
+        const ev2 = await createEvent(owner.client);
+        const connect2 = await owner.client.post(`/api/event/${ev2.id}/sheet-watch`, {
+            url: 'test-fixture:case.csv',
+            conditionGroup: { match: 'all', children: [{ column: 'Interested', operator: 'equals', value: 'YES' }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            includeExisting: true,
+            sendEmail: false,
+            intervalMinutes: 15,
+        });
+        assert.equal(connect2.status, 200, connect2.text);
+
+        const poll2 = await owner.client.post(`/api/event/${ev2.id}/sheet-watch/poll`, {});
+        assert.equal(poll2.status, 200, poll2.text);
+        assert.equal(poll2.body.summary.matched, 2, 'without caseSensitive, "YES" and "yes" both match as before');
+    });
+});

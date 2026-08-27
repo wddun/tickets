@@ -6846,14 +6846,20 @@ function parseSheetDate(value) {
     return isNaN(d.getTime()) ? null : d;
 }
 
-function cellMatchesCondition(cell, operator, targetValue) {
+// caseSensitive only affects the text operators (equals/notEquals/
+// contains/notContains) — it's meaningless for the numeric, date, and
+// empty/not-empty checks, so those never touch it and keep reading the
+// plain trimmed value/target regardless of how the toggle is set.
+function cellMatchesCondition(cell, operator, targetValue, caseSensitive) {
     const value = String(cell || '').trim();
     const target = String(targetValue || '').trim();
+    const cv = caseSensitive ? value : value.toLowerCase();
+    const ct = caseSensitive ? target : target.toLowerCase();
     switch (operator) {
-        case 'equals': return value.toLowerCase() === target.toLowerCase();
-        case 'notEquals': return value.toLowerCase() !== target.toLowerCase();
-        case 'contains': return value.toLowerCase().includes(target.toLowerCase());
-        case 'notContains': return !value.toLowerCase().includes(target.toLowerCase());
+        case 'equals': return cv === ct;
+        case 'notEquals': return cv !== ct;
+        case 'contains': return cv.includes(ct);
+        case 'notContains': return !cv.includes(ct);
         case 'greaterThan': return parseFloat(value) > parseFloat(target);
         case 'lessThan': return parseFloat(value) < parseFloat(target);
         case 'greaterOrEqual': return parseFloat(value) >= parseFloat(target);
@@ -6883,7 +6889,7 @@ function evaluateConditions(conditions, headers, row) {
     for (const cond of conditions) {
         const idx = headers.indexOf(cond.column);
         const cell = idx >= 0 ? row[idx] : '';
-        const matched = cellMatchesCondition(cell, cond.operator, cond.value);
+        const matched = cellMatchesCondition(cell, cond.operator, cond.value, cond.caseSensitive);
         result = result === null ? matched : (cond.join === 'OR' ? (result || matched) : (result && matched));
     }
     return !!result;
@@ -6916,7 +6922,7 @@ function evaluateNode(node, headers, row) {
     }
     const idx = headers.indexOf(node.column);
     const cell = idx >= 0 ? row[idx] : '';
-    return cellMatchesCondition(cell, node.operator, node.value);
+    return cellMatchesCondition(cell, node.operator, node.value, node.caseSensitive);
 }
 
 // Unified "does this row trigger?" — prefers the grouped tree, falls back to
@@ -6957,6 +6963,7 @@ function sanitizeGroup(node, depth = 0, budget = { nodes: 0 }) {
         column,
         operator: CONDITION_OPERATORS.has(node.operator) ? node.operator : 'contains',
         value: String(node.value || '').trim(),
+        caseSensitive: !!node.caseSensitive,
     };
 }
 
@@ -7221,6 +7228,7 @@ app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
                 column: String(c?.column || '').trim(),
                 operator: CONDITION_OPERATORS.has(c?.operator) ? c.operator : 'contains',
                 value: String(c?.value || '').trim(),
+                caseSensitive: !!c?.caseSensitive,
                 ...(i > 0 ? { join: c?.join === 'OR' ? 'OR' : 'AND' } : {}),
             }))
             .filter(c => c.column)

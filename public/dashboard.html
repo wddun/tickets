@@ -5249,6 +5249,9 @@
         ];
         const SW_OPERATOR_LABEL = Object.fromEntries(SW_OPERATORS.map(o => [o.value, o.label]));
         const SW_DATE_OPERATORS = new Set(['dateAfter', 'dateBefore']);
+        // Case only means anything for these four — greaterThan/dateAfter/etc.
+        // don't compare text, and isEmpty/isNotEmpty don't compare a value at all.
+        const SW_CASE_SENSITIVE_OPERATORS = new Set(['equals', 'notEquals', 'contains', 'notContains']);
         const swNeedsValue = op => op !== 'isEmpty' && op !== 'isNotEmpty';
 
         // Mirrors parseSheetDate/cellMatchesCondition in server.js.
@@ -5261,14 +5264,16 @@
         // Mirrors cellMatchesCondition/evaluateConditions in server.js — kept
         // in sync deliberately so the "X of N sample rows match" preview
         // reflects exactly what the server will do on the real sheet.
-        function swCellMatches(cell, operator, targetValue) {
+        function swCellMatches(cell, operator, targetValue, caseSensitive) {
             const value = String(cell || '').trim();
             const target = String(targetValue || '').trim();
+            const cv = caseSensitive ? value : value.toLowerCase();
+            const ct = caseSensitive ? target : target.toLowerCase();
             switch (operator) {
-                case 'equals': return value.toLowerCase() === target.toLowerCase();
-                case 'notEquals': return value.toLowerCase() !== target.toLowerCase();
-                case 'contains': return value.toLowerCase().includes(target.toLowerCase());
-                case 'notContains': return !value.toLowerCase().includes(target.toLowerCase());
+                case 'equals': return cv === ct;
+                case 'notEquals': return cv !== ct;
+                case 'contains': return cv.includes(ct);
+                case 'notContains': return !cv.includes(ct);
                 case 'greaterThan': return parseFloat(value) > parseFloat(target);
                 case 'lessThan': return parseFloat(value) < parseFloat(target);
                 case 'greaterOrEqual': return parseFloat(value) >= parseFloat(target);
@@ -5300,7 +5305,7 @@
             }
             const idx = headers.indexOf(node.column);
             const cell = idx >= 0 ? row[idx] : '';
-            return swCellMatches(cell, node.operator, node.value);
+            return swCellMatches(cell, node.operator, node.value, node.caseSensitive);
         }
 
         // Build the editable tree from a saved config, migrating every older
@@ -5309,12 +5314,12 @@
         function swGroupFromConfig(cfg, defaultColumn) {
             const clone = n => Array.isArray(n.children)
                 ? { match: n.match === 'any' ? 'any' : 'all', children: n.children.map(clone) }
-                : { column: n.column || '', operator: n.operator || 'contains', value: n.value || '' };
+                : { column: n.column || '', operator: n.operator || 'contains', value: n.value || '', caseSensitive: !!n.caseSensitive };
             if (cfg && cfg.conditionGroup && Array.isArray(cfg.conditionGroup.children)) {
                 return clone(cfg.conditionGroup);
             }
             if (cfg && Array.isArray(cfg.conditions) && cfg.conditions.length) {
-                const leaves = cfg.conditions.map(c => ({ column: c.column || '', operator: c.operator || 'contains', value: c.value || '' }));
+                const leaves = cfg.conditions.map(c => ({ column: c.column || '', operator: c.operator || 'contains', value: c.value || '', caseSensitive: !!c.caseSensitive }));
                 if (leaves.length === 1) return { match: 'all', children: leaves };
                 const joins = cfg.conditions.slice(1).map(c => c.join === 'OR' ? 'OR' : 'AND');
                 if (joins.every(j => j === 'AND')) return { match: 'all', children: leaves };
@@ -5355,7 +5360,8 @@
                 }
                 const opLabel = (SW_OPERATOR_LABEL[n.operator] || n.operator).toLowerCase();
                 const valuePart = swNeedsValue(n.operator) ? ` "${esc(n.value)}"` : '';
-                return `${esc(n.column)} ${opLabel}${valuePart}`;
+                const caseNote = SW_CASE_SENSITIVE_OPERATORS.has(n.operator) && n.caseSensitive ? ' (case-sensitive)' : '';
+                return `${esc(n.column)} ${opLabel}${valuePart}${caseNote}`;
             };
             return render(node, true);
         }
@@ -5391,6 +5397,12 @@
                             ? (SW_DATE_OPERATORS.has(node.operator)
                                 ? `<input type="datetime-local" value="${esc(node.value)}" oninput="swLeafSetValue('${path}',this.value)" style="flex:1 1 100%;min-width:0;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;box-sizing:border-box;">`
                                 : `<input type="text" value="${esc(node.value)}" oninput="swLeafSetValue('${path}',this.value)" placeholder="value" style="flex:1 1 100%;min-width:0;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;box-sizing:border-box;">`)
+                            : ''}
+                        ${SW_CASE_SENSITIVE_OPERATORS.has(node.operator)
+                            ? `<label style="flex:1 1 100%;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);cursor:pointer;">
+                                <input type="checkbox" ${node.caseSensitive ? 'checked' : ''} onchange="swLeafSetField('${path}','caseSensitive',this.checked)" style="accent-color:var(--accent, #6366f1);width:13px;height:13px;">
+                                Case-sensitive
+                               </label>`
                             : ''}
                     </div>
                 </div>`;
@@ -5500,8 +5512,19 @@
         // runs on every condition/value edit) was visibly janky, and most of
         // those rows are never looked at. A tall spacer keeps the scrollbar
         // proportional to the real row count so scrolling still feels normal.
-        const SW_ROW_H = 26; // px — must match the row height used below
-        let swVirtual = null; // { headers, sampleRows, matchFlags, map, scrollEl, sizer }
+        //
+        // Shows every column the sheet actually has, not just the derived
+        // name/email — that's the entire point of a preview: seeing exactly
+        // what the watcher would see, not a summary of it. With a real form's
+        // worth of questions that's wider than the panel, so it scrolls
+        // sideways too — the header row is sticky (position:sticky, not a
+        // separate element) so it stays put vertically while tracking the
+        // body horizontally, since both live in the same scroll container.
+        const SW_ROW_H = 26;    // px — must match the row height used below
+        const SW_MATCH_COL_W = 52;
+        const SW_FIELD_COL_W = 160;
+        const SW_TICKETS_COL_W = 68;
+        let swVirtual = null; // { headers, sampleRows, matchFlags, map, scrollEl, sizer, totalWidth }
 
         function swRenderSampleTable(headers, sampleRows, matchFlags, map) {
             const table = document.getElementById('swSampleTable');
@@ -5518,17 +5541,19 @@
                 return;
             }
 
+            const totalWidth = SW_MATCH_COL_W + headers.length * SW_FIELD_COL_W + SW_TICKETS_COL_W;
+            const headerCells = [
+                `<div style="width:${SW_MATCH_COL_W}px;flex:0 0 auto;padding:4px 6px;text-align:center;">Match</div>`,
+                ...headers.map(h => `<div style="width:${SW_FIELD_COL_W}px;flex:0 0 auto;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(h)}">${esc(h)}</div>`),
+                `<div style="width:${SW_TICKETS_COL_W}px;flex:0 0 auto;padding:4px 6px;text-align:center;">Tickets</div>`,
+            ].join('');
+
             table.innerHTML = `
-                <div style="font-size:11px;color:var(--text-muted);margin:8px 0 4px;">Preview of ${sampleRows.length.toLocaleString()} row${sampleRows.length === 1 ? '' : 's'} (matches highlighted) &mdash; scroll for more:</div>
-                <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;">
-                    <div style="display:flex;background:var(--surface-soft);font-weight:600;border-bottom:1px solid var(--border);">
-                        <div style="width:44px;flex-shrink:0;padding:4px 6px;text-align:center;">Match</div>
-                        <div style="flex:1;min-width:0;padding:4px 6px;">Name</div>
-                        <div style="flex:1;min-width:0;padding:4px 6px;">Email</div>
-                        <div style="width:56px;flex-shrink:0;padding:4px 6px;text-align:center;">Tickets</div>
-                    </div>
-                    <div id="swSampleScroll" style="max-height:320px;overflow-y:auto;position:relative;">
-                        <div id="swSampleSizer" style="position:relative;"></div>
+                <div style="font-size:11px;color:var(--text-muted);margin:8px 0 4px;">Preview of ${sampleRows.length.toLocaleString()} row${sampleRows.length === 1 ? '' : 's'} (matches highlighted) &mdash; scrolls both ways:</div>
+                <div style="border:1px solid var(--border);border-radius:6px;">
+                    <div id="swSampleScroll" style="max-height:320px;overflow:auto;position:relative;">
+                        <div style="position:sticky;top:0;z-index:1;display:flex;background:var(--surface-soft);font-weight:600;border-bottom:1px solid var(--border);width:${totalWidth}px;">${headerCells}</div>
+                        <div id="swSampleSizer" style="position:relative;width:${totalWidth}px;"></div>
                     </div>
                 </div>`;
 
@@ -5536,31 +5561,32 @@
             const sizer = document.getElementById('swSampleSizer');
             sizer.style.height = (sampleRows.length * SW_ROW_H) + 'px';
 
-            swVirtual = { headers, sampleRows, matchFlags, map, scrollEl, sizer };
+            swVirtual = { headers, sampleRows, matchFlags, map, scrollEl, sizer, totalWidth };
             scrollEl.onscroll = swRenderVirtualRows;
             swRenderVirtualRows();
         }
 
         function swRenderVirtualRows() {
             if (!swVirtual) return;
-            const { headers, sampleRows, matchFlags, map, scrollEl, sizer } = swVirtual;
+            const { headers, sampleRows, matchFlags, map, scrollEl, sizer, totalWidth } = swVirtual;
             const OVERSCAN = 10;
             const viewH = scrollEl.clientHeight || 320;
             const start = Math.max(0, Math.floor(scrollEl.scrollTop / SW_ROW_H) - OVERSCAN);
             const end = Math.min(sampleRows.length, start + Math.ceil(viewH / SW_ROW_H) + OVERSCAN * 2);
 
-            const gv = (row, col) => { const i = headers.indexOf(col); return i >= 0 ? String(row[i] || '') : ''; };
             let html = '';
             for (let ri = start; ri < end; ri++) {
                 const row = sampleRows[ri];
                 const matched = matchFlags[ri];
-                const name = [gv(row, map.first), gv(row, map.last)].filter(Boolean).join(' ') || '—';
                 const count = matched ? swResolveTicketCount(map, headers, row) : '';
-                html += `<div style="position:absolute;top:${ri * SW_ROW_H}px;left:0;right:0;height:${SW_ROW_H}px;display:flex;align-items:center;font-size:11px;background:${matched ? '#ecfdf5' : 'transparent'};border-bottom:1px solid var(--border);box-sizing:border-box;">
-                    <div style="width:44px;flex-shrink:0;text-align:center;">${matched ? '<span style="color:#059669;font-weight:700;">&#10003;</span>' : '<span style="color:var(--border);">&mdash;</span>'}</div>
-                    <div style="flex:1;min-width:0;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(name)}</div>
-                    <div style="flex:1;min-width:0;padding:0 6px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(gv(row, map.email)) || '—'}</div>
-                    <div style="width:56px;flex-shrink:0;text-align:center;">${count ? '&times;' + count : ''}</div>
+                const fieldCells = headers.map((h, hi) => {
+                    const v = String(row[hi] ?? '').trim();
+                    return `<div style="width:${SW_FIELD_COL_W}px;flex:0 0 auto;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(v)}">${esc(v) || '&mdash;'}</div>`;
+                }).join('');
+                html += `<div style="position:absolute;top:${ri * SW_ROW_H}px;left:0;height:${SW_ROW_H}px;width:${totalWidth}px;display:flex;align-items:center;font-size:11px;background:${matched ? '#ecfdf5' : 'transparent'};border-bottom:1px solid var(--border);box-sizing:border-box;">
+                    <div style="width:${SW_MATCH_COL_W}px;flex:0 0 auto;text-align:center;">${matched ? '<span style="color:#059669;font-weight:700;">&#10003;</span>' : '<span style="color:var(--border);">&mdash;</span>'}</div>
+                    ${fieldCells}
+                    <div style="width:${SW_TICKETS_COL_W}px;flex:0 0 auto;text-align:center;">${count ? '&times;' + count : ''}</div>
                 </div>`;
             }
             sizer.innerHTML = html;
