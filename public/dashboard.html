@@ -7522,13 +7522,13 @@
             <input type="hidden" id="editRegId" />
             <input type="hidden" id="editTicketWinnerId" />
             <input type="hidden" id="editTicketPrizeLabel" />
-            <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-                <button class="btn btn-primary" onclick="submitEditTicket(true)">Save Changes</button>
-                <button class="btn btn-secondary" id="resendWinnerEmailBtn" style="display:none;" onclick="resendWinnerEmailFromModal(this)">Resend Winner Email</button>
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket(true)">Save Changes</button>
+                <button class="btn btn-secondary" id="resendWinnerEmailBtn" style="flex:1;display:none;" onclick="resendWinnerEmailFromModal(this)">Resend Winner Email</button>
             </div>
-            <div style="display:flex;gap:8px;margin-bottom:8px;justify-content:center;">
-                <button class="btn btn-secondary" style="flex:0 1 auto;" onclick="resendTicketEmail(this)">Resend Ticket</button>
-                <button class="btn btn-secondary" style="flex:0 1 auto;" onclick="openDirectEmailModal()">Custom Email</button>
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Ticket</button>
+                <button class="btn btn-secondary" style="flex:1;" onclick="openDirectEmailModal()">Custom Email</button>
             </div>
             <button class="btn btn-danger" style="width:100%;margin-top:4px;"
                 onclick="deleteRegistrationFromModal()">Delete Registration</button>
