@@ -249,8 +249,10 @@
                 baseRx: rx * 0.74,
                 // Big enough that a name is readable at a glance while it falls
                 // — the whole point of the style — without a burst of them
-                // becoming one solid sheet of paper.
-                slipW: clamp(W * 0.32, 76, 196),
+                // becoming one solid sheet of paper. Still read as oversized
+                // on the presentation screen's wider stage even after the
+                // previous pass at this (e68d26e); shrunk again.
+                slipW: clamp(W * 0.26, 62, 158),
             };
             L.slipH = L.slipW * 0.44;
         }
@@ -1363,7 +1365,10 @@
                 const cols = Math.min(names.length, 3);
                 const rows = Math.ceil(names.length / cols);
                 const air = Math.max(40, L.my - L.ry);
-                const slipW = Math.min(W * 0.78, 380, (W * 0.86) / cols, (air * 1.55) / (0.55 + rows * 0.45));
+                // Sized off the same ratio as the falling slips (~0.26 of the
+                // stage), not the far larger W*0.78/380 this used to allow —
+                // the revealed winner is one ticket, not a poster.
+                const slipW = Math.min(W * 0.6, 300, (W * 0.68) / cols, (air * 1.55) / (0.55 + rows * 0.45));
                 const top = air * 0.5;
                 spinState = {
                     start: performance.now(),
