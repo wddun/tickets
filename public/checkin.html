@@ -184,6 +184,13 @@
             font-size: 11px; color: rgba(255,255,255,0.3);
             margin-top: 2px;
         }
+        .person-winner-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 11px; font-weight: 700; color: var(--warning);
+            background: rgba(251,191,36,0.14); border-radius: 10px;
+            padding: 2px 7px; margin-top: 4px; width: fit-content;
+        }
+        .person-winner-badge svg { width: 11px; height: 11px; flex-shrink: 0; }
 
         .row-checkin-btn {
             background: #fff;
@@ -515,6 +522,17 @@ function buildPersonRow(a) {
         ? `<div class="person-lastseen" title="Last sighting: ${new Date(lastSeenAt).toLocaleString()}">Last seen ${new Date(lastSeenAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>`
         : '';
 
+    // Every ticket in a registration carries the same giveawayWins array
+    // (the server keys it by registrationId), so the first ticket's is enough.
+    const wins = a.tickets[0]?.giveawayWins || [];
+    const prizes = wins.map(w => w.prizeLabel).filter(Boolean).join(', ');
+    const winnerBadgeHtml = wins.length
+        ? `<div class="person-winner-badge" title="${escAttr(prizes || 'Giveaway winner')}">
+               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a2 2 0 0 0 0 4h.5M17 6h3a2 2 0 0 1 0 4h-.5"/></svg>
+               ${wins.length > 1 ? `Won &times;${wins.length}` : 'Winner'}
+           </div>`
+        : '';
+
     const initials = a.name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
     const avClass  = allDone ? 'av-done' : noDone ? 'av-pending' : 'av-partial';
     const sdClass  = allDone ? 'sd-done' : noDone ? 'sd-pending' : 'sd-partial';
@@ -553,6 +571,7 @@ function buildPersonRow(a) {
                         ${escHtml(statusTxt)}
                     </div>
                     ${lastSeenHtml}
+                    ${winnerBadgeHtml}
                 </div>
                 <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:8px;flex-shrink:0">
                     ${multiHint}${actionHtml}

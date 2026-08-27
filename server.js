@@ -1,5 +1,5 @@
 import express from 'express';
-import { db, stmt, rowToTicket, rowToEvent, rowToUser, rowToDiscountCode, rowToWaitlistEntry, getWalletDevicesBySerials, getTicketsByTokens } from './db-sqlite.js';
+import { db, stmt, rowToTicket, rowToEvent, rowToUser, rowToDiscountCode, rowToWaitlistEntry, rowToGiveawayWinner, getWalletDevicesBySerials, getTicketsByTokens } from './db-sqlite.js';
 import { nanoid } from 'nanoid';
 import QRCode from 'qrcode';
 import { SESClient, SendEmailCommand, SendRawEmailCommand } from '@aws-sdk/client-ses';
@@ -4209,6 +4209,16 @@ app.get('/api/event/:id/tickets', requireAuthOrScanLink, (req, res) => {
     const tickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
     const lastSeen = new Map(stmt.ticketScans.lastPerTicketByEventId.all(req.params.id).map(r => [r.ticketId, r.lastSeenAt]));
     tickets.forEach(t => { t.lastSeenAt = lastSeen.get(t.id) || null; });
+    // Giveaway win status, shown as a badge next to the ticket wherever the
+    // attendee list is rendered. Keyed by registrationId the same way the
+    // giveaway pool dedupes entrants — one registration, one draw entry,
+    // even if it bought several tickets.
+    const winsByRegistration = new Map();
+    for (const w of stmt.giveawayWinners.byEventId.all(req.params.id)) {
+        if (!winsByRegistration.has(w.registrationId)) winsByRegistration.set(w.registrationId, []);
+        winsByRegistration.get(w.registrationId).push({ prizeLabel: w.prizeLabel || null, wonAt: w.createdAt });
+    }
+    tickets.forEach(t => { t.giveawayWins = winsByRegistration.get(t.registrationId || t.id) || []; });
     res.json(tickets);
 });
 
@@ -4257,7 +4267,7 @@ app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) 
         return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const { registrationId, prizeLabel, customMessage } = req.body;
+    const { registrationId, prizeLabel, customMessage, winnerId } = req.body;
     if (!registrationId) return res.status(400).json({ error: 'registrationId is required' });
 
     const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
@@ -4291,6 +4301,14 @@ app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) 
             registrationId,
         });
         stmt.tickets.setConfirmationSent.run(new Date().toISOString(), registrationId);
+        // winnerId ties this send back to a specific recorded draw (there can
+        // be more than one per registration across separate draws) so the
+        // Winners list shows "Emailed" against the right entry rather than
+        // guessing which of a registration's wins this send was for.
+        if (winnerId) {
+            const row = rowToGiveawayWinner(stmt.giveawayWinners.byId.get(winnerId));
+            if (row && row.eventId === event.id) stmt.giveawayWinners.setEmailed.run(new Date().toISOString(), winnerId);
+        }
     } catch (err) {
         log('giveaway', `[ERR] Email send failed — email: ${winner.email}  err: ${err.message}`);
         return res.status(502).json({ error: 'Failed to send the winner email' });
@@ -4299,6 +4317,141 @@ app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) 
     log('giveaway', `[winner] Notified — name: ${winner.name}  email: ${winner.email}  event: ${event.name} (${event.id})  by: ${req.session.userId}`);
     logAudit(req, { eventId: event.id, action: 'giveaway.winnerNotified', details: { email: winner.email, prizeLabel: prizeLabel || null } });
     res.json({ success: true });
+});
+
+// Recorded win history for the event — persists across page reloads and
+// browser sessions, unlike the controller's own in-memory winners list,
+// which is lost the moment giveaway.html is closed or the event is switched.
+// Also what /api/event/:id/tickets reads to attach a "won" status to a
+// registration's ticket(s).
+app.get('/api/event/:id/giveaway/winners', requireAuth, (req, res) => {
+    if (!stmt.events.byId.get(req.params.id) || !userEventCapabilities(req.session.userId, req.params.id).length) {
+        return res.status(401).json({ error: 'Unauthorized or not found' });
+    }
+    res.json(stmt.giveawayWinners.byEventId.all(req.params.id).map(rowToGiveawayWinner));
+});
+
+// Records a draw result independently of whether the "you won" email was
+// sent — confirmWinner() in giveaway.html calls this every time regardless
+// of the email toggle, so the persisted list matches what the operator
+// actually confirmed, not just the subset that got emailed.
+app.post('/api/event/:id/giveaway/winners', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const { registrationId, prizeLabel } = req.body;
+    if (!registrationId) return res.status(400).json({ error: 'registrationId is required' });
+
+    const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
+    if (!tickets.length || tickets[0].eventId !== event.id) {
+        return res.status(404).json({ error: 'Registration not found for this event' });
+    }
+    const winner = tickets[0];
+
+    const row = {
+        id: nanoid(),
+        eventId: event.id,
+        registrationId,
+        name: winner.name || null,
+        email: winner.email || null,
+        prizeLabel: prizeLabel || null,
+        emailedAt: null,
+        createdAt: new Date().toISOString(),
+        createdBy: req.session.userId,
+    };
+    stmt.giveawayWinners.insert.run(row.id, row.eventId, row.registrationId, row.name, row.email, row.prizeLabel, row.emailedAt, row.createdAt, row.createdBy);
+    logAudit(req, { eventId: event.id, action: 'giveaway.winnerRecorded', details: { email: winner.email, prizeLabel: prizeLabel || null } });
+    res.json(row);
+});
+
+app.delete('/api/event/:id/giveaway/winners/:winnerId', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    const row = rowToGiveawayWinner(stmt.giveawayWinners.byId.get(req.params.winnerId));
+    if (!row || row.eventId !== event.id) return res.status(404).json({ error: 'Winner record not found' });
+
+    stmt.giveawayWinners.deleteById.run(req.params.winnerId, event.id);
+    logAudit(req, { eventId: event.id, action: 'giveaway.winnerRemoved', details: { email: row.email, prizeLabel: row.prizeLabel } });
+    res.json({ success: true });
+});
+
+// A separate, custom-composed email to some or all recorded winners — for
+// prize pickup logistics, a delayed announcement, etc. — distinct from the
+// automatic "here's your ticket, you won" notification sent at draw time.
+app.post('/api/event/:id/giveaway/email-winners', requireAuth, async (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const { subject, message, registrationIds } = req.body;
+    if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required' });
+
+    const allWinners = stmt.giveawayWinners.byEventId.all(event.id).map(rowToGiveawayWinner);
+    if (!allWinners.length) return res.status(400).json({ error: 'No recorded winners for this event' });
+
+    // One email per registration, even if they won (and so appear) more than once.
+    const seen = new Set();
+    const recipients = allWinners.filter(w => {
+        if (registrationIds && !registrationIds.includes(w.registrationId)) return false;
+        if (seen.has(w.registrationId)) return false;
+        seen.add(w.registrationId);
+        return true;
+    });
+    if (!recipients.length) return res.status(400).json({ error: 'No matching winners to email' });
+
+    const escapedMessage = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    let sent = 0;
+    const errors = [];
+    for (const w of recipients) {
+        if (!w.email) { errors.push(w.registrationId); continue; }
+        const html = `
+            <div style="margin:0;padding:0;background:#f3f4f6;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
+            <tr><td align="center" style="padding:24px 16px;">
+            <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
+              <tr><td style="background:#2563eb;padding:24px 32px;text-align:center;">
+                <p style="margin:0;font-size:11px;font-weight:700;color:rgba(255,255,255,0.8);text-transform:uppercase;letter-spacing:1px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Giveaway winner update</p>
+                <h2 style="margin:8px 0 0;font-size:22px;font-weight:700;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${event.name}</h2>
+              </td></tr>
+              <tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                <p style="font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">Hi ${escEmailText(w.name || '')},</p>
+                <div style="background:#f9fafb;border-left:4px solid #2563eb;padding:20px;margin:24px 0;border-radius:8px;">
+                  <p style="color:#555;white-space:pre-wrap;margin:0;font-size:15px;line-height:1.6;">${escapedMessage}</p>
+                </div>
+                <p style="font-size:13px;color:#888;margin:0 0 12px;line-height:1.5;">If you have any questions, you can reply to this email and the organizer will get back to you shortly.</p>
+              </td></tr>
+            </table>
+            </td></tr>
+            </table>
+            </div>
+        `;
+        try {
+            await sendEmail({
+                to: w.email,
+                fromName: `Tickets - ${event.name}`,
+                replyTo: REPLY_TO_EMAIL,
+                subject,
+                html,
+                registrationId: w.registrationId,
+            });
+            sent++;
+        } catch (err) {
+            errors.push(w.email);
+            log('giveaway', `[ERR] Winner email failed — email: ${w.email}  err: ${err.message}`);
+        }
+    }
+
+    log('giveaway', `[winners-email] Sent — event: ${event.name} (${event.id})  sent: ${sent}  failed: ${errors.length}  by: ${req.session.userId}`);
+    logAudit(req, { eventId: event.id, action: 'giveaway.winnersEmailed', details: { subject, sent, failed: errors.length } });
+    res.json({ success: true, sent, failed: errors.length });
 });
 
 // ── Giveaway presenter/display pairing (SSE) ──────────────────────────────────
@@ -4379,6 +4532,7 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.scannerAccess.deleteByEventId.run(req.params.id);
         stmt.seatHolds.deleteByEventId.run(req.params.id);
         stmt.apiKeys.deleteByEventId.run(req.params.id);
+        stmt.giveawayWinners.deleteByEventId.run(req.params.id);
         deleteEventSharing(req.params.id);
         const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
         if (watcher) {
@@ -4414,6 +4568,7 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
             stmt.scannerLinks.deleteByEventId.run(eventId);
             stmt.scannerAccess.deleteByEventId.run(eventId);
             stmt.seatHolds.deleteByEventId.run(eventId);
+            stmt.giveawayWinners.deleteByEventId.run(eventId);
             deleteEventSharing(eventId);
             const watcher = stmt.sheetWatchers.byEventId.get(eventId);
             if (watcher) {

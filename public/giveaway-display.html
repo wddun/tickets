@@ -8,7 +8,7 @@
     <meta name="theme-color" content="#000000">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        :root { --accent: #ffd400; --accent-soft: rgba(255,212,0,0.12); }
+        :root { --accent: #ffd400; --accent-soft: rgba(255,212,0,0.12); --pot-size-mult: 1; --pot-headroom-mult: 1; }
         html, body {
             background: #000; color: #fff; height: 100%;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -142,7 +142,9 @@
 
         .pot-wrap {
             display: none;
-            position: relative; width: min(58vw, 620px); height: min(84vh, 820px);
+            position: relative;
+            width: calc(min(58vw, 620px) * var(--pot-size-mult, 1));
+            height: calc(min(84vh, 820px) * var(--pot-headroom-mult, 1));
         }
         .pot-wrap.show { display: block; }
         canvas#potCanvas { display: block; width: 100%; height: 100%; }
@@ -632,6 +634,20 @@ function applyTheme(color) {
     if (pot) pot.setAccent(color);
 }
 
+// Operator-controlled sizing for the Paper Pot stage — see the "Pot size" /
+// "Space above pot" sliders in giveaway.html's customize panel. Changing the
+// wrapper's CSS size doesn't fire a window resize event, so the pot has to
+// be told explicitly to recompute its layout against the new box.
+function applyPotStage(size, headroom) {
+    if (typeof size === 'number' && size > 0) {
+        document.documentElement.style.setProperty('--pot-size-mult', size);
+    }
+    if (typeof headroom === 'number' && headroom > 0) {
+        document.documentElement.style.setProperty('--pot-headroom-mult', headroom);
+    }
+    if (pot) pot.resize();
+}
+
 function connect() {
     if (!sessionId) return;
     const es = new EventSource(`/api/giveaway/stream/${sessionId}`);
@@ -653,6 +669,7 @@ function connect() {
         if (msg.type === 'spin') {
             if (payload.eventName) document.getElementById('eventName').textContent = payload.eventName;
             applyTheme(payload.theme);
+            applyPotStage(payload.potSize, payload.potHeadroom);
             displaySoundEnabled = payload.soundEnabled !== false;
             updateSoundHint();
             if (payload.style === 'classic') { potMode = false; hidePot(); runClassicSpin(payload); }
@@ -663,6 +680,7 @@ function connect() {
             // and needs to be told what it's showing.
             if (payload.eventName) document.getElementById('eventName').textContent = payload.eventName;
             applyTheme(payload.theme);
+            applyPotStage(payload.potSize, payload.potHeadroom);
             if (typeof payload.soundEnabled === 'boolean') {
                 displaySoundEnabled = payload.soundEnabled;
                 updateSoundHint();

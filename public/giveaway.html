@@ -107,6 +107,12 @@
             width: 60px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
             border-radius: 8px; padding: 7px 8px; color: #fff; font-size: 13px; text-align: center;
         }
+        .cz-range-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+        .cz-range-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+        .cz-range-val {
+            width: 44px; flex: none; text-align: right; font-size: 12px; font-weight: 700;
+            color: rgba(255,255,255,0.6);
+        }
         .cz-textarea {
             width: 100%; margin-top: 8px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
             border-radius: 8px; padding: 8px 10px; color: #fff; font-size: 13px; resize: vertical; min-height: 44px;
@@ -326,6 +332,23 @@
         }
         .wr-badge.emailed { background: rgba(16,185,129,0.18); color: var(--success); }
         .wr-badge.skipped { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.45); }
+        .winner-row .wr-remove {
+            border: none; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.5);
+            width: 22px; height: 22px; border-radius: 50%; font-size: 13px; line-height: 1;
+            cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .winner-row .wr-remove:hover { background: rgba(220,38,38,0.4); color: #fff; }
+
+        .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 26px 0 10px; flex-wrap: wrap; }
+        .section-title-row .section-title { margin: 0; }
+        .email-winners-btn {
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); color: #fff;
+            font-size: 11px; font-weight: 700; padding: 6px 12px; border-radius: 20px; cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .email-winners-btn:hover { background: rgba(255,255,255,0.14); }
+        .email-winners-btn:disabled { opacity: 0.4; cursor: default; }
 
         /* ── Winner overlay ── */
         .winner-overlay {
@@ -396,6 +419,38 @@
         }
         .pc-close { background: rgba(255,255,255,0.1); color: #fff; }
         .pc-stop { background: rgba(220,38,38,0.18); color: #f87171; }
+
+        /* ── Email winners ── */
+        .ew-overlay {
+            position: fixed; inset: 0; z-index: 120; background: rgba(0,0,0,0.7);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s; padding: 20px;
+        }
+        .ew-overlay.show { opacity: 1; pointer-events: auto; }
+        .ew-card {
+            background: #1c1c1e; border: 1px solid rgba(255,255,255,0.12); border-radius: 20px;
+            padding: 26px; max-width: 440px; width: 100%; max-height: 88vh; overflow-y: auto;
+        }
+        .ew-card h3 { font-size: 17px; margin-bottom: 6px; }
+        .ew-sub { font-size: 13px; color: rgba(255,255,255,0.5); margin-bottom: 16px; }
+        .ew-field { margin-bottom: 14px; }
+        .ew-field label { display: block; font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.6); margin-bottom: 6px; }
+        .ew-field input, .ew-field textarea {
+            width: 100%; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px; padding: 10px 12px; color: #fff; font-size: 13px; font-family: inherit; resize: vertical;
+        }
+        .ew-field input::placeholder, .ew-field textarea::placeholder { color: rgba(255,255,255,0.3); }
+        .ew-recipients { max-height: 180px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px 10px; }
+        .ew-recipient-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13px; }
+        .ew-recipient-row input { accent-color: var(--accent); width: 15px; height: 15px; flex-shrink: 0; }
+        .ew-recipient-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ew-select-all { font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.5); background: none; border: none; cursor: pointer; padding: 0 0 8px; }
+        .ew-select-all:hover { color: #fff; }
+        .ew-actions { display: flex; gap: 10px; margin-top: 4px; }
+        .ew-actions button { flex: 1; padding: 12px; border-radius: 12px; border: none; font-weight: 700; font-size: 13px; cursor: pointer; }
+        .ew-cancel { background: rgba(255,255,255,0.1); color: #fff; }
+        .ew-send { background: #fff; color: #1a1f3c; }
+        .ew-send:disabled { opacity: 0.5; }
     </style>
 </head>
 <body>
@@ -477,6 +532,22 @@
                 </div>
                 <input type="number" class="cz-num" id="czWinnersPerSpin" min="1" max="20" value="1" onchange="onWinnersPerSpinChange()">
             </div>
+            <div class="cz-row" style="display:block;" id="czPotSizeRow">
+                <div class="cz-label">Pot size</div>
+                <div class="cz-sub">How big the pot is on the presentation screen.</div>
+                <div class="cz-range-row">
+                    <input type="range" id="czPotSize" min="60" max="140" value="100" oninput="onPotStageChange()">
+                    <span class="cz-range-val" id="czPotSizeVal">100%</span>
+                </div>
+            </div>
+            <div class="cz-row" style="display:block;" id="czPotSpaceRow">
+                <div class="cz-label">Space above pot</div>
+                <div class="cz-sub">Room left for names to fall through before landing.</div>
+                <div class="cz-range-row">
+                    <input type="range" id="czPotSpace" min="50" max="150" value="100" oninput="onPotStageChange()">
+                    <span class="cz-range-val" id="czPotSpaceVal">100%</span>
+                </div>
+            </div>
             <div class="cz-row" style="display:block;">
                 <div class="cz-label">Custom "you won" message</div>
                 <div class="cz-sub">Overrides the default congratulations line in the winner email.</div>
@@ -529,7 +600,10 @@
         <div class="entrant-chips" id="entrantChips"></div>
 
         <div id="winnersSection" style="display:none;">
-            <div class="section-title">Winners</div>
+            <div class="section-title-row">
+                <div class="section-title">Winners</div>
+                <button class="email-winners-btn" id="emailWinnersBtn" onclick="openEmailWinnersModal()">Email Winners</button>
+            </div>
             <div id="winnersList"></div>
         </div>
     </div>
@@ -559,13 +633,37 @@
     </div>
 </div>
 
+<div class="ew-overlay" id="ewOverlay">
+    <div class="ew-card">
+        <h3>Email winners</h3>
+        <p class="ew-sub">A custom message to some or all recorded winners &mdash; separate from the automatic "you won" ticket email sent when a draw is confirmed.</p>
+        <div class="ew-field">
+            <label>Recipients</label>
+            <button class="ew-select-all" id="ewSelectAllBtn" onclick="ewToggleSelectAll()">Select none</button>
+            <div class="ew-recipients" id="ewRecipients"></div>
+        </div>
+        <div class="ew-field">
+            <label>Subject</label>
+            <input type="text" id="ewSubject" placeholder="e.g. Come claim your prize!">
+        </div>
+        <div class="ew-field">
+            <label>Message</label>
+            <textarea id="ewBody" rows="6" placeholder="Write your message to the winners..."></textarea>
+        </div>
+        <div class="ew-actions">
+            <button class="ew-cancel" onclick="closeEmailWinnersModal()">Cancel</button>
+            <button class="ew-send" id="ewSendBtn" onclick="sendWinnersEmail()">Send</button>
+        </div>
+    </div>
+</div>
+
 <script src="giveaway-pot.js"></script>
 <script>
 let events = [];
 let currentEventId = null;
 let allEntrants = [];   // one row per registration, oldest first
 let pool = [];          // entrants still eligible to win
-let winners = [];       // { registrationId, name, email, prizeLabel, emailed }
+let winners = [];       // rows from GET /api/event/:id/giveaway/winners: { id, registrationId, name, email, prizeLabel, emailedAt, createdAt }
 let spinnerStyle = 'reel';
 let spinning = false;
 let pendingWinners = [];   // entrant objects currently shown in the overlay
@@ -581,6 +679,8 @@ const customization = {
     confetti: true,
     winnersPerSpin: 1,
     customMessage: '',
+    potSize: 1,
+    potHeadroom: 1,
 };
 const THEMES = {
     gold:    { accent: '#ffd400', soft: 'rgba(255,212,0,0.12)' },
@@ -648,6 +748,7 @@ function esc(s) {
     buildSwatches();
     const wantedStyle = params.get('style');
     setSpinnerStyle(['reel', 'classic', 'pot'].includes(wantedStyle) ? wantedStyle : 'reel');
+    await loadWinners();
     await loadEntrants();
     await loadWatcherState();
     startLiveSync();
@@ -655,7 +756,6 @@ function esc(s) {
 
 async function onEventChange() {
     currentEventId = document.getElementById('eventSelect').value;
-    winners = [];
     manuallyExcluded = new Set();
     knownRegistrationIds = new Set();
     arrivalsDuringSpin = [];
@@ -663,10 +763,21 @@ async function onEventChange() {
     // Names still queued for the old event's pot have no business fluttering
     // into the new one's.
     if (pot) pot.clear();
-    renderWinners();
+    await loadWinners();
     await loadEntrants();
     await loadWatcherState();
     restartLivePoll();
+}
+
+// The recorded win history for the event — persists server-side, unlike the
+// old in-memory-only list, so it survives a reload, a switch to another
+// event and back, or the operator closing the tab mid-giveaway.
+async function loadWinners() {
+    try {
+        const r = await fetch(`/api/event/${currentEventId}/giveaway/winners`);
+        winners = r.ok ? await r.json() : [];
+    } catch (_) { winners = []; }
+    renderWinners();
 }
 
 // The initial load is a snapshot: everyone already signed up is simply in the
@@ -753,6 +864,7 @@ function setSpinnerStyle(style) {
     else if (style === 'classic') drawWheel(currentRotation);
     else renderReelAtRest();
     updateSpinButton();
+    updatePotStageRows();
     // Reflected in this page's own URL — not to drive the display link
     // (that's one link that always shows the controller's current style,
     // see openPresentPanel), but so reloading or bookmarking the
@@ -817,6 +929,21 @@ function onWinnersPerSpinChange() {
     customization.winnersPerSpin = n;
     document.getElementById('czWinnersPerSpin').value = n;
     updateSpinButton();
+}
+// Only meaningful for the Paper Pot style — hidden for Reel/Classic.
+function updatePotStageRows() {
+    const show = spinnerStyle === 'pot' ? '' : 'none';
+    document.getElementById('czPotSizeRow').style.display = show;
+    document.getElementById('czPotSpaceRow').style.display = show;
+}
+function onPotStageChange() {
+    const sizeEl = document.getElementById('czPotSize');
+    const spaceEl = document.getElementById('czPotSpace');
+    customization.potSize = parseInt(sizeEl.value, 10) / 100;
+    customization.potHeadroom = parseInt(spaceEl.value, 10) / 100;
+    document.getElementById('czPotSizeVal').textContent = sizeEl.value + '%';
+    document.getElementById('czPotSpaceVal').textContent = spaceEl.value + '%';
+    broadcastPotMode();
 }
 setSpeed('normal');
 
@@ -1602,10 +1729,25 @@ async function confirmWinner() {
     const prizeLabel = document.getElementById('prizeInput').value.trim();
     const customMessage = customization.customMessage.trim();
 
-    if (wantsEmail) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    btn.disabled = true;
+    btn.textContent = wantsEmail ? 'Sending…' : 'Saving…';
 
     for (const w of pendingWinners) {
-        let emailed = false;
+        // Recorded regardless of the email toggle — the persisted Winners
+        // list has to match what was actually confirmed, not just the subset
+        // that got emailed, and it's also what gives the registration's
+        // ticket its "won" status elsewhere in the app.
+        let winnerId = null;
+        try {
+            const r = await fetch(`/api/event/${currentEventId}/giveaway/winners`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ registrationId: w.registrationId, prizeLabel: prizeLabel || undefined }),
+            });
+            if (r.ok) winnerId = (await r.json()).id;
+            else console.error('Recording winner failed', w.email, (await r.json().catch(() => ({}))).error);
+        } catch (_) { /* winnerId stays null; email below still fires if requested */ }
+
         if (wantsEmail) {
             try {
                 const r = await fetch(`/api/event/${currentEventId}/giveaway/notify-winner`, {
@@ -1615,19 +1757,18 @@ async function confirmWinner() {
                         registrationId: w.registrationId,
                         prizeLabel: prizeLabel || undefined,
                         customMessage: customMessage || undefined,
+                        winnerId: winnerId || undefined,
                     }),
                 });
-                emailed = r.ok;
                 if (!r.ok) {
                     const data = await r.json().catch(() => ({}));
                     console.error('Winner email failed', w.email, data.error);
                 }
-            } catch (_) { /* logged below via emailed=false */ }
+            } catch (_) { /* the recorded row still stands; badge just reads "Not emailed" */ }
         }
-        winners.unshift({ registrationId: w.registrationId, name: w.name, email: w.email, prizeLabel, emailed });
     }
 
-    renderWinners();
+    await loadWinners();
     closeWinnerOverlay();
     rebuildPool();
 }
@@ -1635,6 +1776,7 @@ async function confirmWinner() {
 function renderWinners() {
     const section = document.getElementById('winnersSection');
     const list = document.getElementById('winnersList');
+    document.getElementById('emailWinnersBtn').disabled = !winners.length;
     if (!winners.length) { section.style.display = 'none'; return; }
     section.style.display = 'block';
     list.innerHTML = winners.map(w => `
@@ -1643,9 +1785,92 @@ function renderWinners() {
                 <div class="wr-name">${esc(w.name || w.email)}</div>
                 <div class="wr-meta">${esc(w.email || '')}${w.prizeLabel ? ' · ' + esc(w.prizeLabel) : ''}</div>
             </div>
-            <span class="wr-badge ${w.emailed ? 'emailed' : 'skipped'}">${w.emailed ? 'Emailed' : 'Not emailed'}</span>
+            <span class="wr-badge ${w.emailedAt ? 'emailed' : 'skipped'}">${w.emailedAt ? 'Emailed' : 'Not emailed'}</span>
+            <button class="wr-remove" onclick="removeWinner('${w.id}')" title="Remove from Winners">&times;</button>
         </div>
     `).join('');
+}
+
+async function removeWinner(winnerId) {
+    if (!confirm('Remove this winner from the list? This does not undo the draw or take back a ticket already issued.')) return;
+    try {
+        const r = await fetch(`/api/event/${currentEventId}/giveaway/winners/${winnerId}`, { method: 'DELETE' });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Failed to remove winner'); return; }
+    } catch (_) { alert('Failed to remove winner'); return; }
+    await loadWinners();
+    rebuildPool();
+}
+
+// ── Email winners ─────────────────────────────────────────────
+// A custom-composed email to some or all recorded winners, separate from the
+// automatic "you won, here's your ticket" notice confirmWinner() can send at
+// draw time — e.g. prize pickup instructions sent out after the event.
+let ewSelected = new Set(); // registrationIds currently checked in the modal
+
+function openEmailWinnersModal() {
+    if (!winners.length) return;
+    // One row per registration — the same person can appear twice in
+    // `winners` if they won more than one draw, but only gets emailed once.
+    const seen = new Set();
+    const recipients = winners.filter(w => {
+        if (seen.has(w.registrationId)) return false;
+        seen.add(w.registrationId);
+        return true;
+    });
+    ewSelected = new Set(recipients.map(w => w.registrationId));
+    document.getElementById('ewRecipients').innerHTML = recipients.map(w => `
+        <label class="ew-recipient-row">
+            <input type="checkbox" checked data-reg="${w.registrationId}" onchange="ewToggleOne('${w.registrationId}', this.checked)">
+            <span>${esc(w.name || w.email || w.registrationId)}${w.email ? ' — ' + esc(w.email) : ''}</span>
+        </label>
+    `).join('');
+    document.getElementById('ewSelectAllBtn').textContent = 'Select none';
+    document.getElementById('ewSubject').value = '';
+    document.getElementById('ewBody').value = '';
+    document.getElementById('ewOverlay').classList.add('show');
+}
+
+function closeEmailWinnersModal() {
+    document.getElementById('ewOverlay').classList.remove('show');
+}
+
+function ewToggleOne(registrationId, checked) {
+    if (checked) ewSelected.add(registrationId);
+    else ewSelected.delete(registrationId);
+}
+
+function ewToggleSelectAll() {
+    const boxes = [...document.querySelectorAll('#ewRecipients input[type="checkbox"]')];
+    const allChecked = boxes.every(b => b.checked);
+    boxes.forEach(b => { b.checked = !allChecked; ewToggleOne(b.dataset.reg, !allChecked); });
+    document.getElementById('ewSelectAllBtn').textContent = allChecked ? 'Select all' : 'Select none';
+}
+
+async function sendWinnersEmail() {
+    const subject = document.getElementById('ewSubject').value.trim();
+    const message = document.getElementById('ewBody').value.trim();
+    if (!subject || !message) { alert('Subject and message are required'); return; }
+    if (!ewSelected.size) { alert('Select at least one recipient'); return; }
+
+    const btn = document.getElementById('ewSendBtn');
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+        const r = await fetch(`/api/event/${currentEventId}/giveaway/email-winners`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subject, message, registrationIds: [...ewSelected] }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(data.error || 'Failed to send'); return; }
+        alert(`Sent to ${data.sent} winner${data.sent === 1 ? '' : 's'}${data.failed ? `, ${data.failed} failed` : ''}.`);
+        closeEmailWinnersModal();
+    } catch (_) {
+        alert('Failed to send');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send';
+    }
 }
 
 // ── Presenter/display pairing ───────────────────────────────────
@@ -1707,7 +1932,7 @@ async function broadcastSpin(payload) {
         await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'spin', payload: { ...payload, eventName: ev ? ev.name : '', theme: THEMES[customization.theme].accent, soundEnabled: customization.soundOnPresenter } }),
+            body: JSON.stringify({ type: 'spin', payload: { ...payload, eventName: ev ? ev.name : '', theme: THEMES[customization.theme].accent, soundEnabled: customization.soundOnPresenter, potSize: customization.potSize, potHeadroom: customization.potHeadroom } }),
         });
     } catch (_) {}
 }
@@ -1728,6 +1953,8 @@ async function broadcastPotMode() {
                     eventName: ev ? ev.name : '',
                     theme: THEMES[customization.theme].accent,
                     soundEnabled: customization.soundOnPresenter,
+                    potSize: customization.potSize,
+                    potHeadroom: customization.potHeadroom,
                 },
             }),
         });

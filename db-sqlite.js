@@ -445,6 +445,29 @@ try { db.exec(`ALTER TABLE sheetWatchers ADD COLUMN boostSeconds INTEGER DEFAULT
     }
 }
 
+// Recorded giveaway wins — one row per draw, kept even after the pool resets
+// or the page reloads, so "who won" survives the operator closing the tab
+// mid-event and doubles as the "won" status shown against the registration's
+// ticket elsewhere in the app (checkin.html). registrationId is not unique:
+// the same person can legitimately win more than once across separate draws.
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS giveawayWinners (
+            id TEXT PRIMARY KEY,
+            eventId TEXT NOT NULL,
+            registrationId TEXT NOT NULL,
+            name TEXT,
+            email TEXT,
+            prizeLabel TEXT,
+            emailedAt TEXT,
+            createdAt TEXT NOT NULL,
+            createdBy TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_giveawayWinners_eventId ON giveawayWinners(eventId);
+        CREATE INDEX IF NOT EXISTS idx_giveawayWinners_registrationId ON giveawayWinners(registrationId);
+    `);
+} catch {}
+
 // ── One-time migration from db.json ──────────────────────────────────────────
 
 const migrationFlag = path.join(__dirname, 'db-migrated.flag');
@@ -616,6 +639,11 @@ export function rowToWaitlistEntry(row) {
         ...row,
         customFields: row.customFields ? JSON.parse(row.customFields) : {},
     };
+}
+
+export function rowToGiveawayWinner(row) {
+    if (!row) return null;
+    return { ...row };
 }
 
 // ── Prepared statements ────────────────────────────────────────────────────────
@@ -866,6 +894,15 @@ export const stmt = {
         countByWatcherId: db.prepare('SELECT COUNT(*) as cnt FROM sheetWatcherSeen WHERE watcherId=?'),
         insert: db.prepare(`INSERT OR IGNORE INTO sheetWatcherSeen (watcherId, seenKey, processedAt) VALUES (?,?,?)`),
         deleteByWatcherId: db.prepare(`DELETE FROM sheetWatcherSeen WHERE watcherId=?`),
+    },
+    giveawayWinners: {
+        byId: db.prepare('SELECT * FROM giveawayWinners WHERE id=?'),
+        byEventId: db.prepare('SELECT * FROM giveawayWinners WHERE eventId=? ORDER BY createdAt DESC'),
+        byRegistrationId: db.prepare('SELECT * FROM giveawayWinners WHERE registrationId=? ORDER BY createdAt DESC'),
+        insert: db.prepare(`INSERT INTO giveawayWinners (id, eventId, registrationId, name, email, prizeLabel, emailedAt, createdAt, createdBy) VALUES (?,?,?,?,?,?,?,?,?)`),
+        setEmailed: db.prepare(`UPDATE giveawayWinners SET emailedAt=? WHERE id=?`),
+        deleteById: db.prepare(`DELETE FROM giveawayWinners WHERE id=? AND eventId=?`),
+        deleteByEventId: db.prepare(`DELETE FROM giveawayWinners WHERE eventId=?`),
     },
 };
 
