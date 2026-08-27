@@ -126,6 +126,15 @@
         const onEvent = typeof opts.onEvent === 'function' ? opts.onEvent : function () {};
 
         let accent = opts.accent || '#ffd400';
+        // How much of the container's height the pot is allowed to claim
+        // before width takes over as the limiting axis — see the comment in
+        // layout() below. Split out as an option (rather than a single
+        // constant shared by both callers) because the controller's stage is
+        // a narrow, tall box (width-bound already, so this rarely even
+        // applies) while the presenter display's stage is close to square —
+        // the same fraction that looks right on one starves the other of
+        // headroom or gives it away for nothing.
+        const heightFactor = typeof opts.heightFactor === 'number' ? opts.heightFactor : 0.66;
         let W = 0, H = 0, dpr = 1;
         let seedCounter = 1;
 
@@ -172,12 +181,19 @@
             // controller stage and a projector a pot of sensible proportions,
             // with enough clear air above it for a slip to be read on the way
             // down. Capped so a very large screen doesn't get a silly bucket.
-            // The height factor is deliberately smaller than the width one:
-            // on a wide/short stage (the projector display) it's height,
-            // not width, that decides the pot's size, and a factor as big
-            // as the width one there meant a taller container just grew a
-            // bigger pot instead of leaving more open air for the fall —
-            // exactly backwards from wanting slips visible for longer.
+            // `heightFactor` is deliberately smaller than the width one
+            // (0.84): on a wide/short stage (the projector display) it's
+            // height, not width, that decides the pot's size, and a factor
+            // as big as the width one there meant a taller container just
+            // grew a bigger pot instead of leaving more open air for the
+            // fall — exactly backwards from wanting slips visible for longer.
+            // It's a caller-supplied option rather than a fixed constant for
+            // the same reason: the presenter display's near-square stage is
+            // height-bound at any reasonable factor, so the value has to be
+            // small enough to leave real headroom there, while the
+            // controller's narrow, tall stage is comfortably width-bound
+            // regardless — a value tuned for one axis-bound regime doesn't
+            // need to (and shouldn't have to) also suit the other.
             // The 0.78 zooms the whole pot out from its original size, applied
             // after the axis caps rather than baked into them separately —
             // tweaking the two caps unevenly shrank the pot by a different
@@ -186,7 +202,7 @@
             // out" read as barely-changed on one stage and much-too-small on
             // the other. A single multiplier after the min() keeps both
             // stages shrinking by the same fraction.
-            const potW = Math.min(W * 0.84, H * 0.66, 680) * 0.78;
+            const potW = Math.min(W * 0.84, H * heightFactor, 680) * 0.78;
             const rx = potW / 2;
             const ry = rx * 0.34;
             const bodyH = potW * 0.72;

@@ -863,6 +863,24 @@
             color: #b45309;
         }
 
+        .winner-badge {
+            display: inline-flex; align-items: center; gap: 3px;
+            font-size: 10px; font-weight: 700;
+            color: #92660a;
+            background: #fef3c7;
+            border-radius: 10px;
+            padding: 2px 7px;
+        }
+        .winner-badge svg { width: 10px; height: 10px; flex-shrink: 0; }
+        /* Same reason as --match-bg/--match-check above: a flat amber fill
+           reads fine on white but washes out against dark mode's card
+           surface, so dark mode gets a translucent tint and a lighter gold
+           text instead of the light-mode flat fill. */
+        [data-theme="dark"] .winner-badge {
+            color: #fcd34d;
+            background: rgba(252, 211, 77, 0.16);
+        }
+
         .ticket-checkbox {
             accent-color: #dc2626;
             width: 14px;
@@ -3429,6 +3447,7 @@
                 <div class="attendee-name">${esc(g.name)}</div>
                 <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap;">
                     ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : g.tickets[0]?.confirmation_sent_at ? `<span title="Email not opened" style="font-size:10px;font-weight:600;color:var(--text-muted);">Sent</span>` : ''}
+                    ${(() => { const wins = g.tickets[0]?.giveawayWins || []; if (!wins.length) return ''; const prizes = wins.map(w => w.prizeLabel).filter(Boolean).join(', '); return `<span class="winner-badge" title="${esc(prizes || 'Giveaway winner')}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a2 2 0 0 0 0 4h.5M17 6h3a2 2 0 0 1 0 4h-.5"/></svg>${wins.length > 1 ? `Won &times;${wins.length}` : 'Winner'}</span>`; })()}
                     ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:var(--text-muted);">Downloaded to Wallet</span>` : ''}
                     ${lastSeenBadge}
                 </div>
