@@ -693,6 +693,16 @@ function escEmailText(value) {
         .replace(/"/g, '&quot;');
 }
 
+// Shared by the real winner-notification send and the email editor's "Winner
+// Email" preview toggle, so the preview shows exactly what confirmWinner()
+// actually mails rather than a hand-maintained approximation of it.
+function giveawayWinnerIntroHtml(eventName, customMessage, prizeLabel) {
+    const prizeHtml = prizeLabel ? ` You won: <strong>${escEmailText(prizeLabel)}</strong>.` : '';
+    return customMessage
+        ? `&#127881; ${escEmailText(customMessage)}${prizeHtml}`
+        : `&#127881; Congratulations, you're a winner of the <strong>${escEmailText(eventName)}</strong> giveaway!${prizeHtml}`;
+}
+
 // Only http(s)/mailto get through — a template is authored by an event owner,
 // but the rendered result is mailed to third parties, so javascript:/data:
 // URLs must never survive into the output.
@@ -751,6 +761,14 @@ const DEFAULT_TICKET_EMAIL_TEMPLATE = {
         { id: 'b-eventimage', type: 'eventImage', props: {} },
         { id: 'b-header', type: 'header', props: { eyebrow: 'Your Registration Confirmation', title: '{{eventName}}' } },
         { id: 'b-greeting', type: 'text', props: { text: 'Hi **{{firstName}}**,', size: 'md', align: 'left', color: '#374151' } },
+        // The one line that actually says *why* this particular email landed
+        // — new registration, an edit, a resend, or (via giveawayWinnerIntroHtml)
+        // a giveaway win. Every send path already computes this text and passes
+        // it as `intro`; it only renders here, wherever this block sits in the
+        // organiser's layout. Without it in the default template, every one of
+        // those context-specific messages — including "you won!" — was
+        // computed server-side and then silently dropped.
+        { id: 'b-intro', type: 'intro', props: {} },
         { id: 'b-body', type: 'text', props: { text: "Thank you for registering for **{{eventName}}**. This email confirms your registration and contains your event ticket. Please save this email—you'll need it to check in at the event.", size: 'sm', align: 'left', color: '#555555' } },
         { id: 'b-details', type: 'eventDetails', props: { showMaps: true } },
         { id: 'b-calendar', type: 'calendar', props: { google: true, ics: true } },
@@ -4216,7 +4234,7 @@ app.get('/api/event/:id/tickets', requireAuthOrScanLink, (req, res) => {
     const winsByRegistration = new Map();
     for (const w of stmt.giveawayWinners.byEventId.all(req.params.id)) {
         if (!winsByRegistration.has(w.registrationId)) winsByRegistration.set(w.registrationId, []);
-        winsByRegistration.get(w.registrationId).push({ prizeLabel: w.prizeLabel || null, wonAt: w.createdAt });
+        winsByRegistration.get(w.registrationId).push({ id: w.id, prizeLabel: w.prizeLabel || null, wonAt: w.createdAt, emailedAt: w.emailedAt || null });
     }
     tickets.forEach(t => { t.giveawayWins = winsByRegistration.get(t.registrationId || t.id) || []; });
     res.json(tickets);
@@ -4280,10 +4298,7 @@ app.post('/api/event/:id/giveaway/notify-winner', requireAuth, async (req, res) 
     }
 
     const winner = tickets[0];
-    const prizeHtml = prizeLabel ? ` You won: <strong>${escEmailText(prizeLabel)}</strong>.` : '';
-    const intro = customMessage
-        ? `&#127881; ${escEmailText(customMessage)}${prizeHtml}`
-        : `&#127881; Congratulations, you're a winner of the <strong>${event.name}</strong> giveaway!${prizeHtml}`;
+    const intro = giveawayWinnerIntroHtml(event.name, customMessage, prizeLabel);
     const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
         firstName: winner.firstName,
         intro,
@@ -4833,10 +4848,14 @@ app.post('/api/event/:id/email-template/preview', requireAuth, async (req, res) 
         registrationId: 'SAMPLEREG',
     });
 
+    const isWinnerVariant = req.body?.variant === 'winner';
+    const intro = isWinnerVariant
+        ? giveawayWinnerIntroHtml(event.name, null, 'a $50 gift card')
+        : `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`;
     try {
         const { html } = await buildTicketEmailHtml({
             firstName: sample[0].firstName || 'Jane',
-            intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+            intro,
             event: { ...event, emailTemplate: template },
             tickets: sample,
         });

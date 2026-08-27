@@ -135,6 +135,18 @@
         // the same fraction that looks right on one starves the other of
         // headroom or gives it away for nothing.
         const heightFactor = typeof opts.heightFactor === 'number' ? opts.heightFactor : 0.66;
+        // Reads the live "Pot size" / "Space above pot" multiplier straight
+        // off the canvas's computed style rather than caching it at create()
+        // time — a slider move only ever reaches this module through the
+        // caller resizing the canvas's CSS box and calling resize(), so the
+        // current value has to be re-read on every layout(), not just once.
+        // Falls back to 1 both when a caller (the controller stage) never
+        // defines the variable at all and when a slider is mid-drag at an
+        // invalid value.
+        function readPotMult(varName) {
+            const v = parseFloat(getComputedStyle(canvas).getPropertyValue(varName));
+            return Number.isFinite(v) && v > 0 ? v : 1;
+        }
         let W = 0, H = 0, dpr = 1;
         let seedCounter = 1;
 
@@ -202,11 +214,32 @@
             // out" read as barely-changed on one stage and much-too-small on
             // the other. A single multiplier after the min() keeps both
             // stages shrinking by the same fraction.
-            const potW = Math.min(W * 0.84, H * heightFactor, 680) * 0.78;
+            //
+            // The operator's "Pot size" / "Space above pot" sliders resize
+            // this canvas's own box via CSS (--pot-size-mult scales its
+            // width, --pot-headroom-mult its height — see the display page's
+            // applyPotStage). Sizing straight off the resulting W/H used to
+            // make the two sliders fight each other on this height-bound
+            // stage: growing the box to add headroom grew the pot right
+            // along with it, so "Space above pot" mostly just made a bigger
+            // pot instead of more open air, and "Pot size" did nothing once
+            // the height term was already the smaller (binding) one.
+            // Dividing each multiplier back out of the measured W/H recovers
+            // the box's *un-scaled* reference size, so the natural pot size
+            // stays put regardless of how much headroom is dialed in; the
+            // size multiplier is then reapplied explicitly, so it's the only
+            // thing that changes the pot's size, and headroom is whatever
+            // real vertical space the (unaffected) pot doesn't use.
+            const sizeMult = readPotMult('--pot-size-mult');
+            const headroomMult = readPotMult('--pot-headroom-mult');
+            const referenceW = W / sizeMult;
+            const referenceH = H / headroomMult;
+            let potW = Math.min(referenceW * 0.84, referenceH * heightFactor, 680) * 0.78 * sizeMult;
+            potW = Math.min(potW, W * 0.94); // never wider than the box itself, however the sliders are set
             const rx = potW / 2;
             const ry = rx * 0.34;
             const bodyH = potW * 0.72;
-            const my = H - bodyH - ry - H * 0.015;   // mouth centre
+            const my = Math.max(0, H - bodyH - ry - H * 0.015);   // mouth centre
             L = {
                 cx: W / 2,
                 my,

@@ -3438,7 +3438,9 @@
                         ${unchecked > 1 ? `<button class="btn btn-secondary btn-sm" onclick="openTicketPicker(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Check In 1</button>` : ''}
                         <button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">${unchecked > 1 ? 'Check In All' : 'Check In'}</button>`;
                 const editBtn = `<button class="btn btn-secondary btn-sm" onclick="openEditTicketModal(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Edit</button>`;
-                const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap">${checkInBtns}${undoBtn}${editBtn}</div>`;
+                const latestWin = (g.tickets[0]?.giveawayWins || [])[0];
+                const resendWinnerBtn = latestWin ? `<button class="btn btn-secondary btn-sm" onclick="resendWinnerEmail('${g.registrationId}', ${JSON.stringify(latestWin.id).replace(/"/g, '&quot;')}, ${JSON.stringify(latestWin.prizeLabel).replace(/"/g, '&quot;')}, this)">Resend Winner Email</button>` : '';
+                const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap">${checkInBtns}${undoBtn}${editBtn}${resendWinnerBtn}</div>`;
                 return `
         <div class="attendee-row${isChecked ? ' row-selected' : ''}" data-regid="${g.registrationId}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
@@ -8121,6 +8123,32 @@
             }
         }
 
+        async function resendWinnerEmail(registrationId, winnerId, prizeLabel, btn) {
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            try {
+                const r = await fetch(`/api/event/${selectedId}/giveaway/notify-winner`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ registrationId, prizeLabel: prizeLabel || undefined, winnerId: winnerId || undefined }),
+                });
+                if (r.ok) {
+                    showToast('Winner email resent.');
+                    const event = events.find(e => e.id === selectedId);
+                    if (event) await fetchAndRender(event, true);
+                } else {
+                    const d = await r.json().catch(() => ({}));
+                    showToast(d.error || 'Failed to resend winner email');
+                }
+            } catch (_) {
+                showToast('Failed to resend winner email');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
         function initLogsPanel() {
             document.getElementById('adminLogsPanel').style.display = 'block';
             fetchLogs();
@@ -8381,7 +8409,7 @@
             }
             return `
                 <div class="modal-section-title">Ticket Email</div>
-                <div class="settings-hint">Design the email attendees receive with their ticket &mdash; drag blocks to reorder, edit the wording, and add a calendar invite.</div>
+                <div class="settings-hint">Design the email attendees receive with their ticket &mdash; drag blocks to reorder, edit the wording, and add a calendar invite. The same layout is also used for giveaway winner notifications; preview that version with the Winner Email toggle inside the editor.</div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;">
                     <button class="btn btn-primary" onclick="openEmailEditor('${eventId}')">Open email editor</button>
                     <span style="font-size:13px;color:${customized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
@@ -8408,6 +8436,12 @@
                 customized: payload.customized,
                 selectedId: null,
                 dirty: false,
+                // Which send-context the live preview shows — the blocks
+                // being edited are identical either way, only the status-line
+                // text at the top differs (see giveawayWinnerIntroHtml
+                // server-side, which both the real winner send and this
+                // preview toggle go through).
+                variant: 'ticket',
             };
 
             const overlay = document.createElement('div');
@@ -8444,6 +8478,10 @@
                         <div class="eb-preview-wrap">
                             <div class="eb-preview-head">
                                 <div class="eb-pane-title" style="margin:0;">Live preview</div>
+                                <div class="eb-seg" id="ebSegVariant" title="The header, footer and every other block are shared — only this status line changes between the two.">
+                                    <button class="active" id="ebSegTicket" onclick="ebSetPreviewVariant('ticket')">Ticket Email</button>
+                                    <button id="ebSegWinner" onclick="ebSetPreviewVariant('winner')">Winner Email</button>
+                                </div>
                                 <div class="eb-seg">
                                     <button class="active" id="ebSegDesktop" onclick="ebSetPreviewWidth('desktop')">Desktop</button>
                                     <button id="ebSegMobile" onclick="ebSetPreviewWidth('mobile')">Mobile</button>
@@ -8482,6 +8520,14 @@
             document.getElementById('ebPreviewBody')?.classList.toggle('mobile', mode === 'mobile');
             document.getElementById('ebSegDesktop')?.classList.toggle('active', mode !== 'mobile');
             document.getElementById('ebSegMobile')?.classList.toggle('active', mode === 'mobile');
+        }
+
+        function ebSetPreviewVariant(mode) {
+            if (!ebState || ebState.variant === mode) return;
+            ebState.variant = mode;
+            document.getElementById('ebSegTicket')?.classList.toggle('active', mode !== 'winner');
+            document.getElementById('ebSegWinner')?.classList.toggle('active', mode === 'winner');
+            ebRefreshPreview();
         }
 
         function ebMarkDirty() {
@@ -8761,7 +8807,7 @@
                 const r = await fetch(`/api/event/${ebState.eventId}/email-template/preview`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ template: ebState.template, ticketCount: 1 }),
+                    body: JSON.stringify({ template: ebState.template, ticketCount: 1, variant: ebState.variant }),
                 });
                 if (!r.ok) throw new Error();
                 const { html } = await r.json();
