@@ -359,6 +359,11 @@ struct ScannerView: View {
             CheckInFeedback.shared.alreadyUsed()
             showBanner(result)
             sendToDisplay(response: response, status: "used")
+        case "expired":
+            result = ScanResult(from: response, status: .expired, title: "Ticket Expired")
+            CheckInFeedback.shared.alreadyUsed()
+            showBanner(result)
+            sendToDisplay(response: response, status: "expired")
         default:
             result = ScanResult(status: .error, title: "Invalid Ticket", name: response.name ?? "")
             CheckInFeedback.shared.error()
@@ -1023,7 +1028,7 @@ struct QuickScanSheet: View {
 // MARK: - Scan Result Model
 
 struct ScanResult: Equatable {
-    enum Status { case success, alreadyUsed, reentryExitPrompt, reentryEnter, checkedOut, error }
+    enum Status { case success, alreadyUsed, expired, reentryExitPrompt, reentryEnter, checkedOut, error }
     let status: Status
     let title: String
     let name: String
@@ -1146,7 +1151,7 @@ struct ScanFlashOverlay: View {
         switch result.status {
         case .success, .reentryEnter:  return Color(red: 0.07, green: 0.53, blue: 0.25)
         case .checkedOut:              return Color(red: 0.15, green: 0.39, blue: 0.92)
-        case .alreadyUsed, .reentryExitPrompt: return Color(red: 0.75, green: 0.37, blue: 0.06)
+        case .alreadyUsed, .expired, .reentryExitPrompt: return Color(red: 0.75, green: 0.37, blue: 0.06)
         case .error:                   return Color(red: 0.72, green: 0.12, blue: 0.12)
         }
     }
@@ -1155,7 +1160,7 @@ struct ScanFlashOverlay: View {
         switch result.status {
         case .success, .reentryEnter: return "checkmark.circle.fill"
         case .checkedOut:             return "arrow.uturn.left.circle.fill"
-        case .alreadyUsed:            return "exclamationmark.circle.fill"
+        case .alreadyUsed, .expired:  return "exclamationmark.circle.fill"
         default:                      return "xmark.circle.fill"
         }
     }
@@ -1270,7 +1275,7 @@ struct ScanResultOverlay: View {
         switch result.status {
         case .success, .reentryEnter: return .green
         case .checkedOut: return Color(red: 0.15, green: 0.39, blue: 0.92)
-        case .alreadyUsed, .reentryExitPrompt: return Color(red: 0.9, green: 0.5, blue: 0.1)
+        case .alreadyUsed, .expired, .reentryExitPrompt: return Color(red: 0.9, green: 0.5, blue: 0.1)
         case .error: return .red
         }
     }
@@ -1280,7 +1285,7 @@ struct ScanResultOverlay: View {
         case .success: return "checkmark.circle.fill"
         case .reentryEnter: return "arrow.right.circle.fill"
         case .checkedOut: return "arrow.uturn.left.circle.fill"
-        case .alreadyUsed: return "exclamationmark.circle.fill"
+        case .alreadyUsed, .expired: return "exclamationmark.circle.fill"
         case .reentryExitPrompt: return "door.left.hand.open"
         case .error: return "xmark.circle.fill"
         }

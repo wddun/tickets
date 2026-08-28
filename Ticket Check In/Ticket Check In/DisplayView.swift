@@ -371,6 +371,7 @@ struct DisplayView: View {
             case "valid", "reentry_enter":          return "checkmark.circle.fill"
             case "checked_out", "checked_back_in":  return "arrow.uturn.left.circle.fill"
             case "used":                            return "exclamationmark.circle.fill"
+            case "expired":                         return "exclamationmark.circle.fill"
             case "reentry_exit":                    return "door.left.hand.open"
             default:                                return "xmark.circle.fill"
             }
@@ -387,6 +388,7 @@ struct DisplayView: View {
         case "checked_out":     return "Checked Out"
         case "checked_back_in": return "Checked Back In"
         case "used":            return "Already Checked In"
+        case "expired":         return "Ticket Expired"
         case "reentry_exit":    return "Ready to Check Out"
         default:                return "Invalid Ticket"
         }
@@ -397,6 +399,7 @@ struct DisplayView: View {
         case "valid", "reentry_enter":         return Color(red: 0.07, green: 0.53, blue: 0.25)
         case "checked_out", "checked_back_in": return Color(red: 0.15, green: 0.39, blue: 0.92)
         case "used":                            return Color(red: 0.75, green: 0.37, blue: 0.06)
+        case "expired":                         return Color(red: 0.75, green: 0.37, blue: 0.06)
         case "reentry_exit":                    return Color(red: 0.18, green: 0.38, blue: 0.75)
         default:                                return Color(red: 0.72, green: 0.12, blue: 0.12)
         }

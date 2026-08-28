@@ -5,7 +5,7 @@ import test, { before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer } from './helpers/server.js';
 import { createClient } from './helpers/client.js';
-import { newUser, createEvent, addTicket, listTickets, scanLinkClient, share } from './helpers/factories.js';
+import { newUser, createEvent, addTicket, listTickets, scanLinkClient, share, setTicketExpiresAt } from './helpers/factories.js';
 
 let server, owner;
 before(async () => {
@@ -75,6 +75,61 @@ describe('validating a ticket', () => {
         // And it was not quietly checked in anyway.
         const [untouched] = await listTickets(owner.client, ticket.eventId);
         assert.equal(untouched.used_at, null);
+    });
+});
+
+describe('ticket expiry cutoff', () => {
+    test('a not-yet-used ticket refuses to scan once the cutoff has passed', async () => {
+        const { ev, ticket } = await eventWithTicket({}, 'Cutoff Guest');
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+
+        const r = await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
+        assert.equal(r.body.status, 'expired');
+        assert.match(r.body.message, /expired/i);
+
+        const [untouched] = await listTickets(owner.client, ev.id);
+        assert.equal(untouched.used_at, null, 'an expired ticket must not be marked used');
+    });
+
+    test('a cutoff in the future does not block scanning', async () => {
+        const { ev, ticket } = await eventWithTicket({}, 'Not Yet');
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() + 3600_000).toISOString());
+
+        const r = await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
+        assert.equal(r.body.status, 'valid');
+    });
+
+    test('a ticket already checked in before the cutoff keeps working', async () => {
+        const { ev, ticket } = await eventWithTicket({}, 'Already In');
+        await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+
+        // Scanning it again reports the normal "already used" status, not expired.
+        const r = await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
+        assert.equal(r.body.status, 'used');
+    });
+
+    test('GET tickets exposes expired for not-yet-used tickets past the cutoff', async () => {
+        const { ev } = await eventWithTicket({}, 'Listed Guest');
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+        const [ticket] = await listTickets(owner.client, ev.id);
+        assert.equal(ticket.expired, true);
+    });
+
+    test('clearing the cutoff (blank) makes a ticket scannable again', async () => {
+        const { ev, ticket } = await eventWithTicket({}, 'Reprieved');
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+        await setTicketExpiresAt(owner.client, ev.id, null);
+
+        const r = await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
+        assert.equal(r.body.status, 'valid');
+    });
+
+    test('only manage_event can set it', async () => {
+        const { ev } = await eventWithTicket();
+        const stranger = await newUser(server);
+        const r = await setTicketExpiresAt(stranger.client, ev.id, new Date().toISOString());
+        assert.equal(r.status, 403);
     });
 });
 

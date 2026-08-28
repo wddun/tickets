@@ -864,6 +864,11 @@
             color: #b45309;
         }
 
+        .status-pill.expired {
+            background: #e5e7eb;
+            color: #4b5563;
+        }
+
         .winner-badge {
             display: inline-flex; align-items: center; gap: 3px;
             font-size: 10px; font-weight: 700;
@@ -2752,6 +2757,7 @@
                 const wl = document.getElementById('waitlistToggle');
                 if (wl) await setWaitlistEnabled(id, wl.checked);
                 await saveWaitlistClaimHours(id);
+                await saveWaitlistMessage(id);
             },
             'tab-notifications': async (id) => {
                 if (document.getElementById('reminderEnabled')) await saveReminder(id);
@@ -3469,9 +3475,12 @@
             const rows = filtered.map(g => {
                 const total = g.tickets.length;
                 const scanned = g.tickets.filter(t => t.used_at).length;
+                const expiredCount = g.tickets.filter(t => !t.used_at && t.expired).length;
                 const isChecked = checkedRegIds.has(g.registrationId);
                 let pill;
-                if (scanned === 0) {
+                if (scanned === 0 && expiredCount === total) {
+                    pill = `<span class="status-pill expired">Expired</span>`;
+                } else if (scanned === 0) {
                     pill = `<span class="status-pill pending">Pending</span>`;
                 } else if (scanned < total) {
                     pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
@@ -4182,6 +4191,12 @@
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:20px;">
+                    <label for="editEventTicketExpiresAt" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Tickets Expire At <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+                    <input type="datetime-local" id="editEventTicketExpiresAt" value="${_toZonedDT(ev.ticketExpiresAt, ev.timezone || browserTimezone())}"
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Any ticket not yet checked in by this moment stops scanning and shows expired — the QR is removed from Apple Wallet, same as a deleted ticket. Checked-in tickets are never affected. Leave blank for tickets that never expire on their own.</div>
+                </div>
+                <div style="margin-bottom:20px;">
                     <label for="editEventTicketPrice" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:var(--text-muted);">(leave blank or 0 for free)</span></label>
                     <div style="position:relative;">
                         <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:14px;">$</span>
@@ -4230,6 +4245,8 @@
             const eventTz = eventTimezoneValue();
             const timeISO = time ? zonedWallClockToISO(time, eventTz) : '';
             const endTimeISO = endTime ? zonedWallClockToISO(endTime, eventTz) : '';
+            const ticketExpiresAt = document.getElementById('editEventTicketExpiresAt').value;
+            const ticketExpiresAtISO = ticketExpiresAt ? zonedWallClockToISO(ticketExpiresAt, eventTz) : '';
 
             const allowReentry = document.getElementById('editEventAllowReentry').checked;
             const capacity = document.getElementById('editEventCapacity').value;
@@ -4260,6 +4277,7 @@
             fd.append('locationAddress', locationAddress);
             fd.append('allowReentry', String(allowReentry));
             fd.append('capacity', capacity || '');
+            fd.append('ticketExpiresAt', ticketExpiresAtISO);
             fd.append('ticketPrice', ticketPrice || '0');
             fd.append('timezone', eventTimezoneValue());
             if (lat) fd.append('lat', lat);
@@ -6476,6 +6494,12 @@
                         style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                     <label style="font-size:13px;font-weight:600;white-space:nowrap;">hours (paid events only)</label>
                 </div>
+                <div style="margin-bottom:18px;">
+                    <label for="waitlistMessage" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Custom message on the "you're on the waitlist" email <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+                    <textarea id="waitlistMessage" rows="3" placeholder="We'll email you if a spot opens up." maxlength="2000"
+                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;font-family:inherit;font-size:13px;resize:vertical;">${esc(ev?.waitlistMessage || '')}</textarea>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Replaces the default "we'll email you the moment a spot opens up" line — use this to set expectations differently, e.g. "we'll email you if we have any left over." Leave blank to keep the default.</div>
+                </div>
                 <div id="waitlistRows">${rows}</div>
                 ${noShowPanel}
                 ${capacityPanel}
@@ -6512,6 +6536,24 @@
                 if (ev) ev.waitlistClaimHours = hours;
             } catch {
                 showToast('Failed to update the claim window.');
+            }
+        }
+
+        async function saveWaitlistMessage(eventId) {
+            const el = document.getElementById('waitlistMessage');
+            if (!el) return;
+            const message = el.value;
+            try {
+                const r = await fetch(`/api/event/${eventId}/waitlist-message`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                if (!r.ok) throw new Error();
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.waitlistMessage = message;
+            } catch {
+                showToast('Failed to update the waitlist message.');
             }
         }
 

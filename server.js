@@ -3305,6 +3305,14 @@ async function joinWaitlist(event, name, email, sendEmailFlag = true) {
 
     if (sendEmailFlag && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const statusUrl = `${BASE_URL}/waitlist-status.html?id=${id}`;
+        // Custom text replaces the default sentence entirely rather than being
+        // appended — an organiser writing "we'll email you if X is left over"
+        // (see events.waitlistMessage) doesn't want the stock "spot opens up"
+        // line sitting right above their own explanation of what actually
+        // happens next.
+        const bodyMsg = (event.waitlistMessage || '').trim()
+            ? event.waitlistMessage.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+            : `We'll email you the moment a spot opens up. You can check your live position any time.`;
         sendEmail({
             to: cleanEmail,
             fromName: `Tickets - ${event.name}`,
@@ -3313,7 +3321,7 @@ async function joinWaitlist(event, name, email, sendEmailFlag = true) {
                 <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
                 <h2 style="color:#1a1f3c;margin:0 0 8px;">You're on the waitlist</h2>
                 <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">You're <strong>#${position}</strong> in line for <strong>${event.name}</strong>.</p>
-                <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">We'll email you the moment a spot opens up. You can check your live position any time.</p>
+                <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">${bodyMsg}</p>
                 <div style="text-align:center;margin-bottom:8px;">
                     <a href="${statusUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Check My Position</a>
                 </div>
@@ -3407,6 +3415,17 @@ app.put('/api/event/:id/waitlist-claim-hours', requireAuth, (req, res) => {
     stmt.events.setWaitlistClaimHours.run(hours, req.params.id);
     logAudit(req, { eventId: event.id, action: 'waitlist.claimHoursChanged', details: { hours } });
     res.json({ success: true, waitlistClaimHours: hours });
+});
+
+// Custom body text for the "you're on the waitlist" email — see joinWaitlist().
+// Empty clears it back to the default sentence.
+app.put('/api/event/:id/waitlist-message', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
+    const message = String(req.body.message || '').slice(0, 2000);
+    stmt.events.setWaitlistMessage.run(message || null, req.params.id);
+    res.json({ success: true, waitlistMessage: message });
 });
 
 // Which ways of getting a ticket send a confirmation. Body is one boolean per
@@ -4422,6 +4441,9 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
 
     stmt.events.update.run(newName, newTime, newEndTime, newColor, imageUrl, allowReentry ? 1 : 0, newCapacity, JSON.stringify(newLocation), req.params.id);
     if (isValidTimeZone(timezone)) stmt.events.setTimezone.run(timezone, req.params.id);
+    if (req.body.ticketExpiresAt !== undefined) {
+        stmt.events.setTicketExpiresAt.run(req.body.ticketExpiresAt || null, req.params.id);
+    }
 
     const priceCents = req.body.ticketPrice !== undefined
         ? Math.round(Math.max(0, parseFloat(req.body.ticketPrice) || 0) * 100)
@@ -4457,12 +4479,13 @@ app.patch('/api/event/:id', requireAuth, async (req, res) => {
 });
 
 app.get('/api/event/:id/tickets', requireAuthOrScanLink, (req, res) => {
-    if (!stmt.events.byId.get(req.params.id) || !requestEventCapabilities(req, req.params.id).length) {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event || !requestEventCapabilities(req, req.params.id).length) {
         return res.status(401).json({ error: 'Unauthorized or not found' });
     }
     const tickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
     const lastSeen = new Map(stmt.ticketScans.lastPerTicketByEventId.all(req.params.id).map(r => [r.ticketId, r.lastSeenAt]));
-    tickets.forEach(t => { t.lastSeenAt = lastSeen.get(t.id) || null; });
+    tickets.forEach(t => { t.lastSeenAt = lastSeen.get(t.id) || null; t.expired = isTicketExpired(t, event); });
     // Giveaway win status, shown as a badge next to the ticket wherever the
     // attendee list is rendered. Keyed by registrationId the same way the
     // giveaway pool dedupes entrants — one registration, one draw entry,
@@ -5917,6 +5940,15 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
         eventId: ticket.eventId, eventName: event ? event.name : null,
     };
 
+    // Checked before the used_at branch below since expiry only ever applies
+    // to a ticket that was never redeemed — see isTicketExpired().
+    if (isTicketExpired(ticket, event)) {
+        log('validate', `[warn] EXPIRED — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  cutoff: ${event.ticketExpiresAt}  ip: ${getIP(req)}`);
+        res.json({ status: 'expired', message: 'This ticket has expired', ...ticketFields });
+        if (event) { const _t = stmt.tickets.byEventId.all(event.id); recordScan(req.body.pairToken, event, 'expired', ticket, _t); }
+        return;
+    }
+
     if (ticket.used_at) {
         if (event && event.allowReentry) {
             const currentStatus = ticket.reentry_status || 'inside';
@@ -6268,6 +6300,13 @@ async function generateVoidedPassBuffer(tombstone) {
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
 const PASS_TEMPLATE_VERSION = 16;
+// A not-yet-checked-in ticket past the event's configured cutoff. Once
+// used_at is set the ticket already did its job, so expiry never applies
+// retroactively — only the door-scan and Wallet-pass paths need to care.
+function isTicketExpired(ticket, event) {
+    return !!(event?.ticketExpiresAt && !ticket.used_at && event.ticketExpiresAt <= new Date().toISOString());
+}
+
 function passContentHash(ticket, event) {
     const data = JSON.stringify({
         _v: PASS_TEMPLATE_VERSION,
@@ -6283,7 +6322,11 @@ function passContentHash(ticket, event) {
         eventLat: event.location?.lat,
         eventLng: event.location?.lng,
         allowReentry: !!event.allowReentry,
-        walletLockScreenEnabled: !!event.walletLockScreenEnabled
+        walletLockScreenEnabled: !!event.walletLockScreenEnabled,
+        // Not the raw cutoff — the boolean it currently evaluates to, so the
+        // hash (and therefore the pass) only changes at the moment a ticket
+        // actually crosses the line, not every time this is recomputed.
+        expired: isTicketExpired(ticket, event),
     });
     return crypto.createHash('sha256').update(data).digest('hex').slice(0, 16);
 }
@@ -6334,25 +6377,28 @@ async function generatePassBuffer(ticket, event) {
 
     const isInsideReentry = event.allowReentry && ticket.reentry_status === 'inside';
     const isCheckedIn = !event.allowReentry && !!ticket.used_at;
+    const isExpired = isTicketExpired(ticket, event);
     const showCheckedInStyle = isCheckedIn || isInsideReentry;
 
-    const passBackgroundColor = showCheckedInStyle ? "rgb(90, 90, 90)" : (event.color || "rgb(99, 102, 241)");
+    const passBackgroundColor = (showCheckedInStyle || isExpired) ? "rgb(90, 90, 90)" : (event.color || "rgb(99, 102, 241)");
     const passTextColor = contrastTextColor(passBackgroundColor) === '#000000' ? "rgb(0, 0, 0)" : "rgb(255, 255, 255)";
     const passOverride = {
         serialNumber: ticket.token,
         passTypeIdentifier: process.env.PASS_TYPE_ID,
         teamIdentifier: process.env.TEAM_ID,
         description: event.name,
-        logoText: showCheckedInStyle ? "✓ CHECKED IN" : event.name,
+        logoText: showCheckedInStyle ? "✓ CHECKED IN" : isExpired ? "EXPIRED" : event.name,
         backgroundColor: passBackgroundColor,
         foregroundColor: passTextColor,
         labelColor: passTextColor,
         // Reentry events: never void — keep QR so attendee can re-scan. Change
-        // color/text instead. Normal events: void when checked in. This must be
-        // set here, in the props passed to PKPass.from() — passkit-generator has
-        // no `voided` setter, so assigning pass.voided after construction (as
-        // this previously did) is a silent no-op that never reaches pass.json.
-        voided: isCheckedIn,
+        // color/text instead. Normal events: void when checked in, or when the
+        // organiser's ticket-expiry cutoff has passed with the ticket never
+        // used. This must be set here, in the props passed to PKPass.from() —
+        // passkit-generator has no `voided` setter, so assigning pass.voided
+        // after construction (as this previously did) is a silent no-op that
+        // never reaches pass.json.
+        voided: isCheckedIn || isExpired,
     };
     // Enable push updates if APNs is configured (authenticationToken must be ≥16 chars)
     if (process.env.APNS_KEY_ID && process.env.APNS_KEY_PATH) {
@@ -6378,7 +6424,7 @@ async function generatePassBuffer(ticket, event) {
         pass.addBuffer('logo@2x.png', logo2x);
     }
 
-    if (!isCheckedIn) {
+    if (!isCheckedIn && !isExpired) {
         pass.setBarcodes({
             format: "PKBarcodeFormatQR",
             message: `ticket:${ticket.token}`,
@@ -6403,8 +6449,8 @@ async function generatePassBuffer(ticket, event) {
         }
     }
 
-    // When checked in, show name + greyed-out event name; logoText already says "✓ CHECKED IN"
-    pass.primaryFields.push({ key: "attendee", label: showCheckedInStyle ? "CHECKED IN" : "NAME", value: ticket.name });
+    // When checked in or expired, show name + greyed-out event name; logoText already says so
+    pass.primaryFields.push({ key: "attendee", label: showCheckedInStyle ? "CHECKED IN" : isExpired ? "EXPIRED" : "NAME", value: ticket.name });
 
     const customFields = ticket.customFields || {};
     const cfEntries = Object.entries(customFields);
@@ -8143,6 +8189,26 @@ setInterval(async () => {
         }
     }
 }, WAITLIST_SWEEP_MS);
+
+// Background job: catch a ticket-expiry cutoff (events.ticketExpiresAt) the
+// moment it passes, even though nobody clicked anything — the PUT
+// /api/event/:id handler already pushes a Wallet update for a cutoff that's
+// already in the past when it's saved, but a cutoff set for later (the
+// normal case — "expires at midnight" set that afternoon) needs something
+// watching the clock. passContentHash folds in isTicketExpired(), so
+// pushWalletIfChanged() below only actually pushes for tickets that just
+// crossed the line since the last tick — already-expired or still-good
+// tickets hash the same as before and are skipped for free.
+// TICKET_EXPIRY_SWEEP_MS is a test hook only, same as WAITLIST_SWEEP_MS.
+const TICKET_EXPIRY_SWEEP_MS = parseInt(process.env.TICKET_EXPIRY_SWEEP_MS) || 5 * 60 * 1000;
+setInterval(() => {
+    const nowIso = new Date().toISOString();
+    const withExpiry = stmt.events.all.all().map(rowToEvent).filter(e => e.ticketExpiresAt && e.ticketExpiresAt <= nowIso);
+    for (const event of withExpiry) {
+        const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket).filter(t => !t.used_at);
+        if (tickets.length) pushWalletIfChanged(tickets, event).catch(() => {});
+    }
+}, TICKET_EXPIRY_SWEEP_MS);
 
 
 

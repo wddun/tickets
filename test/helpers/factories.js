@@ -57,6 +57,7 @@ export async function createEvent(client, fields = {}) {
     // The remaining knobs each have their own endpoint, matching how the
     // dashboard saves them.
     if (fields.capacity != null) await setCapacity(client, event.id, fields.capacity);
+    if (fields.ticketExpiresAt != null) await setTicketExpiresAt(client, event.id, fields.ticketExpiresAt);
     if (fields.publicRegistration) await client.put(`/api/event/${event.id}/public-registration`, { enabled: true });
     if (fields.waitlist) await client.put(`/api/event/${event.id}/waitlist-enabled`, { enabled: true });
     if (fields.ticketPrice != null) await setTicketPrice(client, event.id, fields.ticketPrice);
@@ -83,12 +84,20 @@ export async function updateEvent(client, event, changes = {}) {
     else if (event.capacity) fd.append('capacity', String(event.capacity));
     if ('ticketPrice' in changes) fd.append('ticketPrice', String(changes.ticketPrice));
     else if (event.ticketPrice) fd.append('ticketPrice', String(event.ticketPrice / 100));
+    if ('ticketExpiresAt' in changes) fd.append('ticketExpiresAt', changes.ticketExpiresAt === null ? '' : String(changes.ticketExpiresAt));
+    else if (event.ticketExpiresAt) fd.append('ticketExpiresAt', event.ticketExpiresAt);
     return client.put(`/api/event/${event.id}`, undefined, { form: fd });
 }
 
 export async function setCapacity(client, eventId, capacity) {
     const cur = (await client.get(`/api/event/${eventId}`)).body;
     return updateEvent(client, cur, { capacity });
+}
+
+/** `iso` is a full ISO datetime string, or null to clear it. */
+export async function setTicketExpiresAt(client, eventId, iso) {
+    const cur = (await client.get(`/api/event/${eventId}`)).body;
+    return updateEvent(client, cur, { ticketExpiresAt: iso });
 }
 
 /** `ticketPrice` here is dollars, as the form field is. */

@@ -89,6 +89,28 @@ describe('joining the waitlist', () => {
         assert.match(mail.html, /waitlist-status\.html\?id=/);
     });
 
+    test('a custom waitlist message replaces the default sentence in the email', async () => {
+        const ev = await fullEventWithWaitlist();
+        const set = await owner.client.put(`/api/event/${ev.id}/waitlist-message`, {
+            message: "We'll email you if we have shirts left over.",
+        });
+        assert.equal(set.status, 200);
+
+        const email = uniqueEmail('custom-message-waiter');
+        await publicRegister(visitor(), ev.id, { email });
+
+        const mail = await server.waitForEmail(m => m.to === email && /waitlist/i.test(m.subject));
+        assert.match(mail.html, /shirts left over/);
+        assert.doesNotMatch(mail.html, /the moment a spot opens up/);
+    });
+
+    test('setting the waitlist message needs manage_event', async () => {
+        const ev = await fullEventWithWaitlist();
+        const stranger = await newUser(server);
+        const r = await stranger.client.put(`/api/event/${ev.id}/waitlist-message`, { message: 'nope' });
+        assert.equal(r.status, 403);
+    });
+
     test('can be joined directly, without going through a refused registration', async () => {
         const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 5, waitlist: true });
         const r = await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Direct Join', email: uniqueEmail('direct') });

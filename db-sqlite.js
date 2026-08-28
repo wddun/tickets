@@ -388,6 +388,20 @@ try { db.exec(`ALTER TABLE events ADD COLUMN waitlistClaimHours INTEGER DEFAULT 
 // giveawayRoomState in server.js.
 try { db.exec(`ALTER TABLE events ADD COLUMN giveawayToken TEXT`); } catch {}
 
+// A hard cutoff after which any not-yet-checked-in ticket for this event
+// stops working — the scanner refuses it, and the Apple Wallet pass is
+// voided (QR removed, shown as expired) the same way a deleted ticket's
+// pass is. Independent of the event's own time/endTime, since an organiser
+// may want tickets to die well before or after the event itself (e.g. a
+// same-day giveaway where an unclaimed QR is worthless by midnight). NULL
+// means tickets never expire on their own.
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiresAt TEXT`); } catch {}
+
+// Custom body text for the "you're on the waitlist" email, parallel to
+// reminderMessage — falls back to the default sentence when empty so
+// existing events don't change what they send.
+try { db.exec(`ALTER TABLE events ADD COLUMN waitlistMessage TEXT`); } catch {}
+
 // Scanning a scanner-link QR while signed in grants that account standing
 // "scanner" access to the event — it shows up in Your Events from then on,
 // not just for that one device/session. Deliberately separate from
@@ -705,6 +719,8 @@ export const stmt = {
         setAtDoorEnabled: db.prepare(`UPDATE events SET atDoorEnabled=? WHERE id=?`),
         setWaitlistEnabled: db.prepare(`UPDATE events SET waitlistEnabled=? WHERE id=?`),
         setCapacity: db.prepare(`UPDATE events SET capacity=? WHERE id=?`),
+        setTicketExpiresAt: db.prepare(`UPDATE events SET ticketExpiresAt=? WHERE id=?`),
+        setWaitlistMessage: db.prepare(`UPDATE events SET waitlistMessage=? WHERE id=?`),
         setSkipConfirmationEmails: db.prepare(`UPDATE events SET skipConfirmationEmails=? WHERE id=?`),
         setEmailPolicy: db.prepare(`UPDATE events SET emailPolicy=? WHERE id=?`),
         setShuttleLinkEnabled: db.prepare(`UPDATE events SET shuttleLinkEnabled=? WHERE id=?`),
