@@ -3019,7 +3019,7 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
         if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
         if (discountCodeId) stmt.discountCodes.incrementUse.run(discountCodeId);
         stmt.orders.insert.run(nanoid(8), nanoid(16), event.id, issued.registrationId, cleanName, cleanEmail, 0, 'usd', 'fulfilled', new Date().toISOString(), discountCodeId, discountAmount);
-        if (claimEntry) stmt.waitlist.setStatus.run('converted', claimEntry.id);
+        if (claimEntry) { stmt.waitlist.setStatus.run('converted', claimEntry.id); broadcastWaitlistChanged(event.id); }
         const qrDataUrl = await QRCode.toDataURL(`ticket:${issued.ticket.token}`);
         log('stripe', `[checkout] 100% discount — ticket issued directly — name: ${cleanName}  event: ${event.name}  code: ${discountCode}`);
         return res.json({ success: true, ticket: { token: issued.ticket.token, registrationId: issued.registrationId }, qr: qrDataUrl });
@@ -3138,7 +3138,7 @@ app.post('/api/stripe/webhook', async (req, res) => {
         // Releases the reserved-seat hold now that the promoted person has
         // actually completed checkout — the ticket itself is what counts
         // toward capacity from here on.
-        if (waitlistId) stmt.waitlist.setStatus.run('converted', waitlistId);
+        if (waitlistId) { stmt.waitlist.setStatus.run('converted', waitlistId); broadcastWaitlistChanged(eventId); }
         log('stripe', `[webhook] Ticket issued — name: ${buyerName}  event: ${issued.dbEvent.name}  session: ${session.id}`);
     } else if (stripeEvent.type === 'charge.refunded') {
         // Catches refunds issued directly from the Stripe dashboard, not just
@@ -3321,6 +3321,7 @@ async function joinWaitlist(event, name, email, sendEmailFlag = true) {
         }).catch(() => {});
     }
 
+    broadcastWaitlistChanged(event.id);
     return { waitlisted: true, position, waitlistId: id };
 }
 
@@ -3347,6 +3348,42 @@ app.get('/api/waitlist/entry/:id', (req, res) => {
         isPaid: event.ticketPrice > 0,
         claimUrl: claimActive ? `${BASE_URL}/register.html?id=${event.id}&claim=${entry.claimToken}` : null,
         claimExpired: entry.status === 'notified' && !claimActive,
+    });
+});
+
+// Public SSE companion to the route above — waitlist-status.html holds this
+// open instead of polling. It carries no data of its own: on any change it
+// just pings 'changed' and the page re-fetches GET /api/waitlist/entry/:id
+// (the single source of truth for position/status), so this stream can't
+// drift out of sync with what that route would say. Also doubles as the
+// connection whose connect/disconnect drives the page's "Live" indicator,
+// and receives the 'restarting' broadcast on deploy (see broadcastRestartToAll).
+app.get('/api/waitlist/entry/:id/stream', (req, res) => {
+    const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
+    if (!entry) return res.status(404).send('Not found');
+
+    res.set({
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders();
+    res.write(`retry: 2000\n`);
+    res.write(`: ${' '.repeat(2048)}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+    if (!waitlistStreamClients.has(entry.eventId)) waitlistStreamClients.set(entry.eventId, new Set());
+    waitlistStreamClients.get(entry.eventId).add(res);
+
+    const keepAlive = setInterval(() => {
+        try { res.write(': ping\n\n'); } catch (_) { clearInterval(keepAlive); }
+    }, 25000);
+
+    req.on('close', () => {
+        clearInterval(keepAlive);
+        const clients = waitlistStreamClients.get(entry.eventId);
+        if (clients) { clients.delete(res); if (!clients.size) waitlistStreamClients.delete(entry.eventId); }
     });
 });
 
@@ -3497,12 +3534,14 @@ async function promoteWaitlistEntry(entry, event) {
                 </div>`,
             }).catch(() => {});
         }
+        broadcastWaitlistChanged(event.id);
         return { success: true, notified: true };
     }
 
     const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email, source: null });
     if (!issued) return { success: false, error: 'Failed to issue ticket' };
     stmt.waitlist.setStatus.run('converted', entry.id);
+    broadcastWaitlistChanged(event.id);
     return { success: true, ticket: issued.ticket };
 }
 
@@ -3532,6 +3571,7 @@ app.delete('/api/waitlist/:id', requireAuth, (req, res) => {
     }
     stmt.waitlist.deleteById.run(req.params.id);
     logAudit(req, { eventId: entry.eventId, action: 'waitlist.removed', details: { email: entry.email } });
+    broadcastWaitlistChanged(entry.eventId);
     res.json({ success: true });
 });
 
@@ -8040,6 +8080,7 @@ setInterval(async () => {
         // can't also be handed to the next person.
         if (stmt.waitlist.setExpired.run(entry.id).changes === 0) continue;
         logAudit(WAITLIST_SWEEP_REQ, { eventId: entry.eventId, action: 'waitlist.claimExpired', details: { email: entry.email } });
+        broadcastWaitlistChanged(entry.eventId);
 
         const event = rowToEvent(stmt.events.byId.get(entry.eventId));
         if (!event || !event.waitlistEnabled) continue;
@@ -8067,6 +8108,19 @@ const scannerRegistry     = new Map(); // pairToken → flat scanner data object
 const monitorClients      = new Set(); // { res, eventIds: Set<string> }
 const giveawayChannels    = new Map(); // eventId → Set<{res, role, clientId}>  (giveaway room, fan-out to N controllers + N displays)
 const giveawayRoomState   = new Map(); // eventId → { potMode, spin }          (authoritative — replayed in full to every new connection)
+const waitlistStreamClients = new Map(); // eventId → Set<res>  (waitlist-status.html's live-update companion)
+
+// Pinged whenever a waitlist mutation could change what someone watching
+// their own status page would see — a join, promote, removal, claim expiry,
+// or claim completing at checkout. Carries no payload; the client re-fetches
+// GET /api/waitlist/entry/:id itself, so this can never drift out of sync
+// with what that route would actually say.
+function broadcastWaitlistChanged(eventId) {
+    const clients = waitlistStreamClients.get(eventId);
+    if (!clients || !clients.size) return;
+    const msg = `data: ${JSON.stringify({ type: 'changed' })}\n\n`;
+    for (const res of clients) { try { res.write(msg); } catch (_) { clients.delete(res); } }
+}
 
 function broadcastToMonitors(eventId, payload) {
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;
@@ -8994,6 +9048,7 @@ app.post('/api/v1/waitlist/:id/promote', ...apiRoute('manage_waitlist'), async (
     const issued = await issueTicketForPayment({ eventId: req.apiEvent.id, buyerName: entry.name, buyerEmail: entry.email, source: null });
     if (!issued) return apiError(res, 500, 'promote_failed', 'Could not issue the ticket.');
     stmt.waitlist.setStatus.run('converted', entry.id);
+    broadcastWaitlistChanged(req.apiEvent.id);
     logApiAudit(req, 'api.waitlist_promoted', { email: entry.email });
     res.json({ promoted: true, ticket: { token: issued.ticket.token, registrationId: issued.registrationId } });
 });
@@ -9091,6 +9146,46 @@ app.delete('/api/api-keys/:keyId', requireAuth, (req, res) => {
 });
 
 
-app.listen(PORT, '0.0.0.0', () => {
+// ── Deploy-triggered reload for passive live screens ────────────────────────
+// A `pm2 restart` (every deploy) used to just abruptly drop every open SSE
+// connection — a door display, a giveaway screen, or a waitlist status page
+// left open would silently sit on stale JS/HTML until someone thought to
+// refresh it by hand. On SIGTERM/SIGINT this broadcasts a 'restarting'
+// message into every passive/read-only live channel; each such page's own
+// client JS schedules a reload a few seconds later, once the new process is
+// actually back up. Deliberately excludes the giveaway *controller*
+// (giveaway.html never listens for this message, even though it shares the
+// giveawayChannels connections with the display side) and the scanner/
+// check-in staff tools — those are active operator surfaces where an
+// unannounced reload mid-action would be disruptive, not passive screens;
+// scanner/checkin/index already get a gentler, batched refresh via their own
+// service worker (public/sw-register.js).
+function broadcastRestartToAll() {
+    const msg = `data: ${JSON.stringify({ type: 'restarting' })}\n\n`;
+    const write = (res) => { try { res.write(msg); } catch (_) { /* already gone */ } };
+    for (const clients of displayTokenClients.values()) for (const res of clients) write(res);
+    for (const conns of giveawayChannels.values()) for (const conn of conns) write(conn.res);
+    for (const clients of waitlistStreamClients.values()) for (const res of clients) write(res);
+    for (const client of monitorClients) write(client.res);
+}
+
+let shuttingDown = false;
+function gracefulShutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log('server', `[shutdown] ${signal} received — notifying connected live screens.`);
+    try { broadcastRestartToAll(); } catch (err) { log('server', `[shutdown] broadcast failed: ${err.message}`); }
+    // better-sqlite3 writes are synchronous, so there's no buffered data to
+    // flush — the only reason to wait at all is giving the writes above an
+    // actual chance to leave the process before it exits. Bounded well under
+    // pm2's default kill_timeout so a broadcast that somehow hangs can never
+    // turn a routine restart into a stuck deploy.
+    httpServer.close();
+    setTimeout(() => process.exit(0), 300).unref();
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\nTicket Check-in System running at:\n - Local: http://localhost:${PORT}\n   - Network:  http://0.0.0.0:${PORT}\n`);
 });

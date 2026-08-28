@@ -52,9 +52,33 @@
         @media (max-width: 480px) {
             .container { padding: 16px 12px 32px; }
         }
+
+        /* Live-connection indicator — mirrors the pattern singlink uses on
+           its audience-facing pages (a pill that's invisible while connected
+           and only surfaces to report trouble/recovery), adapted to this
+           app's own theme tokens instead of hardcoded colors. */
+        .conn-banner {
+            position: fixed; top: 14px; left: 14px; z-index: 200;
+            display: flex; align-items: center; gap: 8px;
+            padding: 7px 13px; border-radius: 999px;
+            font-size: 12px; font-weight: 700;
+            background: var(--warning-bg); color: var(--warning-text);
+            opacity: 0; transform: translateY(-8px); pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+        }
+        .conn-banner.visible { opacity: 1; transform: translateY(0); }
+        .conn-banner.reconnected { background: var(--success); color: #fff; }
+        .conn-spinner {
+            width: 9px; height: 9px; border-radius: 50%;
+            border: 2px solid rgba(0,0,0,0.2); border-top-color: currentColor;
+            animation: conn-spin 0.7s linear infinite;
+        }
+        [data-theme="dark"] .conn-spinner { border-color: rgba(255,255,255,0.25); border-top-color: currentColor; }
+        @keyframes conn-spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
+    <div class="conn-banner" id="connBanner"><span class="conn-spinner"></span><span id="connBannerText">Reconnecting&hellip;</span></div>
     <div class="container">
         <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
             <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
@@ -129,8 +153,6 @@
         })();
         const params = new URLSearchParams(window.location.search);
         const id = params.get('id');
-        let pollTimer = null;
-        const POLL_MS = 15000;
 
         function showView(name) {
             for (const v of ['loadingView', 'waitingView', 'notifiedView', 'expiredView', 'convertedView', 'errorView']) {
@@ -150,11 +172,6 @@
                     document.getElementById('waitingEventName').textContent = data.eventName;
                     document.getElementById('positionNum').textContent = data.position;
                     showView('waitingView');
-                    // Still in line — keep checking so a promotion (or moving
-                    // up as other people are promoted or drop off) shows up
-                    // on its own, without the visitor needing to reload.
-                    if (!pollTimer) pollTimer = setInterval(load, POLL_MS);
-                    return;
                 } else if (data.status === 'notified' && data.claimUrl) {
                     document.getElementById('notifiedEventName').textContent = data.eventName;
                     document.getElementById('claimBtn').onclick = () => window.location.href = data.claimUrl;
@@ -168,16 +185,53 @@
                 } else {
                     showView('errorView');
                 }
-                // Nothing changes further on its own once off 'waiting' — a
-                // claim's own countdown isn't something this page needs to
-                // announce mid-visit, and converted/expired are terminal.
-                clearInterval(pollTimer);
-                pollTimer = null;
             } catch {
                 showView('errorView');
             }
         }
-        load();
+
+        // ── Live connection ──────────────────────────────────────────────
+        // Pushed updates instead of polling: the stream carries no data of
+        // its own (see /api/waitlist/entry/:id/stream in server.js) — on any
+        // change it just pings, and load() re-fetches the real status, so
+        // this can never show something the plain GET route wouldn't.
+        if (id) {
+            const banner = document.getElementById('connBanner');
+            const bannerText = document.getElementById('connBannerText');
+            let hasConnectedOnce = false;
+            let reconnectedFlashTimeout = null;
+            const es = new EventSource(`/api/waitlist/entry/${id}/stream`);
+
+            es.onerror = () => {
+                clearTimeout(reconnectedFlashTimeout);
+                banner.classList.remove('reconnected');
+                bannerText.textContent = 'Reconnecting…';
+                banner.classList.add('visible');
+            };
+            es.onmessage = (e) => {
+                let msg;
+                try { msg = JSON.parse(e.data); } catch (_) { return; }
+                if (msg.type === 'connected') {
+                    if (hasConnectedOnce) {
+                        banner.classList.add('reconnected');
+                        bannerText.textContent = 'Reconnected';
+                        clearTimeout(reconnectedFlashTimeout);
+                        reconnectedFlashTimeout = setTimeout(() => banner.classList.remove('visible'), 2000);
+                    }
+                    hasConnectedOnce = true;
+                    load();
+                } else if (msg.type === 'changed') {
+                    load();
+                } else if (msg.type === 'restarting') {
+                    // The server is about to redeploy — this page holds no
+                    // editable state, so just reload once the new process is
+                    // actually back up rather than sitting on stale JS.
+                    setTimeout(() => location.reload(), 3000);
+                }
+            };
+        } else {
+            load();
+        }
     </script>
     <footer class="wts-footer">
         <img src="/logo-nav.svg" alt="Will's Tech Support" style="height:14px;width:auto;opacity:.6">

@@ -274,6 +274,12 @@
                         } else {
                             showResult(msg);
                         }
+                    } else if (msg.type === 'restarting') {
+                        // A passive door display holds no state worth
+                        // preserving — a fresh deploy just reloads it. Short
+                        // delay so it lands after the new process is
+                        // actually accepting connections again.
+                        setTimeout(() => location.reload(), 3000);
                     }
                 } catch { /* malformed */ }
             };

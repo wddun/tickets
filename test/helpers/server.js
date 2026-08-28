@@ -121,6 +121,20 @@ export async function startServer(opts = {}) {
                 await sleep(50);
             }
         },
+        /** Sends a real signal to the server process — e.g. SIGTERM, the same
+         *  one a `pm2 restart` sends, to test the graceful-shutdown path
+         *  without actually going through pm2. */
+        sendSignal(sig) { child.kill(sig); },
+        /** Resolves once the process has actually exited (or immediately, if
+         *  it already had) — for asserting a signal handler doesn't hang. */
+        async waitForExit(timeoutMs = 5000) {
+            const until = Date.now() + timeoutMs;
+            while (!exited) {
+                if (Date.now() > until) throw new Error(`Process did not exit within ${timeoutMs}ms`);
+                await sleep(50);
+            }
+            return exited;
+        },
         async stop() {
             if (!exited) {
                 child.kill('SIGKILL');

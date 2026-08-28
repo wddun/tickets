@@ -8,6 +8,7 @@ import test, { before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer } from './helpers/server.js';
 import { createClient } from './helpers/client.js';
+import { openSseReader } from './helpers/sse.js';
 import { newUser, createEvent, publicRegister, addTicket, listTickets, uniqueEmail } from './helpers/factories.js';
 
 let server, owner;
@@ -153,5 +154,43 @@ describe('no-show release', () => {
 
         const stranger = await newUser(server);
         assert.equal((await stranger.client.post(`/api/event/${ev.id}/no-show-release`, { count: 1 })).status, 403);
+    });
+});
+
+describe('live waitlist status stream', () => {
+    test('pushes a change ping when someone ahead in line leaves, instead of requiring a poll', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Only Seat' });
+
+        const aheadEmail = uniqueEmail('ahead-in-line');
+        const watchedEmail = uniqueEmail('watched-entry');
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Ahead', email: aheadEmail });
+        const joined = await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Watched', email: watchedEmail });
+        assert.equal(joined.body.position, 2);
+
+        const reader = await openSseReader(`${server.base}/api/waitlist/entry/${joined.body.waitlistId}/stream`);
+        try {
+            const first = await reader.next();
+            assert.equal(first?.type, 'connected');
+
+            const entries = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body;
+            const ahead = entries.find(e => e.email === aheadEmail);
+            await owner.client.del(`/api/waitlist/${ahead.id}`, {});
+
+            const changed = await reader.next();
+            assert.equal(changed?.type, 'changed', 'removing the person ahead should push a change to whoever is behind them');
+
+            // The ping carries no data itself — confirm the page's own re-fetch
+            // afterward actually reflects the move up a spot.
+            const status = await visitor().get(`/api/waitlist/entry/${joined.body.waitlistId}`);
+            assert.equal(status.body.position, 1);
+        } finally {
+            reader.close();
+        }
+    });
+
+    test('404s for an unknown entry id instead of opening a stream to nothing', async () => {
+        const res = await fetch(`${server.base}/api/waitlist/entry/does-not-exist/stream`);
+        assert.equal(res.status, 404);
     });
 });
