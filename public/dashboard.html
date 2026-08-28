@@ -3331,7 +3331,7 @@
         <div class="stats-row">
             <div class="stat-box${activeStatFilter === 'all' ? ' stat-active' : ''}" onclick="setStatFilter('all')">
                 <div class="stat-num">${total}${event.capacity ? `<span style="font-size:13px;font-weight:500;color:var(--text-muted);"> / ${event.capacity}</span>` : ''}</div>
-                <div class="stat-label">Tickets${event.capacity ? ` · ${Math.round(total/event.capacity*100)}% full` : ''}</div>
+                <div class="stat-label">Valid Tickets${event.capacity ? ` · ${Math.round(total/event.capacity*100)}% full` : ''}</div>
             </div>
             <div class="stat-box${activeStatFilter === 'checked' ? ' stat-active' : ''}" onclick="setStatFilter('checked')">
                 <div class="stat-num" style="color:#10b981;" id="liveStatScanned">${scanned}</div>
@@ -4087,7 +4087,7 @@
                 : '<span style="font-size:12px;color:var(--text-muted);">No image set</span>';
             return `
                 <div class="modal-section-title">General</div>
-                <div class="settings-hint">Core event details — name, date, location, and ticket price.</div>
+                <div class="settings-hint">Core event details: name, date, location, and ticket price.</div>
                 <div style="margin-bottom:12px;">
                     <label for="editEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name</label>
                     <input type="text" id="editEventName" value="${esc(ev.name || '')}"
@@ -5193,7 +5193,7 @@
                     <input type="checkbox" id="atDoorToggle" ${atDoor ? 'checked' : ''}>
                     <div>
                         <div class="settings-toggle-title">At-Door Sales</div>
-                        <div class="settings-toggle-desc">Staff-only — requires being logged in on the device. ${atDoorDesc}</div>
+                        <div class="settings-toggle-desc">Staff only. Requires being logged in on the device. ${atDoorDesc}</div>
                     </div>
                 </label>
 
@@ -5246,7 +5246,7 @@
                     <input type="checkbox" id="perDeviceToggle" ${perDevice ? 'checked' : ''}>
                     <div>
                         <div class="settings-toggle-title">One Registration Per Device</div>
-                        <div class="settings-toggle-desc">Remembers the browser that registered and turns it away next time, before the form is shown. This is a deterrent, not a lock — clearing cookies, a private window, or a second phone all get around it. Pair it with the email limit above for anything that matters.</div>
+                        <div class="settings-toggle-desc">Remembers the browser that registered and turns it away next time, before the form is shown. This is a deterrent, not a lock. Clearing cookies, a private window, or a second phone will bypass it. Pair it with the email limit above for anything that matters.</div>
                     </div>
                 </label>
 
@@ -5825,7 +5825,7 @@
                         <input type="checkbox" ${checked ? 'checked' : ''} onchange="swToggleExtraColumn(${i}, this.checked)">
                         <span style="flex:1;min-width:0;">${esc(h)}</span>
                     </label>
-                    ${checked ? `<input type="text" value="${esc(label)}" oninput="swSetExtraLabel(${i}, this.value)" placeholder="Ticket label (optional — default: ${esc(h)})" style="width:100%;margin-top:3px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:11px;box-sizing:border-box;">` : ''}
+                    ${checked ? `<input type="text" value="${esc(label)}" oninput="swSetExtraLabel(${i}, this.value)" placeholder="Ticket label (optional; default: ${esc(h)})" style="width:100%;margin-top:3px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:11px;box-sizing:border-box;">` : ''}
                 </div>`;
             }).join('');
         }
@@ -6069,7 +6069,7 @@
             if (!keyInfo) {
                 return `
                     <div class="modal-section-title">API Access</div>
-                    <div class="settings-empty">Could not load API access — only administrators can view this.</div>
+                    <div class="settings-empty">Could not load API access. Only administrators can view this.</div>
                 `;
             }
 
@@ -6495,7 +6495,7 @@
                 </div>
                 <div style="margin-bottom:18px;">
                     <label for="waitlistMessage" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Custom message on the "you're on the waitlist" email <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
-                    <textarea id="waitlistMessage" rows="3" placeholder="We'll email you if a spot opens up." maxlength="2000"
+                    <textarea id="waitlistMessage" rows="3" placeholder="You will be notified by email if a spot becomes available." maxlength="2000"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;font-family:inherit;font-size:13px;resize:vertical;">${esc(ev?.waitlistMessage || '')}</textarea>
                     <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Replaces the default line about being notified when a spot opens. Use this to set different expectations, for example: "You will be notified if any tickets remain unclaimed." Leave blank to keep the default.</div>
                 </div>
@@ -6911,7 +6911,7 @@
             try {
                 const r = await fetch(`/api/event/${eventId}/audit-log?limit=25`);
                 if (r.status === 403) {
-                    return `<hr class="settings-divider"><div class="settings-subhead">Activity Log</div><div class="settings-empty">You don't have permission to view this event's activity log.</div>`;
+                    return `<hr class="settings-divider"><div class="settings-subhead">Activity Log</div><div class="settings-empty">You do not have permission to view this event's activity log.</div>`;
                 }
                 if (!r.ok) return '';
                 const { entries } = await r.json();
@@ -8390,7 +8390,7 @@
 
         async function resendTicketEmail(btn) {
             if (hasUnsavedChanges()) {
-                if (!await confirmDialog('You have unsaved changes. "Resend Only" will send the current saved data — your edits will NOT be included. Continue?')) return;
+                if (!await confirmDialog('You have unsaved changes. "Resend Only" sends the currently saved data; your edits will not be included. Continue?')) return;
             }
             const id = document.getElementById('editTicketId').value;
             const originalText = btn.textContent;
@@ -8595,7 +8595,7 @@
                 });
                 if (r.ok) {
                     closeReportProblemModal();
-                    showToast('Thanks — your report has been sent.');
+                    showToast('Your report has been sent.');
                 } else {
                     const d = await r.json();
                     showToast(d.error || 'Failed to send your report.');
@@ -8681,7 +8681,7 @@
             image: { url: '', href: '', width: 320, align: 'center' },
             divider: {},
             spacer: { height: 16 },
-            footerNote: { lines: ["Keep this email — it's your entry ticket."] },
+            footerNote: { lines: ["Retain this email as your entry ticket."] },
         };
 
         let ebState = null;
@@ -8977,7 +8977,7 @@
                     </div>
                     ${open ? `<div class="eb-card-body">${ebRenderInspector(b)}</div>` : ''}
                 </div>`;
-            }).join('') || '<div class="settings-empty">No blocks yet — add one from the left.</div>';
+            }).join('') || '<div class="settings-empty">No blocks yet. Add one from the left panel.</div>';
             ebInitDrag(canvas);
         }
 
@@ -9022,7 +9022,7 @@
                                 ${['left', 'center', 'right'].map(v => `<option value="${v}" ${p.align === v ? 'selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
                             </select></div>
                         </div></div>
-                        <div class="eb-note">Must be a publicly reachable URL — email clients can't load images from behind a login.</div>`;
+                        <div class="eb-note">Must be a publicly reachable URL. Email clients cannot load images from behind a login.</div>`;
                 case 'spacer':
                     return `<div class="eb-field"><label>Height (px)</label><input type="number" min="4" max="80" value="${p.height || 16}" oninput="${setNum('height')}"></div>`;
                 case 'footerNote':

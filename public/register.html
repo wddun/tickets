@@ -238,7 +238,7 @@
             <div id="closedView" style="display:none;">
                 <div class="success-box">
                     <div class="success-title">Registration is closed</div>
-                    <div class="success-sub">This event isn't accepting new registrations right now.</div>
+                    <div class="success-sub">This event is not currently accepting new registrations.</div>
                 </div>
             </div>
 
@@ -265,7 +265,7 @@
             <div id="waitlistView" style="display:none;">
                 <div class="success-box">
                     <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    <div class="success-title" id="waitlistTitle">You're on the waitlist</div>
+                    <div class="success-title" id="waitlistTitle">You Are on the Waitlist</div>
                     <div class="success-sub" id="waitlistSub"></div>
                     <button class="btn-outline" onclick="window.location.href = window.location.pathname + '?id=' + eventId">Back</button>
                 </div>
@@ -274,7 +274,7 @@
             <div id="successView" style="display:none;">
                 <div class="success-box">
                     <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
-                    <div class="success-title" id="successTitle">You're registered!</div>
+                    <div class="success-title" id="successTitle">Registration Confirmed</div>
                     <div class="success-sub">A confirmation email has been sent to you with your QR code.</div>
                     <img id="qrImage" class="qr-img" src="" alt="QR Code">
                     <div class="ticket-token" id="ticketToken"></div>
@@ -418,7 +418,7 @@
                 isFullWaitlistable = true;
                 btn.disabled = false;
                 btn.textContent = 'Join Waitlist';
-                el.textContent = "Sold out — join the waitlist below and we'll email you if a spot opens up.";
+                el.textContent = "This event is sold out. Join the waitlist below and you will be notified by email if a spot becomes available.";
                 el.style.background = 'var(--warning-bg)';
                 el.style.borderColor = '#fcd34d';
                 el.style.color = 'var(--warning-text)';
@@ -521,10 +521,10 @@
             const soldOut = d.reason === 'sold_out';
             document.getElementById('queueTitle').textContent = soldOut
                 ? 'This event is full'
-                : 'Every spot is being filled in right now';
+                : 'Every remaining spot is currently being claimed';
             document.getElementById('queueSub').textContent = soldOut
                 ? 'All tickets have been claimed.'
-                : `${d.held} ${d.held === 1 ? 'person is' : 'people are'} part-way through signing up for the last ${d.remaining === 0 ? '' : d.remaining + ' '}spot${d.held === 1 ? '' : 's'}. If any of them don't finish, a spot frees up automatically — this page will let you in the moment one does.`;
+                : `${d.held} ${d.held === 1 ? 'person is' : 'people are'} part-way through signing up for the last ${d.remaining === 0 ? '' : d.remaining + ' '}spot${d.held === 1 ? '' : 's'}. If any of them do not complete their registration, a spot will be released automatically; this page will admit you the moment one becomes available.`;
 
             renderAvailability({ ...d, registered: d.issued }, 'queue');
 
@@ -665,10 +665,10 @@
             document.getElementById('processingView').style.display = 'none';
             document.getElementById('waitlistView').style.display  = 'block';
             document.getElementById('waitlistTitle').textContent =
-                data.alreadyOnList ? "You're already on the waitlist" : "You're on the waitlist";
+                data.alreadyOnList ? "You Are Already on the Waitlist" : "You Are on the Waitlist";
             document.getElementById('waitlistSub').textContent = data.position
-                ? `You're #${data.position} in line. We'll email you the moment a spot opens up.`
-                : `We'll email you the moment a spot opens up.`;
+                ? `You are number ${data.position} in line. You will be notified by email if a spot becomes available.`
+                : `You will be notified by email if a spot becomes available.`;
         }
 
         function showSuccess(ticket, qr) {
@@ -695,7 +695,7 @@
                     const res  = await fetch(`/api/stripe/session/${sid}`);
                     const data = await res.json();
                     if (data.status === 'fulfilled' && data.ticket) {
-                        document.getElementById('successTitle').textContent = 'Payment complete!';
+                        document.getElementById('successTitle').textContent = 'Payment Complete';
                         showSuccess(data.ticket, data.qr);
                         return;
                     }
@@ -706,7 +706,7 @@
                     }
                 } catch {}
             }
-            alert('Ticket processing is taking longer than expected. Check your email — it will arrive shortly.');
+            alert('Ticket processing is taking longer than expected. Please check your email; it will arrive shortly.');
         }
 
         if (sessionId) {

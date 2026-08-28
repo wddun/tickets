@@ -123,7 +123,7 @@ describe('the sheet watcher cannot be pointed at the server\'s own network', () 
         const r = await owner.client.post(`/api/event/${ev.id}/sheet-watch/preview`, {
             url: 'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit#gid=0',
         });
-        assert.ok(!/doesn't look like a Google Sheets link/.test(r.body?.error || ''),
+        assert.ok(!/does not appear to be a Google Sheets link/.test(r.body?.error || ''),
             'a genuine sheet URL was rejected as not being one');
     });
 

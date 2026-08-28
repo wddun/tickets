@@ -306,7 +306,7 @@ function sendVerificationEmail(email, verifyToken) {
   </div>
   <h2 style="font-size:22px;font-weight:700;color:#1a1f3c;margin:0 0 10px;">Verify your email</h2>
   <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 28px;">
-    Thanks for signing up. Click the button below to verify your email address and activate your account.
+    Thank you for creating an account. Please click the button below to verify your email address and activate your account.
   </p>
   <div style="text-align:center;margin-bottom:28px;">
     <a href="${verifyURL}" style="background:#c4294a;color:#fff;text-decoration:none;font-size:16px;font-weight:700;padding:14px 32px;border-radius:10px;display:inline-block;">
@@ -314,7 +314,7 @@ function sendVerificationEmail(email, verifyToken) {
     </a>
   </div>
   <p style="color:#94a3b8;font-size:13px;line-height:1.6;margin:0;">
-    This link expires in 24 hours. If you didn't create an account, you can ignore this email.
+    This link will expire in 24 hours. If you did not create this account, no further action is required.
   </p>
   <div style="margin-top:12px;padding:12px 14px;background:#f8fafc;border-radius:8px;word-break:break-all;">
     <span style="color:#64748b;font-size:12px;">${verifyURL}</span>
@@ -700,10 +700,10 @@ function escEmailText(value) {
 // Email" preview toggle, so the preview shows exactly what confirmWinner()
 // actually mails rather than a hand-maintained approximation of it.
 function giveawayWinnerIntroHtml(eventName, customMessage, prizeLabel) {
-    const prizeHtml = prizeLabel ? ` You won: <strong>${escEmailText(prizeLabel)}</strong>.` : '';
+    const prizeHtml = prizeLabel ? ` Prize: <strong>${escEmailText(prizeLabel)}</strong>.` : '';
     return customMessage
-        ? `&#127881; ${escEmailText(customMessage)}${prizeHtml}`
-        : `&#127881; Congratulations, you're a winner of the <strong>${escEmailText(eventName)}</strong> giveaway!${prizeHtml}`;
+        ? `${escEmailText(customMessage)}${prizeHtml}`
+        : `Congratulations, you are a winner of the <strong>${escEmailText(eventName)}</strong> giveaway.${prizeHtml}`;
 }
 
 // The winner email is a fully independent template (own blocks, own design)
@@ -774,7 +774,7 @@ const DEFAULT_TICKET_EMAIL_TEMPLATE = {
     blocks: [
         { id: 'b-eventimage', type: 'eventImage', props: {} },
         { id: 'b-header', type: 'header', props: { eyebrow: 'Your Registration Confirmation', title: '{{eventName}}' } },
-        { id: 'b-greeting', type: 'text', props: { text: 'Hi **{{firstName}}**,', size: 'md', align: 'left', color: '#374151' } },
+        { id: 'b-greeting', type: 'text', props: { text: 'Dear **{{firstName}}**,', size: 'md', align: 'left', color: '#374151' } },
         // The one line that actually says *why* this particular email landed
         // — new registration, an edit, a resend, or (via giveawayWinnerIntroHtml)
         // a giveaway win. Every send path already computes this text and passes
@@ -783,13 +783,13 @@ const DEFAULT_TICKET_EMAIL_TEMPLATE = {
         // those context-specific messages — including "you won!" — was
         // computed server-side and then silently dropped.
         { id: 'b-intro', type: 'intro', props: {} },
-        { id: 'b-body', type: 'text', props: { text: "Thank you for registering for **{{eventName}}**. This email confirms your registration and contains your event ticket. Please save this email—you'll need it to check in at the event.", size: 'sm', align: 'left', color: '#555555' } },
+        { id: 'b-body', type: 'text', props: { text: "Thank you for registering for **{{eventName}}**. This email confirms your registration and contains your ticket. Please retain this email, as it is required for check-in at the event.", size: 'sm', align: 'left', color: '#555555' } },
         { id: 'b-details', type: 'eventDetails', props: { showMaps: true } },
         { id: 'b-calendar', type: 'calendar', props: { google: true, ics: true } },
         { id: 'b-changes', type: 'changes', props: {} },
         { id: 'b-fields', type: 'customFields', props: {} },
         { id: 'b-tickets', type: 'tickets', props: { showWallet: true, showToken: true } },
-        { id: 'b-footer', type: 'footerNote', props: { lines: ["Keep this email — it's your entry ticket.", "Don't share your QR code with others."] } },
+        { id: 'b-footer', type: 'footerNote', props: { lines: ["Retain this email as your entry ticket.", "Do not share your QR code with others."] } },
     ],
 };
 
@@ -1989,15 +1989,15 @@ app.post('/api/auth/forgot-password', forgotPasswordLimiter, async (req, res) =>
     const resetUrl = `${BASE_URL}/reset-password.html?token=${rawToken}`;
     await sendEmail({
         to: normalizedEmail,
-        subject: 'Reset your password — Will\'s Tech Support Tickets',
+        subject: 'Password Reset for Will\'s Tech Support Tickets',
         html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;">
             <div style="margin-bottom:24px;"><img src="${BASE_URL}/logo.png" alt="Will's Tech Support" style="height:28px;"></div>
-            <h2 style="color:#1a1f3c;margin:0 0 8px;">Reset your password</h2>
-            <p style="color:#64748b;margin:0 0 28px;">We received a request to reset the password for <strong>${normalizedEmail}</strong>. Click the button below to choose a new password.</p>
+            <h2 style="color:#1a1f3c;margin:0 0 8px;">Reset Your Password</h2>
+            <p style="color:#64748b;margin:0 0 28px;">A request was received to reset the password for <strong>${normalizedEmail}</strong>. Please click the button below to choose a new password.</p>
             <div style="text-align:center;margin:0 0 28px;">
                 <a href="${resetUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Reset Password</a>
             </div>
-            <p style="color:#94a3b8;font-size:13px;margin:0 0 8px;">This link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>
+            <p style="color:#94a3b8;font-size:13px;margin:0 0 8px;">This link will expire in 1 hour. If you did not request this change, no further action is required.</p>
             <p style="color:#cbd5e1;font-size:11px;word-break:break-all;">Direct link: ${resetUrl}</p>
         </div>`
     }).catch(err => log('forgot-password', `[ERR] Email failed — email: ${normalizedEmail}  err: ${err.message}`));
@@ -2803,7 +2803,7 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
     // posting straight to this route hands out a paid event's tickets for
     // nothing, Stripe never involved.
     if (event.ticketPrice > 0) {
-        return res.status(400).json({ error: 'This event is paid — use the checkout link to buy a ticket' });
+        return res.status(400).json({ error: 'This event is paid. Please use the checkout link to purchase a ticket.' });
     }
 
     const blockedHere = signupBlockReason(req, event, email);
@@ -2841,7 +2841,7 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
     if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID && shouldSendConfirmation('public', null, event)) {
         const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName,
-            intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+            intro: `Your registration for <strong>${event.name}</strong> is confirmed.`,
             event,
             tickets: [ticket],
         });
@@ -2927,7 +2927,7 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 
         && shouldSendConfirmation(source, null, dbEvent)) {
         const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName,
-            intro: `You&rsquo;re all set for <strong>${dbEvent.name}</strong>! We&rsquo;ll see you there.`,
+            intro: `Your registration for <strong>${dbEvent.name}</strong> is confirmed.`,
             event: dbEvent,
             tickets: [ticket],
         });
@@ -2959,7 +2959,7 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.allowPublicRegistration) return res.status(403).json({ error: 'Registration is not open for this event' });
-    if (!event.ticketPrice) return res.status(400).json({ error: 'This event is free — use /api/register' });
+    if (!event.ticketPrice) return res.status(400).json({ error: 'This event is free. Please use /api/register.' });
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanName  = name.trim();
@@ -3179,7 +3179,7 @@ app.post('/api/event/:eventId/at-door-register', requireAuth, async (req, res) =
     const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.atDoorEnabled) return res.status(403).json({ error: 'At-door sales are not enabled for this event' });
-    if (event.ticketPrice) return res.status(400).json({ error: 'This event is paid — share the registration QR code instead' });
+    if (event.ticketPrice) return res.status(400).json({ error: 'This event is paid. Please share the registration QR code instead.' });
 
     if (event.capacity) {
         // Counts seats people are holding mid-signup, not just issued tickets —
@@ -3637,7 +3637,7 @@ app.post('/api/event/:id/no-show-release', requireAuth, async (req, res) => {
     // Never trust a count the client computed earlier — someone may have
     // checked in between the preview and this click.
     const notCheckedIn = stmt.tickets.byEventId.all(event.id).map(rowToTicket).filter(t => !t.used_at);
-    if (!notCheckedIn.length) return res.status(409).json({ error: 'Nothing to release — every ticket is checked in' });
+    if (!notCheckedIn.length) return res.status(409).json({ error: 'Nothing to release. Every ticket is checked in.' });
 
     // Released whole registrations at a time (a family of four sharing one
     // registration goes together), oldest first, until at least `count`
@@ -3729,7 +3729,7 @@ app.get('/api/event/:id/orders', requireAuth, (req, res) => {
 });
 
 app.post('/api/orders/:id/refund', requireAuth, async (req, res) => {
-    if (!stripe) return res.status(503).json({ error: 'Stripe is not connected yet — email support@willstechsupport.com to connect your Stripe account.' });
+    if (!stripe) return res.status(503).json({ error: 'Stripe is not yet connected. Please email support@willstechsupport.com to connect your Stripe account.' });
     const order = stmt.orders.byId.get(req.params.id);
     if (!order) return res.status(404).json({ error: 'Order not found' });
     if (!userHasEventCapability(req.session.userId, order.eventId, 'manage_payments')) {
@@ -3948,7 +3948,7 @@ app.post('/api/register-bulk', async (req, res) => {
                     firstName,
                     intro: isUpdate
                         ? `Your registration for <strong>${event.name}</strong> has been updated.`
-                        : `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+                        : `Your registration for <strong>${event.name}</strong> is confirmed.`,
                     event,
                     tickets: ticketsToSend,
                     changesHtml,
@@ -4773,11 +4773,11 @@ app.post('/api/event/:id/giveaway/email-winners', requireAuth, async (req, res) 
                 <h2 style="margin:8px 0 0;font-size:22px;font-weight:700;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">${event.name}</h2>
               </td></tr>
               <tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-                <p style="font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">Hi ${escEmailText(w.name || '')},</p>
+                <p style="font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">Dear ${escEmailText(w.name || '')},</p>
                 <div style="background:#f9fafb;border-left:4px solid #2563eb;padding:20px;margin:24px 0;border-radius:8px;">
                   <p style="color:#555;white-space:pre-wrap;margin:0;font-size:15px;line-height:1.6;">${escapedMessage}</p>
                 </div>
-                <p style="font-size:13px;color:#888;margin:0 0 12px;line-height:1.5;">If you have any questions, you can reply to this email and the organizer will get back to you shortly.</p>
+                <p style="font-size:13px;color:#888;margin:0 0 12px;line-height:1.5;">For any questions, please reply to this email; the organizer will respond shortly.</p>
               </td></tr>
             </table>
             </td></tr>
@@ -5112,7 +5112,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
 
         const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
             firstName: newTickets[0].firstName,
-            intro: `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`,
+            intro: `Your registration for <strong>${event.name}</strong> is confirmed.`,
             event,
             tickets: newTickets,
         });
@@ -5325,7 +5325,7 @@ app.post('/api/event/:id/email-template/preview', requireAuth, async (req, res) 
     const isWinnerVariant = req.body?.variant === 'winner';
     const intro = isWinnerVariant
         ? giveawayWinnerIntroHtml(event.name, null, 'a $50 gift card')
-        : `You&rsquo;re all set for <strong>${event.name}</strong>! We&rsquo;ll see you there.`;
+        : `Your registration for <strong>${event.name}</strong> is confirmed.`;
 
     try {
         const { html } = await buildTicketEmailHtml({
@@ -5369,7 +5369,7 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
     const eventOwner = rowToUser(stmt.users.byId.get(event.userId));
     const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
         firstName: groupTickets[0].firstName,
-        intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
+        intro: `This is a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
         event,
         tickets: groupTickets,
     });
@@ -5474,7 +5474,7 @@ app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
                 <div style="background:#f9fafb;border-left:4px solid #2563eb;padding:20px;margin:24px 0;border-radius:8px;">
                   <p style="color:#555;white-space:pre-wrap;margin:0;font-size:15px;line-height:1.6;">${escapedMessage}</p>
                 </div>
-                <p style="font-size:13px;color:#888;margin:0 0 12px;line-height:1.5;">If you have any questions, you can reply to this email and the organizer will get back to you shortly.</p>
+                <p style="font-size:13px;color:#888;margin:0 0 12px;line-height:1.5;">For any questions, please reply to this email; the organizer will respond shortly.</p>
               </td></tr>
             </table>
             </td></tr>
@@ -5793,7 +5793,7 @@ app.post('/api/registrations/bulk-resend', requireAuth, async (req, res) => {
         try {
             const { html, attachments, subject: subjectOverride } = await buildTicketEmailHtml({
                 firstName: ticket.firstName,
-                intro: `Here&rsquo;s a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
+                intro: `This is a copy of your ticket${actualCount > 1 ? 's' : ''} for <strong>${event.name}</strong>.`,
                 event,
                 tickets: groupTickets,
             });
@@ -7699,7 +7699,7 @@ app.post('/api/event/:id/sheet-watch/preview', requireAuth, async (req, res) => 
     const url = String(req.body?.url || '').trim();
     if (!url) return res.status(400).json({ error: 'url required' });
     const csvUrl = sheetCsvUrl(url);
-    if (!csvUrl) return res.status(400).json({ error: "That doesn't look like a Google Sheets link — paste the sheet's URL from your browser's address bar" });
+    if (!csvUrl) return res.status(400).json({ error: "This does not appear to be a Google Sheets link. Please paste the sheet's URL from your browser's address bar." });
     try {
         const { headers, rows } = await fetchSheetRows(csvUrl);
         const lower = headers.map(h => h.toLowerCase());
@@ -7756,7 +7756,7 @@ app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
     }
     const cleanUrl = String(url).trim();
     const csvUrl = sheetCsvUrl(cleanUrl);
-    if (!csvUrl) return res.status(400).json({ error: "That doesn't look like a valid sheet link" });
+    if (!csvUrl) return res.status(400).json({ error: "This does not appear to be a valid sheet link." });
     const interval = Math.min(15, Math.max(1, parseInt(intervalMinutes, 10) || 2));
     const cleanExtraColumns = Array.isArray(extraColumns) ? extraColumns.slice(0, 20) : [];
     // Keep only labels for columns that are actually selected, and only when
@@ -7947,8 +7947,8 @@ app.post('/api/event/:id/transfer-ownership', requireAuth, (req, res) => {
             html: `
                 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
                     <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
-                    <h2 style="color:#1a1f3c;margin:0 0 8px;">You've been given ownership</h2>
-                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 12px;"><strong>${previousOwner?.email || 'An administrator'}</strong> transferred ownership of <strong>${event.name}</strong> to you. You now have full control of the event, including who else can access it.</p>
+                    <h2 style="color:#1a1f3c;margin:0 0 8px;">Ownership Transferred</h2>
+                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 12px;"><strong>${previousOwner?.email || 'An administrator'}</strong> has transferred ownership of <strong>${event.name}</strong> to you. You now have full control of the event, including management of access for other users.</p>
                     <div style="text-align:center;margin:28px 0 8px;">
                         <a href="${BASE_URL}/login.html" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Open the dashboard</a>
                     </div>
@@ -8018,9 +8018,9 @@ app.post('/api/sheet/share', requireAuth, async (req, res) => {
             html: `
                 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
                     <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
-                    <h2 style="color:#1a1f3c;margin:0 0 8px;">You've been given access</h2>
-                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 12px;"><strong>${user?.email}</strong> shared <strong>${permissionLabel}</strong> access to <strong>${event.name}</strong> with you.</p>
-                    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">Log in to view it.</p>
+                    <h2 style="color:#1a1f3c;margin:0 0 8px;">Access Granted</h2>
+                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 12px;"><strong>${user?.email}</strong> has shared <strong>${permissionLabel}</strong> access to <strong>${event.name}</strong> with you.</p>
+                    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">Please log in to view it.</p>
                     <div style="text-align:center;margin-bottom:8px;">
                         <a href="${BASE_URL}/login.html" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Log In</a>
                     </div>
@@ -8088,7 +8088,7 @@ app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
 function buildReminderHtml(event, customMessage) {
     const hours = event.reminderHoursBefore ?? 24;
     const timeLabel = hours === 24 ? 'tomorrow' : hours < 24 ? `in ${hours} hour${hours !== 1 ? 's' : ''}` : `in ${Math.round(hours / 24)} day${Math.round(hours / 24) !== 1 ? 's' : ''}`;
-    const msg = (customMessage || `This is a friendly reminder that ${event.name} is coming up ${timeLabel}. We look forward to seeing you there!`)
+    const msg = (customMessage || `This is a reminder that ${event.name} is scheduled to take place ${timeLabel}.`)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
     return `
         <div style="margin:0;padding:0;background:#f3f4f6;">
@@ -8097,11 +8097,11 @@ function buildReminderHtml(event, customMessage) {
         <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
           <tr><td style="background:#059669;padding:24px 32px;text-align:center;">
             <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.8);text-transform:uppercase;letter-spacing:1px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Event Reminder</p>
-            <h1 style="margin:8px 0 0;font-size:26px;font-weight:800;color:#fff;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">See you ${timeLabel}!</h1>
+            <h1 style="margin:8px 0 0;font-size:26px;font-weight:800;color:#fff;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Reminder: ${event.name}</h1>
           </td></tr>
           <tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
             <p style="font-size:15px;color:#374151;margin:0 0 20px;line-height:1.6;">Hello,</p>
-            <p style="font-size:14px;color:#666;margin:0 0 24px;line-height:1.6;">Your event is coming up ${timeLabel}. Here are the details so you can plan ahead:</p>
+            <p style="font-size:14px;color:#666;margin:0 0 24px;line-height:1.6;">Your event is scheduled to take place ${timeLabel}. Details are provided below.</p>
 
             <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin:24px 0;">
               <table width="100%" cellpadding="0" cellspacing="0">
@@ -8125,8 +8125,8 @@ function buildReminderHtml(event, customMessage) {
               <p style="color:#0c4a6e;white-space:pre-wrap;margin:0;font-size:14px;line-height:1.6;">${msg}</p>
             </div>
 
-            <p style="font-size:14px;color:#666;margin:0 0 16px;line-height:1.6;"><strong>What you need to bring:</strong> This email contains your ticket. Save it or forward it to your phone so you can check in easily when you arrive.</p>
-            <p style="font-size:13px;color:#888;margin:0;">Can't find your original ticket? Reply to this email and we'll send it to you right away.</p>
+            <p style="font-size:14px;color:#666;margin:0 0 16px;line-height:1.6;"><strong>What to bring:</strong> This email contains your ticket. Please retain it, or forward it to your phone, for check-in upon arrival.</p>
+            <p style="font-size:13px;color:#888;margin:0;">If you cannot locate your original ticket, reply to this email and a copy will be sent to you.</p>
           </td></tr>
         </table>
         </td></tr>
@@ -9087,7 +9087,7 @@ app.post('/api/v1/registrations', ...apiRoute('manage_tickets'), async (req, res
         const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
         buildTicketEmailHtml({
             firstName,
-            intro: `You&rsquo;re all set for <strong>${event.name}</strong>!`,
+            intro: `Your registration for <strong>${event.name}</strong> is confirmed.`,
             event,
             tickets,
         }).then(({ html, attachments, subject }) => sendEmail({
@@ -9184,7 +9184,7 @@ app.delete('/api/v1/registrations/:id/checkin', ...apiRoute('undo_checkin'), (re
 // contains and get back the same verdict the scanner would show.
 app.post('/api/v1/scan', ...apiRoute('checkin'), (req, res) => {
     const raw = String(req.body?.token || '').trim();
-    if (!raw) return apiError(res, 400, 'invalid_request', 'token is required — the contents of the QR code.');
+    if (!raw) return apiError(res, 400, 'invalid_request', 'token is required: the contents of the QR code.');
     const token = raw.startsWith('ticket:') ? raw.slice('ticket:'.length).trim() : raw;
 
     const ticket = rowToTicket(stmt.tickets.byToken.get(token));
