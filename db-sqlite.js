@@ -704,6 +704,7 @@ export const stmt = {
         setTicketPrice: db.prepare(`UPDATE events SET ticketPrice=? WHERE id=?`),
         setAtDoorEnabled: db.prepare(`UPDATE events SET atDoorEnabled=? WHERE id=?`),
         setWaitlistEnabled: db.prepare(`UPDATE events SET waitlistEnabled=? WHERE id=?`),
+        setCapacity: db.prepare(`UPDATE events SET capacity=? WHERE id=?`),
         setSkipConfirmationEmails: db.prepare(`UPDATE events SET skipConfirmationEmails=? WHERE id=?`),
         setEmailPolicy: db.prepare(`UPDATE events SET emailPolicy=? WHERE id=?`),
         setShuttleLinkEnabled: db.prepare(`UPDATE events SET shuttleLinkEnabled=? WHERE id=?`),

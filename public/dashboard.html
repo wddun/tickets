@@ -2759,6 +2759,10 @@
         };
 
         function onSettingsFieldChange(e) {
+            // Opt out fields that trigger an immediate action (release counts)
+            // rather than a saved setting — they shouldn't gate navigation
+            // behind "you have unsaved changes".
+            if (e.target.closest('[data-no-dirty]')) return;
             const scope = e.target.closest('.dirty-scope');
             if (!scope) return;
             const tabId = scope.dataset.tab;
@@ -3255,7 +3259,9 @@
             const tickets = await r.json();
             allTickets = tickets;
             event._tickets = tickets;
-            event._counts = { total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
+            // Preserve fields loadEvents() attaches to _counts (e.g. waiting)
+            // that this per-ticket fetch doesn't know about.
+            event._counts = { ...event._counts, total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
             if (!silent) renderSidebar();
             renderDetail(event, tickets);
         }
@@ -3333,6 +3339,11 @@
                 <div class="stat-label">Not Yet In</div>
                 <div style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="liveStatPct">${pct}% checked in</div>
             </div>
+            ${event.waitlistEnabled ? `
+            <div class="stat-box" onclick="showSettingsView('${event.id}', 'tab-waitlist')">
+                <div class="stat-num" style="color:#6366f1;" id="liveStatWaiting">${event._counts?.waiting ?? 0}</div>
+                <div class="stat-label">Waiting</div>
+            </div>` : ''}
         </div>
 
         <div class="section-header">
@@ -4311,7 +4322,7 @@
             }
         }
 
-        async function showSettingsView(id) {
+        async function showSettingsView(id, initialTab) {
             const event = events.find(e => e.id === id);
             document.getElementById('eventDetail').style.display = 'none';
             const view = document.getElementById('settingsView');
@@ -4377,6 +4388,9 @@
             await loadAccessData(id);
             initAddressAutocomplete('editEventLocAddress', 'editEventAddressAC', 'editEventLat', 'editEventLng');
             initSettingsScrollSpy();
+            if (initialTab && initialTab !== 'tab-general') {
+                switchSettingsTab(document.getElementById('navfor-' + initialTab), initialTab);
+            }
         }
 
         async function showOverviewView(id) {
@@ -6403,6 +6417,7 @@
             // its own, and it only shows up once there's actually something
             // to release.
             let noShowPanel = '';
+            let capacityPanel = '';
             if (enabled) {
                 try {
                     const r = await fetch(`/api/event/${eventId}/no-show-release/preview`);
@@ -6417,10 +6432,25 @@
                                     ${d.notCheckedInCount} ticket${d.notCheckedInCount === 1 ? '' : 's'} not checked in &middot; ${d.waitingCount} people waiting.
                                     This cancels that many not-checked-in tickets and offers the freed spots to the waitlist, in order. Nothing happens until you click Release.
                                 </div>
-                                <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                                <div data-no-dirty style="display:flex;align-items:center;gap:10px;margin-top:8px;">
                                     <input type="number" id="noShowReleaseCount" inputmode="numeric" value="${suggested}" min="1" max="${d.notCheckedInCount}"
                                         style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                                     <button class="btn btn-danger btn-sm" onclick="releaseNoShows('${eventId}', this)">Release to Waitlist</button>
+                                </div>
+                            `;
+                        }
+                        if (ev?.capacity && d.waitingCount) {
+                            capacityPanel = `
+                                <hr class="settings-divider">
+                                <div class="settings-subhead">Increase capacity for the waitlist</div>
+                                <div class="settings-hint">
+                                    ${d.waitingCount} people waiting, ${ev.capacity} current capacity.
+                                    This raises the event's capacity and immediately gives that many new spots to the people waiting longest — a ticket for a free event, a claim link for a paid one. Nothing happens until you click Release.
+                                </div>
+                                <div data-no-dirty style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                                    <input type="number" id="capacityReleaseCount" inputmode="numeric" value="${Math.min(1, d.waitingCount)}" min="1" max="${d.waitingCount}"
+                                        style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
+                                    <button class="btn btn-primary btn-sm" onclick="releaseWaitlistCapacity('${eventId}', this)">Release to Waitlist</button>
                                 </div>
                             `;
                         }
@@ -6448,6 +6478,7 @@
                 </div>
                 <div id="waitlistRows">${rows}</div>
                 ${noShowPanel}
+                ${capacityPanel}
             `;
         }
 
@@ -6506,6 +6537,36 @@
                 if (section) section.innerHTML = await renderWaitlistSection(eventId);
             } catch (err) {
                 showToast(err.message || 'Failed to release tickets.');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function releaseWaitlistCapacity(eventId, btn) {
+            const countEl = document.getElementById('capacityReleaseCount');
+            const count = Math.max(1, parseInt(countEl?.value) || 1);
+            const ok = await confirmDialog(
+                `This raises the event's capacity by ${count} and immediately gives the ${count} longest-waiting ${count === 1 ? 'person' : 'people'} a spot. This can't be undone.`,
+                { title: 'Increase capacity for the waitlist?', confirmText: 'Release', danger: false },
+            );
+            if (!ok) return;
+            btn.disabled = true;
+            try {
+                const r = await fetch(`/api/event/${eventId}/waitlist/release-capacity`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ count })
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.capacity = data.newCapacity;
+                showToast(`Capacity raised to ${data.newCapacity} — ${data.promoted} promoted from the waitlist.`);
+                const section = document.getElementById('tab-waitlist');
+                if (section) section.innerHTML = await renderWaitlistSection(eventId);
+                loadEvents();
+            } catch (err) {
+                showToast(err.message || 'Failed to release capacity.');
             } finally {
                 btn.disabled = false;
             }
@@ -6652,6 +6713,7 @@
                 await fetch(`/api/waitlist/${entryId}`, { method: 'DELETE' });
                 const section = document.getElementById('tab-waitlist');
                 if (section) section.innerHTML = await renderWaitlistSection(eventId);
+                loadEvents();
             } catch {
                 showToast('Failed to remove waitlist entry.');
             }

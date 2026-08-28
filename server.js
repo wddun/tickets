@@ -3656,6 +3656,47 @@ app.post('/api/event/:id/no-show-release', requireAuth, async (req, res) => {
     res.json({ success: true, released: toRelease.length, promoted: promotedEmails.length });
 });
 
+// Raises capacity and promotes that many people off the waitlist, oldest
+// first — distinct from no-show-release above, which frees existing seats
+// rather than adding new ones. Requires manage_event (raising capacity) and
+// manage_waitlist (deciding who gets the new seats), same two-capability
+// shape as no-show-release for the same reason.
+app.post('/api/event/:id/waitlist/release-capacity', requireAuth, async (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event') || !userHasEventCapability(req.session.userId, event.id, 'manage_waitlist')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    if (!event.capacity) return res.status(400).json({ error: 'This event has no capacity limit set' });
+    const requestedCount = Math.max(0, parseInt(req.body.count) || 0);
+    if (!requestedCount) return res.status(400).json({ error: 'count is required' });
+
+    const waitingCount = stmt.waitlist.countWaitingByEventId.get(event.id)?.cnt ?? 0;
+    if (!waitingCount) return res.status(409).json({ error: 'Nobody is on the waitlist' });
+    // Capped at how many are actually waiting — capacity shouldn't inflate
+    // past what there's anyone left to fill it with.
+    const actualCount = Math.min(requestedCount, waitingCount);
+
+    const newCapacity = event.capacity + actualCount;
+    stmt.events.setCapacity.run(newCapacity, event.id);
+    const updatedEvent = rowToEvent(stmt.events.byId.get(event.id));
+    logAudit(req, { eventId: event.id, action: 'waitlist.capacityReleased', details: { count: actualCount, from: event.capacity, to: newCapacity } });
+
+    const promotedEmails = [];
+    for (let i = 0; i < actualCount; i++) {
+        const next = stmt.waitlist.nextWaitingByEventId.get(event.id);
+        if (!next) break;
+        const nextEntry = rowToWaitlistEntry(next);
+        const result = await promoteWaitlistEntry(nextEntry, updatedEvent);
+        if (result.success) {
+            promotedEmails.push(nextEntry.email);
+            logAudit(req, { eventId: event.id, action: result.notified ? 'waitlist.notified' : 'waitlist.promoted', details: { email: nextEntry.email, source: 'capacity_release' } });
+        }
+    }
+
+    res.json({ success: true, released: actualCount, newCapacity, promoted: promotedEmails.length });
+});
+
 // ── Payments (Beta) — orders & refunds ─────────────────────────────────────────
 
 app.get('/api/event/:id/orders', requireAuth, (req, res) => {
@@ -4205,7 +4246,11 @@ app.get('/api/events/counts', requireAuth, (req, res) => {
     const counts = {};
     userEvents.forEach(e => {
         const tickets = stmt.tickets.byEventId.all(e.id);
-        counts[e.id] = { total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
+        counts[e.id] = {
+            total: tickets.length,
+            scanned: tickets.filter(t => t.used_at).length,
+            waiting: e.waitlistEnabled ? (stmt.waitlist.countWaitingByEventId.get(e.id)?.cnt ?? 0) : 0,
+        };
     });
     res.json(counts);
 });

@@ -157,6 +157,60 @@ describe('no-show release', () => {
     });
 });
 
+describe('capacity release', () => {
+    test('raises capacity and promotes the requested number, oldest first', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Only Seat' });
+        const firstEmail = uniqueEmail('release-first');
+        const secondEmail = uniqueEmail('release-second');
+        const thirdEmail = uniqueEmail('release-third');
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'First', email: firstEmail });
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Second', email: secondEmail });
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Third', email: thirdEmail });
+
+        const r = await owner.client.post(`/api/event/${ev.id}/waitlist/release-capacity`, { count: 2 });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.released, 2);
+        assert.equal(r.body.promoted, 2);
+        assert.equal(r.body.newCapacity, 3);
+
+        const fresh = await owner.client.get(`/api/event/${ev.id}`);
+        assert.equal(fresh.body.capacity, 3);
+
+        const waitlist = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body;
+        assert.equal(waitlist.find(w => w.email === firstEmail).status, 'converted');
+        assert.equal(waitlist.find(w => w.email === secondEmail).status, 'converted');
+        assert.equal(waitlist.find(w => w.email === thirdEmail).status, 'waiting');
+
+        const tickets = await listTickets(owner.client, ev.id);
+        assert.ok(tickets.some(t => t.email === firstEmail));
+        assert.ok(tickets.some(t => t.email === secondEmail));
+        assert.ok(!tickets.some(t => t.email === thirdEmail));
+    });
+
+    test('caps the release at how many are actually waiting', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 5, waitlist: true });
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Only Waiter', email: uniqueEmail('only-waiter') });
+
+        const r = await owner.client.post(`/api/event/${ev.id}/waitlist/release-capacity`, { count: 10 });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.released, 1);
+        assert.equal(r.body.newCapacity, 6);
+    });
+
+    test('refuses with no capacity limit, nobody waiting, or missing permission', async () => {
+        const unlimited = await createEvent(owner.client, { publicRegistration: true, waitlist: true });
+        assert.equal((await owner.client.post(`/api/event/${unlimited.id}/waitlist/release-capacity`, { count: 1 })).status, 400);
+
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 5, waitlist: true });
+        assert.equal((await owner.client.post(`/api/event/${ev.id}/waitlist/release-capacity`, { count: 1 })).status, 409);
+
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Waiter', email: uniqueEmail('perm-waiter') });
+        const stranger = await newUser(server);
+        assert.equal((await stranger.client.post(`/api/event/${ev.id}/waitlist/release-capacity`, { count: 1 })).status, 403);
+    });
+});
+
 describe('live waitlist status stream', () => {
     test('pushes a change ping when someone ahead in line leaves, instead of requiring a poll', async () => {
         const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1, waitlist: true });
