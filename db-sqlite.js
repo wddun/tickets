@@ -397,10 +397,14 @@ try { db.exec(`ALTER TABLE events ADD COLUMN giveawayToken TEXT`); } catch {}
 // means tickets never expire on their own.
 try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiresAt TEXT`); } catch {}
 
-// Custom body text for the "you're on the waitlist" email, parallel to
-// reminderMessage — falls back to the default sentence when empty so
-// existing events don't change what they send.
+// Superseded by waitlistEmailTemplate below (the full block editor) — column
+// kept so a value someone already set doesn't just vanish, but nothing reads
+// it anymore.
 try { db.exec(`ALTER TABLE events ADD COLUMN waitlistMessage TEXT`); } catch {}
+// Per-event waitlist-join email layout, same block-document shape as
+// emailTemplate. NULL means "never customised" — DEFAULT_WAITLIST_EMAIL_TEMPLATE
+// is used, so existing events keep their current waitlist email untouched.
+try { db.exec(`ALTER TABLE events ADD COLUMN waitlistEmailTemplate TEXT`); } catch {}
 
 // When a single ticket was expired — either by the organiser directly, or
 // by the sweep that watches events.ticketExpiresAt (see server.js). This is
@@ -659,6 +663,7 @@ export function rowToEvent(row) {
         walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
         emailTemplate: (() => { try { return row.emailTemplate ? JSON.parse(row.emailTemplate) : null; } catch { return null; } })(),
         winnerEmailTemplate: (() => { try { return row.winnerEmailTemplate ? JSON.parse(row.winnerEmailTemplate) : null; } catch { return null; } })(),
+        waitlistEmailTemplate: (() => { try { return row.waitlistEmailTemplate ? JSON.parse(row.waitlistEmailTemplate) : null; } catch { return null; } })(),
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
     };
 }
@@ -735,6 +740,7 @@ export const stmt = {
         setWalletLockScreenEnabled: db.prepare(`UPDATE events SET walletLockScreenEnabled=? WHERE id=?`),
         setEmailTemplate: db.prepare(`UPDATE events SET emailTemplate=? WHERE id=?`),
         setWinnerEmailTemplate: db.prepare(`UPDATE events SET winnerEmailTemplate=? WHERE id=?`),
+        setWaitlistEmailTemplate: db.prepare(`UPDATE events SET waitlistEmailTemplate=? WHERE id=?`),
         setTimezone: db.prepare(`UPDATE events SET timezone=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         setOwner: db.prepare(`UPDATE events SET userId=? WHERE id=?`),

@@ -768,6 +768,18 @@ const EMAIL_BLOCK_TYPES = new Set([
     'customFields', 'tickets', 'button', 'divider', 'spacer', 'image', 'footerNote',
 ]);
 
+// A waitlist-join email has no ticket to attach yet, nothing to add to a
+// calendar (there's no confirmed spot), and no per-registration edits or
+// custom fields — so its palette is the same shared blocks minus everything
+// that only makes sense once a ticket exists, plus one block only this email
+// needs: waitlistPosition, the "you're #N in line" line. waitlistStatusButton
+// is the equivalent of the `tickets` block here — dynamic, no props, content
+// (the per-recipient status-page link) only exists at send time.
+const WAITLIST_EMAIL_BLOCK_TYPES = new Set([
+    'header', 'text', 'waitlistPosition', 'eventImage', 'eventDetails',
+    'waitlistStatusButton', 'button', 'divider', 'spacer', 'image', 'footerNote',
+]);
+
 const DEFAULT_TICKET_EMAIL_TEMPLATE = {
     version: 1,
     settings: { accent: 'auto', pageBackground: '#f3f4f6', cardBackground: '#ffffff', subject: '' },
@@ -793,16 +805,29 @@ const DEFAULT_TICKET_EMAIL_TEMPLATE = {
     ],
 };
 
+const DEFAULT_WAITLIST_EMAIL_TEMPLATE = {
+    version: 1,
+    settings: { accent: 'auto', pageBackground: '#f3f4f6', cardBackground: '#ffffff', subject: 'You are on the waitlist for {{eventName}}' },
+    blocks: [
+        { id: 'b-header', type: 'header', props: { eyebrow: 'Waitlist Confirmation', title: '{{eventName}}' } },
+        { id: 'b-position', type: 'waitlistPosition', props: {} },
+        { id: 'b-body', type: 'text', props: { text: 'You will be notified by email if a spot becomes available. You may check your position at any time.', size: 'sm', align: 'left', color: '#64748b' } },
+        { id: 'b-button', type: 'waitlistStatusButton', props: {} },
+    ],
+};
+
 // Coerces whatever the client sent into a template we're willing to render.
 // Unknown block types and unknown props are dropped rather than rejected so a
 // newer editor talking to an older server degrades instead of erroring.
-function normalizeEmailTemplate(raw) {
+// Shared by the ticket/winner editor and the waitlist editor — only the
+// allowed block-type set and the fallback default differ between them.
+function normalizeEmailTemplateWith(raw, allowedTypes, defaultTemplate) {
     if (!raw || typeof raw !== 'object' || !Array.isArray(raw.blocks)) {
-        return JSON.parse(JSON.stringify(DEFAULT_TICKET_EMAIL_TEMPLATE));
+        return JSON.parse(JSON.stringify(defaultTemplate));
     }
     const s = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
     const blocks = raw.blocks
-        .filter(b => b && typeof b === 'object' && EMAIL_BLOCK_TYPES.has(b.type))
+        .filter(b => b && typeof b === 'object' && allowedTypes.has(b.type))
         .slice(0, 40)
         .map((b, i) => {
             const p = b.props && typeof b.props === 'object' ? b.props : {};
@@ -849,7 +874,7 @@ function normalizeEmailTemplate(raw) {
                         .slice(0, 6).map(l => String(l ?? '').slice(0, 300));
                     break;
                 default:
-                    break; // intro / eventImage / changes / customFields / divider carry no props
+                    break; // intro / eventImage / changes / customFields / divider / waitlistPosition / waitlistStatusButton carry no props
             }
             return { id: typeof b.id === 'string' && b.id ? b.id.slice(0, 40) : `b-${i}`, type: b.type, props };
         });
@@ -862,8 +887,16 @@ function normalizeEmailTemplate(raw) {
             cardBackground: safeEmailColor(s.cardBackground, '#ffffff'),
             subject: String(s.subject ?? '').slice(0, 200),
         },
-        blocks: blocks.length ? blocks : JSON.parse(JSON.stringify(DEFAULT_TICKET_EMAIL_TEMPLATE.blocks)),
+        blocks: blocks.length ? blocks : JSON.parse(JSON.stringify(defaultTemplate.blocks)),
     };
+}
+
+function normalizeEmailTemplate(raw) {
+    return normalizeEmailTemplateWith(raw, EMAIL_BLOCK_TYPES, DEFAULT_TICKET_EMAIL_TEMPLATE);
+}
+
+function normalizeWaitlistEmailTemplate(raw) {
+    return normalizeEmailTemplateWith(raw, WAITLIST_EMAIL_BLOCK_TYPES, DEFAULT_WAITLIST_EMAIL_TEMPLATE);
 }
 
 // Renders one block to email-safe HTML. `ctx` carries everything dynamic:
@@ -899,7 +932,7 @@ function renderEmailBlock(block, ctx) {
             return ctx.intro ? `<p style="font-size:15px;color:#555;margin:0 0 24px;line-height:1.6;">${ctx.intro}</p>` : '';
 
         case 'eventDetails': {
-            const rows = ctx.dateRowHtml + (p.showMaps ? ctx.locRowHtml : ctx.locRowPlainHtml);
+            const rows = (ctx.dateRowHtml || '') + (p.showMaps ? (ctx.locRowHtml || '') : (ctx.locRowPlainHtml || ''));
             if (!rows.trim()) return '';
             return `<table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:24px;">
     <tr><td style="padding:18px 20px;"><table cellpadding="0" cellspacing="0" width="100%">${rows}</table></td></tr>
@@ -924,7 +957,13 @@ function renderEmailBlock(block, ctx) {
             return ctx.customFieldsHtml || '';
 
         case 'tickets':
-            return ctx.addAllHtml + ctx.qrBlocksHtml;
+            return (ctx.addAllHtml || '') + (ctx.qrBlocksHtml || '');
+
+        case 'waitlistPosition':
+            return ctx.waitlistPositionHtml || '';
+
+        case 'waitlistStatusButton':
+            return ctx.waitlistStatusButtonHtml || '';
 
         case 'button': {
             const url = safeEmailUrl(applyEmailVars(p.url, ctx.vars));
@@ -978,7 +1017,10 @@ function renderEmailBlock(block, ctx) {
 // get an image to always render without a live fetch, on Gmail included.
 // Returns { html, attachments, subject } — attachments must be passed to
 // sendEmail(); subject is non-empty only when the template overrides it.
-async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '', template: templateOverride = null }) {
+// Shared by buildTicketEmailHtml and buildWaitlistEmailHtml — the date/venue
+// rows an `eventDetails` block renders are identical regardless of which
+// email they end up in.
+function buildEventDetailRows(event) {
     const dateStr = formatEventDateRange(event);
     const dateRowHtml = dateStr ? `
         <tr>
@@ -1003,11 +1045,20 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
           </td>
         </tr>` : '';
 
-    // Accent color: convert "rgb(r,g,b)" → hex if needed
+    return { dateStr, dateRowHtml, locRowHtml, locRowPlainHtml };
+}
+
+// Accent color: convert "rgb(r,g,b)" → hex if needed
+function eventAccentHexFor(event) {
     const rawColor = event.color || 'rgb(99,102,241)';
-    const eventAccentHex = rawColor.startsWith('rgb')
+    return rawColor.startsWith('rgb')
         ? '#' + rawColor.match(/\d+/g).map(n => parseInt(n).toString(16).padStart(2, '0')).join('')
         : rawColor;
+}
+
+async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesHtml = '', customFieldsHtml = '', template: templateOverride = null }) {
+    const { dateStr, dateRowHtml, locRowHtml, locRowPlainHtml } = buildEventDetailRows(event);
+    const eventAccentHex = eventAccentHexFor(event);
 
     const template = templateOverride || normalizeEmailTemplate(event.emailTemplate);
     const accentHex = template.settings.accent === 'auto' ? eventAccentHex : template.settings.accent;
@@ -1172,6 +1223,93 @@ ${rows.join('\n')}
         : '';
 
     return { html, attachments, subject };
+}
+
+// Renders the waitlist-join email through the same block system as
+// buildTicketEmailHtml, restricted to WAITLIST_EMAIL_BLOCK_TYPES — no
+// tickets/calendar/customFields/changes blocks, since none of those exist
+// yet for someone who isn't seated. `position` is null for the editor's
+// preview, where there's no real queue to report a number from.
+function buildWaitlistEmailHtml({ firstName, event, position, statusUrl, template: templateOverride = null }) {
+    const { dateStr, dateRowHtml, locRowHtml, locRowPlainHtml } = buildEventDetailRows(event);
+    const eventAccentHex = eventAccentHexFor(event);
+
+    const template = templateOverride || normalizeWaitlistEmailTemplate(event.waitlistEmailTemplate);
+    const accentHex = template.settings.accent === 'auto' ? eventAccentHex : template.settings.accent;
+    const accentTextColor = contrastTextColor(accentHex);
+    const accentTextRgb = accentTextColor === '#000000' ? '0,0,0' : '255,255,255';
+
+    const waitlistPositionHtml = position
+        ? `<p style="font-size:15px;color:#475569;margin:0 0 24px;line-height:1.6;">You are number <strong>${position}</strong> in line for <strong>${escEmailText(event.name || '')}</strong>.</p>`
+        : '';
+
+    const waitlistStatusButtonHtml = statusUrl ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;"><tr><td align="center">
+    <a href="${statusUrl}" style="display:inline-block;padding:13px 26px;background:${accentHex};color:#ffffff;font-size:15px;font-weight:700;border-radius:10px;text-decoration:none;">View Your Position</a>
+    </td></tr></table>` : '';
+
+    const ctx = {
+        accentHex,
+        accentTextColor,
+        accentTextRgb,
+        eventImageUrl: safeEmailImageUrl(event.imageUrl) || null,
+        dateRowHtml,
+        locRowHtml,
+        locRowPlainHtml,
+        waitlistPositionHtml,
+        waitlistStatusButtonHtml,
+        vars: {
+            firstName: firstName || '',
+            eventName: event.name || '',
+            eventDate: dateStr ? dateStr.replace(/&ndash;/g, '–') : '',
+            eventLocation: eventLocationLine(event),
+            position: position != null ? String(position) : '',
+        },
+    };
+
+    const rows = [];
+    let bodyBuffer = [];
+    const flushBody = () => {
+        if (!bodyBuffer.length) return;
+        const inner = bodyBuffer.join('\n').trim();
+        bodyBuffer = [];
+        if (inner) rows.push(`<tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">${inner}</td></tr>`);
+    };
+    for (const block of template.blocks) {
+        if (block.type === 'header' || block.type === 'eventImage') {
+            flushBody();
+            rows.push(renderEmailBlock(block, ctx));
+        } else {
+            bodyBuffer.push(renderEmailBlock(block, ctx));
+        }
+    }
+    flushBody();
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+</head>
+<body style="margin:0;padding:0;background:${template.settings.pageBackground};">
+<div style="margin:0;padding:0;background:${template.settings.pageBackground};">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:${template.settings.pageBackground};">
+<tr><td align="center" style="padding:24px 16px;">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${template.settings.cardBackground};border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
+${rows.join('\n')}
+</table>
+</td></tr>
+</table>
+</div>
+</body>
+</html>`;
+
+    const subject = template.settings.subject
+        ? applyEmailVars(template.settings.subject, ctx.vars).trim()
+        : `You are on the waitlist for ${event.name}`;
+
+    return { html, subject };
 }
 
 // 1x1 transparent GIF for email open tracking
@@ -3307,27 +3445,14 @@ async function joinWaitlist(event, name, email, sendEmailFlag = true) {
 
     if (sendEmailFlag && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
         const statusUrl = `${BASE_URL}/waitlist-status.html?id=${id}`;
-        // Custom text replaces the default sentence entirely rather than being
-        // appended — an organiser writing "we'll email you if X is left over"
-        // (see events.waitlistMessage) doesn't want the stock "spot opens up"
-        // line sitting right above their own explanation of what actually
-        // happens next.
-        const bodyMsg = (event.waitlistMessage || '').trim()
-            ? event.waitlistMessage.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
-            : `You will be notified by email if a spot becomes available. You may check your position at any time.`;
+        const nameParts = cleanName.split(/\s+/).filter(Boolean);
+        const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(' ') : (nameParts[0] || '');
+        const { html, subject } = buildWaitlistEmailHtml({ firstName, event, position, statusUrl });
         sendEmail({
             to: cleanEmail,
             fromName: `Tickets - ${event.name}`,
-            subject: `You are on the waitlist for ${event.name}`,
-            html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
-                <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
-                <h2 style="color:#1a1f3c;margin:0 0 8px;">Waitlist Confirmation</h2>
-                <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">You are number <strong>${position}</strong> in line for <strong>${event.name}</strong>.</p>
-                <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">${bodyMsg}</p>
-                <div style="text-align:center;margin-bottom:8px;">
-                    <a href="${statusUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">View Your Position</a>
-                </div>
-            </div>`,
+            subject,
+            html,
         }).catch(() => {});
     }
 
@@ -3419,16 +3544,6 @@ app.put('/api/event/:id/waitlist-claim-hours', requireAuth, (req, res) => {
     res.json({ success: true, waitlistClaimHours: hours });
 });
 
-// Custom body text for the "you're on the waitlist" email — see joinWaitlist().
-// Empty clears it back to the default sentence.
-app.put('/api/event/:id/waitlist-message', requireAuth, (req, res) => {
-    const event = rowToEvent(stmt.events.byId.get(req.params.id));
-    if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
-    const message = String(req.body.message || '').slice(0, 2000);
-    stmt.events.setWaitlistMessage.run(message || null, req.params.id);
-    res.json({ success: true, waitlistMessage: message });
-});
 
 // Which ways of getting a ticket send a confirmation. Body is one boolean per
 // source in EMAIL_SOURCES; an omitted source keeps whatever it resolves to now,
@@ -5273,6 +5388,8 @@ app.get('/api/event/:id/email-template', requireAuth, (req, res) => {
         defaultTemplate: DEFAULT_TICKET_EMAIL_TEMPLATE,
         winnerCustomized: !!event.winnerEmailTemplate,
         winnerTemplate: resolveWinnerEmailTemplate(event),
+        waitlistCustomized: !!event.waitlistEmailTemplate,
+        waitlistTemplate: normalizeWaitlistEmailTemplate(event.waitlistEmailTemplate),
     });
 });
 
@@ -5281,24 +5398,32 @@ app.put('/api/event/:id/email-template', requireAuth, (req, res) => {
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!canManageEvent(req, event.id)) return res.status(403).json({ error: 'Not authorized' });
 
-    // Two independent templates share this route, picked by `variant` — the
-    // ticket-confirmation layout (default) and the giveaway winner layout.
-    const isWinner = req.body?.variant === 'winner';
-    const setStmt = isWinner ? stmt.events.setWinnerEmailTemplate : stmt.events.setEmailTemplate;
-    const auditAction = isWinner ? 'winner_email_template' : 'email_template';
+    // Three independent templates share this route, picked by `variant`: the
+    // ticket-confirmation layout (default), the giveaway winner layout, and
+    // the waitlist-join layout.
+    const variant = req.body?.variant === 'winner' || req.body?.variant === 'waitlist' ? req.body.variant : 'ticket';
+    const setStmt = variant === 'winner' ? stmt.events.setWinnerEmailTemplate
+        : variant === 'waitlist' ? stmt.events.setWaitlistEmailTemplate
+        : stmt.events.setEmailTemplate;
+    const auditAction = variant === 'winner' ? 'winner_email_template'
+        : variant === 'waitlist' ? 'waitlist_email_template'
+        : 'email_template';
+    const normalize = variant === 'waitlist' ? normalizeWaitlistEmailTemplate : normalizeEmailTemplate;
 
     // An explicit null resets back to the fallback rather than persisting a
     // copy of it, so future changes to that fallback still apply: the
-    // built-in default for the ticket email, or the current ticket email
-    // for the winner email (its "not customised" state).
+    // built-in default for the ticket/waitlist email, or the current ticket
+    // email for the winner email (its "not customised" state).
     if (req.body?.template === null) {
         setStmt.run(null, event.id);
         logAudit(req, { eventId: event.id, action: `${auditAction}_reset` });
-        const fallback = isWinner ? normalizeEmailTemplate(event.emailTemplate) : DEFAULT_TICKET_EMAIL_TEMPLATE;
+        const fallback = variant === 'winner' ? normalizeEmailTemplate(event.emailTemplate)
+            : variant === 'waitlist' ? DEFAULT_WAITLIST_EMAIL_TEMPLATE
+            : DEFAULT_TICKET_EMAIL_TEMPLATE;
         return res.json({ success: true, customized: false, template: fallback });
     }
 
-    const template = normalizeEmailTemplate(req.body?.template);
+    const template = normalize(req.body?.template);
     setStmt.run(JSON.stringify(template), event.id);
     logAudit(req, { eventId: event.id, action: `${auditAction}_update`, details: { blocks: template.blocks.length } });
     res.json({ success: true, customized: true, template });
@@ -5310,6 +5435,23 @@ app.post('/api/event/:id/email-template/preview', requireAuth, async (req, res) 
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!canManageEvent(req, event.id)) return res.status(403).json({ error: 'Not authorized' });
+
+    if (req.body?.variant === 'waitlist') {
+        const template = normalizeWaitlistEmailTemplate(req.body?.template);
+        try {
+            const { html } = buildWaitlistEmailHtml({
+                firstName: 'Jane',
+                event,
+                position: 3,
+                statusUrl: `${BASE_URL}/waitlist-status.html?id=SAMPLE`,
+                template,
+            });
+            return res.json({ html });
+        } catch (err) {
+            log('email-template', `[ERR] Waitlist preview failed — event: ${event.id}  ${err.message}`);
+            return res.status(500).json({ error: 'Could not render preview.' });
+        }
+    }
 
     const template = normalizeEmailTemplate(req.body?.template);
     const sampleCount = Math.min(2, Math.max(1, parseInt(req.body?.ticketCount, 10) || 1));

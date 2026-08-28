@@ -89,25 +89,65 @@ describe('joining the waitlist', () => {
         assert.match(mail.html, /waitlist-status\.html\?id=/);
     });
 
-    test('a custom waitlist message replaces the default sentence in the email', async () => {
+    test('a custom waitlist email template changes what is actually sent', async () => {
         const ev = await fullEventWithWaitlist();
-        const set = await owner.client.put(`/api/event/${ev.id}/waitlist-message`, {
-            message: "We'll email you if we have shirts left over.",
-        });
-        assert.equal(set.status, 200);
+        const template = {
+            version: 1,
+            settings: { accent: 'auto', pageBackground: '#f3f4f6', cardBackground: '#ffffff', subject: 'Waitlist for {{eventName}}' },
+            blocks: [
+                { id: 'b-header', type: 'header', props: { eyebrow: 'Waitlist', title: '{{eventName}}' } },
+                { id: 'b-position', type: 'waitlistPosition', props: {} },
+                { id: 'b-body', type: 'text', props: { text: "We'll email you if we have shirts left over.", size: 'sm', align: 'left', color: '#64748b' } },
+                { id: 'b-button', type: 'waitlistStatusButton', props: {} },
+            ],
+        };
+        const set = await owner.client.put(`/api/event/${ev.id}/email-template`, { template, variant: 'waitlist' });
+        assert.equal(set.status, 200, set.text);
+        assert.equal(set.body.customized, true);
 
-        const email = uniqueEmail('custom-message-waiter');
+        const email = uniqueEmail('custom-template-waiter');
         await publicRegister(visitor(), ev.id, { email });
 
-        const mail = await server.waitForEmail(m => m.to === email && /waitlist/i.test(m.subject));
-        assert.match(mail.html, /shirts left over/);
+        const mail = await server.waitForEmail(m => m.to === email && /shirts left over/.test(m.html));
+        assert.match(mail.subject, new RegExp(`Waitlist for ${ev.name}`));
+        assert.match(mail.html, /waitlist-status\.html\?id=/);
         assert.doesNotMatch(mail.html, /notified by email if a spot becomes available/);
     });
 
-    test('setting the waitlist message needs manage_event', async () => {
+    test('ticket-only blocks are stripped from a waitlist template', async () => {
+        const ev = await fullEventWithWaitlist();
+        const template = {
+            version: 1,
+            settings: { accent: 'auto', pageBackground: '#f3f4f6', cardBackground: '#ffffff', subject: '' },
+            blocks: [{ id: 'b-tickets', type: 'tickets', props: { showWallet: true, showToken: true } }],
+        };
+        const r = await owner.client.put(`/api/event/${ev.id}/email-template`, { template, variant: 'waitlist' });
+        assert.equal(r.status, 200, r.text);
+        // Invalid for this variant, filtered out, and the block list falls
+        // back to the default rather than saving empty.
+        assert.ok(r.body.template.blocks.length > 0);
+        assert.ok(!r.body.template.blocks.some(b => b.type === 'tickets'));
+    });
+
+    test('GET reports the waitlist template alongside the ticket and winner ones', async () => {
+        const ev = await fullEventWithWaitlist();
+        const r = await owner.client.get(`/api/event/${ev.id}/email-template`);
+        assert.equal(r.status, 200);
+        assert.equal(r.body.waitlistCustomized, false);
+        assert.ok(r.body.waitlistTemplate.blocks.some(b => b.type === 'waitlistPosition'));
+    });
+
+    test('the waitlist email preview renders through the same renderer', async () => {
+        const ev = await fullEventWithWaitlist();
+        const r = await owner.client.post(`/api/event/${ev.id}/email-template/preview`, { template: null, variant: 'waitlist' });
+        assert.equal(r.status, 200, r.text);
+        assert.match(r.body.html, /You are number <strong>3<\/strong> in line/);
+    });
+
+    test('setting the waitlist email template needs manage_event', async () => {
         const ev = await fullEventWithWaitlist();
         const stranger = await newUser(server);
-        const r = await stranger.client.put(`/api/event/${ev.id}/waitlist-message`, { message: 'nope' });
+        const r = await stranger.client.put(`/api/event/${ev.id}/email-template`, { template: null, variant: 'waitlist' });
         assert.equal(r.status, 403);
     });
 

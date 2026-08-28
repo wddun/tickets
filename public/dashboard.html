@@ -2752,7 +2752,6 @@
                 const wl = document.getElementById('waitlistToggle');
                 if (wl) await setWaitlistEnabled(id, wl.checked);
                 await saveWaitlistClaimHours(id);
-                await saveWaitlistMessage(id);
             },
             'tab-notifications': async (id) => {
                 if (document.getElementById('reminderEnabled')) await saveReminder(id);
@@ -6406,6 +6405,11 @@
             const ev = events.find(e => e.id === eventId);
             const enabled = !!ev?.waitlistEnabled;
             const claimHours = ev?.waitlistClaimHours ?? 48;
+            let waitlistEmailCustomized = false;
+            try {
+                const r = await fetch(`/api/event/${eventId}/email-template`);
+                if (r.ok) waitlistEmailCustomized = (await r.json()).waitlistCustomized;
+            } catch {}
             let rows = '<div class="settings-empty">No one is on the waitlist.</div>';
             try {
                 const r = await fetch(`/api/event/${eventId}/waitlist`);
@@ -6493,11 +6497,11 @@
                         style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                     <label style="font-size:13px;font-weight:600;white-space:nowrap;">hours (paid events only)</label>
                 </div>
-                <div style="margin-bottom:18px;">
-                    <label for="waitlistMessage" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Custom message on the "you're on the waitlist" email <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
-                    <textarea id="waitlistMessage" rows="3" placeholder="You will be notified by email if a spot becomes available." maxlength="2000"
-                        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;font-family:inherit;font-size:13px;resize:vertical;">${esc(ev?.waitlistMessage || '')}</textarea>
-                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Replaces the default line about being notified when a spot opens. Use this to set different expectations, for example: "You will be notified if any tickets remain unclaimed." Leave blank to keep the default.</div>
+                <div style="margin-bottom:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openEmailEditor('${eventId}', 'waitlist')">Edit waitlist email</button>
+                    <span style="font-size:13px;color:${waitlistEmailCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
+                        ${waitlistEmailCustomized ? 'Custom layout' : 'Default layout'}
+                    </span>
                 </div>
                 <div id="waitlistRows">${rows}</div>
                 ${noShowPanel}
@@ -6535,24 +6539,6 @@
                 if (ev) ev.waitlistClaimHours = hours;
             } catch {
                 showToast('Failed to update the claim window.');
-            }
-        }
-
-        async function saveWaitlistMessage(eventId) {
-            const el = document.getElementById('waitlistMessage');
-            if (!el) return;
-            const message = el.value;
-            try {
-                const r = await fetch(`/api/event/${eventId}/waitlist-message`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message })
-                });
-                if (!r.ok) throw new Error();
-                const ev = events.find(e => e.id === eventId);
-                if (ev) ev.waitlistMessage = message;
-            } catch {
-                showToast('Failed to update the waitlist message.');
             }
         }
 
@@ -8643,6 +8629,7 @@
             chev: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
             ticket: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4V9z"/><line x1="13" y1="7" x2="13" y2="17" stroke-dasharray="2,2"/></svg>',
             trophy: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 5H4a1 1 0 0 0-1 1v1a4 4 0 0 0 4 4M17 5h3a1 1 0 0 1 1 1v1a4 4 0 0 1-4 4"/></svg>',
+            clock: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
         };
 
         // `dynamic` blocks render server-supplied content (tickets, event
@@ -8660,11 +8647,28 @@
             tickets:      { label: 'Tickets & QR',  singleton: true,  dynamic: true, desc: 'QR codes and Apple Wallet buttons' },
             customFields: { label: 'Custom fields', singleton: true,  dynamic: true, desc: "The attendee's custom field answers" },
             changes:      { label: 'Change summary', singleton: true, dynamic: true, desc: 'What changed, on update emails only' },
+            waitlistPosition:    { label: 'Position line', singleton: true, dynamic: true, desc: 'The "you are #N in line" sentence' },
+            waitlistStatusButton: { label: 'View position button', singleton: true, dynamic: true, desc: "Button linking to the recipient's live waitlist status page" },
             button:       { label: 'Button',        singleton: false, desc: 'A link styled as a button' },
             image:        { label: 'Image',         singleton: false, desc: 'A hosted image' },
             divider:      { label: 'Divider',       singleton: false, desc: 'Horizontal rule' },
             spacer:       { label: 'Spacer',        singleton: false, desc: 'Vertical gap' },
             footerNote:   { label: 'Footer note',   singleton: true,  desc: 'Small print under the tickets' },
+        };
+
+        // Which block types each editor variant may use — a waitlist email has
+        // no ticket, calendar entry, or per-registration edits yet, so its
+        // palette (see server.js's WAITLIST_EMAIL_BLOCK_TYPES) is a subset.
+        const EB_VARIANT_BLOCK_TYPES = {
+            ticket: ['header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'tickets', 'customFields', 'changes', 'button', 'image', 'divider', 'spacer', 'footerNote'],
+            winner: ['header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'tickets', 'customFields', 'changes', 'button', 'image', 'divider', 'spacer', 'footerNote'],
+            waitlist: ['header', 'text', 'waitlistPosition', 'eventImage', 'eventDetails', 'waitlistStatusButton', 'button', 'image', 'divider', 'spacer', 'footerNote'],
+        };
+
+        const EB_VARIANT_VARS = {
+            ticket: '{{firstName}}, {{lastName}}, {{fullName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{ticketCount}}',
+            winner: '{{firstName}}, {{lastName}}, {{fullName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{ticketCount}}',
+            waitlist: '{{firstName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{position}}',
         };
 
         const EB_DEFAULT_PROPS = {
@@ -8677,6 +8681,8 @@
             tickets: { showWallet: true, showToken: true },
             customFields: {},
             changes: {},
+            waitlistPosition: {},
+            waitlistStatusButton: {},
             button: { label: 'View details', url: 'https://', align: 'center' },
             image: { url: '', href: '', width: 320, align: 'center' },
             divider: {},
@@ -8689,7 +8695,7 @@
         let ebPreviewSeq = 0;
 
         async function renderEmailTemplateSection(eventId) {
-            let customized = false, winnerCustomized = false;
+            let customized = false, winnerCustomized = false, waitlistCustomized = false;
             try {
                 const r = await fetch(`/api/event/${eventId}/email-template`);
                 if (r.status === 403) {
@@ -8700,6 +8706,7 @@
                     const data = await r.json();
                     customized = data.customized;
                     winnerCustomized = data.winnerCustomized;
+                    waitlistCustomized = data.waitlistCustomized;
                 }
             } catch {
                 return '<div class="modal-section-title">Ticket Email</div>' +
@@ -8707,7 +8714,7 @@
             }
             return `
                 <div class="modal-section-title">Ticket Email</div>
-                <div class="settings-hint">Design the email attendees receive with their ticket &mdash; drag blocks to reorder, edit the wording, and add a calendar invite. Giveaway winner notifications use their own independent layout, edited on the Winner Email tab inside the editor.</div>
+                <div class="settings-hint">Design the email attendees receive with their ticket &mdash; drag blocks to reorder, edit the wording, and add a calendar invite. Giveaway winner notifications and the waitlist-join email each use their own independent layout, edited on their own tab inside the editor.</div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;">
                     <button class="btn btn-primary" onclick="openEmailEditor('${eventId}')">Open email editor</button>
                     <span style="font-size:13px;color:${customized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
@@ -8716,21 +8723,26 @@
                     <span style="font-size:13px;color:${winnerCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
                         Winner: ${winnerCustomized ? 'custom layout' : 'mirrors ticket email'}
                     </span>
+                    <span style="font-size:13px;color:${waitlistCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
+                        Waitlist: ${waitlistCustomized ? 'custom layout' : 'default layout'}
+                    </span>
                 </div>`;
         }
 
         const EB_VARIANT_META = {
             ticket: { title: 'Ticket email', tabTitle: 'Ticket Email', tabSub: 'Sent with every registration', icon: 'ticket' },
             winner: { title: 'Winner email', tabTitle: 'Winner Email', tabSub: 'Sent to giveaway winners', icon: 'trophy' },
+            waitlist: { title: 'Waitlist email', tabTitle: 'Waitlist Email', tabSub: 'Sent when someone joins the waitlist', icon: 'clock' },
         };
 
-        // The two independent templates (regular ticket confirmation vs.
-        // giveaway winner notification) share one editor instance. `ebActive()`
-        // is the single seam every render/edit function goes through so the
-        // rest of the editor doesn't need to know which one is open.
+        // The three independent templates (ticket confirmation, giveaway
+        // winner notification, waitlist-join) share one editor instance.
+        // `ebActive()` is the single seam every render/edit function goes
+        // through so the rest of the editor doesn't need to know which one
+        // is open.
         function ebActive() { return ebState?.variants[ebState.activeVariant]; }
 
-        async function openEmailEditor(eventId) {
+        async function openEmailEditor(eventId, initialVariant = 'ticket') {
             const ev = events.find(e => e.id === eventId);
             let payload;
             try {
@@ -8743,7 +8755,7 @@
 
             ebState = {
                 eventId,
-                activeVariant: 'ticket',
+                activeVariant: initialVariant,
                 variants: {
                     ticket: {
                         template: payload.template,
@@ -8757,8 +8769,16 @@
                         selectedId: null,
                         dirty: false,
                     },
+                    waitlist: {
+                        template: payload.waitlistTemplate,
+                        customized: payload.waitlistCustomized,
+                        selectedId: null,
+                        dirty: false,
+                    },
                 },
             };
+
+            const ebTabId = (key) => `ebTab${key.charAt(0).toUpperCase()}${key.slice(1)}`;
 
             const overlay = document.createElement('div');
             overlay.className = 'eb-overlay';
@@ -8766,7 +8786,7 @@
             overlay.innerHTML = `
                 <div class="eb-topbar">
                     <div>
-                        <h2 id="ebTitle">${EB_VARIANT_META.ticket.title}</h2>
+                        <h2 id="ebTitle">${EB_VARIANT_META[initialVariant].title}</h2>
                         <div class="eb-topbar-sub">${ev ? esc(ev.name) : ''}</div>
                     </div>
                     <div class="eb-topbar-spacer"></div>
@@ -8780,7 +8800,7 @@
                 </div>
                 <div class="eb-variant-bar">
                     ${Object.entries(EB_VARIANT_META).map(([key, m]) => `
-                        <button class="eb-variant-tab ${key === 'ticket' ? 'active' : ''}" id="ebTab${key === 'ticket' ? 'Ticket' : 'Winner'}" onclick="ebSetActiveVariant('${key}')">
+                        <button class="eb-variant-tab ${key === initialVariant ? 'active' : ''}" id="${ebTabId(key)}" onclick="ebSetActiveVariant('${key}')">
                             ${EB_ICONS[m.icon]}
                             <div>
                                 <div class="eb-variant-tab-title">${m.tabTitle}</div>
@@ -8823,7 +8843,7 @@
         }
 
         function closeEmailEditor() {
-            const dirty = ebState && (ebState.variants.ticket.dirty || ebState.variants.winner.dirty);
+            const dirty = ebState && Object.values(ebState.variants).some(v => v.dirty);
             if (dirty && !confirm('Discard unsaved changes to the email templates?')) return;
             document.getElementById('ebOverlay')?.remove();
             ebState = null;
@@ -8854,8 +8874,9 @@
             ebState.activeVariant = mode;
             const title = document.getElementById('ebTitle');
             if (title) title.textContent = EB_VARIANT_META[mode].title;
-            document.getElementById('ebTabTicket')?.classList.toggle('active', mode === 'ticket');
-            document.getElementById('ebTabWinner')?.classList.toggle('active', mode === 'winner');
+            for (const key of Object.keys(EB_VARIANT_META)) {
+                document.getElementById(`ebTab${key.charAt(0).toUpperCase()}${key.slice(1)}`)?.classList.toggle('active', mode === key);
+            }
             ebRenderPalette();
             ebRenderDesign();
             ebRenderCanvas();
@@ -8884,7 +8905,9 @@
 
         function ebRenderPalette() {
             const used = new Set(ebActive().template.blocks.map(b => b.type));
-            document.getElementById('ebPalette').innerHTML = Object.entries(EB_BLOCK_DEFS).map(([type, def]) => {
+            const allowed = EB_VARIANT_BLOCK_TYPES[ebState.activeVariant] || Object.keys(EB_BLOCK_DEFS);
+            document.getElementById('ebPalette').innerHTML = allowed.map((type) => {
+                const def = EB_BLOCK_DEFS[type];
                 const disabled = def.singleton && used.has(type);
                 return `<button class="eb-palette-btn" ${disabled ? 'disabled' : ''} title="${esc(def.desc)}"
                     onclick="ebAddBlock('${type}')">${EB_ICONS.plus}<span>${esc(def.label)}</span></button>`;
@@ -8893,12 +8916,13 @@
 
         function ebRenderDesign() {
             const s = ebActive().template.settings;
+            const isWaitlist = ebState.activeVariant === 'waitlist';
             document.getElementById('ebDesign').innerHTML = `
                 <div class="eb-field">
                     <label>Subject line</label>
                     <input type="text" value="${esc(s.subject || '')}" placeholder="Default subject"
                         oninput="ebSetSetting('subject', this.value)">
-                    <div class="eb-note">Leave blank to keep the automatic subject, which adapts to new, updated and re-sent tickets.</div>
+                    <div class="eb-note">${isWaitlist ? 'Leave blank to keep the automatic subject.' : 'Leave blank to keep the automatic subject, which adapts to new, updated and re-sent tickets.'}</div>
                 </div>
                 <div class="eb-field">
                     <label>Accent colour</label>
@@ -8923,7 +8947,7 @@
                     <div class="eb-note">Page, then card.</div>
                 </div>
                 <div class="eb-note" style="margin-top:14px;">
-                    <strong>Variables:</strong> {{firstName}}, {{lastName}}, {{fullName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{ticketCount}}.<br>
+                    <strong>Variables:</strong> ${EB_VARIANT_VARS[ebState.activeVariant] || EB_VARIANT_VARS.ticket}.<br>
                     <strong>Formatting:</strong> **bold**, *italic*, [link](https://…).
                 </div>`;
         }
@@ -9197,7 +9221,7 @@
             const isWinner = variant === 'winner';
             const confirmMsg = isWinner
                 ? 'Reset the winner email so it goes back to mirroring the ticket email?'
-                : 'Reset the ticket email back to the default layout?';
+                : `Reset the ${EB_VARIANT_META[variant].title.toLowerCase()} back to the default layout?`;
             if (!await confirmDialog(confirmMsg, { confirmText: 'Reset' })) return;
             try {
                 const r = await fetch(`/api/event/${ebState.eventId}/email-template`, {
