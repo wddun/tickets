@@ -9,11 +9,11 @@ import assert from 'node:assert/strict';
 import { startServer } from './helpers/server.js';
 import { createClient } from './helpers/client.js';
 import { openSseReader } from './helpers/sse.js';
-import { newUser, createEvent, publicRegister, addTicket, listTickets, uniqueEmail } from './helpers/factories.js';
+import { newUser, createEvent, publicRegister, addTicket, listTickets, uniqueEmail, setTicketExpiresAt } from './helpers/factories.js';
 
 let server, owner;
 before(async () => {
-    server = await startServer({ env: { WAITLIST_SWEEP_MS: '300', WAITLIST_CLAIM_MS_OVERRIDE: '250' } });
+    server = await startServer({ env: { WAITLIST_SWEEP_MS: '300', WAITLIST_CLAIM_MS_OVERRIDE: '250', TICKET_EXPIRY_SWEEP_MS: '300' } });
     owner = await newUser(server);
 });
 after(async () => { await server?.stop(); });
@@ -81,7 +81,7 @@ describe('claim-expiry auto-chain promote', () => {
         });
         assert.ok(secondNotified, 'the next person in line was never auto-promoted');
 
-        const mail = await server.waitForEmail(m => m.to === secondEmail && /spot opened up/i.test(m.subject));
+        const mail = await server.waitForEmail(m => m.to === secondEmail && /spot is available/i.test(m.subject));
         assert.match(mail.html, /claim=/);
 
         // The waitlist status page reflects the expiry directly (not just
@@ -208,6 +208,64 @@ describe('capacity release', () => {
         await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Waiter', email: uniqueEmail('perm-waiter') });
         const stranger = await newUser(server);
         assert.equal((await stranger.client.post(`/api/event/${ev.id}/waitlist/release-capacity`, { count: 1 })).status, 403);
+    });
+});
+
+describe('auto-promote on ticket expiry', () => {
+    test('manually expiring a ticket frees the seat and promotes the longest-waiting entry', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Unclaimed Seat' });
+        const waiterEmail = uniqueEmail('auto-promote-waiter');
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Waiting Person', email: waiterEmail });
+
+        const [seatTicket] = await listTickets(owner.client, ev.id);
+        const r = await owner.client.post(`/api/ticket/${seatTicket.id}/expire`);
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.promoted, waiterEmail);
+
+        const waitlist = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body;
+        assert.equal(waitlist.find(w => w.email === waiterEmail).status, 'converted');
+        assert.ok((await listTickets(owner.client, ev.id)).some(t => t.email === waiterEmail));
+    });
+
+    test('does not promote when the event has no waitlist', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1 });
+        await addTicket(owner.client, ev.id, { name: 'Solo Seat' });
+        const [t] = await listTickets(owner.client, ev.id);
+
+        const r = await owner.client.post(`/api/ticket/${t.id}/expire`);
+        assert.equal(r.status, 200);
+        assert.equal(r.body.promoted, null);
+    });
+
+    test('an expired ticket no longer counts toward capacity', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1 });
+        await addTicket(owner.client, ev.id, { name: 'To Be Expired' });
+        const [t] = await listTickets(owner.client, ev.id);
+
+        const soldOut = await publicRegister(visitor(), ev.id, { email: uniqueEmail('sold-out') });
+        assert.equal(soldOut.status, 400);
+
+        await owner.client.post(`/api/ticket/${t.id}/expire`);
+
+        const nowFits = await publicRegister(visitor(), ev.id, { email: uniqueEmail('fits-now') });
+        assert.equal(nowFits.status, 200, nowFits.text);
+    });
+
+    test('the cutoff sweep promotes the waitlist too, not just manual expiry', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Sweep Seat' });
+        const waiterEmail = uniqueEmail('sweep-promote-waiter');
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Sweep Waiter', email: waiterEmail });
+
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() + 200).toISOString());
+        await waitFor(async () => {
+            const waitlist = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body;
+            const entry = waitlist.find(w => w.email === waiterEmail);
+            return entry?.status === 'converted' ? entry : null;
+        });
+
+        assert.ok((await listTickets(owner.client, ev.id)).some(t => t.email === waiterEmail));
     });
 });
 

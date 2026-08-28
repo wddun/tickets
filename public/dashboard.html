@@ -864,11 +864,6 @@
             color: #b45309;
         }
 
-        .status-pill.expired {
-            background: #e5e7eb;
-            color: #4b5563;
-        }
-
         .winner-badge {
             display: inline-flex; align-items: center; gap: 3px;
             font-size: 10px; font-weight: 700;
@@ -3276,8 +3271,13 @@
             if (Array.isArray(tickets)) allTickets = tickets;
             else tickets = allTickets;
 
-            const total = tickets.length;
-            const scanned = tickets.filter(t => t.used_at).length;
+            // Expired, never-claimed tickets don't count toward the headline
+            // numbers — that seat was freed (see server.js's expireTicket) —
+            // but they stay in the attendee list below so staff can still see
+            // and manage them.
+            const activeTickets = tickets.filter(t => t.used_at || !t.expired);
+            const total = activeTickets.length;
+            const scanned = activeTickets.filter(t => t.used_at).length;
             const pct = total ? Math.round((scanned / total) * 100) : 0;
             const grouped = groupTickets(tickets);
 
@@ -3478,9 +3478,7 @@
                 const expiredCount = g.tickets.filter(t => !t.used_at && t.expired).length;
                 const isChecked = checkedRegIds.has(g.registrationId);
                 let pill;
-                if (scanned === 0 && expiredCount === total) {
-                    pill = `<span class="status-pill expired">Expired</span>`;
-                } else if (scanned === 0) {
+                if (scanned === 0) {
                     pill = `<span class="status-pill pending">Pending</span>`;
                 } else if (scanned < total) {
                     pill = `<span class="status-pill partial">${scanned}/${total} In</span>`;
@@ -3520,6 +3518,7 @@
                 <div class="attendee-name">${esc(g.name)}</div>
                 <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap;">
                     ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : g.tickets[0]?.confirmation_sent_at ? `<span title="Email not opened" style="font-size:10px;font-weight:600;color:var(--text-muted);">Sent</span>` : ''}
+                    ${expiredCount > 0 ? `<span title="Not checked in before the ticket expiry cutoff" style="font-size:10px;font-weight:600;color:#b45309;">Expired</span>` : ''}
                     ${(() => { const wins = g.tickets[0]?.giveawayWins || []; if (!wins.length) return ''; const prizes = wins.map(w => w.prizeLabel).filter(Boolean).join(', '); return `<span class="winner-badge" title="${esc(prizes || 'Giveaway winner')}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a2 2 0 0 0 0 4h.5M17 6h3a2 2 0 0 1 0 4h-.5"/></svg>${wins.length > 1 ? `Won &times;${wins.length}` : 'Winner'}</span>`; })()}
                     ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:var(--text-muted);">Downloaded to Wallet</span>` : ''}
                     ${lastSeenBadge}
@@ -3528,7 +3527,7 @@
             <div class="col-email">
                 <div class="attendee-email">${esc(g.email || '')}</div>
             </div>
-            <div class="ticket-count">${total} ticket${total !== 1 ? 's' : ''}</div>
+            <div class="ticket-count">${expiredCount === total ? '<span style="color:#b45309;">Expired</span>' : `${total} ticket${total !== 1 ? 's' : ''}`}</div>
             <div>${pill}</div>
             <div>${btns}</div>
         </div>`;
@@ -4194,7 +4193,7 @@
                     <label for="editEventTicketExpiresAt" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Tickets Expire At <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
                     <input type="datetime-local" id="editEventTicketExpiresAt" value="${_toZonedDT(ev.ticketExpiresAt, ev.timezone || browserTimezone())}"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
-                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Any ticket not yet checked in by this moment stops scanning and shows expired — the QR is removed from Apple Wallet, same as a deleted ticket. Checked-in tickets are never affected. Leave blank for tickets that never expire on their own.</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Any ticket not checked in by this time stops scanning and is marked expired. Its Apple Wallet pass is voided, the same as a deleted ticket. Checked-in tickets are not affected. Leave blank if tickets should never expire.</div>
                 </div>
                 <div style="margin-bottom:20px;">
                     <label for="editEventTicketPrice" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:var(--text-muted);">(leave blank or 0 for free)</span></label>
@@ -6463,7 +6462,7 @@
                                 <div class="settings-subhead">Increase capacity for the waitlist</div>
                                 <div class="settings-hint">
                                     ${d.waitingCount} people waiting, ${ev.capacity} current capacity.
-                                    This raises the event's capacity and immediately gives that many new spots to the people waiting longest — a ticket for a free event, a claim link for a paid one. Nothing happens until you click Release.
+                                    Raises the event capacity and immediately assigns that many new spots to the longest-waiting entries. Free events receive a ticket; paid events receive a claim link. No changes occur until you click Release.
                                 </div>
                                 <div data-no-dirty style="display:flex;align-items:center;gap:10px;margin-top:8px;">
                                     <input type="number" id="capacityReleaseCount" inputmode="numeric" value="${Math.min(1, d.waitingCount)}" min="1" max="${d.waitingCount}"
@@ -6498,7 +6497,7 @@
                     <label for="waitlistMessage" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Custom message on the "you're on the waitlist" email <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
                     <textarea id="waitlistMessage" rows="3" placeholder="We'll email you if a spot opens up." maxlength="2000"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;font-family:inherit;font-size:13px;resize:vertical;">${esc(ev?.waitlistMessage || '')}</textarea>
-                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Replaces the default "we'll email you the moment a spot opens up" line — use this to set expectations differently, e.g. "we'll email you if we have any left over." Leave blank to keep the default.</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Replaces the default line about being notified when a spot opens. Use this to set different expectations, for example: "You will be notified if any tickets remain unclaimed." Leave blank to keep the default.</div>
                 </div>
                 <div id="waitlistRows">${rows}</div>
                 ${noShowPanel}
@@ -6561,7 +6560,7 @@
             const countEl = document.getElementById('noShowReleaseCount');
             const count = Math.max(1, parseInt(countEl?.value) || 1);
             const ok = await confirmDialog(
-                `This cancels ${count} not-checked-in ticket${count === 1 ? '' : 's'} and offers those spots to the waitlist. This can't be undone.`,
+                `This cancels ${count} not-checked-in ticket${count === 1 ? '' : 's'} and offers those spots to the waitlist. This action cannot be undone.`,
                 { title: 'Release no-show tickets?', confirmText: 'Release', danger: true },
             );
             if (!ok) return;
@@ -6574,7 +6573,7 @@
                 });
                 const data = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(data.error || 'Failed');
-                showToast(`Released ${data.released} ticket${data.released === 1 ? '' : 's'} — ${data.promoted} promoted from the waitlist.`);
+                showToast(`Released ${data.released} ticket${data.released === 1 ? '' : 's'}. ${data.promoted} promoted from the waitlist.`);
                 const section = document.getElementById('tab-waitlist');
                 if (section) section.innerHTML = await renderWaitlistSection(eventId);
             } catch (err) {
@@ -6588,7 +6587,7 @@
             const countEl = document.getElementById('capacityReleaseCount');
             const count = Math.max(1, parseInt(countEl?.value) || 1);
             const ok = await confirmDialog(
-                `This raises the event's capacity by ${count} and immediately gives the ${count} longest-waiting ${count === 1 ? 'person' : 'people'} a spot. This can't be undone.`,
+                `This raises the event capacity by ${count} and immediately assigns a spot to the ${count} longest-waiting ${count === 1 ? 'person' : 'people'}. This action cannot be undone.`,
                 { title: 'Increase capacity for the waitlist?', confirmText: 'Release', danger: false },
             );
             if (!ok) return;
@@ -6603,7 +6602,7 @@
                 if (!r.ok) throw new Error(data.error || 'Failed');
                 const ev = events.find(e => e.id === eventId);
                 if (ev) ev.capacity = data.newCapacity;
-                showToast(`Capacity raised to ${data.newCapacity} — ${data.promoted} promoted from the waitlist.`);
+                showToast(`Capacity raised to ${data.newCapacity}. ${data.promoted} promoted from the waitlist.`);
                 const section = document.getElementById('tab-waitlist');
                 if (section) section.innerHTML = await renderWaitlistSection(eventId);
                 loadEvents();
@@ -6740,7 +6739,7 @@
                 const r = await fetch(`/api/waitlist/${entryId}/promote`, { method: 'POST' });
                 const d = await r.json();
                 if (!r.ok) { showToast(d.error || 'Failed to promote from waitlist.'); return; }
-                showToast(d.notified ? 'Notified — they have a claim link to complete checkout.' : 'Ticket issued from waitlist.');
+                showToast(d.notified ? 'Notified. A claim link has been sent to complete checkout.' : 'Ticket issued from waitlist.');
                 const section = document.getElementById('tab-waitlist');
                 if (section) section.innerHTML = await renderWaitlistSection(eventId);
                 loadEvents();
@@ -8246,7 +8245,9 @@
                 const checkedIn = !!tk.used_at;
                 const reentryEvent = events.find(e => e.id === tk.eventId);
                 let statusBadge;
-                if (!checkedIn) {
+                if (!checkedIn && tk.expiredAt) {
+                    statusBadge = `<span style="background:#e5e7eb;color:#4b5563;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;" title="Expired ${new Date(tk.expiredAt).toLocaleString()}">Expired</span>`;
+                } else if (!checkedIn) {
                     statusBadge = `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">Not checked in</span>`;
                 } else if (reentryEvent?.allowReentry) {
                     const rs = tk.reentry_status || 'inside';
@@ -8264,6 +8265,11 @@
                 const toggleBtn = checkedIn
                     ? (reentryEvent?.fullAccess ? `<button onclick="toggleTicketInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Undo Check-in</button>` : '')
                     : `<button onclick="toggleTicketInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#d1fae5;color:#065f46;border:none;border-radius:6px;cursor:pointer;">Mark Checked In</button>`;
+                // Only meaningful before check-in — a used ticket already did
+                // its job and can't be expired (see isTicketExpired()).
+                const expireBtn = checkedIn || !reentryEvent?.fullAccess ? '' : tk.expiredAt
+                    ? `<button onclick="setTicketExpiredInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;margin-left:6px;padding:3px 10px;font-size:11px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;">Restore Ticket</button>`
+                    : `<button onclick="setTicketExpiredInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;margin-left:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Expire Ticket</button>`;
                 const size = showLarge ? 120 : 80;
                 const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Ticket ${i + 1}</div>` : '';
                 return `<div style="text-align:center;">
@@ -8272,7 +8278,7 @@
                     <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">${tk.token}</div>
                     ${statusBadge}
                     ${walletBadge}
-                    ${toggleBtn}
+                    <div>${toggleBtn}${expireBtn}</div>
                 </div>`;
             };
 
@@ -8331,6 +8337,30 @@
                     if (freshTickets.length) openEditTicketModal(regId, freshTickets);
                 }
             }
+        }
+
+        async function setTicketExpiredInModal(ticketId, expire, regId) {
+            if (expire && !await confirmDialog(
+                'This ticket will stop scanning and its Apple Wallet pass will be voided. If the event has a waitlist, the freed spot will be offered to the longest-waiting entry.',
+                { title: 'Expire this ticket?', confirmText: 'Expire', danger: true },
+            )) return;
+
+            const r = await fetch(`/api/ticket/${ticketId}/${expire ? 'expire' : 'unexpire'}`, { method: 'POST' });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { showToast(d.error || 'Failed to update the ticket.'); return; }
+            if (expire && d.promoted) showToast(`Ticket expired. The freed spot was offered to ${d.promoted}.`);
+
+            const event = events.find(e => e.id === selectedId);
+            if (event) {
+                const r2 = await fetch(`/api/event/${event.id}/tickets`);
+                if (r2.ok) {
+                    allTickets = await r2.json();
+                    rerenderTable();
+                    const freshTickets = allTickets.filter(t => t.registrationId === regId);
+                    if (freshTickets.length) openEditTicketModal(regId, freshTickets);
+                }
+            }
+            loadEvents();
         }
 
         async function deleteRegistrationFromModal() {

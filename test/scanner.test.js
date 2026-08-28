@@ -116,19 +116,87 @@ describe('ticket expiry cutoff', () => {
         assert.equal(ticket.expired, true);
     });
 
-    test('clearing the cutoff (blank) makes a ticket scannable again', async () => {
-        const { ev, ticket } = await eventWithTicket({}, 'Reprieved');
+    test('clearing the cutoff does not retroactively restore an already-expired ticket', async () => {
+        // Expiry is a deliberate, one-way action once it happens (it can
+        // hand the freed seat to someone on the waitlist) — changing the
+        // event's cutoff afterward must never silently undo it.
+        const { ev, ticket } = await eventWithTicket({}, 'Already Expired');
         await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
         await setTicketExpiresAt(owner.client, ev.id, null);
 
         const r = await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
-        assert.equal(r.body.status, 'valid');
+        assert.equal(r.body.status, 'expired');
     });
 
     test('only manage_event can set it', async () => {
         const { ev } = await eventWithTicket();
         const stranger = await newUser(server);
         const r = await setTicketExpiresAt(stranger.client, ev.id, new Date().toISOString());
+        assert.equal(r.status, 403);
+    });
+});
+
+describe('manually expiring a ticket', () => {
+    test('expires a not-yet-used ticket and it stops scanning', async () => {
+        const { ev, ticket } = await eventWithTicket({}, 'Manual Expire');
+        const [t] = await listTickets(owner.client, ev.id);
+
+        const r = await owner.client.post(`/api/ticket/${t.id}/expire`);
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.success, true);
+
+        const [after2] = await listTickets(owner.client, ev.id);
+        assert.equal(after2.expired, true);
+
+        const scan = await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
+        assert.equal(scan.body.status, 'expired');
+    });
+
+    test('refuses a ticket that is already checked in', async () => {
+        const { ev, ticket } = await eventWithTicket({}, 'Checked In Already');
+        await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
+        const [t] = await listTickets(owner.client, ev.id);
+
+        const r = await owner.client.post(`/api/ticket/${t.id}/expire`);
+        assert.equal(r.status, 409);
+    });
+
+    test('refuses a ticket that is already expired', async () => {
+        const { ev } = await eventWithTicket({}, 'Twice Expired');
+        const [t] = await listTickets(owner.client, ev.id);
+        await owner.client.post(`/api/ticket/${t.id}/expire`);
+
+        const r = await owner.client.post(`/api/ticket/${t.id}/expire`);
+        assert.equal(r.status, 409);
+    });
+
+    test('can be restored, and scans normally again', async () => {
+        const { ev, ticket } = await eventWithTicket({}, 'Restored');
+        const [t] = await listTickets(owner.client, ev.id);
+        await owner.client.post(`/api/ticket/${t.id}/expire`);
+
+        const restore = await owner.client.post(`/api/ticket/${t.id}/unexpire`);
+        assert.equal(restore.status, 200, restore.text);
+
+        const [after2] = await listTickets(owner.client, ev.id);
+        assert.equal(after2.expired, false);
+
+        const scan = await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
+        assert.equal(scan.body.status, 'valid');
+    });
+
+    test('restoring a ticket that is not expired is refused', async () => {
+        const { ev } = await eventWithTicket({}, 'Never Expired');
+        const [t] = await listTickets(owner.client, ev.id);
+        const r = await owner.client.post(`/api/ticket/${t.id}/unexpire`);
+        assert.equal(r.status, 409);
+    });
+
+    test('needs manage_tickets', async () => {
+        const { ev } = await eventWithTicket();
+        const [t] = await listTickets(owner.client, ev.id);
+        const stranger = await newUser(server);
+        const r = await stranger.client.post(`/api/ticket/${t.id}/expire`);
         assert.equal(r.status, 403);
     });
 });

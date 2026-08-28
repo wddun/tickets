@@ -2619,7 +2619,9 @@ function eventSeatUsage(eventId) {
     const event = rowToEvent(stmt.events.byId.get(eventId));
     if (!event) return null;
     const nowIso = new Date().toISOString();
-    const issued = stmt.tickets.countByEventId.get(eventId)?.cnt ?? 0;
+    // Excludes an expired, never-claimed ticket — that seat has been freed
+    // (see expireTicket()), same as a cancelled one would be.
+    const issued = stmt.tickets.countActiveByEventId.get(eventId)?.cnt ?? 0;
     const held = event.capacity ? (stmt.seatHolds.countActive.get(eventId, nowIso)?.cnt ?? 0) : 0;
     const claimed = event.capacity ? (stmt.waitlist.countActiveClaims.get(eventId, nowIso)?.cnt ?? 0) : 0;
     const capacity = event.capacity || null;
@@ -3312,18 +3314,18 @@ async function joinWaitlist(event, name, email, sendEmailFlag = true) {
         // happens next.
         const bodyMsg = (event.waitlistMessage || '').trim()
             ? event.waitlistMessage.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
-            : `We'll email you the moment a spot opens up. You can check your live position any time.`;
+            : `You will be notified by email if a spot becomes available. You may check your position at any time.`;
         sendEmail({
             to: cleanEmail,
             fromName: `Tickets - ${event.name}`,
-            subject: `You're on the waitlist for ${event.name}`,
+            subject: `You are on the waitlist for ${event.name}`,
             html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
                 <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
-                <h2 style="color:#1a1f3c;margin:0 0 8px;">You're on the waitlist</h2>
-                <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">You're <strong>#${position}</strong> in line for <strong>${event.name}</strong>.</p>
+                <h2 style="color:#1a1f3c;margin:0 0 8px;">Waitlist Confirmation</h2>
+                <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">You are number <strong>${position}</strong> in line for <strong>${event.name}</strong>.</p>
                 <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">${bodyMsg}</p>
                 <div style="text-align:center;margin-bottom:8px;">
-                    <a href="${statusUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Check My Position</a>
+                    <a href="${statusUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">View Your Position</a>
                 </div>
             </div>`,
         }).catch(() => {});
@@ -3541,14 +3543,14 @@ async function promoteWaitlistEntry(entry, event) {
                 to: entry.email,
                 fromName: `Tickets - ${event.name}`,
                 replyTo: REPLY_TO_EMAIL,
-                subject: `A spot opened up for ${event.name}!`,
+                subject: `A spot is available for ${event.name}`,
                 html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
                     <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
-                    <h2 style="color:#1a1f3c;margin:0 0 8px;">A spot opened up!</h2>
-                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">Good news — a ticket for <strong>${event.name}</strong> just became available, and it's reserved for you.</p>
-                    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">This hold lasts <strong>${windowLabel}</strong> — complete your registration before then to keep it.</p>
+                    <h2 style="color:#1a1f3c;margin:0 0 8px;">A Spot Is Available</h2>
+                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">A ticket for <strong>${event.name}</strong> has become available and is reserved for you.</p>
+                    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">This reservation will be held for <strong>${windowLabel}</strong>. Please complete your registration within that time to keep your spot.</p>
                     <div style="text-align:center;margin-bottom:8px;">
-                        <a href="${claimUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Complete Your Registration</a>
+                        <a href="${claimUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Complete Registration</a>
                     </div>
                 </div>`,
             }).catch(() => {});
@@ -4264,10 +4266,12 @@ app.get('/api/events/counts', requireAuth, (req, res) => {
         .filter(Boolean);
     const counts = {};
     userEvents.forEach(e => {
-        const tickets = stmt.tickets.byEventId.all(e.id);
+        // Same "expired, never-claimed tickets don't count" rule as
+        // eventSeatUsage() — this feeds the sidebar's "N/M checked in" badge.
+        const activeTickets = stmt.tickets.byEventId.all(e.id).filter(t => t.used_at || !t.expiredAt);
         counts[e.id] = {
-            total: tickets.length,
-            scanned: tickets.filter(t => t.used_at).length,
+            total: activeTickets.length,
+            scanned: activeTickets.filter(t => t.used_at).length,
             waiting: e.waitlistEnabled ? (stmt.waitlist.countWaitingByEventId.get(e.id)?.cnt ?? 0) : 0,
         };
     });
@@ -4456,6 +4460,17 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     const eventTickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
     pushWalletIfChanged(eventTickets, updated).catch(() => {});
 
+    // A cutoff that's already in the past when it's saved (an organiser
+    // closing things out right now, rather than scheduling ahead) shouldn't
+    // wait for the next sweep tick to actually take effect.
+    if (updated.ticketExpiresAt && updated.ticketExpiresAt <= new Date().toISOString()) {
+        const eligible = stmt.tickets.activeUnexpiredByEventId.all(req.params.id).map(rowToTicket);
+        for (const ticket of eligible) {
+            try { await expireTicket(ticket, updated, req); }
+            catch (err) { log('ticket-expiry', `[ERR] Immediate expire failed — ticket: ${ticket.id}  err: ${err.message}`); }
+        }
+    }
+
     res.json(capacityWarning ? { ...updated, capacityWarning } : updated);
 });
 
@@ -4485,7 +4500,7 @@ app.get('/api/event/:id/tickets', requireAuthOrScanLink, (req, res) => {
     }
     const tickets = stmt.tickets.byEventId.all(req.params.id).map(rowToTicket);
     const lastSeen = new Map(stmt.ticketScans.lastPerTicketByEventId.all(req.params.id).map(r => [r.ticketId, r.lastSeenAt]));
-    tickets.forEach(t => { t.lastSeenAt = lastSeen.get(t.id) || null; t.expired = isTicketExpired(t, event); });
+    tickets.forEach(t => { t.lastSeenAt = lastSeen.get(t.id) || null; t.expired = isTicketExpired(t); });
     // Giveaway win status, shown as a badge next to the ticket wherever the
     // attendee list is rendered. Keyed by registrationId the same way the
     // giveaway pool dedupes entrants — one registration, one draw entry,
@@ -5177,6 +5192,71 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 
     res.json({ success: true, tickets: updatedTickets });
     pushWalletIfChanged(updatedTickets, event).catch(() => { });
+});
+
+// Expires one not-yet-used ticket — the single place that stamps
+// tickets.expiredAt, voids its Wallet pass (same treatment as a deleted
+// ticket — see generatePassBuffer), and, if the event runs a waitlist,
+// immediately hands the seat it just freed to whoever has waited longest.
+// Called from the organiser's manual "Expire Ticket" action, the cutoff
+// sweep below, and PUT /api/event/:id when a newly-saved cutoff is already
+// in the past. `req` is only used for logAudit's actor — the sweep passes a
+// system-actor shape the same way the waitlist sweep does.
+async function expireTicket(ticket, event, req) {
+    const now = new Date().toISOString();
+    if (stmt.tickets.setExpired.run(now, now, ticket.id).changes === 0) return null;
+    ticket.expiredAt = now;
+    ticket.updated_at = now;
+    logAudit(req, { eventId: event.id, action: 'ticket.expired', details: { ticketId: ticket.id, name: ticket.name, email: ticket.email } });
+    pushWalletIfChanged([ticket], event).catch(() => {});
+
+    if (!event.waitlistEnabled) return { promoted: null };
+    const next = stmt.waitlist.nextWaitingByEventId.get(event.id);
+    if (!next) return { promoted: null };
+    const nextEntry = rowToWaitlistEntry(next);
+    try {
+        const result = await promoteWaitlistEntry(nextEntry, event);
+        if (!result.success) return { promoted: null };
+        logAudit(req, { eventId: event.id, action: result.notified ? 'waitlist.notified' : 'waitlist.promoted', details: { email: nextEntry.email, source: 'ticket_expired' } });
+        return { promoted: nextEntry.email };
+    } catch (err) {
+        log('waitlist', `[ERR] Auto-promote after expiry failed — email: ${nextEntry.email}  err: ${err.message}`);
+        return { promoted: null };
+    }
+}
+
+app.post('/api/ticket/:id/expire', requireAuth, async (req, res) => {
+    const ticket = rowToTicket(stmt.tickets.byId.get(req.params.id));
+    if (!ticket) return res.status(404).json({ error: 'Not found' });
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_tickets')) {
+        return res.status(403).json({ error: 'Not authorized to edit tickets' });
+    }
+    if (ticket.used_at) return res.status(409).json({ error: 'This ticket is already checked in' });
+    if (ticket.expiredAt) return res.status(409).json({ error: 'This ticket is already expired' });
+
+    const result = await expireTicket(ticket, event, req);
+    res.json({ success: true, promoted: result?.promoted || null });
+});
+
+app.post('/api/ticket/:id/unexpire', requireAuth, (req, res) => {
+    const ticket = rowToTicket(stmt.tickets.byId.get(req.params.id));
+    if (!ticket) return res.status(404).json({ error: 'Not found' });
+    const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_tickets')) {
+        return res.status(403).json({ error: 'Not authorized to edit tickets' });
+    }
+    if (!ticket.expiredAt) return res.status(409).json({ error: 'This ticket is not expired' });
+
+    const now = new Date().toISOString();
+    stmt.tickets.clearExpired.run(now, ticket.id);
+    ticket.expiredAt = null;
+    ticket.updated_at = now;
+    logAudit(req, { eventId: event.id, action: 'ticket.unexpired', details: { ticketId: ticket.id, name: ticket.name, email: ticket.email } });
+    pushWalletIfChanged([ticket], event).catch(() => {});
+    res.json({ success: true });
 });
 
 // Resend ticket email without changing any data
@@ -5942,8 +6022,8 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
 
     // Checked before the used_at branch below since expiry only ever applies
     // to a ticket that was never redeemed — see isTicketExpired().
-    if (isTicketExpired(ticket, event)) {
-        log('validate', `[warn] EXPIRED — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  cutoff: ${event.ticketExpiresAt}  ip: ${getIP(req)}`);
+    if (isTicketExpired(ticket)) {
+        log('validate', `[warn] EXPIRED — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event?.name}  expiredAt: ${ticket.expiredAt}  ip: ${getIP(req)}`);
         res.json({ status: 'expired', message: 'This ticket has expired', ...ticketFields });
         if (event) { const _t = stmt.tickets.byEventId.all(event.id); recordScan(req.body.pairToken, event, 'expired', ticket, _t); }
         return;
@@ -6300,11 +6380,12 @@ async function generateVoidedPassBuffer(tombstone) {
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
 const PASS_TEMPLATE_VERSION = 16;
-// A not-yet-checked-in ticket past the event's configured cutoff. Once
+// A ticket the organiser expired — manually, or via the sweep watching
+// events.ticketExpiresAt (see expireTicket() and the sweep below). Once
 // used_at is set the ticket already did its job, so expiry never applies
 // retroactively — only the door-scan and Wallet-pass paths need to care.
-function isTicketExpired(ticket, event) {
-    return !!(event?.ticketExpiresAt && !ticket.used_at && event.ticketExpiresAt <= new Date().toISOString());
+function isTicketExpired(ticket) {
+    return !ticket.used_at && !!ticket.expiredAt;
 }
 
 function passContentHash(ticket, event) {
@@ -6313,6 +6394,7 @@ function passContentHash(ticket, event) {
         name: ticket.name,
         token: ticket.token,
         used_at: ticket.used_at ?? null,
+        expiredAt: ticket.expiredAt ?? null,
         reentry_status: ticket.reentry_status ?? null,
         customFields: ticket.customFields ?? {},
         eventName: event.name,
@@ -6323,10 +6405,6 @@ function passContentHash(ticket, event) {
         eventLng: event.location?.lng,
         allowReentry: !!event.allowReentry,
         walletLockScreenEnabled: !!event.walletLockScreenEnabled,
-        // Not the raw cutoff — the boolean it currently evaluates to, so the
-        // hash (and therefore the pass) only changes at the moment a ticket
-        // actually crosses the line, not every time this is recomputed.
-        expired: isTicketExpired(ticket, event),
     });
     return crypto.createHash('sha256').update(data).digest('hex').slice(0, 16);
 }
@@ -6377,7 +6455,7 @@ async function generatePassBuffer(ticket, event) {
 
     const isInsideReentry = event.allowReentry && ticket.reentry_status === 'inside';
     const isCheckedIn = !event.allowReentry && !!ticket.used_at;
-    const isExpired = isTicketExpired(ticket, event);
+    const isExpired = isTicketExpired(ticket);
     const showCheckedInStyle = isCheckedIn || isInsideReentry;
 
     const passBackgroundColor = (showCheckedInStyle || isExpired) ? "rgb(90, 90, 90)" : (event.color || "rgb(99, 102, 241)");
@@ -8192,21 +8270,26 @@ setInterval(async () => {
 
 // Background job: catch a ticket-expiry cutoff (events.ticketExpiresAt) the
 // moment it passes, even though nobody clicked anything — the PUT
-// /api/event/:id handler already pushes a Wallet update for a cutoff that's
-// already in the past when it's saved, but a cutoff set for later (the
-// normal case — "expires at midnight" set that afternoon) needs something
-// watching the clock. passContentHash folds in isTicketExpired(), so
-// pushWalletIfChanged() below only actually pushes for tickets that just
-// crossed the line since the last tick — already-expired or still-good
-// tickets hash the same as before and are skipped for free.
-// TICKET_EXPIRY_SWEEP_MS is a test hook only, same as WAITLIST_SWEEP_MS.
+// /api/event/:id handler already expires eligible tickets immediately when
+// a cutoff that's already in the past is saved, but a cutoff set for later
+// (the normal case — "expires at midnight" set that afternoon) needs
+// something watching the clock. expireTicket() no-ops on a ticket that's
+// already expired (or used), so re-scanning the same events every tick is
+// cheap once a batch has been processed. Same system-actor shape as
+// WAITLIST_SWEEP_REQ, for the same reason: no real session to log audit
+// entries under. TICKET_EXPIRY_SWEEP_MS is a test hook only, same as
+// WAITLIST_SWEEP_MS.
+const TICKET_EXPIRY_SWEEP_REQ = { headers: {}, ip: 'system', session: {} };
 const TICKET_EXPIRY_SWEEP_MS = parseInt(process.env.TICKET_EXPIRY_SWEEP_MS) || 5 * 60 * 1000;
-setInterval(() => {
+setInterval(async () => {
     const nowIso = new Date().toISOString();
     const withExpiry = stmt.events.all.all().map(rowToEvent).filter(e => e.ticketExpiresAt && e.ticketExpiresAt <= nowIso);
     for (const event of withExpiry) {
-        const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket).filter(t => !t.used_at);
-        if (tickets.length) pushWalletIfChanged(tickets, event).catch(() => {});
+        const tickets = stmt.tickets.activeUnexpiredByEventId.all(event.id).map(rowToTicket);
+        for (const ticket of tickets) {
+            try { await expireTicket(ticket, event, TICKET_EXPIRY_SWEEP_REQ); }
+            catch (err) { log('ticket-expiry', `[ERR] Sweep expire failed — ticket: ${ticket.id}  err: ${err.message}`); }
+        }
     }
 }, TICKET_EXPIRY_SWEEP_MS);
 

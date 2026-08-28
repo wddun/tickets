@@ -402,6 +402,14 @@ try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiresAt TEXT`); } catch {}
 // existing events don't change what they send.
 try { db.exec(`ALTER TABLE events ADD COLUMN waitlistMessage TEXT`); } catch {}
 
+// When a single ticket was expired — either by the organiser directly, or
+// by the sweep that watches events.ticketExpiresAt (see server.js). This is
+// the one source of truth isTicketExpired() checks; the event-level cutoff
+// is only the trigger that decides when to stamp this column, not something
+// checked at scan time itself. NULL means never expired. Set only on a
+// not-yet-used ticket — used_at already answers "did this ticket do its job".
+try { db.exec(`ALTER TABLE tickets ADD COLUMN expiredAt TEXT`); } catch {}
+
 // Scanning a scanner-link QR while signed in grants that account standing
 // "scanner" access to the event — it shows up in Your Events from then on,
 // not just for that one device/session. Deliberately separate from
@@ -742,6 +750,13 @@ export const stmt = {
         firstByRegistrationIdOrId: db.prepare('SELECT * FROM tickets WHERE registrationId = ? OR id = ? LIMIT 1'),
         byEventId: db.prepare('SELECT * FROM tickets WHERE eventId = ?'),
         countByEventId: db.prepare('SELECT COUNT(*) as cnt FROM tickets WHERE eventId = ?'),
+        // "Still occupies a seat" — a used ticket always counts (it happened);
+        // an unused one counts unless it's expired. Backs capacity accounting
+        // so an expired, never-claimed ticket stops holding its spot.
+        countActiveByEventId: db.prepare(`SELECT COUNT(*) as cnt FROM tickets WHERE eventId = ? AND (used_at IS NOT NULL OR expiredAt IS NULL)`),
+        // Not-yet-used, not-yet-expired tickets for an event — what the
+        // ticket-expiry cutoff sweep and PUT /api/event/:id act on.
+        activeUnexpiredByEventId: db.prepare(`SELECT * FROM tickets WHERE eventId = ? AND used_at IS NULL AND expiredAt IS NULL`),
         byEventAndEmail: db.prepare('SELECT * FROM tickets WHERE eventId = ? AND lower(email) = ? LIMIT 1'),
         insert: db.prepare(`INSERT INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at, email_opened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
         updateInfo: db.prepare(`UPDATE tickets SET name=?, firstName=?, lastName=?, email=?, customFields=? WHERE id=?`),
@@ -750,6 +765,8 @@ export const stmt = {
         reentryEnter: db.prepare(`UPDATE tickets SET reentry_status='inside', updated_at=? WHERE id=?`),
         reentryExit: db.prepare(`UPDATE tickets SET reentry_status='outside', updated_at=? WHERE id=?`),
         undoCheckIn: db.prepare(`UPDATE tickets SET used_at=NULL, reentry_status=NULL, updated_at=? WHERE id=?`),
+        setExpired: db.prepare(`UPDATE tickets SET expiredAt=?, updated_at=? WHERE id=? AND used_at IS NULL AND expiredAt IS NULL`),
+        clearExpired: db.prepare(`UPDATE tickets SET expiredAt=NULL, updated_at=? WHERE id=?`),
         setPassHash: db.prepare(`UPDATE tickets SET passHash=?, updated_at=? WHERE id=?`),
         setWalletDownloaded: db.prepare(`UPDATE tickets SET wallet_downloaded_at=? WHERE token=?`),
         setEmailOpened: db.prepare(`UPDATE tickets SET email_opened_at=? WHERE registrationId=? AND email_opened_at IS NULL`),

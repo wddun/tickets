@@ -101,7 +101,7 @@ describe('joining the waitlist', () => {
 
         const mail = await server.waitForEmail(m => m.to === email && /waitlist/i.test(m.subject));
         assert.match(mail.html, /shirts left over/);
-        assert.doesNotMatch(mail.html, /the moment a spot opens up/);
+        assert.doesNotMatch(mail.html, /notified by email if a spot becomes available/);
     });
 
     test('setting the waitlist message needs manage_event', async () => {
@@ -205,7 +205,7 @@ describe('promoting someone off the waitlist', () => {
         // No ticket was created — money still only changes hands through Stripe.
         assert.ok(!(await listTickets(owner.client, ev.id)).some(t => t.email === email));
 
-        const mail = await server.waitForEmail(m => m.to === email && /spot opened up/i.test(m.subject));
+        const mail = await server.waitForEmail(m => m.to === email && /spot is available/i.test(m.subject));
         assert.match(mail.html, /register\.html\?id=[^&]+&claim=/);
 
         // The claim is a real reservation: the status route hands the same
