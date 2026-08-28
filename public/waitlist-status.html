@@ -229,6 +229,17 @@
                     setTimeout(() => location.reload(), 3000);
                 }
             };
+
+            // Belt-and-suspenders on top of the SSE reconnect above: a phone
+            // OS can throttle or fully suspend a backgrounded tab's network
+            // activity for longer than the stream's own reconnect timing
+            // accounts for. The moment the tab is actually looked at again —
+            // unlocked, switched back to — force a fresh fetch regardless of
+            // what the connection was doing while it was away.
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') load();
+            });
+            window.addEventListener('focus', load);
         } else {
             load();
         }
