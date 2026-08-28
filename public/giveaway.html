@@ -44,6 +44,11 @@
         .present-btn.live { background: rgba(16,185,129,0.18); border-color: rgba(16,185,129,0.4); color: #34d399; }
         .present-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.3); }
         .present-btn.live .present-dot { background: #34d399; box-shadow: 0 0 6px #34d399; }
+        /* A broadcast that failed after retries — distinct from "no display
+           connected yet" (grey), since this means the room itself may be
+           out of sync, not just quiet. */
+        .present-btn.sync-issue { background: rgba(245,158,11,0.18); border-color: rgba(245,158,11,0.4); color: #f59e0b; }
+        .present-btn.sync-issue .present-dot { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
 
         .wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 60px; }
 
@@ -618,15 +623,16 @@
 <div class="present-overlay" id="presentOverlay">
     <div class="present-card">
         <h3>Present on another screen</h3>
-        <p>Open this link on the TV, projector, or second device &mdash; it shows just the spinner and the winner, no controls, no attendee list, no emails. It always shows whatever style is selected here, including on the moment it connects, and follows every switch and spin you make afterward.</p>
+        <p>Open this link on the TV, projector, or second device &mdash; it shows just the spinner and the winner, no controls, no attendee list, no emails. This link is permanent for this event: it keeps working across reloads, a different device, or reconnecting after a dropped connection, and any number of screens can have it open at once, all mirroring the same thing. Any other controller open on this event stays in sync too &mdash; switching style here switches it everywhere.</p>
         <div class="present-link-group">
             <div class="present-link-row">
                 <input type="text" id="presentLinkInput" readonly onclick="this.select()">
                 <button onclick="copyPresentLink()">Copy</button>
             </div>
         </div>
-        <div class="present-status" id="presentStatus"><span class="present-dot"></span> Waiting for the display to connect&hellip;</div>
+        <div class="present-status" id="presentStatus"><span class="present-dot"></span> Waiting for a display to connect&hellip;</div>
         <div class="present-card-actions">
+            <button class="pc-close" onclick="rotatePresentLink()" title="Invalidates the current link and generates a new one">Rotate Link</button>
             <button class="pc-close" onclick="closePresentPanel()">Close</button>
             <button class="pc-stop" onclick="stopPresenting()">Stop Presenting</button>
         </div>
@@ -691,9 +697,16 @@ const THEMES = {
 };
 const SPEED_MULT = { slow: 1.35, normal: 1, fast: 0.68 };
 
-// Presenter/display pairing
-let presenterSessionId = null;
-let presenterPollTimer = null;
+// Presenter/display pairing — keyed by eventId (a persistent room, not a
+// per-tab session), so a refresh, a second controller, or a display
+// reconnecting after a drop all land back in the same synced room. See
+// connectGiveawayRoom() and the /api/giveaway/room/:eventId/* routes.
+let giveawayClientId = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random())); // this tab's identity, so it can skip its own echoed broadcasts
+let giveawayToken = null;      // this event's persistent room token (only the display needs it — kept here just to build the link)
+let giveawayStream = null;     // this controller's own subscription — lets a mode switch on another controller reach this one live
+let presenting = false;        // Present panel open/closed — drives the sound-preference split, not whether broadcasting happens (that's always on)
+let presentPollTimer = null;
+let syncIssue = false;
 
 // ── Live entries ────────────────────────────────────────────────
 // The pool used to be a snapshot taken when the page loaded, which is fine
@@ -747,11 +760,18 @@ function esc(s) {
     document.getElementById('mainContent').style.display = 'block';
     buildSwatches();
     const wantedStyle = params.get('style');
-    setSpinnerStyle(['reel', 'classic', 'pot'].includes(wantedStyle) ? wantedStyle : 'reel');
+    // remote:true here too — this is this TAB's own starting point (its
+    // bookmarked ?style=, or the plain default), not a real style change to
+    // announce. A second controller opening after the first would otherwise
+    // broadcast its own stale default the instant it loads, momentarily
+    // stomping whatever the room was actually showing until
+    // connectGiveawayRoom()'s reply caught up a moment later.
+    setSpinnerStyle(['reel', 'classic', 'pot'].includes(wantedStyle) ? wantedStyle : 'reel', { remote: true });
     await loadWinners();
     await loadEntrants();
     await loadWatcherState();
     startLiveSync();
+    connectGiveawayRoom();
 })();
 
 async function onEventChange() {
@@ -760,6 +780,8 @@ async function onEventChange() {
     knownRegistrationIds = new Set();
     arrivalsDuringSpin = [];
     sheetWatcher = null;
+    lastRoomCounts = { controllers: 0, displays: 0 };
+    syncIssue = false;
     // Names still queued for the old event's pot have no business fluttering
     // into the new one's.
     if (pot) pot.clear();
@@ -767,6 +789,7 @@ async function onEventChange() {
     await loadEntrants();
     await loadWatcherState();
     restartLivePoll();
+    connectGiveawayRoom(); // different event = different room
 }
 
 // The recorded win history for the event — persists server-side, unlike the
@@ -854,7 +877,11 @@ function updateSpinButton() {
             : '';
 }
 
-function setSpinnerStyle(style) {
+// opts.remote: true when this is applying a style another controller
+// broadcast (see applyRemotePotMode) — mirrors the switch locally without
+// re-broadcasting it, which would otherwise echo back and forth forever.
+function setSpinnerStyle(style, opts) {
+    const remote = !!(opts && opts.remote);
     spinnerStyle = style;
     document.getElementById('styleBtnReel').classList.toggle('active', style === 'reel');
     document.getElementById('styleBtnClassic').classList.toggle('active', style === 'classic');
@@ -865,9 +892,10 @@ function setSpinnerStyle(style) {
     else renderReelAtRest();
     updateSpinButton();
     updatePotStageRows();
+    if (remote) return;
     // Reflected in this page's own URL — not to drive the display link
     // (that's one link that always shows the controller's current style,
-    // see openPresentPanel), but so reloading or bookmarking the
+    // see connectGiveawayRoom), but so reloading or bookmarking the
     // controller itself comes back to the style it was left on.
     const url = new URL(location.href);
     url.searchParams.set('style', style);
@@ -1322,10 +1350,9 @@ function reelGlowAmount(centerPos, itemsPerSec) {
 // TV/projector running the presentation doesn't also hear it from the
 // operator's laptop).
 function controllerSoundEnabled() {
-    return presenterSessionId ? customization.soundOnController : customization.sound;
+    return presenting ? customization.soundOnController : customization.sound;
 }
 function updateSoundRows() {
-    const presenting = !!presenterSessionId;
     document.getElementById('czSoundRowSingle').style.display = presenting ? 'none' : '';
     document.getElementById('czSoundRowPresenter').style.display = presenting ? '' : 'none';
     document.getElementById('czSoundRowController').style.display = presenting ? '' : 'none';
@@ -1874,30 +1901,96 @@ async function sendWinnersEmail() {
 }
 
 // ── Presenter/display pairing ───────────────────────────────────
+// The room is the event, not a per-tab session: this tab (and every other
+// controller tab open on the same event) keeps one SSE subscription open to
+// /api/giveaway/room/:eventId/stream for as long as an event is selected,
+// independent of whether the Present panel happens to be open. That's what
+// makes a style switch on one controller reach every other controller AND
+// every display live, and what lets a display's link keep working forever
+// instead of being orphaned by the controller reloading.
+let lastRoomCounts = { controllers: 0, displays: 0 };
+
+async function connectGiveawayRoom() {
+    if (giveawayStream) { try { giveawayStream.close(); } catch (_) {} giveawayStream = null; }
+    if (!currentEventId) return;
+    try {
+        const r = await fetch(`/api/event/${currentEventId}/giveaway/token`);
+        if (r.ok) {
+            const data = await r.json();
+            giveawayToken = data.token;
+            const input = document.getElementById('presentLinkInput');
+            if (input) input.value = data.displayUrl;
+        }
+    } catch (_) {}
+
+    const es = new EventSource(`/api/giveaway/room/${encodeURIComponent(currentEventId)}/stream?role=controller&clientId=${encodeURIComponent(giveawayClientId)}`);
+    giveawayStream = es;
+    es.onopen = () => { syncIssue = false; renderRoomStatus(); };
+    es.onmessage = (e) => {
+        let msg;
+        try { msg = JSON.parse(e.data); } catch (_) { return; }
+        if (msg.clientId && msg.clientId === giveawayClientId) return; // our own echoed broadcast
+        if (msg.type === 'connected' || msg.type === 'presence') {
+            updateRoomCounts(msg.counts);
+        } else if (msg.type === 'potMode' && msg.payload) {
+            applyRemotePotMode(msg.payload);
+        }
+        // 'spin' from another controller isn't replayed into this tab's own
+        // animation — only the shared display renders someone else's spin,
+        // same as it always has. 'reset' has nothing for a controller to
+        // apply locally; it only clears the room's cached spin state.
+    };
+}
+
+// Mirrors a style switch made on a DIFFERENT controller — never re-broadcasts
+// (that would echo back and forth between tabs) and never interrupts a draw
+// already spinning locally.
+function applyRemotePotMode(payload) {
+    if (spinning) return;
+    if (payload.style && ['reel', 'classic', 'pot'].includes(payload.style) && payload.style !== spinnerStyle) {
+        setSpinnerStyle(payload.style, { remote: true });
+    }
+}
+
+function updateRoomCounts(counts) {
+    if (!counts) return;
+    lastRoomCounts = counts;
+    renderRoomStatus();
+}
+function renderRoomStatus() {
+    const statusEl = document.getElementById('presentStatus');
+    const { displays, controllers } = lastRoomCounts;
+    if (statusEl) {
+        const controllerNote = controllers > 1 ? ` &middot; ${controllers} controllers open` : '';
+        statusEl.innerHTML = displays > 0
+            ? `<span class="present-dot" style="background:#34d399;box-shadow:0 0 6px #34d399;"></span> ${displays} display${displays === 1 ? '' : 's'} connected${controllerNote}`
+            : `<span class="present-dot"></span> Waiting for a display to connect&hellip;${controllerNote}`;
+    }
+    updatePresentBtn(displays > 0);
+}
+function updatePresentBtn(live) {
+    const btn = document.getElementById('presentBtn');
+    btn.classList.toggle('live', !!live && !syncIssue);
+    btn.classList.toggle('sync-issue', syncIssue);
+}
+
 function openPresentPanel() {
-    const isNewSession = !presenterSessionId;
-    if (isNewSession) presenterSessionId = crypto.randomUUID();
-    document.getElementById('presentLinkInput').value = `${location.origin}/giveaway-display.html?session=${presenterSessionId}`;
+    presenting = true;
     document.getElementById('presentOverlay').classList.add('show');
     updateSoundRows();
-    // A newly minted session has told no display anything yet — record the
-    // current style/theme/count server-side now (see broadcastPotMode and
-    // the stream route in server.js) so a display connecting to this link
-    // shows the right thing on the very first frame, not just after the
-    // next poll or the next real style switch.
-    if (isNewSession) broadcastPotMode();
-    pollPresenterStatus();
-    clearInterval(presenterPollTimer);
-    presenterPollTimer = setInterval(pollPresenterStatus, 2000);
+    renderRoomStatus();
+    if (!giveawayStream) connectGiveawayRoom();
 }
 function closePresentPanel() {
     document.getElementById('presentOverlay').classList.remove('show');
-    clearInterval(presenterPollTimer);
 }
 function stopPresenting() {
-    presenterSessionId = null;
+    // Only affects this tab's own sound preference (see controllerSoundEnabled)
+    // — the room, any other controller, and any connected display all keep
+    // running exactly as they were. There's no server-side "session" to tear
+    // down any more.
+    presenting = false;
     closePresentPanel();
-    updatePresentBtn(false);
     updateSoundRows();
 }
 function copyPresentLink() {
@@ -1905,84 +1998,74 @@ function copyPresentLink() {
     input.select();
     navigator.clipboard?.writeText(input.value).catch(() => document.execCommand('copy'));
 }
-async function pollPresenterStatus() {
-    if (!presenterSessionId) return;
+async function rotatePresentLink() {
+    if (!currentEventId) return;
+    if (!confirm('Rotate the link? The current display link will stop working immediately — anyone already watching on it will need the new one.')) return;
     try {
-        const r = await fetch(`/api/giveaway/status/${presenterSessionId}`);
-        const data = r.ok ? await r.json() : { connected: false };
-        const statusEl = document.getElementById('presentStatus');
-        statusEl.innerHTML = data.connected
-            ? '<span class="present-dot" style="background:#34d399;box-shadow:0 0 6px #34d399;"></span> Display connected'
-            : '<span class="present-dot"></span> Waiting for the display to connect…';
-        updatePresentBtn(data.connected);
+        const r = await fetch(`/api/giveaway/token/${currentEventId}/rotate`, { method: 'POST' });
+        if (!r.ok) return;
+        const data = await r.json();
+        giveawayToken = data.token;
+        document.getElementById('presentLinkInput').value = data.displayUrl;
     } catch (_) {}
 }
-function updatePresentBtn(live) {
-    const btn = document.getElementById('presentBtn');
-    const was = btn.classList.contains('live');
-    btn.classList.toggle('live', live);
-    // A display opened halfway through the evening has no idea what style is
-    // selected or how full the pot is — tell it as soon as it appears.
-    if (live && !was) broadcastPotMode();
+
+// One retrying broadcast helper for every message type — a failed POST used
+// to be silently swallowed, leaving the operator's "Display connected"
+// dot as the only (coarse, connectivity-only) signal something was wrong.
+// This retries briefly, then flips the nav-bar dot to an explicit sync-issue
+// state so a live operator gets real feedback instead of false confidence.
+async function giveawayBroadcast(type, payload) {
+    if (!currentEventId) return;
+    const body = JSON.stringify({ type, payload, clientId: giveawayClientId });
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const r = await fetch(`/api/giveaway/room/${currentEventId}/broadcast`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body,
+            });
+            if (r.ok) {
+                if (syncIssue) { syncIssue = false; renderRoomStatus(); }
+                return;
+            }
+        } catch (_) {}
+        if (attempt < 2) await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
+    }
+    syncIssue = true;
+    renderRoomStatus();
 }
+
 async function broadcastSpin(payload) {
-    if (!presenterSessionId) return;
     const ev = events.find(e => e.id === currentEventId);
-    try {
-        await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'spin', payload: { ...payload, eventName: ev ? ev.name : '', theme: THEMES[customization.theme].accent, soundEnabled: customization.soundOnPresenter, potSize: customization.potSize, potHeadroom: customization.potHeadroom } }),
-        });
-    } catch (_) {}
+    giveawayBroadcast('spin', { ...payload, eventName: ev ? ev.name : '', theme: THEMES[customization.theme].accent, soundEnabled: customization.soundOnPresenter, potSize: customization.potSize, potHeadroom: customization.potHeadroom });
 }
 // The pot is the one style that shows something between spins, so the display
-// needs its state (idle pot, how full) and not just spin events.
+// (and every other controller — see applyRemotePotMode) needs its state
+// (which style, idle pot, how full) and not just spin events.
 async function broadcastPotMode() {
-    if (!presenterSessionId) return;
     const ev = events.find(e => e.id === currentEventId);
-    try {
-        await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                type: 'potMode',
-                payload: {
-                    active: spinnerStyle === 'pot',
-                    total: pool.length,
-                    eventName: ev ? ev.name : '',
-                    theme: THEMES[customization.theme].accent,
-                    soundEnabled: customization.soundOnPresenter,
-                    potSize: customization.potSize,
-                    potHeadroom: customization.potHeadroom,
-                },
-            }),
-        });
-    } catch (_) {}
+    giveawayBroadcast('potMode', {
+        active: spinnerStyle === 'pot',
+        style: spinnerStyle,
+        total: pool.length,
+        eventName: ev ? ev.name : '',
+        theme: THEMES[customization.theme].accent,
+        soundEnabled: customization.soundOnPresenter,
+        potSize: customization.potSize,
+        potHeadroom: customization.potHeadroom,
+    });
 }
 
 // Names only — the display never sees emails or registration ids, same as
 // every other payload it receives.
 async function broadcastPotAdd(names) {
-    if (!presenterSessionId || !names.length) return;
-    try {
-        await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'potAdd', payload: { names, total: pool.length } }),
-        });
-    } catch (_) {}
+    if (!names.length) return;
+    giveawayBroadcast('potAdd', { names, total: pool.length });
 }
 
 async function broadcastReset() {
-    if (!presenterSessionId) return;
-    try {
-        await fetch(`/api/giveaway/broadcast/${presenterSessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'reset', payload: {} }),
-        });
-    } catch (_) {}
+    giveawayBroadcast('reset', {});
 }
 </script>
 </body>

@@ -3360,6 +3360,18 @@ app.put('/api/event/:id/waitlist-enabled', requireAuth, (req, res) => {
     res.json({ success: true, waitlistEnabled: enabled });
 });
 
+// How long a promoted claim stays open before the auto-chain sweep (below)
+// offers the seat to the next person in line.
+app.put('/api/event/:id/waitlist-claim-hours', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
+    const hours = Math.max(1, Math.min(240, parseInt(req.body.hours) || 48));
+    stmt.events.setWaitlistClaimHours.run(hours, req.params.id);
+    logAudit(req, { eventId: event.id, action: 'waitlist.claimHoursChanged', details: { hours } });
+    res.json({ success: true, waitlistClaimHours: hours });
+});
+
 // Which ways of getting a ticket send a confirmation. Body is one boolean per
 // source in EMAIL_SOURCES; an omitted source keeps whatever it resolves to now,
 // so a client that predates a newly added source can't silently reset it.
@@ -3444,30 +3456,31 @@ app.post('/api/event/:id/waitlist', publicWriteLimiter, async (req, res) => {
     res.json(await joinWaitlist(event, name, email));
 });
 
-// Promote someone off the waitlist: issues them a free ticket directly (for
-// paid events, promoting sends them a personal note to complete checkout —
-// keeps Stripe as the one place money actually changes hands) and marks the
-// waitlist entry as converted. Doesn't auto-check capacity — the organizer is
-// explicitly choosing to seat this person, e.g. after a cancellation.
-app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
-    const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
-    if (!entry) return res.status(404).json({ error: 'Waitlist entry not found' });
-    if (!userHasEventCapability(req.session.userId, entry.eventId, 'manage_waitlist')) {
-        return res.status(403).json({ error: 'Only the event owner can manage the waitlist' });
-    }
-    const event = rowToEvent(stmt.events.byId.get(entry.eventId));
-    if (!event) return res.status(404).json({ error: 'Event not found' });
-
+// Shared by the manual Promote button, the claim-expiry auto-chain sweep, and
+// the no-show waitlist release — one place that decides what "promote this
+// person" actually does, so all three stay consistent. For a paid event this
+// is a reservation, not a ticket: the claim token is good for the event's
+// configured window (waitlistClaimHours, default 48h) and the capacity check
+// elsewhere treats an active claim as an occupied seat, so this specific
+// person's spot can't be lost to someone else registering in the meantime.
+// For a free event there's nothing to hold open for, so it issues the ticket
+// immediately.
+async function promoteWaitlistEntry(entry, event) {
     if (event.ticketPrice > 0) {
-        // A real reservation, not just a nudge: the claim token is good for
-        // 48 hours, and the capacity check elsewhere treats an active claim
-        // as an occupied seat, so this specific person's spot can't be lost
-        // to someone else registering in the meantime.
         const claimToken = nanoid(24);
-        const claimExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+        const claimHours = event.waitlistClaimHours || 48;
+        // WAITLIST_CLAIM_MS_OVERRIDE is a test hook only (unset in production,
+        // same as WAITLIST_SWEEP_MS above) — the real minimum is 1 hour
+        // (enforced in the /waitlist-claim-hours route), too long for a test
+        // to actually wait out, so this lets a test exercise the real
+        // expiry -> auto-chain-promote path end to end instead of leaving it
+        // unverified.
+        const claimMs = parseInt(process.env.WAITLIST_CLAIM_MS_OVERRIDE) || (claimHours * 60 * 60 * 1000);
+        const claimExpiresAt = new Date(Date.now() + claimMs).toISOString();
         stmt.waitlist.setClaim.run(new Date().toISOString(), claimToken, claimExpiresAt, entry.id);
         if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
             const claimUrl = `${BASE_URL}/register.html?id=${event.id}&claim=${claimToken}`;
+            const windowLabel = claimHours % 24 === 0 ? `${claimHours / 24} day${claimHours === 24 ? '' : 's'}` : `${claimHours} hours`;
             sendEmail({
                 to: entry.email,
                 fromName: `Tickets - ${event.name}`,
@@ -3477,22 +3490,38 @@ app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
                     <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
                     <h2 style="color:#1a1f3c;margin:0 0 8px;">A spot opened up!</h2>
                     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">Good news — a ticket for <strong>${event.name}</strong> just became available, and it's reserved for you.</p>
-                    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">This hold lasts <strong>48 hours</strong> — complete your registration before then to keep it.</p>
+                    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">This hold lasts <strong>${windowLabel}</strong> — complete your registration before then to keep it.</p>
                     <div style="text-align:center;margin-bottom:8px;">
                         <a href="${claimUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Complete Your Registration</a>
                     </div>
                 </div>`,
             }).catch(() => {});
         }
-        logAudit(req, { eventId: event.id, action: 'waitlist.notified', details: { email: entry.email } });
-        return res.json({ success: true, notified: true });
+        return { success: true, notified: true };
     }
 
     const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email, source: null });
-    if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
+    if (!issued) return { success: false, error: 'Failed to issue ticket' };
     stmt.waitlist.setStatus.run('converted', entry.id);
-    logAudit(req, { eventId: event.id, action: 'waitlist.promoted', details: { email: entry.email } });
-    res.json({ success: true, ticket: issued.ticket });
+    return { success: true, ticket: issued.ticket };
+}
+
+// Promote someone off the waitlist. Doesn't auto-check capacity — the
+// organizer is explicitly choosing to seat this person, e.g. after a
+// cancellation.
+app.post('/api/waitlist/:id/promote', requireAuth, async (req, res) => {
+    const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
+    if (!entry) return res.status(404).json({ error: 'Waitlist entry not found' });
+    if (!userHasEventCapability(req.session.userId, entry.eventId, 'manage_waitlist')) {
+        return res.status(403).json({ error: 'Only the event owner can manage the waitlist' });
+    }
+    const event = rowToEvent(stmt.events.byId.get(entry.eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    const result = await promoteWaitlistEntry(entry, event);
+    if (!result.success) return res.status(500).json({ error: result.error });
+    logAudit(req, { eventId: event.id, action: result.notified ? 'waitlist.notified' : 'waitlist.promoted', details: { email: entry.email } });
+    res.json(result);
 });
 
 app.delete('/api/waitlist/:id', requireAuth, (req, res) => {
@@ -3504,6 +3533,87 @@ app.delete('/api/waitlist/:id', requireAuth, (req, res) => {
     stmt.waitlist.deleteById.run(req.params.id);
     logAudit(req, { eventId: entry.eventId, action: 'waitlist.removed', details: { email: entry.email } });
     res.json({ success: true });
+});
+
+// No-show → waitlist release. Deliberately organizer-triggered only — nothing
+// cancels an attendee's ticket on a timer. This just tells the dashboard how
+// many not-yet-checked-in tickets and how many waiting people there are, so
+// an organizer can decide for themselves whether it's worth releasing any.
+app.get('/api/event/:id/no-show-release/preview', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_tickets') || !userHasEventCapability(req.session.userId, event.id, 'manage_waitlist')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    const notCheckedInCount = stmt.tickets.byEventId.all(event.id).filter(t => !t.used_at).length;
+    const waitingCount = stmt.waitlist.countWaitingByEventId.get(event.id)?.cnt ?? 0;
+    res.json({
+        notCheckedInCount, waitingCount,
+        eventStarted: !event.time || event.time <= new Date().toISOString(),
+    });
+});
+
+// Cancels up to `count` not-checked-in tickets and hands those seats to the
+// next people waiting, in the same order and via the same promote logic
+// (claim window, emails) as a manual or auto-chain promote. Requires both
+// manage_tickets (cancelling someone else's ticket) and manage_waitlist
+// (deciding who gets the freed seats) — this is genuinely two permissions at
+// once, not one capability wearing two hats.
+app.post('/api/event/:id/no-show-release', requireAuth, async (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_tickets') || !userHasEventCapability(req.session.userId, event.id, 'manage_waitlist')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    // A safety floor, not just a UI hint — refuses a click that lands before
+    // the event has actually started, e.g. someone browsing the panel early.
+    if (event.time && event.time > new Date().toISOString()) {
+        return res.status(409).json({ error: "This event hasn't started yet" });
+    }
+    const requestedCount = Math.max(0, parseInt(req.body.count) || 0);
+    if (!requestedCount) return res.status(400).json({ error: 'count is required' });
+
+    // Never trust a count the client computed earlier — someone may have
+    // checked in between the preview and this click.
+    const notCheckedIn = stmt.tickets.byEventId.all(event.id).map(rowToTicket).filter(t => !t.used_at);
+    if (!notCheckedIn.length) return res.status(409).json({ error: 'Nothing to release — every ticket is checked in' });
+
+    // Released whole registrations at a time (a family of four sharing one
+    // registration goes together), oldest first, until at least `count`
+    // tickets are freed — matches how "one person" is counted everywhere
+    // else a registration groups multiple tickets.
+    const byRegistration = new Map();
+    for (const t of notCheckedIn) {
+        const rid = t.registrationId || t.id;
+        if (!byRegistration.has(rid)) byRegistration.set(rid, []);
+        byRegistration.get(rid).push(t);
+    }
+    const registrations = [...byRegistration.values()].sort((a, b) => String(a[0].created_at || '').localeCompare(String(b[0].created_at || '')));
+
+    const toRelease = [];
+    for (const regTickets of registrations) {
+        if (toRelease.length >= requestedCount) break;
+        toRelease.push(...regTickets);
+    }
+
+    const del = db.transaction(() => { for (const t of toRelease) stmt.tickets.deleteById.run(t.id); });
+    del();
+    voidWalletTickets(toRelease, [event]);
+    logAudit(req, { eventId: event.id, action: 'waitlist.noShowReleased', details: { count: toRelease.length } });
+
+    const promotedEmails = [];
+    for (let i = 0; i < toRelease.length; i++) {
+        const next = stmt.waitlist.nextWaitingByEventId.get(event.id);
+        if (!next) break;
+        const nextEntry = rowToWaitlistEntry(next);
+        const result = await promoteWaitlistEntry(nextEntry, event);
+        if (result.success) {
+            promotedEmails.push(nextEntry.email);
+            logAudit(req, { eventId: event.id, action: result.notified ? 'waitlist.notified' : 'waitlist.promoted', details: { email: nextEntry.email, source: 'no_show_release' } });
+        }
+    }
+
+    res.json({ success: true, released: toRelease.length, promoted: promotedEmails.length });
 });
 
 // ── Payments (Beta) — orders & refunds ─────────────────────────────────────────
@@ -4081,6 +4191,11 @@ app.get('/api/event/:id', (req, res) => {
     // anyone who merely knows an event id; callers with real access get it
     // from /api/events, which is authenticated.
     if (!req.session.userId || !userHasEventAccess(req.session.userId, event.id)) delete event.scannerPin;
+    // The giveaway room token grants read access to live entrant names and
+    // draw state — unlike displayToken (just ticket counts), that's personal
+    // data, so it never travels on the public event object. Organizers fetch
+    // it from the dedicated, capability-checked /giveaway/token route.
+    delete event.giveawayToken;
     res.json(event);
 });
 
@@ -4282,21 +4397,20 @@ app.get('/api/event/:id/tickets', requireAuthOrScanLink, (req, res) => {
 // last-seen scan — which is far too much to re-fetch at that rate once a few
 // hundred people have signed up. Same authorization as that route (any
 // capability on the event) since this returns a strict subset of it.
-app.get('/api/event/:id/giveaway/entrants', requireAuth, (req, res) => {
-    if (!stmt.events.byId.get(req.params.id) || !userEventCapabilities(req.session.userId, req.params.id).length) {
-        return res.status(401).json({ error: 'Unauthorized or not found' });
-    }
-    // One entrant per registration, not per ticket — a family of four bought
-    // one entry into the draw, not four.
+// One entrant per registration, not per ticket — a family of four bought one
+// entry into the draw, not four. Shared by the authenticated (controller)
+// entrants route and the public room-token one below, since they're the same
+// data with email included or stripped.
+function buildGiveawayEntrants(eventId, { includeEmail = true } = {}) {
     const byRegistration = new Map();
-    for (const t of stmt.tickets.byEventId.all(req.params.id)) {
+    for (const t of stmt.tickets.byEventId.all(eventId)) {
         const rid = t.registrationId || t.id;
         const existing = byRegistration.get(rid);
         if (!existing) {
             byRegistration.set(rid, {
                 registrationId: rid,
                 name: t.name || '',
-                email: t.email || '',
+                ...(includeEmail ? { email: t.email || '' } : {}),
                 checkedIn: !!t.used_at,
                 createdAt: t.created_at || null,
             });
@@ -4308,7 +4422,69 @@ app.get('/api/event/:id/giveaway/entrants', requireAuth, (req, res) => {
     // Oldest first, so a client diffing against what it already has sees new
     // arrivals in the order they actually signed up.
     entrants.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    return entrants;
+}
+
+app.get('/api/event/:id/giveaway/entrants', requireAuth, (req, res) => {
+    if (!stmt.events.byId.get(req.params.id) || !userEventCapabilities(req.session.userId, req.params.id).length) {
+        return res.status(401).json({ error: 'Unauthorized or not found' });
+    }
+    const entrants = buildGiveawayEntrants(req.params.id);
     res.json({ entrants, total: entrants.length });
+});
+
+// Public, room-token gated (see the pairing block further down for what the
+// token is) — lets giveaway-display.html poll for new entrants directly
+// instead of relying solely on the controller to relay them, so the venue
+// screen stays current even if every controller tab is closed or
+// backgrounded. Names only: no email, since this reaches an unauthenticated
+// audience-facing screen.
+app.get('/api/giveaway/room/:eventId/entrants', (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
+    if (!event || !event.giveawayToken || req.query.token !== event.giveawayToken) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    const entrants = buildGiveawayEntrants(event.id, { includeEmail: false });
+    res.json({ entrants, total: entrants.length });
+});
+
+// Lazily creates (or returns) the event's persistent giveaway room link —
+// stable forever, unlike the old crypto.randomUUID() session that reset
+// every time the controller tab refreshed and orphaned whatever was already
+// on the venue screen. Mirrors /api/display/token/:eventId exactly.
+app.get('/api/event/:id/giveaway/token', requireAuth, (req, res) => {
+    const eventId = req.params.id;
+    if (!userEventCapabilities(req.session.userId, eventId).length) return res.status(403).json({ error: 'Not authorized' });
+    let event = rowToEvent(stmt.events.byId.get(eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!event.giveawayToken) {
+        stmt.events.setGiveawayToken.run(crypto.randomBytes(24).toString('hex'), eventId);
+        event = rowToEvent(stmt.events.byId.get(eventId));
+    }
+    res.json({
+        token: event.giveawayToken,
+        // The controller authenticates by session, not the token — it's
+        // only here so the operator's own bookmark also lands on the right
+        // event without needing the dashboard's event picker.
+        controllerUrl: `${BASE_URL}/giveaway.html?eventId=${eventId}`,
+        displayUrl: `${BASE_URL}/giveaway-display.html?eventId=${eventId}&token=${event.giveawayToken}`,
+    });
+});
+
+// Regenerates the room link, invalidating the old one — for if it leaks.
+app.post('/api/giveaway/token/:eventId/rotate', requireAuth, (req, res) => {
+    const eventId = req.params.eventId;
+    if (!userEventCapabilities(req.session.userId, eventId).length) return res.status(403).json({ error: 'Not authorized' });
+    const event = rowToEvent(stmt.events.byId.get(eventId));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const token = crypto.randomBytes(24).toString('hex');
+    stmt.events.setGiveawayToken.run(token, eventId);
+    logAudit(req, { eventId, action: 'giveaway.tokenRotated' });
+    res.json({
+        token,
+        controllerUrl: `${BASE_URL}/giveaway.html?eventId=${eventId}`,
+        displayUrl: `${BASE_URL}/giveaway-display.html?eventId=${eventId}&token=${token}`,
+    });
 });
 
 // Giveaway mode: email a spinner-drawn winner using their existing ticket(s)
@@ -4506,35 +4682,66 @@ app.post('/api/event/:id/giveaway/email-winners', requireAuth, async (req, res) 
     res.json({ success: true, sent, failed: errors.length });
 });
 
-// ── Giveaway presenter/display pairing (SSE) ──────────────────────────────────
-// Lets the organizer control the spin from their own device while a second,
-// audience-facing device (a TV/projector) shows a clean live view — no pool
-// list, no controls, no attendee emails. sessionId is a client-generated
-// crypto.randomUUID(), unguessable, and is the only "auth" the display needs
-// (same pattern as scanner pairing tokens above); nothing sensitive is ever
-// sent over this channel beyond entrant first/last names.
-app.get('/api/giveaway/stream/:sessionId', (req, res) => {
-    const { sessionId } = req.params;
-    if (!sessionId) return res.status(400).send('sessionId required');
+// ── Giveaway room pairing (SSE) ─────────────────────────────────────────────
+// Lets any number of organizer devices control the spin/pot while any number
+// of audience-facing devices (TVs/projectors) show a clean live view — no
+// pool list, no controls, no attendee emails. Keyed by eventId, not a
+// per-tab session, and gated by the persistent room token from
+// /api/event/:id/giveaway/token above: a controller refreshing, a second
+// staff member opening the same link, or a display reconnecting after a
+// network blip all land back in the exact same room, and giveawayRoomState
+// (below) means a client that joins mid-event is caught up immediately
+// rather than sitting blank until the next broadcast happens to reach it.
+// Nothing sensitive is ever sent over this channel beyond entrant names.
+function giveawayRoomCounts(eventId) {
+    const conns = giveawayChannels.get(eventId);
+    const counts = { controllers: 0, displays: 0 };
+    if (conns) for (const c of conns) counts[c.role === 'display' ? 'displays' : 'controllers']++;
+    return counts;
+}
+function broadcastGiveawayPresence(eventId) {
+    const conns = giveawayChannels.get(eventId);
+    if (!conns || !conns.size) return;
+    const msg = `data: ${JSON.stringify({ type: 'presence', counts: giveawayRoomCounts(eventId) })}\n\n`;
+    for (const c of conns) { try { c.res.write(msg); } catch (_) { conns.delete(c); } }
+}
+
+app.get('/api/giveaway/room/:eventId/stream', (req, res) => {
+    const { eventId } = req.params;
+    const event = rowToEvent(stmt.events.byId.get(eventId));
+    if (!event) return res.status(404).send('Not found');
+    const token = req.query.token || '';
+    const authedBySession = !!(req.session?.userId && userEventCapabilities(req.session.userId, eventId).length);
+    const authedByToken = !!(token && event.giveawayToken && token === event.giveawayToken);
+    if (!authedBySession && !authedByToken) return res.status(403).send('Not authorized');
+
+    const role = req.query.role === 'display' ? 'display' : 'controller';
+    const clientId = String(req.query.clientId || '').slice(0, 64) || null;
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
+    // Speeds up the browser's default EventSource reconnect delay (a few
+    // seconds) so a dropped connection — laptop sleep, a network blip —
+    // comes back faster during a live draw.
+    res.write(`retry: 2000\n`);
     res.write(`: ${' '.repeat(2048)}\n\n`);
 
-    const prev = giveawayChannels.get(sessionId);
-    if (prev && prev !== res) { try { prev.end(); } catch (_) { } }
-    giveawayChannels.set(sessionId, res);
-    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
-    // Replays whatever style/state the controller last broadcast, so a
-    // display opened after the operator has already switched styles (or
-    // one that reconnects) shows the right thing immediately instead of
-    // sitting idle until the next spin or the controller's own poll
-    // happens to notice it connected.
-    const last = giveawayLastState.get(sessionId);
-    if (last) res.write(`data: ${JSON.stringify(last)}\n\n`);
+    const conn = { res, role, clientId };
+    if (!giveawayChannels.has(eventId)) giveawayChannels.set(eventId, new Set());
+    giveawayChannels.get(eventId).add(conn);
+
+    res.write(`data: ${JSON.stringify({ type: 'connected', role, counts: giveawayRoomCounts(eventId) })}\n\n`);
+    // Catches this connection up on whatever's already happened in the room
+    // — the last mode switch and, if one was mid-flight, the last spin —
+    // instead of it sitting idle until the next broadcast happens to land.
+    const state = giveawayRoomState.get(eventId);
+    if (state?.potMode) res.write(`data: ${JSON.stringify(state.potMode)}\n\n`);
+    if (state?.spin) res.write(`data: ${JSON.stringify(state.spin)}\n\n`);
+
+    broadcastGiveawayPresence(eventId);
 
     const keepAlive = setInterval(() => {
         try { res.write(': ping\n\n'); } catch (_) { clearInterval(keepAlive); }
@@ -4542,29 +4749,60 @@ app.get('/api/giveaway/stream/:sessionId', (req, res) => {
 
     req.on('close', () => {
         clearInterval(keepAlive);
-        if (giveawayChannels.get(sessionId) === res) giveawayChannels.delete(sessionId);
+        const conns = giveawayChannels.get(eventId);
+        if (conns) {
+            conns.delete(conn);
+            if (!conns.size) giveawayChannels.delete(eventId);
+        }
+        broadcastGiveawayPresence(eventId);
     });
 });
 
-app.get('/api/giveaway/status/:sessionId', requireAuth, (req, res) => {
-    res.json({ connected: giveawayChannels.has(req.params.sessionId) });
+// How many controllers/displays are currently in the room — the Present
+// panel polls this so it can show real connection counts instead of a
+// binary connected/disconnected dot.
+app.get('/api/giveaway/room/:eventId/status', requireAuth, (req, res) => {
+    if (!userEventCapabilities(req.session.userId, req.params.eventId).length) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    res.json(giveawayRoomCounts(req.params.eventId));
 });
 
-app.post('/api/giveaway/broadcast/:sessionId', requireAuth, (req, res) => {
-    const { sessionId } = req.params;
-    const msg = { type: req.body?.type, payload: req.body?.payload };
-    // Recorded even if nothing is connected yet — a display opened later
-    // (see the stream route above) still needs to catch up to it.
-    if (msg.type === 'potMode') giveawayLastState.set(sessionId, msg);
-    const ch = giveawayChannels.get(sessionId);
-    if (!ch) return res.status(404).json({ error: 'No display connected for this session' });
-    try {
-        ch.write(`data: ${JSON.stringify(msg)}\n\n`);
-    } catch (_) {
-        giveawayChannels.delete(sessionId);
-        return res.status(410).json({ error: 'Display disconnected' });
+// The only way to change what the room shows — mode switches, spins, pot
+// additions, resets. Requires real event capability (the old sessionId-based
+// route had no ownership check at all beyond being logged in). Updates the
+// room's authoritative state before fanning out, so a client that joins a
+// moment later still gets it via the replay above.
+app.post('/api/giveaway/room/:eventId/broadcast', requireAuth, (req, res) => {
+    const { eventId } = req.params;
+    if (!userEventCapabilities(req.session.userId, eventId).length) {
+        return res.status(403).json({ error: 'Not authorized' });
     }
-    res.json({ success: true });
+    const type = req.body?.type;
+    if (!['spin', 'potMode', 'potAdd', 'reset'].includes(type)) {
+        return res.status(400).json({ error: 'Invalid message type' });
+    }
+    const msg = { type, payload: req.body?.payload || {}, clientId: req.body?.clientId || null };
+
+    let state = giveawayRoomState.get(eventId);
+    if (!state) { state = {}; giveawayRoomState.set(eventId, state); }
+    if (type === 'potMode') state.potMode = msg;
+    else if (type === 'spin') state.spin = msg;
+    else if (type === 'reset') state.spin = null;
+
+    const conns = giveawayChannels.get(eventId);
+    let delivered = 0;
+    if (conns) {
+        const payload = `data: ${JSON.stringify(msg)}\n\n`;
+        for (const conn of conns) {
+            // The sender already applied this locally — skip the echo so it
+            // doesn't re-run its own optimistic update or restart an
+            // animation it just started.
+            if (conn.clientId && conn.clientId === msg.clientId) continue;
+            try { conn.res.write(payload); delivered++; } catch (_) { conns.delete(conn); }
+        }
+    }
+    res.json({ success: true, delivered, connected: !!(conns && conns.size) });
 });
 
 // Delete an event
@@ -7779,6 +8017,47 @@ setInterval(async () => {
     }
 }, 5 * 60 * 1000);
 
+// Background job: waitlist claim-expiry auto-chain. Before this, a promoted
+// offer that went unclaimed just sat there forever — nobody else got that
+// seat until an organizer happened to notice and re-promote manually. Every
+// 5 minutes, expire anything past its claim window and hand the seat to the
+// next person waiting; if that offer also lapses, the following tick chains
+// to the person after them, and so on. logAudit needs a request-shaped
+// object for the actor's IP/session — this job has neither, so it logs as
+// a 'system' actor rather than faking a user. WAITLIST_SWEEP_MS is a test
+// hook only (unset in production, same as the other env vars listed in
+// test/README.md) — a real test can shrink it instead of waiting 5 minutes
+// for an unmocked sweep to actually fire.
+const WAITLIST_SWEEP_REQ = { headers: {}, ip: 'system', session: {} };
+const WAITLIST_SWEEP_MS = parseInt(process.env.WAITLIST_SWEEP_MS) || 5 * 60 * 1000;
+setInterval(async () => {
+    const nowIso = new Date().toISOString();
+    const lapsed = stmt.waitlist.expiredClaims.all(nowIso).map(rowToWaitlistEntry);
+    for (const entry of lapsed) {
+        // Only affects the row if it's still 'notified' — guards against a
+        // race with a manual promote/claim completing between the query
+        // above and this write, so a seat already claimed in that window
+        // can't also be handed to the next person.
+        if (stmt.waitlist.setExpired.run(entry.id).changes === 0) continue;
+        logAudit(WAITLIST_SWEEP_REQ, { eventId: entry.eventId, action: 'waitlist.claimExpired', details: { email: entry.email } });
+
+        const event = rowToEvent(stmt.events.byId.get(entry.eventId));
+        if (!event || !event.waitlistEnabled) continue;
+        const next = stmt.waitlist.nextWaitingByEventId.get(entry.eventId);
+        if (!next) continue;
+        const nextEntry = rowToWaitlistEntry(next);
+        try {
+            const result = await promoteWaitlistEntry(nextEntry, event);
+            if (result.success) {
+                logAudit(WAITLIST_SWEEP_REQ, { eventId: event.id, action: 'waitlist.autoPromoted', details: { email: nextEntry.email, notified: !!result.notified } });
+                log('waitlist', `[auto-promote] ${nextEntry.email} — event: ${event.name} (${event.id})`);
+            }
+        } catch (err) {
+            log('waitlist', `[ERR] Auto-promote failed — email: ${nextEntry.email}  err: ${err.message}`);
+        }
+    }
+}, WAITLIST_SWEEP_MS);
+
 
 
 // ── Door Display / SSE ──────────────────────────────────────────────────────
@@ -7786,8 +8065,8 @@ const displayTokenClients = new Map(); // displayToken → Set<res>  (display sc
 const scannerChannels     = new Map(); // pairToken → res           (scanner's persistent SSE channel)
 const scannerRegistry     = new Map(); // pairToken → flat scanner data object
 const monitorClients      = new Set(); // { res, eventIds: Set<string> }
-const giveawayChannels    = new Map(); // sessionId → res           (giveaway presenter-display SSE channel)
-const giveawayLastState   = new Map(); // sessionId → last 'potMode' message (replayed to a display that connects after it was sent)
+const giveawayChannels    = new Map(); // eventId → Set<{res, role, clientId}>  (giveaway room, fan-out to N controllers + N displays)
+const giveawayRoomState   = new Map(); // eventId → { potMode, spin }          (authoritative — replayed in full to every new connection)
 
 function broadcastToMonitors(eventId, payload) {
     const chunk = `data: ${JSON.stringify(payload)}\n\n`;

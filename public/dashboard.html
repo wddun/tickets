@@ -2268,6 +2268,7 @@
         .badge-waiting { background: #e0e7ff; color: #3730a3; }
         .badge-notified { background: #fef3c7; color: #92400e; }
         .badge-converted { background: #d1fae5; color: #065f46; }
+        .badge-expired { background: #fee2e2; color: #991b1b; }
         .badge-active { background: #d1fae5; color: #065f46; }
         .badge-inactive { background: var(--border); color: var(--text-muted); }
         .beta-callout {
@@ -2750,6 +2751,7 @@
             'tab-waitlist': async (id) => {
                 const wl = document.getElementById('waitlistToggle');
                 if (wl) await setWaitlistEnabled(id, wl.checked);
+                await saveWaitlistClaimHours(id);
             },
             'tab-notifications': async (id) => {
                 if (document.getElementById('reminderEnabled')) await saveReminder(id);
@@ -6372,6 +6374,7 @@
         async function renderWaitlistSection(eventId) {
             const ev = events.find(e => e.id === eventId);
             const enabled = !!ev?.waitlistEnabled;
+            const claimHours = ev?.waitlistClaimHours ?? 48;
             let rows = '<div class="settings-empty">No one is on the waitlist.</div>';
             try {
                 const r = await fetch(`/api/event/${eventId}/waitlist`);
@@ -6393,19 +6396,58 @@
                     }
                 }
             } catch {}
+
+            // No-show → waitlist release: entirely organizer-triggered (see
+            // server.js's /no-show-release routes) — this just surfaces the
+            // numbers and, once clicked, a confirm step. Nothing here runs on
+            // its own, and it only shows up once there's actually something
+            // to release.
+            let noShowPanel = '';
+            if (enabled) {
+                try {
+                    const r = await fetch(`/api/event/${eventId}/no-show-release/preview`);
+                    if (r.ok) {
+                        const d = await r.json();
+                        if (d.eventStarted && d.notCheckedInCount && d.waitingCount) {
+                            const suggested = Math.min(d.notCheckedInCount, d.waitingCount);
+                            noShowPanel = `
+                                <hr class="settings-divider">
+                                <div class="settings-subhead">Release no-show tickets to the waitlist</div>
+                                <div class="settings-hint">
+                                    ${d.notCheckedInCount} ticket${d.notCheckedInCount === 1 ? '' : 's'} not checked in &middot; ${d.waitingCount} people waiting.
+                                    This cancels that many not-checked-in tickets and offers the freed spots to the waitlist, in order. Nothing happens until you click Release.
+                                </div>
+                                <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                                    <input type="number" id="noShowReleaseCount" inputmode="numeric" value="${suggested}" min="1" max="${d.notCheckedInCount}"
+                                        style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
+                                    <button class="btn btn-danger btn-sm" onclick="releaseNoShows('${eventId}', this)">Release to Waitlist</button>
+                                </div>
+                            `;
+                        }
+                    }
+                } catch {}
+            }
+
             return `
                 <div class="modal-section-title">Waitlist</div>
                 <div class="settings-hint">
-                    When an event is full, people can join a waitlist instead of being turned away. Promote an entry to issue them a ticket (free events) or send them a claim link (paid events).
+                    When an event is full, people can join a waitlist instead of being turned away. Promote an entry to issue them a ticket (free events) or send them a claim link (paid events). An unclaimed claim link is automatically offered to the next person in line once it expires.
                 </div>
-                <label class="settings-toggle" style="margin-bottom:18px;">
+                <label class="settings-toggle" style="margin-bottom:14px;">
                     <input type="checkbox" id="waitlistToggle" ${enabled ? 'checked' : ''}>
                     <div>
                         <div class="settings-toggle-title">Enable Waitlist</div>
                         <div class="settings-toggle-desc">Requires a capacity limit set on this event</div>
                     </div>
                 </label>
+                <div style="margin-bottom:18px;display:flex;align-items:center;gap:10px;">
+                    <label style="font-size:13px;font-weight:600;white-space:nowrap;">Claim link expires after</label>
+                    <input type="number" id="waitlistClaimHours" inputmode="numeric" value="${claimHours}" min="1" max="240"
+                        style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
+                    <label style="font-size:13px;font-weight:600;white-space:nowrap;">hours (paid events only)</label>
+                </div>
                 <div id="waitlistRows">${rows}</div>
+                ${noShowPanel}
             `;
         }
 
@@ -6421,6 +6463,51 @@
                 if (ev) ev.waitlistEnabled = enabled;
             } catch {
                 showToast('Failed to update waitlist settings.');
+            }
+        }
+
+        async function saveWaitlistClaimHours(eventId) {
+            const el = document.getElementById('waitlistClaimHours');
+            if (!el) return;
+            const hours = parseInt(el.value) || 48;
+            try {
+                const r = await fetch(`/api/event/${eventId}/waitlist-claim-hours`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hours })
+                });
+                if (!r.ok) throw new Error();
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.waitlistClaimHours = hours;
+            } catch {
+                showToast('Failed to update the claim window.');
+            }
+        }
+
+        async function releaseNoShows(eventId, btn) {
+            const countEl = document.getElementById('noShowReleaseCount');
+            const count = Math.max(1, parseInt(countEl?.value) || 1);
+            const ok = await confirmDialog(
+                `This cancels ${count} not-checked-in ticket${count === 1 ? '' : 's'} and offers those spots to the waitlist. This can't be undone.`,
+                { title: 'Release no-show tickets?', confirmText: 'Release', danger: true },
+            );
+            if (!ok) return;
+            btn.disabled = true;
+            try {
+                const r = await fetch(`/api/event/${eventId}/no-show-release`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ count })
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                showToast(`Released ${data.released} ticket${data.released === 1 ? '' : 's'} — ${data.promoted} promoted from the waitlist.`);
+                const section = document.getElementById('tab-waitlist');
+                if (section) section.innerHTML = await renderWaitlistSection(eventId);
+            } catch (err) {
+                showToast(err.message || 'Failed to release tickets.');
+            } finally {
+                btn.disabled = false;
             }
         }
 

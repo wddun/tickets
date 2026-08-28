@@ -211,8 +211,10 @@
 
 <script src="giveaway-pot.js"></script>
 <script>
-const sessionId = new URLSearchParams(location.search).get('session');
-if (!sessionId) document.body.innerHTML = '<div class="idle-msg">Missing session — open this link from the giveaway page\'s Present panel.</div>';
+const params = new URLSearchParams(location.search);
+const eventId = params.get('eventId');
+const roomToken = params.get('token');
+if (!eventId || !roomToken) document.body.innerHTML = '<div class="idle-msg">Missing link — open this link from the giveaway page\'s Present panel.</div>';
 
 const WHEEL_PALETTE = ['#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b'];
 
@@ -662,9 +664,57 @@ function applyPotStage(size, headroom) {
     if (pot) pot.resize();
 }
 
+// ── Live entries — independent of the controller ────────────────
+// The old design only ever learned about new entrants through 'potAdd'
+// broadcasts relayed by the controller, which meant a backgrounded or closed
+// controller tab left this screen stale even though it was the one actually
+// facing the room. This polls the same public entrant feed the controller
+// uses (see /api/giveaway/room/:eventId/entrants) directly, so the display
+// keeps itself current on its own. 'potAdd' broadcasts are otherwise ignored
+// now — acting on both would risk adding the same arrival twice.
+let knownRegistrationIds = new Set();
+let entryPollTimer = null;
+const ENTRY_POLL_MS = 5000;
+
+function reelLabel(entrant) { return entrant.name || '(no name)'; }
+
+async function pollDisplayEntrants() {
+    if (!eventId || !roomToken) return;
+    try {
+        const r = await fetch(`/api/giveaway/room/${encodeURIComponent(eventId)}/entrants?token=${encodeURIComponent(roomToken)}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        const fresh = data.entrants || [];
+        if (!knownRegistrationIds.size) {
+            // First successful poll (page load, or the first poll after a
+            // long reconnect gap) — everyone already signed up is simply
+            // already in the room; nothing to animate dropping in.
+            fresh.forEach(e => knownRegistrationIds.add(e.registrationId));
+            potTotal = fresh.length;
+            if (potMode) updatePotCount();
+            return;
+        }
+        const arrivals = fresh.filter(e => !knownRegistrationIds.has(e.registrationId));
+        potTotal = fresh.length;
+        if (!arrivals.length) { if (potMode) updatePotCount(); return; }
+        arrivals.forEach(e => knownRegistrationIds.add(e.registrationId));
+        if (potMode) {
+            showPot();
+            document.getElementById('idleMsg').style.display = 'none';
+            updatePotCount();
+            pot.addNames(arrivals.map(reelLabel));
+        }
+    } catch (_) {}
+}
+function startEntryPoll() {
+    clearInterval(entryPollTimer);
+    entryPollTimer = setInterval(pollDisplayEntrants, ENTRY_POLL_MS);
+    pollDisplayEntrants();
+}
+
 function connect() {
-    if (!sessionId) return;
-    const es = new EventSource(`/api/giveaway/stream/${sessionId}`);
+    if (!eventId || !roomToken) return;
+    const es = new EventSource(`/api/giveaway/room/${encodeURIComponent(eventId)}/stream?role=display&token=${encodeURIComponent(roomToken)}`);
     es.onopen = () => {
         document.getElementById('liveDot').classList.add('connected');
         document.getElementById('liveDot').lastChild.textContent = ' connected';
@@ -676,7 +726,7 @@ function connect() {
     es.onmessage = (e) => {
         let msg;
         try { msg = JSON.parse(e.data); } catch (_) { return; }
-        if (msg.type === 'connected') return;
+        if (msg.type === 'connected' || msg.type === 'presence' || msg.type === 'potAdd') return;
         // Every message shape carries a payload; the pot branches below read it
         // too, so it can't live inside the spin branch.
         const payload = msg.payload || {};
@@ -709,12 +759,6 @@ function connect() {
                 hidePot();
                 if (!document.getElementById('winnerWrap').classList.contains('show')) setIdle();
             }
-        } else if (msg.type === 'potAdd') {
-            if (!potMode) return;
-            if (typeof payload.total === 'number') { potTotal = payload.total; updatePotCount(); }
-            showPot();
-            document.getElementById('idleMsg').style.display = 'none';
-            pot.addNames(payload.names || []);
         } else if (msg.type === 'reset') {
             setIdle();
         }
@@ -722,6 +766,7 @@ function connect() {
 }
 updateSoundHint();
 connect();
+startEntryPoll();
 </script>
 </body>
 </html>

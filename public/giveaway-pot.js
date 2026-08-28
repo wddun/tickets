@@ -363,7 +363,7 @@
             const mag = releaseMags[pairIdx % releaseMags.length];
             const side = releaseIndex % 2 === 0 ? 1 : -1;
             releaseIndex++;
-            flyers.push(spawnFlyer(queue.shift(), side * mag));
+            flyers.push(spawnFlyer(queue.shift().name, side * mag));
             lastReleaseAt = now;
         }
 
@@ -1289,11 +1289,32 @@
             rafId = requestAnimationFrame(t => frame(t, gen));
         }
 
+        // How old a still-queued arrival has to be, relative to the moment the
+        // tab comes back, before it's treated as "already happened" rather
+        // than "just arrived" — see the fast-forward below.
+        const STALE_ARRIVAL_MS = 2000;
         function onVisibility() {
             if (destroyed || document.visibilityState !== 'visible') return;
+            const now = performance.now();
             // A frame within the last second means the loop is alive; anything
             // longer and it was frozen with the tab.
-            if (running && performance.now() - lastFrame > 1000) {
+            if (running && now - lastFrame > 1000) {
+                // rAF was fully suspended for the gap, but addNames() kept
+                // queuing arrivals the whole time (its poll timer isn't
+                // frame-driven) — without this, resuming would drain the
+                // entire backlog through the normal (just faster) release
+                // pacing, which reads as a flood of paper the instant the
+                // screen is looked at again. Anything queued more than
+                // STALE_ARRIVAL_MS ago has, as far as the room is concerned,
+                // already arrived — it goes straight into the settled pile
+                // with no animation. Only the last couple of seconds' worth
+                // still falls normally once the loop restarts below.
+                const stillFresh = [];
+                for (const item of queue) {
+                    if (now - item.queuedAt > STALE_ARRIVAL_MS) resting++;
+                    else stillFresh.push(item);
+                }
+                queue = stillFresh;
                 running = false;
                 kick();
             } else if (!running) {
@@ -1318,7 +1339,13 @@
             // business, not the caller's.
             addNames(names) {
                 if (!names || !names.length) return;
-                for (const n of names) queue.push(n || '(no name)');
+                // queuedAt (performance.now(), which keeps ticking in a
+                // hidden/backgrounded tab even though rAF doesn't) is what
+                // lets onVisibility() below tell a genuinely-just-arrived
+                // name from one that's been waiting through a long hidden
+                // gap, so a reconnect/refocus doesn't replay it as a flood.
+                const queuedAt = performance.now();
+                for (const n of names) queue.push({ name: n || '(no name)', queuedAt });
                 // A backlog nobody will ever see individually is not worth the
                 // memory: past this point the extras go straight into the heap
                 // so the count stays honest without a ten-minute queue.

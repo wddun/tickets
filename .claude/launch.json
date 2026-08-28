@@ -44,6 +44,12 @@
       "port": 3030
     },
     {
+      "name": "tickets-verify",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/will/Documents/tickets && mkdir -p /tmp/tickets-verify-scratch/sessions /tmp/tickets-verify-scratch/pass-cache && PORT=3031 BASE_URL=http://localhost:3031 SESSION_SECRET=localtestsecret ADMIN_EMAIL=admin@localtest.dev TICKETS_DB=/tmp/tickets-verify-scratch/tickets.db SESSIONS_DIR=/tmp/tickets-verify-scratch/sessions PASS_CACHE_DIR=/tmp/tickets-verify-scratch/pass-cache EMAIL_SINK=/tmp/tickets-verify-scratch/emails.jsonl node server.js"],
+      "port": 3031
+    },
+    {
       "name": "inventorytracker-dev",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "cd /Users/will/Documents/inventorytracker && mv server-data server-data.real 2>/dev/null; PORT=3040 node server.js"],

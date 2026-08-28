@@ -376,6 +376,18 @@ try {
 try { db.exec(`ALTER TABLE waitlist ADD COLUMN claimToken TEXT`); } catch {}
 try { db.exec(`ALTER TABLE waitlist ADD COLUMN claimExpiresAt TEXT`); } catch {}
 
+// How long a promoted claim stays open before the auto-promote sweep (below)
+// gives up on it and offers the seat to the next person in line. Per-event so
+// an organiser running a fast-turnaround door event can shorten it from the
+// 48h default.
+try { db.exec(`ALTER TABLE events ADD COLUMN waitlistClaimHours INTEGER DEFAULT 48`); } catch {}
+
+// Stable per-event link for the live giveaway pot/spinner — mirrors
+// events.displayToken (lazy-created, never changes) so re-presenting mid-event
+// never orphans whatever's already on the venue screen. See giveawayChannels/
+// giveawayRoomState in server.js.
+try { db.exec(`ALTER TABLE events ADD COLUMN giveawayToken TEXT`); } catch {}
+
 // Scanning a scanner-link QR while signed in grants that account standing
 // "scanner" access to the event — it shows up in Your Events from then on,
 // not just for that one device/session. Deliberately separate from
@@ -620,6 +632,7 @@ export function rowToEvent(row) {
         blockDuplicateEmails: !!row.blockDuplicateEmails,
         shuttleLinkEnabled: !!row.shuttleLinkEnabled,
         skipConfirmationEmails: !!row.skipConfirmationEmails,
+        waitlistClaimHours: row.waitlistClaimHours ?? 48,
         emailPolicy: (() => { try { return row.emailPolicy ? JSON.parse(row.emailPolicy) : null; } catch { return null; } })(),
         walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
         emailTemplate: (() => { try { return row.emailTemplate ? JSON.parse(row.emailTemplate) : null; } catch { return null; } })(),
@@ -672,12 +685,15 @@ export const stmt = {
     events: {
         byId: db.prepare('SELECT * FROM events WHERE id = ?'),
         byDisplayToken: db.prepare('SELECT * FROM events WHERE displayToken = ?'),
+        byGiveawayToken: db.prepare('SELECT * FROM events WHERE giveawayToken = ?'),
         byUserId: db.prepare('SELECT * FROM events WHERE userId = ?'),
         all: db.prepare('SELECT * FROM events'),
         insert: db.prepare(`INSERT INTO events (id, userId, name, time, endTime, color, imageUrl, scannerPin, location, allowReentry, capacity, displayToken, reminderEnabled, reminderMessage, reminderHoursBefore, reminderSentAt, customFields, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
         update: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, imageUrl=?, allowReentry=?, capacity=?, location=? WHERE id=?`),
         updateFull: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, imageUrl=?, allowReentry=?, capacity=?, location=?, reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=?, customFields=?, scannerPin=? WHERE id=?`),
         setDisplayToken: db.prepare(`UPDATE events SET displayToken=? WHERE id=?`),
+        setGiveawayToken: db.prepare(`UPDATE events SET giveawayToken=? WHERE id=?`),
+        setWaitlistClaimHours: db.prepare(`UPDATE events SET waitlistClaimHours=? WHERE id=?`),
         setReminderSentAt: db.prepare(`UPDATE events SET reminderSentAt=? WHERE id=?`),
         setReminder: db.prepare(`UPDATE events SET reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=? WHERE id=?`),
         setCustomFields: db.prepare(`UPDATE events SET customFields=? WHERE id=?`),
@@ -862,10 +878,17 @@ export const stmt = {
         countWaitingByEventId: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='waiting'`),
         countWaitingAheadOf: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='waiting' AND (createdAt < ? OR (createdAt = ? AND rowid < ?))`),
         countActiveClaims: db.prepare(`SELECT COUNT(*) as cnt FROM waitlist WHERE eventId=? AND status='notified' AND claimExpiresAt>?`),
+        // Oldest still-waiting entry for an event — who a freed seat goes to
+        // next, whether that's a manual Promote click or the auto-chain sweep.
+        nextWaitingByEventId: db.prepare(`SELECT rowid AS rowid, * FROM waitlist WHERE eventId=? AND status='waiting' ORDER BY createdAt ASC, rowid ASC LIMIT 1`),
+        // Every event's unclaimed, past-expiry offers, for the auto-promote
+        // sweep — global like reminderDue, not scoped to one event.
+        expiredClaims: db.prepare(`SELECT rowid AS rowid, * FROM waitlist WHERE status='notified' AND claimExpiresAt IS NOT NULL AND claimExpiresAt<=?`),
         insert: db.prepare(`INSERT INTO waitlist (id, eventId, name, email, customFields, status, createdAt) VALUES (?,?,?,?,?,?,?)`),
         setStatus: db.prepare(`UPDATE waitlist SET status=? WHERE id=?`),
         setNotified: db.prepare(`UPDATE waitlist SET status='notified', notifiedAt=? WHERE id=?`),
         setClaim: db.prepare(`UPDATE waitlist SET status='notified', notifiedAt=?, claimToken=?, claimExpiresAt=? WHERE id=?`),
+        setExpired: db.prepare(`UPDATE waitlist SET status='expired' WHERE id=? AND status='notified'`),
         deleteById: db.prepare(`DELETE FROM waitlist WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM waitlist WHERE eventId=?`),
     },

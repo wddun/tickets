@@ -129,6 +129,8 @@
         })();
         const params = new URLSearchParams(window.location.search);
         const id = params.get('id');
+        let pollTimer = null;
+        const POLL_MS = 15000;
 
         function showView(name) {
             for (const v of ['loadingView', 'waitingView', 'notifiedView', 'expiredView', 'convertedView', 'errorView']) {
@@ -148,11 +150,16 @@
                     document.getElementById('waitingEventName').textContent = data.eventName;
                     document.getElementById('positionNum').textContent = data.position;
                     showView('waitingView');
+                    // Still in line — keep checking so a promotion (or moving
+                    // up as other people are promoted or drop off) shows up
+                    // on its own, without the visitor needing to reload.
+                    if (!pollTimer) pollTimer = setInterval(load, POLL_MS);
+                    return;
                 } else if (data.status === 'notified' && data.claimUrl) {
                     document.getElementById('notifiedEventName').textContent = data.eventName;
                     document.getElementById('claimBtn').onclick = () => window.location.href = data.claimUrl;
                     showView('notifiedView');
-                } else if (data.status === 'notified' && data.claimExpired) {
+                } else if ((data.status === 'notified' && data.claimExpired) || data.status === 'expired') {
                     document.getElementById('expiredEventName').textContent = data.eventName;
                     showView('expiredView');
                 } else if (data.status === 'converted') {
@@ -161,6 +168,11 @@
                 } else {
                     showView('errorView');
                 }
+                // Nothing changes further on its own once off 'waiting' — a
+                // claim's own countdown isn't something this page needs to
+                // announce mid-visit, and converted/expired are terminal.
+                clearInterval(pollTimer);
+                pollTimer = null;
             } catch {
                 showView('errorView');
             }
