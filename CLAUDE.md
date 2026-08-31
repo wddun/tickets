@@ -96,6 +96,7 @@ Plain HTML + vanilla JS, no framework, no bundler. Each page is self-contained:
 - `giveaway.html` — prize-draw controller (spinner styles, live entries, winner emails)
 - `giveaway-display.html` — audience-facing giveaway screen, paired over SSE
 - `giveaway-pot.js` — the Paper Pot animation, shared by both giveaway pages
+- `help-content.js` — content for the dashboard's inline "?" help icons (`window.HELP_CONTENT`, one entry per settings field/block type/system concept, rendered via `helpIcon()`/`showHelp()` in dashboard.html). **Whenever a dashboard setting, field, or system behavior changes or is added, update the matching entry here (or add one) in the same commit** — this is the one place that documentation lives, and it drifting out of sync with the code defeats the point of it.
 
 ### iOS app (`Ticket Check In/`)
 

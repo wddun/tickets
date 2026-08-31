@@ -15,6 +15,7 @@
     <meta name="apple-mobile-web-app-title" content="WTS Dashboard">
     <link rel="manifest" href="/manifest-dashboard.json">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <script src="help-content.js"></script>
     <script>
     (function(){
       var saved = localStorage.getItem('wts-theme');
@@ -2271,6 +2272,31 @@
         .badge-expired { background: #fee2e2; color: #991b1b; }
         .badge-active { background: #d1fae5; color: #065f46; }
         .badge-inactive { background: var(--border); color: var(--text-muted); }
+
+        /* Inline help ("?") icon — sits next to a field label, click opens a
+           popover with what the field does and its edge cases. Content lives
+           in help-content.js, keyed by the string passed to helpIcon(). */
+        .help-icon {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 15px; height: 15px; border-radius: 50%;
+            background: var(--border); color: var(--text-muted);
+            font-size: 10px; font-weight: 700; line-height: 1;
+            border: none; cursor: pointer; padding: 0;
+            margin-left: 5px; vertical-align: middle;
+            flex-shrink: 0;
+        }
+        .help-icon:hover { background: var(--navy); color: #fff; }
+        [data-theme="dark"] .help-icon:hover { background: var(--navy-mid); }
+        .help-modal { max-width: 480px; }
+        .help-modal-summary { font-size: 14px; color: var(--text); line-height: 1.6; margin-bottom: 14px; }
+        .help-modal-details { margin: 0 0 20px; padding-left: 20px; font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+        .help-modal-details li { margin-bottom: 9px; }
+        .help-modal-details li:last-child { margin-bottom: 0; }
+        .help-modal-details strong, .help-modal-details code { color: var(--text); }
+        .help-modal-details code {
+            background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+            padding: 1px 5px; font-size: 12px; font-family: ui-monospace, monospace;
+        }
         .beta-callout {
             margin-top: 10px;
             padding: 11px 13px;
@@ -2717,6 +2743,43 @@
                 overlay.querySelector('#confirmDialogCancel').onclick = () => finish(false);
                 overlay.querySelector('#confirmDialogOk').onclick = () => finish(true);
                 overlay.querySelector('#confirmDialogOk').focus();
+            });
+        }
+
+        // ── Inline help ──────────────────────────────────────────────────────────
+        // helpIcon(key) renders a small "?" button; showHelp(key) opens its
+        // content (from help-content.js) in a modal. One content file, one
+        // rendering path, so every field's help looks the same regardless of
+        // which settings tab it's in. A missing key renders no icon at all
+        // (fails quiet, not with a broken button) so a typo'd key is visibly
+        // obvious in review rather than opening an empty popover in production.
+        function helpIcon(key) {
+            if (!window.HELP_CONTENT?.[key]) return '';
+            return `<button type="button" class="help-icon" data-no-dirty onclick="event.preventDefault();event.stopPropagation();showHelp('${key}')" aria-label="What does this do?" title="What does this do?">?</button>`;
+        }
+
+        function showHelp(key) {
+            const h = window.HELP_CONTENT?.[key];
+            if (!h) return;
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.style.zIndex = '1700';
+            overlay.innerHTML = `
+                <div class="modal help-modal">
+                    <div class="modal-header"><h2>${esc(h.title)}</h2></div>
+                    <div class="help-modal-summary">${esc(h.summary)}</div>
+                    ${h.details?.length ? `<ul class="help-modal-details">${h.details.map(d => `<li>${d}</li>`).join('')}</ul>` : ''}
+                    <div style="display:flex;justify-content:flex-end;">
+                        <button class="btn btn-secondary" id="helpModalClose">Close</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            const close = () => overlay.remove();
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+            overlay.querySelector('#helpModalClose').onclick = close;
+            document.addEventListener('keydown', function onKeydown(e) {
+                if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeydown); }
             });
         }
 
@@ -4094,27 +4157,27 @@
                 <div class="modal-section-title">General</div>
                 <div class="settings-hint">Core event details: name, date, location, and ticket price.</div>
                 <div style="margin-bottom:12px;">
-                    <label for="editEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name</label>
+                    <label for="editEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name${helpIcon('general.name')}</label>
                     <input type="text" id="editEventName" value="${esc(ev.name || '')}"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label for="editEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Start Date &amp; Time</label>
+                    <label for="editEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Start Date &amp; Time${helpIcon('general.time')}</label>
                     <input type="datetime-local" id="editEventTime" value="${_toZonedDT(ev.time, ev.timezone || browserTimezone())}"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label for="editEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Date &amp; Time <span style="font-weight:400;color:var(--text-muted);">(optional — for multi-day events)</span></label>
+                    <label for="editEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Date &amp; Time <span style="font-weight:400;color:var(--text-muted);">(optional — for multi-day events)</span>${helpIcon('general.endTime')}</label>
                     <input type="datetime-local" id="editEventEndTime" value="${_toZonedDT(ev.endTime, ev.timezone || browserTimezone())}"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label for="editEventTimezone" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Timezone</label>
+                    <label for="editEventTimezone" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Timezone${helpIcon('general.timezone')}</label>
                     ${timezoneSelectHtml(ev.timezone)}
                     <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">The times above are entered and shown in this zone. Ticket emails, reminders and calendar invites all label it, so attendees never have to guess.</div>
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label for="editEventColor" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Accent Color</label>
+                    <label for="editEventColor" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Accent Color${helpIcon('general.color')}</label>
                     <div style="display:flex;align-items:center;gap:10px;">
                         <input type="color" id="editEventColor" value="${esc(hexColor)}"
                             style="width:44px;height:36px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer;">
@@ -4122,12 +4185,12 @@
                     </div>
                 </div>
                 <div style="margin-bottom:12px;">
-                    <label for="editEventLocName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name</label>
+                    <label for="editEventLocName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name${helpIcon('general.venueName')}</label>
                     <input type="text" id="editEventLocName" value="${esc(ev.location?.name || '')}"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:16px;">
-                    <label for="editEventLocAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address</label>
+                    <label for="editEventLocAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address${helpIcon('general.address')}</label>
                     <div class="addr-wrap">
                         <input type="text" id="editEventLocAddress" placeholder="Start typing an address…"
                             autocomplete="off" value="${esc(ev.location?.address || '')}"
@@ -4139,7 +4202,7 @@
                 </div>
                 <div style="margin-bottom:20px;">
                     <label for="editEventImage" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Image <span
-                            style="font-weight:400;color:var(--text-muted);">(optional, replaces current)</span></label>
+                            style="font-weight:400;color:var(--text-muted);">(optional, replaces current)</span>${helpIcon('general.image')}</label>
                     <div id="editEventImagePreview" style="margin-bottom:8px;">${imagePreview}</div>
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                         <input type="file" id="editEventImage" accept="image/png,image/jpeg" style="font-size:13px;" onchange="handleEventImageFileSelected(this)">
@@ -4152,7 +4215,7 @@
                         <input type="checkbox" id="editEventAllowReentry" ${ev.allowReentry ? 'checked' : ''}
                             style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
                         <div>
-                            <div style="font-size:13px;font-weight:600;">Allow Reentry</div>
+                            <div style="font-size:13px;font-weight:600;">Allow Reentry${helpIcon('general.allowReentry')}</div>
                             <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Attendees can exit and re-enter. Scanner
                                 must confirm each check-out. QR code stays active on Apple Wallet pass.</div>
                         </div>
@@ -4165,7 +4228,7 @@
                             onchange="setShuttleLinkEnabled('${eventId}', this.checked)"
                             style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
                         <div>
-                            <div style="font-size:13px;font-weight:600;">Allow Shuttle Linking</div>
+                            <div style="font-size:13px;font-weight:600;">Allow Shuttle Linking${helpIcon('general.shuttleLink')}</div>
                             <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Lets a linked shuttle/bus app check
                                 riders' existing tickets to board — read-only, never marks a ticket used. Only enable
                                 this if tickets for this event are <strong>never</strong> also scanned at a door.</div>
@@ -4184,24 +4247,24 @@
                             onchange="setWalletLockScreenEnabled('${eventId}', this.checked)"
                             style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
                         <div>
-                            <div style="font-size:13px;font-weight:600;">Show on Lock Screen</div>
+                            <div style="font-size:13px;font-weight:600;">Show on Lock Screen${helpIcon('general.walletLockScreen')}</div>
                             <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Apple Wallet reminds attendees near the event time and when they're close to the venue (e.g. "Tonight at 8pm"). Turn off to keep the ticket silent in Wallet — recommended if you'd rather guests not see event details on a locked phone.</div>
                         </div>
                     </label>
                 </div>
                 <div style="margin-bottom:20px;">
-                    <label for="editEventCapacity" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Capacity <span style="font-weight:400;color:var(--text-muted);">(optional — leave blank for unlimited)</span></label>
+                    <label for="editEventCapacity" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Capacity <span style="font-weight:400;color:var(--text-muted);">(optional — leave blank for unlimited)</span>${helpIcon('general.capacity')}</label>
                     <input type="number" min="1" inputmode="numeric" id="editEventCapacity" placeholder="e.g. 200" value="${ev.capacity || ''}"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                 </div>
                 <div style="margin-bottom:20px;">
-                    <label for="editEventTicketExpiresAt" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Tickets Expire At <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+                    <label for="editEventTicketExpiresAt" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Tickets Expire At <span style="font-weight:400;color:var(--text-muted);">(optional)</span>${helpIcon('general.ticketExpiresAt')}</label>
                     <input type="datetime-local" id="editEventTicketExpiresAt" value="${_toZonedDT(ev.ticketExpiresAt, ev.timezone || browserTimezone())}"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                     <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Any ticket not checked in by this time stops scanning and is marked expired. Its Apple Wallet pass is voided, the same as a deleted ticket. Checked-in tickets are not affected. Leave blank if tickets should never expire.</div>
                 </div>
                 <div style="margin-bottom:20px;">
-                    <label for="editEventTicketExpiryLimit" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Limit How Many Expire <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+                    <label for="editEventTicketExpiryLimit" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Limit How Many Expire <span style="font-weight:400;color:var(--text-muted);">(optional)</span>${helpIcon('general.ticketExpiryLimit')}</label>
                     <div style="display:flex;gap:10px;">
                         <input type="number" min="1" inputmode="numeric" id="editEventTicketExpiryLimit" placeholder="All tickets" value="${ev.ticketExpiryLimit || ''}"
                             style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
@@ -4213,7 +4276,7 @@
                     <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">By default the cutoff above expires every not-checked-in ticket. Set a number here to expire only that many instead &mdash; a registration covering several tickets at once always expires together, so this can go slightly over. Has no effect without a cutoff time set above.</div>
                 </div>
                 <div style="margin-bottom:20px;">
-                    <label for="editEventTicketPrice" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:var(--text-muted);">(leave blank or 0 for free)</span></label>
+                    <label for="editEventTicketPrice" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:var(--text-muted);">(leave blank or 0 for free)</span>${helpIcon('general.ticketPrice')}</label>
                     <div style="position:relative;">
                         <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:14px;">$</span>
                         <input type="number" min="0" step="0.01" inputmode="decimal" id="editEventTicketPrice" placeholder="0.00" value="${ev.ticketPrice ? (ev.ticketPrice / 100).toFixed(2) : ''}"
@@ -4233,7 +4296,7 @@
 
         function renderDangerZoneSection(eventId) {
             return `
-                <div class="modal-section-title" style="color:#dc2626;">Danger Zone</div>
+                <div class="modal-section-title" style="color:#dc2626;">Danger Zone${helpIcon('dangerZone.deleteEvent')}</div>
                 <div class="settings-hint">Deleting an event permanently removes it and all its tickets. This cannot be undone.</div>
                 <button class="btn btn-danger" onclick="deleteEvent('${eventId}')">Delete Event</button>
             `;
@@ -4463,7 +4526,7 @@
                 </div>`).join('');
 
             return `
-                <div class="modal-section-title">Custom Fields</div>
+                <div class="modal-section-title">Custom Fields${helpIcon('customFields.list')}</div>
                 <div class="settings-hint">Define fields that appear when adding or editing tickets (e.g. T-Shirt Size, Meal choice).</div>
                 <div id="settingsCfRows">${rows}</div>
                 <button type="button" onclick="addSettingsCfRow()"
@@ -4669,14 +4732,14 @@
                 <div class="settings-hint">
                     Send a notification to event subscribers or selected devices.
                 </div>
-                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
                     <select id="pushTarget" onchange="togglePushDeviceList()" style="padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                         <option value="subscribers">Everyone subscribed</option>
                         <option value="devices">Select devices</option>
-                    </select>
+                    </select>${helpIcon('notifications.target')}
                 </div>
                 <div id="pushDeviceList" style="display:none;border:1px solid var(--border);border-radius:8px;padding:8px;max-height:180px;overflow:auto;margin-bottom:10px;">
-                    ${deviceRows}
+                    ${deviceRows}${helpIcon('notifications.deviceList')}
                 </div>
                 <div style="margin-bottom:8px;">
                     <label for="pushTitle" style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Title</label>
@@ -4687,7 +4750,7 @@
                     <label for="pushBody" style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Message</label>
                     <textarea id="pushBody" rows="3" placeholder="Message…" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"></textarea>
                 </div>
-                <button class="btn btn-primary" onclick="sendPush('${eventId}', this)">Send Push</button>
+                <button class="btn btn-primary" onclick="sendPush('${eventId}', this)">Send Push</button>${helpIcon('notifications.sendPush')}
             `;
         }
 
@@ -4797,7 +4860,7 @@
                                 </div>
                                 ${data.canTransferOwnership ? `
                                     <div class="access-actions">
-                                        <button class="access-edit-btn" onclick="toggleTransferOwnership()">Transfer</button>
+                                        <button class="access-edit-btn" onclick="toggleTransferOwnership()">Transfer</button>${helpIcon('access.transferOwnership')}
                                     </div>` : ''}
                             </div>
                             ${data.canTransferOwnership ? `
@@ -4835,8 +4898,8 @@
                                 <div class="access-date">Added ${fmtDate(a.claimedAt)}${a.grantedByEmail ? ' by ' + esc(a.grantedByEmail) : ''}</div>
                             </div>
                             <div class="access-actions">
-                                <button class="access-edit-btn" onclick="toggleAccessEditor('${eventId}', '${a.id}')">Edit</button>
-                                <button class="revoke-btn" onclick="revokeAccess('${a.id}', '${eventId}')">Revoke</button>
+                                <button class="access-edit-btn" onclick="toggleAccessEditor('${eventId}', '${a.id}')">Edit</button>${helpIcon('access.editPermissions')}
+                                <button class="revoke-btn" onclick="revokeAccess('${a.id}', '${eventId}')">Revoke</button>${helpIcon('access.revoke')}
                             </div>
                         </div>
                         <div id="accessEditor-${a.id}" style="display:none;">
@@ -4860,18 +4923,18 @@
                 ${linkNote}
                 ${data.linkUrl ? `
                     <div class="link-box">
-                        <label>Sharing Link</label>
+                        <label>Sharing Link${helpIcon('access.sharingLink')}</label>
                         <div style="display:flex;gap:8px;">
                             <input type="text" value="${esc(data.linkUrl)}" readonly onclick="this.select()">
                             <button class="btn btn-primary btn-sm tap-target-sm" onclick="copySettingsLink('${esc(data.linkUrl)}')">Copy</button>
                         </div>
                     </div>` : ''}
 
-                <div class="settings-subhead">People with access</div>
+                <div class="settings-subhead">People with access${helpIcon('access.capabilities')}</div>
                 <div>${rows}</div>
 
                 <hr class="settings-divider">
-                <div class="settings-subhead">Add someone</div>
+                <div class="settings-subhead">Add someone${helpIcon('access.addSomeone')}</div>
                 <div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
                     <input type="email" id="shareEmail" placeholder="User email" autocomplete="email" style="flex:1;min-width:150px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;" />
                     <button class="btn btn-primary" onclick="shareRoom('${eventId}')">Share</button>
@@ -4881,7 +4944,7 @@
                     <div class="cap-editor-presets">
                         <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'new', 'view')">Check-in only</button>
                         <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'new', 'full')">Full access</button>
-                        <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'new', 'none')">Clear all</button>
+                        <button type="button" class="cap-preset-btn" onclick="applyCapabilityPreset('${eventId}', 'new', 'none')">Clear all</button>${helpIcon('access.roles')}
                     </div>
                     ${renderCapabilityGrid(eventId, 'new', data.rolePresets.view)}
                 </div>
@@ -5192,7 +5255,7 @@
                     <input type="checkbox" id="publicRegToggle" ${enabled ? 'checked' : ''}
                         onchange="document.getElementById('publicRegLinkBox').style.display = this.checked ? 'block' : 'none';">
                     <div>
-                        <div class="settings-toggle-title">Public Registration</div>
+                        <div class="settings-toggle-title">Public Registration${helpIcon('registration.publicRegistration')}</div>
                         <div class="settings-toggle-desc">Anyone with the link can self-register${isPaid ? ' and check out' : ' for a free ticket'}</div>
                     </div>
                 </label>
@@ -5252,27 +5315,27 @@
                 <label class="settings-toggle">
                     <input type="checkbox" id="allowMultipleToggle" ${allowMultiple ? 'checked' : ''}>
                     <div>
-                        <div class="settings-toggle-title">Allow Registering Several People</div>
+                        <div class="settings-toggle-title">Allow Registering Several People${helpIcon('registration.allowMultiple')}</div>
                         <div class="settings-toggle-desc">Shows a "Register Another Person" button after someone gets their ticket, so one person can sign up a whole group. Turn off to let each visitor register once per visit.</div>
                     </div>
                 </label>
                 <label class="settings-toggle">
                     <input type="checkbox" id="blockDupeEmailToggle" ${blockDupes ? 'checked' : ''}>
                     <div>
-                        <div class="settings-toggle-title">One Registration Per Email</div>
+                        <div class="settings-toggle-title">One Registration Per Email${helpIcon('registration.blockDuplicateEmails')}</div>
                         <div class="settings-toggle-desc">Refuses an email address that already has a ticket for this event, with a message saying so. Catches the same person signing up twice, and accidental double submissions.</div>
                     </div>
                 </label>
                 <label class="settings-toggle">
                     <input type="checkbox" id="perDeviceToggle" ${perDevice ? 'checked' : ''}>
                     <div>
-                        <div class="settings-toggle-title">One Registration Per Device</div>
+                        <div class="settings-toggle-title">One Registration Per Device${helpIcon('registration.oneRegPerDevice')}</div>
                         <div class="settings-toggle-desc">Remembers the browser that registered and turns it away next time, before the form is shown. This is a deterrent, not a lock. Clearing cookies, a private window, or a second phone will bypass it. Pair it with the email limit above for anything that matters.</div>
                     </div>
                 </label>
 
                 <hr class="settings-divider">
-                <div class="settings-subhead">Registration Page Look</div>
+                <div class="settings-subhead">Registration Page Look${helpIcon('registration.theme')}</div>
                 <div class="settings-hint" style="margin-bottom:10px;">
                     How the public registration page is styled. The event image (set under General) becomes the banner across the top.
                 </div>
@@ -6175,7 +6238,7 @@
 
         function renderApiKeyList(keys) {
             const live = (keys || []).filter(k => !k.revokedAt);
-            const rows = live.length ? `<table class="mini-table"><thead><tr><th>Name</th><th>Key</th><th>Scopes</th><th>Last used</th><th></th></tr></thead><tbody>` +
+            const rows = live.length ? `<table class="mini-table"><thead><tr><th>Name</th><th>Key</th><th>Scopes${helpIcon('api.scopes')}</th><th>Last used${helpIcon('api.keyList')}</th><th>${helpIcon('api.revoke')}</th></tr></thead><tbody>` +
                 live.map(k => `
                     <tr>
                         <td>${esc(k.name)}</td>
@@ -6192,7 +6255,7 @@
             return `
                 ${rows}
                 <div class="settings-card" style="margin-top:12px;">
-                    <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-muted);">Create a key</div>
+                    <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-muted);">Create a key${helpIcon('api.keyName')}</div>
                     <input type="text" id="newApiKeyName" placeholder="What is it for? e.g. Zapier, our website"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;">
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px;margin-bottom:12px;">
@@ -6203,7 +6266,7 @@
                                 <span><code style="font-size:11px;">${key}</code><br><span style="color:var(--text-muted);">${label}</span></span>
                             </label>`).join('')}
                     </div>
-                    <button class="btn btn-primary btn-sm" onclick="createApiKey()">Create key</button>
+                    <button class="btn btn-primary btn-sm" onclick="createApiKey()">Create key</button>${helpIcon('api.createKey')}
                 </div>
             `;
         }
@@ -6576,7 +6639,7 @@
                             const suggested = Math.min(d.notCheckedInCount, d.waitingCount);
                             noShowPanel = `
                                 <hr class="settings-divider">
-                                <div class="settings-subhead">Release no-show tickets to the waitlist</div>
+                                <div class="settings-subhead">Release no-show tickets to the waitlist${helpIcon('waitlist.noShowRelease')}</div>
                                 <div class="settings-hint">
                                     ${d.notCheckedInCount} ticket${d.notCheckedInCount === 1 ? '' : 's'} not checked in &middot; ${d.waitingCount} people waiting.
                                     This cancels that many not-checked-in tickets and offers the freed spots to the waitlist, in order. Nothing happens until you click Release.
@@ -6591,7 +6654,7 @@
                         if (ev?.capacity && d.waitingCount) {
                             capacityPanel = `
                                 <hr class="settings-divider">
-                                <div class="settings-subhead">Increase capacity for the waitlist</div>
+                                <div class="settings-subhead">Increase capacity for the waitlist${helpIcon('waitlist.capacityRelease')}</div>
                                 <div class="settings-hint">
                                     ${d.waitingCount} people waiting, ${ev.capacity} current capacity.
                                     Raises the event capacity and immediately assigns that many new spots to the longest-waiting entries. Free events receive a ticket; paid events receive a claim link. No changes occur until you click Release.
@@ -6615,12 +6678,12 @@
                 <label class="settings-toggle" style="margin-bottom:14px;">
                     <input type="checkbox" id="waitlistToggle" ${enabled ? 'checked' : ''}>
                     <div>
-                        <div class="settings-toggle-title">Enable Waitlist</div>
+                        <div class="settings-toggle-title">Enable Waitlist${helpIcon('waitlist.enable')}</div>
                         <div class="settings-toggle-desc">Requires a capacity limit set on this event</div>
                     </div>
                 </label>
                 <div style="margin-bottom:18px;display:flex;align-items:center;gap:10px;">
-                    <label style="font-size:13px;font-weight:600;white-space:nowrap;">Claim link expires after</label>
+                    <label style="font-size:13px;font-weight:600;white-space:nowrap;">Claim link expires after${helpIcon('waitlist.claimHours')}</label>
                     <input type="number" id="waitlistClaimHours" inputmode="numeric" value="${claimHours}" min="1" max="240"
                         style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                     <label style="font-size:13px;font-weight:600;white-space:nowrap;">hours (paid events only)</label>
@@ -6629,11 +6692,11 @@
                     <button type="button" class="btn btn-secondary btn-sm" onclick="openEmailEditor('${eventId}', 'waitlist')">Edit waitlist email</button>
                     <span style="font-size:13px;color:${waitlistEmailCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
                         ${waitlistEmailCustomized ? 'Custom layout' : 'Default layout'}
-                    </span>
+                    </span>${helpIcon('waitlist.joinEmail')}
                     <button type="button" class="btn btn-secondary btn-sm" onclick="openEmailEditor('${eventId}', 'waitlistClaim')">Edit spot-available email</button>
                     <span style="font-size:13px;color:${waitlistClaimEmailCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
                         ${waitlistClaimEmailCustomized ? 'Custom layout' : 'Default layout'}
-                    </span>
+                    </span>${helpIcon('waitlist.claimEmail')}
                 </div>
                 <div data-no-dirty style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                     <input type="search" id="waitlistSearch" placeholder="Search by name or email…" oninput="waitlistRerenderTable('${eventId}')"
@@ -6645,7 +6708,7 @@
                         <option value="notified">Spot offered</option>
                         <option value="converted">Converted to ticket</option>
                         <option value="expired">Offer expired</option>
-                    </select>
+                    </select>${helpIcon('waitlist.table')}
                 </div>
                 <div id="waitlistRows" data-no-dirty>${rows}</div>
                 ${noShowPanel}
@@ -6796,7 +6859,7 @@
                     <div class="scan-access-main">
                         <img class="scan-access-qr" src="/api/scanner-links/${primary.id}/qr" alt="Scan code" width="100" height="100">
                         <div class="scan-access-info">
-                            <div class="scan-access-title">Start Scanning</div>
+                            <div class="scan-access-title">Start Scanning${helpIcon('access.scanLinks')}</div>
                             <div class="scan-access-sub">Scan this code with any camera app, or share the link — it opens straight into the scanner for this event only, no login needed.</div>
                             <div style="display:flex;gap:8px;margin-top:10px;">
                                 <input type="text" value="${esc(primary.url)}" readonly onclick="this.select()" class="inline-copy-input" style="flex:1;min-width:0;padding:8px;border-radius:6px;outline:none;font-size:12px;color:var(--text);background:var(--card);">
@@ -6898,7 +6961,7 @@
                 if (r.ok) {
                     const codes = await r.json();
                     if (codes.length) {
-                        rows = `<table class="mini-table"><thead><tr><th>Code</th><th>Discount</th><th>Used</th><th>Status</th><th></th></tr></thead><tbody>` +
+                        rows = `<table class="mini-table"><thead><tr><th>Code</th><th>Discount</th><th>Used</th><th>Status${helpIcon('discounts.status')}</th><th>${helpIcon('discounts.delete')}</th></tr></thead><tbody>` +
                             codes.map(c => `
                                 <tr>
                                     <td><strong>${esc(c.code)}</strong></td>
@@ -6918,14 +6981,14 @@
                 <div class="settings-hint">
                     Percentage or fixed-amount codes applied at checkout for paid events. A 100%-off code issues the ticket immediately.
                 </div>
-                <div class="settings-card" style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <input type="text" id="newCodeText" placeholder="CODE" maxlength="24" autocapitalize="characters" autocorrect="off" style="width:110px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;text-transform:uppercase;">
+                <div class="settings-card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                    <input type="text" id="newCodeText" placeholder="CODE" maxlength="24" autocapitalize="characters" autocorrect="off" style="width:110px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;text-transform:uppercase;">${helpIcon('discounts.code')}
                     <select id="newCodeType" style="padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
                         <option value="percent">% off</option>
                         <option value="fixed">$ off</option>
-                    </select>
-                    <input type="number" id="newCodeValue" placeholder="Value" min="1" inputmode="numeric" style="width:80px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
-                    <input type="number" id="newCodeMaxUses" placeholder="Max uses (optional)" min="1" inputmode="numeric" style="width:150px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
+                    </select>${helpIcon('discounts.type')}
+                    <input type="number" id="newCodeValue" placeholder="Value" min="0.01" step="0.01" inputmode="decimal" style="width:80px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">${helpIcon('discounts.value')}
+                    <input type="number" id="newCodeMaxUses" placeholder="Max uses (optional)" min="1" inputmode="numeric" style="width:150px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">${helpIcon('discounts.maxUses')}
                     <button class="btn btn-primary btn-sm" onclick="createDiscountCode('${eventId}')">Add Code</button>
                 </div>
                 <div id="discountRows">${rows}</div>
@@ -6935,7 +6998,13 @@
         async function createDiscountCode(eventId) {
             const code = document.getElementById('newCodeText').value.trim();
             const type = document.getElementById('newCodeType').value;
-            const value = parseInt(document.getElementById('newCodeValue').value, 10);
+            // Fixed-amount codes are stored in cents (matching ticketPrice), same
+            // as the Ticket Price field's own dollars-to-cents conversion — the
+            // "$ off" input takes whole dollars, not cents, from the organiser.
+            const rawValue = document.getElementById('newCodeValue').value;
+            const value = type === 'fixed'
+                ? Math.round(Math.max(0, parseFloat(rawValue) || 0) * 100)
+                : parseInt(rawValue, 10);
             const maxUsesRaw = document.getElementById('newCodeMaxUses').value.trim();
             if (!code || !value) { showToast('Code and value are required.'); return; }
             try {
@@ -6989,7 +7058,7 @@
                 } else if (r.ok) {
                     const orders = await r.json();
                     if (orders.length) {
-                        rows = `<table class="mini-table"><thead><tr><th>Buyer</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>` +
+                        rows = `<table class="mini-table"><thead><tr><th>Buyer</th><th>Amount</th><th>Status${helpIcon('payments.orders')}</th><th>Date</th><th>${helpIcon('payments.refund')}</th></tr></thead><tbody>` +
                             orders.map(o => `
                                 <tr>
                                     <td>${esc(o.buyerName || '')}<br><span style="color:var(--text-muted);font-size:11px;">${esc(o.buyerEmail || '')}</span></td>
@@ -7004,7 +7073,7 @@
                 }
             } catch {}
             return `
-                <div class="modal-section-title">Payments<span class="beta-pill">BETA</span></div>
+                <div class="modal-section-title">Payments<span class="beta-pill">BETA</span>${helpIcon('payments.beta')}</div>
                 <div class="settings-hint">
                     Orders placed for this event through Stripe Checkout. Refunds go back to the original payment method.
                 </div>
@@ -7041,11 +7110,11 @@
             try {
                 const r = await fetch(`/api/event/${eventId}/audit-log?limit=25`);
                 if (r.status === 403) {
-                    return `<hr class="settings-divider"><div class="settings-subhead">Activity Log</div><div class="settings-empty">You do not have permission to view this event's activity log.</div>`;
+                    return `<hr class="settings-divider"><div class="settings-subhead">Activity Log${helpIcon('auditLog.overview')}</div><div class="settings-empty">You do not have permission to view this event's activity log.</div>`;
                 }
                 if (!r.ok) return '';
                 const { entries } = await r.json();
-                if (!entries.length) return `<hr class="settings-divider"><div class="settings-subhead">Activity Log</div><div class="settings-empty">No activity recorded yet.</div>`;
+                if (!entries.length) return `<hr class="settings-divider"><div class="settings-subhead">Activity Log${helpIcon('auditLog.overview')}</div><div class="settings-empty">No activity recorded yet.</div>`;
                 const rows = entries.map(e => `
                     <tr>
                         <td>${esc(e.userEmail || 'system')}</td>
@@ -7054,7 +7123,7 @@
                     </tr>`).join('');
                 return `
                     <hr class="settings-divider">
-                    <div class="settings-subhead">Activity Log</div>
+                    <div class="settings-subhead">Activity Log${helpIcon('auditLog.overview')}</div>
                     <div class="settings-hint">Who did what to this event, most recent first.</div>
                     <div style="max-height:220px;overflow-y:auto;">
                         <table class="mini-table"><thead><tr><th>Who</th><th>Action</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>
@@ -8946,14 +9015,14 @@
             overlay.innerHTML = `
                 <div class="eb-topbar">
                     <div>
-                        <h2 id="ebTitle">${EB_VARIANT_META[initialVariant].title}</h2>
+                        <h2 id="ebTitle">${EB_VARIANT_META[initialVariant].title}${helpIcon('email.variants')}</h2>
                         <div class="eb-topbar-sub">${ev ? esc(ev.name) : ''}</div>
                     </div>
                     <div class="eb-topbar-spacer"></div>
                     <div class="eb-topbar-actions">
                         <button class="btn btn-secondary btn-sm eb-mobile-toggle" onclick="ebToggleMobilePane('palette')">Blocks</button>
                         <button class="btn btn-secondary btn-sm eb-mobile-toggle" onclick="ebToggleMobilePane('preview')">Preview</button>
-                        <button class="btn btn-secondary btn-sm" onclick="ebResetTemplate()">Reset</button>
+                        <button class="btn btn-secondary btn-sm" onclick="ebResetTemplate()">Reset</button>${helpIcon('email.reset')}
                         <button class="btn btn-secondary btn-sm" onclick="closeEmailEditor()">Close</button>
                         <button class="btn btn-primary btn-sm" id="ebSaveBtn" onclick="ebSaveTemplate()">Save</button>
                     </div>
@@ -8982,7 +9051,7 @@
                     <div class="eb-pane eb-pane-preview">
                         <div class="eb-preview-wrap">
                             <div class="eb-preview-head">
-                                <div class="eb-pane-title" style="margin:0;">Live preview</div>
+                                <div class="eb-pane-title" style="margin:0;">Live preview${helpIcon('email.preview')}</div>
                                 <div class="eb-seg">
                                     <button class="active" id="ebSegDesktop" onclick="ebSetPreviewWidth('desktop')">Desktop</button>
                                     <button id="ebSegMobile" onclick="ebSetPreviewWidth('mobile')">Mobile</button>
@@ -9069,8 +9138,10 @@
             document.getElementById('ebPalette').innerHTML = allowed.map((type) => {
                 const def = EB_BLOCK_DEFS[type];
                 const disabled = def.singleton && used.has(type);
-                return `<button class="eb-palette-btn" ${disabled ? 'disabled' : ''} title="${esc(def.desc)}"
-                    onclick="ebAddBlock('${type}')">${EB_ICONS.plus}<span>${esc(def.label)}</span></button>`;
+                return `<div style="display:flex;align-items:center;">
+                    <button class="eb-palette-btn" ${disabled ? 'disabled' : ''} title="${esc(def.desc)}"
+                        onclick="ebAddBlock('${type}')">${EB_ICONS.plus}<span>${esc(def.label)}</span></button>${helpIcon('email.block.' + type)}
+                    </div>`;
             }).join('');
         }
 
@@ -9079,13 +9150,13 @@
             const isWaitlist = ebState.activeVariant === 'waitlist' || ebState.activeVariant === 'waitlistClaim';
             document.getElementById('ebDesign').innerHTML = `
                 <div class="eb-field">
-                    <label>Subject line</label>
+                    <label>Subject line${helpIcon('email.subject')}</label>
                     <input type="text" value="${esc(s.subject || '')}" placeholder="Default subject"
                         oninput="ebSetSetting('subject', this.value)">
                     <div class="eb-note">${isWaitlist ? 'Leave blank to keep the automatic subject.' : 'Leave blank to keep the automatic subject, which adapts to new, updated and re-sent tickets.'}</div>
                 </div>
                 <div class="eb-field">
-                    <label>Accent colour</label>
+                    <label>Accent colour${helpIcon('email.accentColor')}</label>
                     <div class="eb-row">
                         <select onchange="ebSetAccentMode(this.value)">
                             <option value="auto" ${s.accent === 'auto' ? 'selected' : ''}>Match event colour</option>
@@ -9097,7 +9168,7 @@
                     </div>
                 </div>
                 <div class="eb-field">
-                    <label>Backgrounds</label>
+                    <label>Backgrounds${helpIcon('email.backgrounds')}</label>
                     <div class="eb-row">
                         <input type="color" value="${esc(s.pageBackground)}" title="Page background"
                             oninput="ebSetSetting('pageBackground', this.value)" style="padding:2px;height:34px;">
@@ -9108,7 +9179,7 @@
                 </div>
                 <div class="eb-note" style="margin-top:14px;">
                     <strong>Variables:</strong> ${EB_VARIANT_VARS[ebState.activeVariant] || EB_VARIANT_VARS.ticket}.<br>
-                    <strong>Formatting:</strong> **bold**, *italic*, [link](https://…).
+                    <strong>Formatting:</strong> **bold**, *italic*, [link](https://…).${helpIcon('email.formatting')}
                 </div>`;
         }
 

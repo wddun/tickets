@@ -3234,7 +3234,6 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
 
     const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!event.allowPublicRegistration) return res.status(403).json({ error: 'Registration is not open for this event' });
     if (!event.ticketPrice) return res.status(400).json({ error: 'This event is free. Please use /api/register.' });
 
     const cleanEmail = email.trim().toLowerCase();
@@ -3249,6 +3248,15 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
         if (candidate && candidate.status === 'notified' && candidate.claimExpiresAt > new Date().toISOString()) {
             claimEntry = candidate;
         }
+    }
+
+    // A claim link always gets a shot at checkout, same as register.html's own
+    // client-side gate already assumes ("the backend re-validates the claim
+    // regardless of whether registration is generally open") — the organiser
+    // already promised this specific person a seat, so closing registration
+    // generally shouldn't strand a claim already in flight.
+    if (!claimEntry && !event.allowPublicRegistration) {
+        return res.status(403).json({ error: 'Registration is not open for this event' });
     }
 
     // A promoted waitlist entry already has a seat set aside, so it skips the
@@ -5269,6 +5277,8 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.seatHolds.deleteByEventId.run(req.params.id);
         stmt.apiKeys.deleteByEventId.run(req.params.id);
         stmt.giveawayWinners.deleteByEventId.run(req.params.id);
+        stmt.discountCodes.deleteByEventId.run(req.params.id);
+        stmt.waitlist.deleteByEventId.run(req.params.id);
         deleteEventSharing(req.params.id);
         const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
         if (watcher) {
@@ -5304,7 +5314,10 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
             stmt.scannerLinks.deleteByEventId.run(eventId);
             stmt.scannerAccess.deleteByEventId.run(eventId);
             stmt.seatHolds.deleteByEventId.run(eventId);
+            stmt.apiKeys.deleteByEventId.run(eventId);
             stmt.giveawayWinners.deleteByEventId.run(eventId);
+            stmt.discountCodes.deleteByEventId.run(eventId);
+            stmt.waitlist.deleteByEventId.run(eventId);
             deleteEventSharing(eventId);
             const watcher = stmt.sheetWatchers.byEventId.get(eventId);
             if (watcher) {
