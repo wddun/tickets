@@ -780,6 +780,16 @@ const WAITLIST_EMAIL_BLOCK_TYPES = new Set([
     'waitlistStatusButton', 'button', 'divider', 'spacer', 'image', 'footerNote',
 ]);
 
+// The "a spot is available" email sent when a paid event's waitlist entry is
+// promoted — was hardcoded HTML with no organiser control until this palette
+// existed. Like the waitlist-join email it has no ticket yet, but it does
+// need its own primary CTA (waitlistClaimButton, the "Complete Registration"
+// link) rather than waitlistStatusButton's "check your position" link.
+const WAITLIST_CLAIM_EMAIL_BLOCK_TYPES = new Set([
+    'header', 'text', 'waitlistClaimButton', 'eventImage', 'eventDetails',
+    'button', 'divider', 'spacer', 'image', 'footerNote',
+]);
+
 const DEFAULT_TICKET_EMAIL_TEMPLATE = {
     version: 1,
     settings: { accent: 'auto', pageBackground: '#f3f4f6', cardBackground: '#ffffff', subject: '' },
@@ -813,6 +823,17 @@ const DEFAULT_WAITLIST_EMAIL_TEMPLATE = {
         { id: 'b-position', type: 'waitlistPosition', props: {} },
         { id: 'b-body', type: 'text', props: { text: 'You will be notified by email if a spot becomes available. You may check your position at any time.', size: 'sm', align: 'left', color: '#64748b' } },
         { id: 'b-button', type: 'waitlistStatusButton', props: {} },
+    ],
+};
+
+const DEFAULT_WAITLIST_CLAIM_EMAIL_TEMPLATE = {
+    version: 1,
+    settings: { accent: 'auto', pageBackground: '#f3f4f6', cardBackground: '#ffffff', subject: 'A spot is available for {{eventName}}' },
+    blocks: [
+        { id: 'b-header', type: 'header', props: { eyebrow: 'Waitlist Update', title: 'A Spot Is Available' } },
+        { id: 'b-body', type: 'text', props: { text: 'A ticket for **{{eventName}}** has become available and is reserved for you.', size: 'sm', align: 'left', color: '#475569' } },
+        { id: 'b-window', type: 'text', props: { text: 'This reservation will be held for **{{claimWindow}}**. Please complete your registration within that time to keep your spot.', size: 'sm', align: 'left', color: '#64748b' } },
+        { id: 'b-button', type: 'waitlistClaimButton', props: {} },
     ],
 };
 
@@ -899,6 +920,10 @@ function normalizeWaitlistEmailTemplate(raw) {
     return normalizeEmailTemplateWith(raw, WAITLIST_EMAIL_BLOCK_TYPES, DEFAULT_WAITLIST_EMAIL_TEMPLATE);
 }
 
+function normalizeWaitlistClaimEmailTemplate(raw) {
+    return normalizeEmailTemplateWith(raw, WAITLIST_CLAIM_EMAIL_BLOCK_TYPES, DEFAULT_WAITLIST_CLAIM_EMAIL_TEMPLATE);
+}
+
 // Renders one block to email-safe HTML. `ctx` carries everything dynamic:
 // precomputed ticket/QR markup, event detail rows, calendar links, and the
 // variable bag used for {{...}} substitution.
@@ -964,6 +989,9 @@ function renderEmailBlock(block, ctx) {
 
         case 'waitlistStatusButton':
             return ctx.waitlistStatusButtonHtml || '';
+
+        case 'waitlistClaimButton':
+            return ctx.waitlistClaimButtonHtml || '';
 
         case 'button': {
             const url = safeEmailUrl(applyEmailVars(p.url, ctx.vars));
@@ -1310,6 +1338,119 @@ ${rows.join('\n')}
         : `You are on the waitlist for ${event.name}`;
 
     return { html, subject };
+}
+
+// Renders the "a spot is available" claim email through the same block
+// system, restricted to WAITLIST_CLAIM_EMAIL_BLOCK_TYPES. This used to be
+// hardcoded HTML sent directly from promoteWaitlistEntry with no organiser
+// control — the one waitlist-adjacent email the customization system didn't
+// reach. `windowLabel` is the human-readable claim window ("2 days"), used
+// both in the {{claimWindow}} var and to build the button context.
+function buildWaitlistClaimEmailHtml({ firstName, event, claimUrl, windowLabel, template: templateOverride = null }) {
+    const { dateStr, dateRowHtml, locRowHtml, locRowPlainHtml } = buildEventDetailRows(event);
+    const eventAccentHex = eventAccentHexFor(event);
+
+    const template = templateOverride || normalizeWaitlistClaimEmailTemplate(event.waitlistClaimEmailTemplate);
+    const accentHex = template.settings.accent === 'auto' ? eventAccentHex : template.settings.accent;
+    const accentTextColor = contrastTextColor(accentHex);
+    const accentTextRgb = accentTextColor === '#000000' ? '0,0,0' : '255,255,255';
+
+    const waitlistClaimButtonHtml = claimUrl ? `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;"><tr><td align="center">
+    <a href="${claimUrl}" style="display:inline-block;padding:13px 26px;background:${accentHex};color:#ffffff;font-size:15px;font-weight:700;border-radius:10px;text-decoration:none;">Complete Registration</a>
+    </td></tr></table>` : '';
+
+    const ctx = {
+        accentHex,
+        accentTextColor,
+        accentTextRgb,
+        eventImageUrl: safeEmailImageUrl(event.imageUrl) || null,
+        dateRowHtml,
+        locRowHtml,
+        locRowPlainHtml,
+        waitlistClaimButtonHtml,
+        vars: {
+            firstName: firstName || '',
+            eventName: event.name || '',
+            eventDate: dateStr ? dateStr.replace(/&ndash;/g, '–') : '',
+            eventLocation: eventLocationLine(event),
+            claimWindow: windowLabel || '',
+        },
+    };
+
+    const rows = [];
+    let bodyBuffer = [];
+    const flushBody = () => {
+        if (!bodyBuffer.length) return;
+        const inner = bodyBuffer.join('\n').trim();
+        bodyBuffer = [];
+        if (inner) rows.push(`<tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">${inner}</td></tr>`);
+    };
+    for (const block of template.blocks) {
+        if (block.type === 'header' || block.type === 'eventImage') {
+            flushBody();
+            rows.push(renderEmailBlock(block, ctx));
+        } else {
+            bodyBuffer.push(renderEmailBlock(block, ctx));
+        }
+    }
+    flushBody();
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+</head>
+<body style="margin:0;padding:0;background:${template.settings.pageBackground};">
+<div style="margin:0;padding:0;background:${template.settings.pageBackground};">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:${template.settings.pageBackground};">
+<tr><td align="center" style="padding:24px 16px;">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${template.settings.cardBackground};border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
+${rows.join('\n')}
+</table>
+</td></tr>
+</table>
+</div>
+</body>
+</html>`;
+
+    const subject = template.settings.subject
+        ? applyEmailVars(template.settings.subject, ctx.vars).trim()
+        : `A spot is available for ${event.name}`;
+
+    return { html, subject };
+}
+
+// The email sent when a promoted claim lapses unclaimed — not part of the
+// block-editor system (unlike the join/claim emails next to it): this is a
+// single fixed-copy heads-up, not a moment an organiser needs to brand, and
+// giving it a fourth editable variant for one sentence of copy would be
+// customization for its own sake. Still uses the event's own accent colour
+// and photo so it doesn't look like a foreign system message.
+function buildWaitlistExpiredEmailHtml(event) {
+    const accentHex = eventAccentHexFor(event);
+    const accentTextColor = contrastTextColor(accentHex);
+    const imageHtml = safeEmailImageUrl(event.imageUrl)
+        ? `<img src="${safeEmailImageUrl(event.imageUrl)}" alt="" style="display:block;max-width:100%;max-height:200px;width:auto;height:auto;border:0;">`
+        : '';
+    return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;"><tr><td align="center" style="padding:24px 16px;">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
+${imageHtml ? `<tr><td>${imageHtml}</td></tr>` : ''}
+<tr><td style="background:${accentHex};padding:24px 32px;"><h1 style="margin:0;font-size:22px;font-weight:800;color:${accentTextColor};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Reservation Expired</h1></td></tr>
+<tr><td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<p style="font-size:15px;color:#374151;margin:0 0 8px;line-height:1.6;">Your reserved spot for <strong>${escEmailText(event.name || '')}</strong> was not claimed in time and has been released to the next person on the waitlist.</p>
+<p style="font-size:14px;color:#6b7280;margin:0;line-height:1.6;">Contact the organiser if you would still like to attend.</p>
+</td></tr>
+</table>
+</td></tr></table>
+</body>
+</html>`;
 }
 
 // 1x1 transparent GIF for email open tracking
@@ -3483,7 +3624,49 @@ app.get('/api/waitlist/entry/:id', (req, res) => {
         isPaid: event.ticketPrice > 0,
         claimUrl: claimActive ? `${BASE_URL}/register.html?id=${event.id}&claim=${entry.claimToken}` : null,
         claimExpired: entry.status === 'notified' && !claimActive,
+        // So waitlist-status.html can carry the same look as the event's own
+        // registration page instead of a fixed, unbranded template — the same
+        // theme/colour/photo an organiser already picked via REGISTRATION_THEMES.
+        theme: themeForEvent(event),
+        eventImageUrl: safeEmailImageUrl(event.imageUrl) || null,
+        // Leaving is only offered while there's actually something to give up —
+        // once converted/expired the entry is inert either way.
+        canLeave: entry.status === 'waiting' || (entry.status === 'notified' && claimActive),
     });
+});
+
+// Public self-service — lets the waitlisted person themselves give up their
+// spot, rather than only the organiser (see DELETE /api/waitlist/:id below).
+// Same trust model as the GET route above: the id is an unguessable nanoid
+// known only to the person it was emailed to. Leaving an active claim (not
+// just a 'waiting' entry) immediately frees it to the auto-chain sweep's
+// next-in-line, the same as if the claim had simply expired — there's no
+// reason to make someone who knows they don't want it wait out the window.
+app.post('/api/waitlist/entry/:id/leave', publicWriteLimiter, async (req, res) => {
+    const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(req.params.id));
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    const claimActive = entry.status === 'notified' && entry.claimToken && entry.claimExpiresAt && entry.claimExpiresAt > new Date().toISOString();
+    if (entry.status !== 'waiting' && !claimActive) {
+        return res.status(409).json({ error: 'This waitlist entry can no longer be left' });
+    }
+    const event = rowToEvent(stmt.events.byId.get(entry.eventId));
+    stmt.waitlist.deleteById.run(entry.id);
+    logAudit(req, { eventId: entry.eventId, action: 'waitlist.left', details: { email: entry.email } });
+    broadcastWaitlistChanged(entry.eventId);
+
+    if (claimActive && event && event.waitlistEnabled) {
+        const next = stmt.waitlist.nextWaitingByEventId.get(entry.eventId);
+        if (next) {
+            const nextEntry = rowToWaitlistEntry(next);
+            try {
+                const result = await promoteWaitlistEntry(nextEntry, event);
+                if (result.success) logAudit(req, { eventId: event.id, action: result.notified ? 'waitlist.notified' : 'waitlist.promoted', details: { email: nextEntry.email, source: 'self_release' } });
+            } catch (err) {
+                log('waitlist', `[ERR] Auto-promote after self-release failed — email: ${entry.email}  err: ${err.message}`);
+            }
+        }
+    }
+    res.json({ success: true });
 });
 
 // Public SSE companion to the route above — waitlist-status.html holds this
@@ -3654,20 +3837,15 @@ async function promoteWaitlistEntry(entry, event) {
         if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
             const claimUrl = `${BASE_URL}/register.html?id=${event.id}&claim=${claimToken}`;
             const windowLabel = claimHours % 24 === 0 ? `${claimHours / 24} day${claimHours === 24 ? '' : 's'}` : `${claimHours} hours`;
+            const nameParts = (entry.name || '').trim().split(/\s+/).filter(Boolean);
+            const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(' ') : (nameParts[0] || '');
+            const { html, subject } = buildWaitlistClaimEmailHtml({ firstName, event, claimUrl, windowLabel });
             sendEmail({
                 to: entry.email,
                 fromName: `Tickets - ${event.name}`,
                 replyTo: REPLY_TO_EMAIL,
-                subject: `A spot is available for ${event.name}`,
-                html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:auto;padding:32px 24px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;">
-                    <div style="margin-bottom:24px;"><div style="background:#1a1f3c;display:inline-block;padding:14px 20px;border-radius:12px;"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;">WTS Tickets</span></div></div>
-                    <h2 style="color:#1a1f3c;margin:0 0 8px;">A Spot Is Available</h2>
-                    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">A ticket for <strong>${event.name}</strong> has become available and is reserved for you.</p>
-                    <p style="color:#64748b;font-size:14px;line-height:1.6;margin:0 0 28px;">This reservation will be held for <strong>${windowLabel}</strong>. Please complete your registration within that time to keep your spot.</p>
-                    <div style="text-align:center;margin-bottom:8px;">
-                        <a href="${claimUrl}" style="background:#1a1f3c;color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;">Complete Registration</a>
-                    </div>
-                </div>`,
+                subject,
+                html,
             }).catch(() => {});
         }
         broadcastWaitlistChanged(event.id);
@@ -3709,6 +3887,30 @@ app.delete('/api/waitlist/:id', requireAuth, (req, res) => {
     logAudit(req, { eventId: entry.eventId, action: 'waitlist.removed', details: { email: entry.email } });
     broadcastWaitlistChanged(entry.eventId);
     res.json({ success: true });
+});
+
+// Bulk remove, for the dashboard's multi-select — otherwise clearing out a
+// batch of stale/duplicate entries is one request per row. Silently skips
+// any id that doesn't belong to this event rather than failing the whole
+// batch, since the selection was built from a list the caller already had
+// access to.
+app.post('/api/event/:id/waitlist/bulk-remove', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_waitlist')) {
+        return res.status(403).json({ error: 'Only the event owner can manage the waitlist' });
+    }
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 500) : [];
+    let removed = 0;
+    for (const id of ids) {
+        const entry = rowToWaitlistEntry(stmt.waitlist.byId.get(id));
+        if (!entry || entry.eventId !== event.id) continue;
+        stmt.waitlist.deleteById.run(id);
+        removed++;
+        logAudit(req, { eventId: event.id, action: 'waitlist.removed', details: { email: entry.email } });
+    }
+    if (removed) broadcastWaitlistChanged(event.id);
+    res.json({ success: true, removed });
 });
 
 // No-show → waitlist release. Deliberately organizer-triggered only — nothing
@@ -5390,35 +5592,44 @@ app.get('/api/event/:id/email-template', requireAuth, (req, res) => {
         winnerTemplate: resolveWinnerEmailTemplate(event),
         waitlistCustomized: !!event.waitlistEmailTemplate,
         waitlistTemplate: normalizeWaitlistEmailTemplate(event.waitlistEmailTemplate),
+        waitlistClaimCustomized: !!event.waitlistClaimEmailTemplate,
+        waitlistClaimTemplate: normalizeWaitlistClaimEmailTemplate(event.waitlistClaimEmailTemplate),
     });
 });
+
+const EMAIL_TEMPLATE_VARIANTS = new Set(['ticket', 'winner', 'waitlist', 'waitlistClaim']);
 
 app.put('/api/event/:id/email-template', requireAuth, (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!canManageEvent(req, event.id)) return res.status(403).json({ error: 'Not authorized' });
 
-    // Three independent templates share this route, picked by `variant`: the
-    // ticket-confirmation layout (default), the giveaway winner layout, and
-    // the waitlist-join layout.
-    const variant = req.body?.variant === 'winner' || req.body?.variant === 'waitlist' ? req.body.variant : 'ticket';
+    // Four independent templates share this route, picked by `variant`: the
+    // ticket-confirmation layout (default), the giveaway winner layout, the
+    // waitlist-join layout, and the waitlist "spot available" claim layout.
+    const variant = EMAIL_TEMPLATE_VARIANTS.has(req.body?.variant) ? req.body.variant : 'ticket';
     const setStmt = variant === 'winner' ? stmt.events.setWinnerEmailTemplate
         : variant === 'waitlist' ? stmt.events.setWaitlistEmailTemplate
+        : variant === 'waitlistClaim' ? stmt.events.setWaitlistClaimEmailTemplate
         : stmt.events.setEmailTemplate;
     const auditAction = variant === 'winner' ? 'winner_email_template'
         : variant === 'waitlist' ? 'waitlist_email_template'
+        : variant === 'waitlistClaim' ? 'waitlist_claim_email_template'
         : 'email_template';
-    const normalize = variant === 'waitlist' ? normalizeWaitlistEmailTemplate : normalizeEmailTemplate;
+    const normalize = variant === 'waitlist' ? normalizeWaitlistEmailTemplate
+        : variant === 'waitlistClaim' ? normalizeWaitlistClaimEmailTemplate
+        : normalizeEmailTemplate;
 
     // An explicit null resets back to the fallback rather than persisting a
     // copy of it, so future changes to that fallback still apply: the
-    // built-in default for the ticket/waitlist email, or the current ticket
-    // email for the winner email (its "not customised" state).
+    // built-in default for the ticket/waitlist/claim email, or the current
+    // ticket email for the winner email (its "not customised" state).
     if (req.body?.template === null) {
         setStmt.run(null, event.id);
         logAudit(req, { eventId: event.id, action: `${auditAction}_reset` });
         const fallback = variant === 'winner' ? normalizeEmailTemplate(event.emailTemplate)
             : variant === 'waitlist' ? DEFAULT_WAITLIST_EMAIL_TEMPLATE
+            : variant === 'waitlistClaim' ? DEFAULT_WAITLIST_CLAIM_EMAIL_TEMPLATE
             : DEFAULT_TICKET_EMAIL_TEMPLATE;
         return res.json({ success: true, customized: false, template: fallback });
     }
@@ -5449,6 +5660,23 @@ app.post('/api/event/:id/email-template/preview', requireAuth, async (req, res) 
             return res.json({ html });
         } catch (err) {
             log('email-template', `[ERR] Waitlist preview failed — event: ${event.id}  ${err.message}`);
+            return res.status(500).json({ error: 'Could not render preview.' });
+        }
+    }
+
+    if (req.body?.variant === 'waitlistClaim') {
+        const template = normalizeWaitlistClaimEmailTemplate(req.body?.template);
+        try {
+            const { html } = buildWaitlistClaimEmailHtml({
+                firstName: 'Jane',
+                event,
+                claimUrl: `${BASE_URL}/register.html?id=${event.id}&claim=SAMPLE`,
+                windowLabel: `${event.waitlistClaimHours || 48} hours`,
+                template,
+            });
+            return res.json({ html });
+        } catch (err) {
+            log('email-template', `[ERR] Waitlist claim preview failed — event: ${event.id}  ${err.message}`);
             return res.status(500).json({ error: 'Could not render preview.' });
         }
     }
@@ -8394,6 +8622,18 @@ setInterval(async () => {
         broadcastWaitlistChanged(entry.eventId);
 
         const event = rowToEvent(stmt.events.byId.get(entry.eventId));
+        if (event && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+            // Previously the only way to learn a claim had lapsed was to
+            // revisit waitlist-status.html and notice it now said "expired" —
+            // nothing ever told the person it happened.
+            sendEmail({
+                to: entry.email,
+                fromName: `Tickets - ${event.name}`,
+                replyTo: REPLY_TO_EMAIL,
+                subject: `Your reservation for ${event.name} has expired`,
+                html: buildWaitlistExpiredEmailHtml(event),
+            }).catch(() => {});
+        }
         if (!event || !event.waitlistEnabled) continue;
         const next = stmt.waitlist.nextWaitingByEventId.get(entry.eventId);
         if (!next) continue;

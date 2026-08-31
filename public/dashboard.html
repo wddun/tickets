@@ -6401,34 +6401,140 @@
         }
 
         // ── Waitlist ────────────────────────────────────────────────────────────
+        // ── Waitlist entries table: search / sort / bulk-select ────────────────
+        // A flat unfiltered fetch used to just get dumped into a table with no
+        // way to find one person in a long list or clear out several stale
+        // entries at once. Filtering/sorting is done client-side against a
+        // small per-event cache rather than re-fetching on every keystroke;
+        // any actual mutation (promote/remove/bulk-remove) still re-runs the
+        // full renderWaitlistSection, same as before, so it can never drift
+        // from the server's numbers.
+        const WAITLIST_STATUS_LABELS = {
+            waiting: 'Waiting',
+            notified: 'Spot offered',
+            converted: 'Converted to ticket',
+            expired: 'Offer expired',
+        };
+        let waitlistCache = {};
+        let waitlistSelection = {};
+        let waitlistSort = {};
+
+        function waitlistVisibleEntries(eventId) {
+            let list = waitlistCache[eventId] || [];
+            const q = (document.getElementById('waitlistSearch')?.value || '').trim().toLowerCase();
+            const status = document.getElementById('waitlistStatusFilter')?.value || '';
+            if (q) list = list.filter(w => (w.name || '').toLowerCase().includes(q) || (w.email || '').toLowerCase().includes(q));
+            if (status) list = list.filter(w => w.status === status);
+            const sort = waitlistSort[eventId] || { key: 'createdAt', dir: 'asc' };
+            list = [...list].sort((a, b) => {
+                const av = String(a[sort.key] ?? '').toLowerCase();
+                const bv = String(b[sort.key] ?? '').toLowerCase();
+                if (av < bv) return sort.dir === 'asc' ? -1 : 1;
+                if (av > bv) return sort.dir === 'asc' ? 1 : -1;
+                return 0;
+            });
+            return list;
+        }
+
+        function waitlistSetSort(eventId, key) {
+            const cur = waitlistSort[eventId] || { key: 'createdAt', dir: 'asc' };
+            waitlistSort[eventId] = { key, dir: cur.key === key && cur.dir === 'asc' ? 'desc' : 'asc' };
+            waitlistRerenderTable(eventId);
+        }
+
+        function waitlistRerenderTable(eventId) {
+            const el = document.getElementById('waitlistRows');
+            if (el) el.innerHTML = renderWaitlistTable(eventId);
+        }
+
+        function renderWaitlistTable(eventId) {
+            const all = waitlistCache[eventId] || [];
+            if (!all.length) return '<div class="settings-empty">No one is on the waitlist.</div>';
+            const list = waitlistVisibleEntries(eventId);
+            const selected = waitlistSelection[eventId] || new Set();
+            const sort = waitlistSort[eventId] || { key: 'createdAt', dir: 'asc' };
+            const arrow = (key) => sort.key === key ? (sort.dir === 'asc' ? ' &#9650;' : ' &#9660;') : '';
+            const th = (label, key) => `<th style="cursor:pointer;user-select:none;" onclick="waitlistSetSort('${eventId}','${key}')">${label}${arrow(key)}</th>`;
+            const bulkBar = selected.size ? `
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <span style="font-size:13px;font-weight:600;">${selected.size} selected</span>
+                    <button class="btn btn-danger btn-sm" onclick="waitlistBulkRemove('${eventId}')">Remove selected</button>
+                </div>` : '';
+            if (!list.length) return bulkBar + '<div class="settings-empty">No entries match your search.</div>';
+            const allVisibleSelected = list.every(w => selected.has(w.id));
+            return bulkBar + `<table class="mini-table"><thead><tr>
+                    <th style="width:24px;"><input type="checkbox" ${allVisibleSelected ? 'checked' : ''} onchange="waitlistToggleSelectAll('${eventId}', this.checked)"></th>
+                    ${th('Name', 'name')}${th('Email', 'email')}${th('Status', 'status')}${th('Joined', 'createdAt')}<th></th>
+                </tr></thead><tbody>` +
+                list.map(w => `
+                    <tr>
+                        <td><input type="checkbox" ${selected.has(w.id) ? 'checked' : ''} onchange="waitlistToggleSelect('${eventId}','${w.id}', this.checked)"></td>
+                        <td>${esc(w.name || '')}</td>
+                        <td>${esc(w.email)}</td>
+                        <td><span class="badge badge-${w.status}">${WAITLIST_STATUS_LABELS[w.status] || esc(w.status)}</span></td>
+                        <td>${fmtDate(w.createdAt)}</td>
+                        <td style="text-align:right;white-space:nowrap;">
+                            ${w.status === 'waiting' ? `<button class="btn btn-primary btn-sm" onclick="promoteWaitlistEntry('${w.id}','${eventId}',this)">Promote</button>` : ''}
+                            <button class="btn btn-danger btn-sm" onclick="removeWaitlistEntry('${w.id}','${eventId}')">Remove</button>
+                        </td>
+                    </tr>`).join('') + '</tbody></table>';
+        }
+
+        function waitlistToggleSelectAll(eventId, checked) {
+            if (!waitlistSelection[eventId]) waitlistSelection[eventId] = new Set();
+            const list = waitlistVisibleEntries(eventId);
+            for (const w of list) { if (checked) waitlistSelection[eventId].add(w.id); else waitlistSelection[eventId].delete(w.id); }
+            waitlistRerenderTable(eventId);
+        }
+
+        function waitlistToggleSelect(eventId, id, checked) {
+            if (!waitlistSelection[eventId]) waitlistSelection[eventId] = new Set();
+            if (checked) waitlistSelection[eventId].add(id); else waitlistSelection[eventId].delete(id);
+            waitlistRerenderTable(eventId);
+        }
+
+        async function waitlistBulkRemove(eventId) {
+            const ids = [...(waitlistSelection[eventId] || [])];
+            if (!ids.length) return;
+            if (!await confirmDialog(`Remove ${ids.length} ${ids.length === 1 ? 'person' : 'people'} from the waitlist?`, { confirmText: 'Remove' })) return;
+            try {
+                const r = await fetch(`/api/event/${eventId}/waitlist/bulk-remove`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+                });
+                if (!r.ok) throw new Error();
+                const d = await r.json();
+                showToast(`Removed ${d.removed} ${d.removed === 1 ? 'entry' : 'entries'}.`);
+                const section = document.getElementById('tab-waitlist');
+                if (section) section.innerHTML = await renderWaitlistSection(eventId);
+                loadEvents();
+            } catch {
+                showToast('Failed to remove the selected entries.');
+            }
+        }
+
         async function renderWaitlistSection(eventId) {
             const ev = events.find(e => e.id === eventId);
             const enabled = !!ev?.waitlistEnabled;
             const claimHours = ev?.waitlistClaimHours ?? 48;
             let waitlistEmailCustomized = false;
+            let waitlistClaimEmailCustomized = false;
             try {
                 const r = await fetch(`/api/event/${eventId}/email-template`);
-                if (r.ok) waitlistEmailCustomized = (await r.json()).waitlistCustomized;
+                if (r.ok) {
+                    const data = await r.json();
+                    waitlistEmailCustomized = data.waitlistCustomized;
+                    waitlistClaimEmailCustomized = data.waitlistClaimCustomized;
+                }
             } catch {}
+            waitlistSelection[eventId] = new Set();
+            waitlistCache[eventId] = [];
             let rows = '<div class="settings-empty">No one is on the waitlist.</div>';
             try {
                 const r = await fetch(`/api/event/${eventId}/waitlist`);
                 if (r.ok) {
                     const entries = await r.json();
-                    if (entries.length) {
-                        rows = `<table class="mini-table"><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Joined</th><th></th></tr></thead><tbody>` +
-                            entries.map(w => `
-                                <tr>
-                                    <td>${esc(w.name || '')}</td>
-                                    <td>${esc(w.email)}</td>
-                                    <td><span class="badge badge-${w.status}">${w.status}</span></td>
-                                    <td>${fmtDate(w.createdAt)}</td>
-                                    <td style="text-align:right;white-space:nowrap;">
-                                        ${w.status === 'waiting' ? `<button class="btn btn-primary btn-sm" onclick="promoteWaitlistEntry('${w.id}','${eventId}',this)">Promote</button>` : ''}
-                                        <button class="btn btn-danger btn-sm" onclick="removeWaitlistEntry('${w.id}','${eventId}')">Remove</button>
-                                    </td>
-                                </tr>`).join('') + '</tbody></table>';
-                    }
+                    waitlistCache[eventId] = entries;
+                    if (entries.length) rows = renderWaitlistTable(eventId);
                 }
             } catch {}
 
@@ -6502,8 +6608,24 @@
                     <span style="font-size:13px;color:${waitlistEmailCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
                         ${waitlistEmailCustomized ? 'Custom layout' : 'Default layout'}
                     </span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openEmailEditor('${eventId}', 'waitlistClaim')">Edit spot-available email</button>
+                    <span style="font-size:13px;color:${waitlistClaimEmailCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
+                        ${waitlistClaimEmailCustomized ? 'Custom layout' : 'Default layout'}
+                    </span>
                 </div>
-                <div id="waitlistRows">${rows}</div>
+                <div data-no-dirty style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <input type="search" id="waitlistSearch" placeholder="Search by name or email…" oninput="waitlistRerenderTable('${eventId}')"
+                        style="flex:1;min-width:180px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
+                    <select id="waitlistStatusFilter" onchange="waitlistRerenderTable('${eventId}')"
+                        style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
+                        <option value="">All statuses</option>
+                        <option value="waiting">Waiting</option>
+                        <option value="notified">Spot offered</option>
+                        <option value="converted">Converted to ticket</option>
+                        <option value="expired">Offer expired</option>
+                    </select>
+                </div>
+                <div id="waitlistRows" data-no-dirty>${rows}</div>
                 ${noShowPanel}
                 ${capacityPanel}
             `;
@@ -8630,6 +8752,7 @@
             ticket: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4V9z"/><line x1="13" y1="7" x2="13" y2="17" stroke-dasharray="2,2"/></svg>',
             trophy: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 5H4a1 1 0 0 0-1 1v1a4 4 0 0 0 4 4M17 5h3a1 1 0 0 1 1 1v1a4 4 0 0 1-4 4"/></svg>',
             clock: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+            bell: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
         };
 
         // `dynamic` blocks render server-supplied content (tickets, event
@@ -8649,6 +8772,7 @@
             changes:      { label: 'Change summary', singleton: true, dynamic: true, desc: 'What changed, on update emails only' },
             waitlistPosition:    { label: 'Position line', singleton: true, dynamic: true, desc: 'The "you are #N in line" sentence' },
             waitlistStatusButton: { label: 'View position button', singleton: true, dynamic: true, desc: "Button linking to the recipient's live waitlist status page" },
+            waitlistClaimButton: { label: 'Claim button', singleton: true, dynamic: true, desc: 'Primary button linking to the reserved-spot registration/checkout page' },
             button:       { label: 'Button',        singleton: false, desc: 'A link styled as a button' },
             image:        { label: 'Image',         singleton: false, desc: 'A hosted image' },
             divider:      { label: 'Divider',       singleton: false, desc: 'Horizontal rule' },
@@ -8663,12 +8787,14 @@
             ticket: ['header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'tickets', 'customFields', 'changes', 'button', 'image', 'divider', 'spacer', 'footerNote'],
             winner: ['header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'tickets', 'customFields', 'changes', 'button', 'image', 'divider', 'spacer', 'footerNote'],
             waitlist: ['header', 'text', 'waitlistPosition', 'eventImage', 'eventDetails', 'waitlistStatusButton', 'button', 'image', 'divider', 'spacer', 'footerNote'],
+            waitlistClaim: ['header', 'text', 'waitlistClaimButton', 'eventImage', 'eventDetails', 'button', 'image', 'divider', 'spacer', 'footerNote'],
         };
 
         const EB_VARIANT_VARS = {
             ticket: '{{firstName}}, {{lastName}}, {{fullName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{ticketCount}}',
             winner: '{{firstName}}, {{lastName}}, {{fullName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{ticketCount}}',
             waitlist: '{{firstName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{position}}',
+            waitlistClaim: '{{firstName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{claimWindow}}',
         };
 
         const EB_DEFAULT_PROPS = {
@@ -8683,6 +8809,7 @@
             changes: {},
             waitlistPosition: {},
             waitlistStatusButton: {},
+            waitlistClaimButton: {},
             button: { label: 'View details', url: 'https://', align: 'center' },
             image: { url: '', href: '', width: 320, align: 'center' },
             divider: {},
@@ -8695,7 +8822,7 @@
         let ebPreviewSeq = 0;
 
         async function renderEmailTemplateSection(eventId) {
-            let customized = false, winnerCustomized = false, waitlistCustomized = false;
+            let customized = false, winnerCustomized = false, waitlistCustomized = false, waitlistClaimCustomized = false;
             try {
                 const r = await fetch(`/api/event/${eventId}/email-template`);
                 if (r.status === 403) {
@@ -8707,6 +8834,7 @@
                     customized = data.customized;
                     winnerCustomized = data.winnerCustomized;
                     waitlistCustomized = data.waitlistCustomized;
+                    waitlistClaimCustomized = data.waitlistClaimCustomized;
                 }
             } catch {
                 return '<div class="modal-section-title">Ticket Email</div>' +
@@ -8714,7 +8842,7 @@
             }
             return `
                 <div class="modal-section-title">Ticket Email</div>
-                <div class="settings-hint">Design the email attendees receive with their ticket &mdash; drag blocks to reorder, edit the wording, and add a calendar invite. Giveaway winner notifications and the waitlist-join email each use their own independent layout, edited on their own tab inside the editor.</div>
+                <div class="settings-hint">Design the email attendees receive with their ticket &mdash; drag blocks to reorder, edit the wording, and add a calendar invite. Giveaway winner notifications and both waitlist emails (join confirmation and spot-available) each use their own independent layout, edited on their own tab inside the editor.</div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;">
                     <button class="btn btn-primary" onclick="openEmailEditor('${eventId}')">Open email editor</button>
                     <span style="font-size:13px;color:${customized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
@@ -8726,6 +8854,9 @@
                     <span style="font-size:13px;color:${waitlistCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
                         Waitlist: ${waitlistCustomized ? 'custom layout' : 'default layout'}
                     </span>
+                    <span style="font-size:13px;color:${waitlistClaimCustomized ? '#059669' : 'var(--text-muted)'};font-weight:600;">
+                        Spot available: ${waitlistClaimCustomized ? 'custom layout' : 'default layout'}
+                    </span>
                 </div>`;
         }
 
@@ -8733,6 +8864,7 @@
             ticket: { title: 'Ticket email', tabTitle: 'Ticket Email', tabSub: 'Sent with every registration', icon: 'ticket' },
             winner: { title: 'Winner email', tabTitle: 'Winner Email', tabSub: 'Sent to giveaway winners', icon: 'trophy' },
             waitlist: { title: 'Waitlist email', tabTitle: 'Waitlist Email', tabSub: 'Sent when someone joins the waitlist', icon: 'clock' },
+            waitlistClaim: { title: 'Spot available email', tabTitle: 'Spot Available', tabSub: 'Sent when a waitlisted person is promoted', icon: 'bell' },
         };
 
         // The three independent templates (ticket confirmation, giveaway
@@ -8772,6 +8904,12 @@
                     waitlist: {
                         template: payload.waitlistTemplate,
                         customized: payload.waitlistCustomized,
+                        selectedId: null,
+                        dirty: false,
+                    },
+                    waitlistClaim: {
+                        template: payload.waitlistClaimTemplate,
+                        customized: payload.waitlistClaimCustomized,
                         selectedId: null,
                         dirty: false,
                     },
@@ -8916,7 +9054,7 @@
 
         function ebRenderDesign() {
             const s = ebActive().template.settings;
-            const isWaitlist = ebState.activeVariant === 'waitlist';
+            const isWaitlist = ebState.activeVariant === 'waitlist' || ebState.activeVariant === 'waitlistClaim';
             document.getElementById('ebDesign').innerHTML = `
                 <div class="eb-field">
                     <label>Subject line</label>

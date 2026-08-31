@@ -405,6 +405,12 @@ try { db.exec(`ALTER TABLE events ADD COLUMN waitlistMessage TEXT`); } catch {}
 // emailTemplate. NULL means "never customised" — DEFAULT_WAITLIST_EMAIL_TEMPLATE
 // is used, so existing events keep their current waitlist email untouched.
 try { db.exec(`ALTER TABLE events ADD COLUMN waitlistEmailTemplate TEXT`); } catch {}
+// Layout for the "a spot is available" email sent when a paid event's
+// waitlist entry is promoted (see promoteWaitlistEntry in server.js). Same
+// block-document shape as the others; NULL means the built-in default is
+// used. Previously this email was hardcoded HTML with no organiser control
+// at all — the one waitlist-adjacent email the block editor didn't reach.
+try { db.exec(`ALTER TABLE events ADD COLUMN waitlistClaimEmailTemplate TEXT`); } catch {}
 
 // When a single ticket was expired — either by the organiser directly, or
 // by the sweep that watches events.ticketExpiresAt (see server.js). This is
@@ -664,6 +670,7 @@ export function rowToEvent(row) {
         emailTemplate: (() => { try { return row.emailTemplate ? JSON.parse(row.emailTemplate) : null; } catch { return null; } })(),
         winnerEmailTemplate: (() => { try { return row.winnerEmailTemplate ? JSON.parse(row.winnerEmailTemplate) : null; } catch { return null; } })(),
         waitlistEmailTemplate: (() => { try { return row.waitlistEmailTemplate ? JSON.parse(row.waitlistEmailTemplate) : null; } catch { return null; } })(),
+        waitlistClaimEmailTemplate: (() => { try { return row.waitlistClaimEmailTemplate ? JSON.parse(row.waitlistClaimEmailTemplate) : null; } catch { return null; } })(),
         customFields: row.customFields ? JSON.parse(row.customFields) : null,
     };
 }
@@ -741,6 +748,7 @@ export const stmt = {
         setEmailTemplate: db.prepare(`UPDATE events SET emailTemplate=? WHERE id=?`),
         setWinnerEmailTemplate: db.prepare(`UPDATE events SET winnerEmailTemplate=? WHERE id=?`),
         setWaitlistEmailTemplate: db.prepare(`UPDATE events SET waitlistEmailTemplate=? WHERE id=?`),
+        setWaitlistClaimEmailTemplate: db.prepare(`UPDATE events SET waitlistClaimEmailTemplate=? WHERE id=?`),
         setTimezone: db.prepare(`UPDATE events SET timezone=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         setOwner: db.prepare(`UPDATE events SET userId=? WHERE id=?`),

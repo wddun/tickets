@@ -49,6 +49,13 @@
         }
         .btn-outline:hover { background: var(--border); }
 
+        .btn-text {
+            background: none; border: none; color: var(--text-muted);
+            font-size: 13px; text-decoration: underline; cursor: pointer;
+            padding: 6px; margin-top: 4px;
+        }
+        .btn-text:hover { color: var(--text); }
+
         @media (max-width: 480px) {
             .container { padding: 16px 12px 32px; }
         }
@@ -75,6 +82,38 @@
         }
         [data-theme="dark"] .conn-spinner { border-color: rgba(255,255,255,0.25); border-top-color: currentColor; }
         @keyframes conn-spin { to { transform: rotate(360deg); } }
+
+        /* ── Event branding ────────────────────────────────────────────────
+           This page used to look identical for every event on the platform —
+           fixed navy, no photo, no organiser identity — despite being the
+           page a waitlisted person is most likely to revisit. It now picks
+           up the same theme (see REGISTRATION_THEMES in server.js) and photo
+           an organiser already set for their registration page, via the
+           `theme`/`eventImageUrl` fields on GET /api/waitlist/entry/:id.
+           Undeclared --rt-* vars fall back to the plain look above, so a
+           slow-loading theme never leaves anything unstyled. */
+        :root {
+            --rt-bg: none; --rt-surface: none; --rt-text: none;
+            --rt-muted: none; --rt-accent: none; --rt-accent-text: #ffffff;
+            --rt-border: none; --rt-radius: 14px; --rt-header-h: 130px;
+            --rt-font: none; --rt-header-bg: none;
+        }
+        body.themed { background: var(--rt-bg); color: var(--rt-text); font-family: var(--rt-font); }
+        body.themed .status-box { background: var(--rt-surface); border: 1px solid var(--rt-border); border-radius: var(--rt-radius); color: var(--rt-text); }
+        body.themed .status-title { color: var(--rt-text); }
+        body.themed .status-sub { color: var(--rt-muted); }
+        body.themed .position-badge,
+        body.themed #claimBtn { background: var(--rt-accent) !important; color: var(--rt-accent-text) !important; }
+        body.themed .btn-outline { background: transparent; color: var(--rt-text); border: 1.5px solid var(--rt-border); }
+        body.themed .nav a { color: var(--rt-accent); }
+
+        .event-banner {
+            display: none; width: 100%; height: var(--rt-header-h);
+            background: var(--rt-header-bg, var(--rt-accent));
+            background-size: contain; background-repeat: no-repeat; background-position: center;
+            margin: -1px -1px 18px; width: calc(100% + 2px); border-radius: var(--rt-radius) var(--rt-radius) 0 0;
+        }
+        .event-banner.show { display: block; }
     </style>
 </head>
 <body>
@@ -84,6 +123,7 @@
             <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
         </div>
         <div class="card">
+            <div class="event-banner" id="eventBanner"></div>
             <div id="loadingView">
                 <div class="status-box">
                     <div class="status-sub">Checking your status…</div>
@@ -97,6 +137,7 @@
                     <div class="status-sub">You are in line for this event.</div>
                     <div class="position-badge">#<span id="positionNum"></span><span>your position</span></div>
                     <div class="status-sub">You will be notified by email if a spot becomes available. There is no need to check this page again.</div>
+                    <button type="button" class="btn-text" id="leaveBtnWaiting">Leave the waitlist</button>
                 </div>
             </div>
 
@@ -107,6 +148,7 @@
                     <div class="status-sub" id="notifiedEventName"></div>
                     <div class="status-sub">Please complete your registration to keep your spot; this reservation is time-limited.</div>
                     <button class="btn-outline" id="claimBtn" style="margin-top:14px;background:var(--navy);color:#fff;border:none;">Complete Your Registration</button>
+                    <div><button type="button" class="btn-text" id="leaveBtnNotified">I no longer want this spot</button></div>
                 </div>
             </div>
 
@@ -123,6 +165,14 @@
                     <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
                     <div class="status-title">You already have a ticket</div>
                     <div class="status-sub">Check your email for your QR code for <strong id="convertedEventName"></strong>.</div>
+                </div>
+            </div>
+
+            <div id="leftView" style="display:none;">
+                <div class="status-box">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                    <div class="status-title">You Have Left the Waitlist</div>
+                    <div class="status-sub">You will not be notified if a spot becomes available. If you change your mind, you're welcome to join again from the event's registration page.</div>
                 </div>
             </div>
 
@@ -153,20 +203,61 @@
         })();
         const params = new URLSearchParams(window.location.search);
         const id = params.get('id');
+        let currentData = null;
+        let hasLeft = false;
+        let waitlistStream = null;
 
         function showView(name) {
-            for (const v of ['loadingView', 'waitingView', 'notifiedView', 'expiredView', 'convertedView', 'errorView']) {
+            for (const v of ['loadingView', 'waitingView', 'notifiedView', 'expiredView', 'convertedView', 'leftView', 'errorView']) {
                 document.getElementById(v).style.display = v === name ? 'block' : 'none';
+            }
+        }
+
+        // Picks up the same registration-page theme and event photo an
+        // organiser already set (see themeForEvent in server.js) — this page
+        // used to be fixed-navy and unbranded for every event.
+        function applyTheme(style) {
+            if (!style || !style.vars) return;
+            const root = document.documentElement.style;
+            const v = style.vars;
+            const set = (k, val) => { if (val) root.setProperty(k, val); };
+            set('--rt-bg', v.bg);          set('--rt-surface', v.surface);
+            set('--rt-text', v.text);      set('--rt-muted', v.muted);
+            set('--rt-accent', v.accent);  set('--rt-accent-text', v.accentText);
+            set('--rt-border', v.border);  set('--rt-radius', v.radius);
+            set('--rt-header-h', v.headerHeight); set('--rt-font', v.font);
+            set('--rt-header-bg', v.headerGradient || v.accent);
+            document.body.classList.add('themed');
+            const meta = document.querySelector('meta[name="theme-color"]');
+            if (meta && v.accent) meta.setAttribute('content', v.accent);
+        }
+
+        function renderBanner(imageUrl, style) {
+            const el = document.getElementById('eventBanner');
+            if (imageUrl) {
+                el.style.backgroundImage = `url('${imageUrl}')`;
+                el.classList.add('show');
+            } else if (style?.vars?.headerGradient) {
+                el.classList.add('show');
             }
         }
 
         async function load() {
             if (!id) return showView('errorView');
+            if (hasLeft) return; // already showing leftView; a stray 'changed' ping from our own leave must not 404 over it
             try {
                 const res = await fetch(`/api/waitlist/entry/${id}`);
+                // leaveWaitlist() can complete (and set hasLeft) while this
+                // fetch is still in flight — a concurrent 'changed' ping from
+                // our own leave triggered exactly this race in testing, where
+                // the 404 below landed after leftView was already showing.
+                if (hasLeft) return;
                 if (!res.ok) return showView('errorView');
                 const data = await res.json();
+                currentData = data;
                 document.title = `Waitlist — ${data.eventName}`;
+                applyTheme(data.theme);
+                renderBanner(data.eventImageUrl, data.theme);
 
                 if (data.status === 'waiting') {
                     document.getElementById('waitingEventName').textContent = data.eventName;
@@ -186,9 +277,33 @@
                     showView('errorView');
                 }
             } catch {
-                showView('errorView');
+                if (!hasLeft) showView('errorView');
             }
         }
+
+        // Self-service leave — previously the only way off the waitlist was
+        // asking the organiser to remove you. Leaving an active claim (the
+        // notified view) releases it immediately to the next person in line,
+        // same as if it had simply expired.
+        async function leaveWaitlist() {
+            if (!id) return;
+            const activeClaim = currentData?.status === 'notified' && !!currentData.claimUrl;
+            const msg = activeClaim
+                ? 'Give up your reserved spot? It will be offered to the next person on the waitlist and cannot be undone.'
+                : 'Leave the waitlist? You will not be notified if a spot becomes available.';
+            if (!confirm(msg)) return;
+            try {
+                const r = await fetch(`/api/waitlist/entry/${id}/leave`, { method: 'POST' });
+                if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Could not leave the waitlist.'); return; }
+                hasLeft = true;
+                waitlistStream?.close();
+                showView('leftView');
+            } catch {
+                alert('Connection error. Please try again.');
+            }
+        }
+        document.getElementById('leaveBtnWaiting').addEventListener('click', leaveWaitlist);
+        document.getElementById('leaveBtnNotified').addEventListener('click', leaveWaitlist);
 
         // ── Live connection ──────────────────────────────────────────────
         // Pushed updates instead of polling: the stream carries no data of
@@ -201,6 +316,7 @@
             let hasConnectedOnce = false;
             let reconnectedFlashTimeout = null;
             const es = new EventSource(`/api/waitlist/entry/${id}/stream`);
+            waitlistStream = es;
 
             es.onerror = () => {
                 clearTimeout(reconnectedFlashTimeout);

@@ -102,6 +102,19 @@
         body.themed .success-box { background: transparent; border: none; }
         body.themed .success-title { color: var(--rt-text); }
         body.themed .success-sub { color: var(--rt-muted); }
+        body.themed .position-badge { background: var(--rt-accent); color: var(--rt-accent-text); }
+        body.themed #waitlistStatusLink { border-color: var(--rt-border); color: var(--rt-text); }
+
+        /* Waitlist confirmation: live position + link to the status page, so a
+           visitor isn't fully dependent on email delivery to check where they
+           stand. Undeclared vars fall back to the plain (non-themed) look. */
+        .position-badge {
+            display: inline-block; background: var(--navy); color: #fff;
+            font-size: 24px; font-weight: 800;
+            padding: 12px 24px; border-radius: 16px;
+            margin: 4px 0 16px;
+        }
+        .position-badge span { font-size: 13px; font-weight: 600; display: block; opacity: .75; margin-top: 2px; }
         body.themed .processing-spinner { border-color: var(--rt-border); border-top-color: var(--rt-accent); }
         /* Chrome outside the card follows the theme too, or a dark theme ends
            up with light-theme links floating underneath it. */
@@ -267,6 +280,8 @@
                     <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <div class="success-title" id="waitlistTitle">You Are on the Waitlist</div>
                     <div class="success-sub" id="waitlistSub"></div>
+                    <div class="position-badge" id="waitlistPositionBadge" style="display:none;">#<span id="waitlistPositionNum"></span><span>your position</span></div>
+                    <a class="btn-outline" id="waitlistStatusLink" href="#" style="display:none;text-decoration:none;text-align:center;margin-bottom:10px;">View Live Status</a>
                     <button class="btn-outline" onclick="window.location.href = window.location.pathname + '?id=' + eventId">Back</button>
                 </div>
             </div>
@@ -669,6 +684,22 @@
             document.getElementById('waitlistSub').textContent = data.position
                 ? `You are number ${data.position} in line. You will be notified by email if a spot becomes available.`
                 : `You will be notified by email if a spot becomes available.`;
+            const badge = document.getElementById('waitlistPositionBadge');
+            if (data.position) {
+                document.getElementById('waitlistPositionNum').textContent = data.position;
+                badge.style.display = 'inline-block';
+            }
+
+            // Only reachable from an email link before this — the page just
+            // submitted on can now jump straight to the same live-updating
+            // status page (position ticking down, a spot opening up) instead
+            // of being fully dependent on mail arriving. No need to duplicate
+            // that live-tracking logic here too — the link goes straight to it.
+            if (data.waitlistId) {
+                const link = document.getElementById('waitlistStatusLink');
+                link.href = `/waitlist-status.html?id=${encodeURIComponent(data.waitlistId)}`;
+                link.style.display = 'block';
+            }
         }
 
         function showSuccess(ticket, qr) {
