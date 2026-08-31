@@ -4201,6 +4201,18 @@
                     <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Any ticket not checked in by this time stops scanning and is marked expired. Its Apple Wallet pass is voided, the same as a deleted ticket. Checked-in tickets are not affected. Leave blank if tickets should never expire.</div>
                 </div>
                 <div style="margin-bottom:20px;">
+                    <label for="editEventTicketExpiryLimit" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Limit How Many Expire <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+                    <div style="display:flex;gap:10px;">
+                        <input type="number" min="1" inputmode="numeric" id="editEventTicketExpiryLimit" placeholder="All tickets" value="${ev.ticketExpiryLimit || ''}"
+                            style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
+                        <select id="editEventTicketExpiryOrder" style="padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;">
+                            <option value="oldest" ${ev.ticketExpiryOrder !== 'newest' ? 'selected' : ''}>Oldest registrations first</option>
+                            <option value="newest" ${ev.ticketExpiryOrder === 'newest' ? 'selected' : ''}>Newest registrations first</option>
+                        </select>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">By default the cutoff above expires every not-checked-in ticket. Set a number here to expire only that many instead &mdash; a registration covering several tickets at once always expires together, so this can go slightly over. Has no effect without a cutoff time set above.</div>
+                </div>
+                <div style="margin-bottom:20px;">
                     <label for="editEventTicketPrice" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:var(--text-muted);">(leave blank or 0 for free)</span></label>
                     <div style="position:relative;">
                         <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:14px;">$</span>
@@ -4251,6 +4263,8 @@
             const endTimeISO = endTime ? zonedWallClockToISO(endTime, eventTz) : '';
             const ticketExpiresAt = document.getElementById('editEventTicketExpiresAt').value;
             const ticketExpiresAtISO = ticketExpiresAt ? zonedWallClockToISO(ticketExpiresAt, eventTz) : '';
+            const ticketExpiryLimit = document.getElementById('editEventTicketExpiryLimit').value;
+            const ticketExpiryOrder = document.getElementById('editEventTicketExpiryOrder').value;
 
             const allowReentry = document.getElementById('editEventAllowReentry').checked;
             const capacity = document.getElementById('editEventCapacity').value;
@@ -4282,6 +4296,8 @@
             fd.append('allowReentry', String(allowReentry));
             fd.append('capacity', capacity || '');
             fd.append('ticketExpiresAt', ticketExpiresAtISO);
+            fd.append('ticketExpiryLimit', ticketExpiryLimit || '');
+            fd.append('ticketExpiryOrder', ticketExpiryOrder || 'oldest');
             fd.append('ticketPrice', ticketPrice || '0');
             fd.append('timezone', eventTimezoneValue());
             if (lat) fd.append('lat', lat);
