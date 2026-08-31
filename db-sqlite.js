@@ -396,6 +396,15 @@ try { db.exec(`ALTER TABLE events ADD COLUMN giveawayToken TEXT`); } catch {}
 // same-day giveaway where an unclaimed QR is worthless by midnight). NULL
 // means tickets never expire on their own.
 try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiresAt TEXT`); } catch {}
+// How many not-yet-checked-in tickets the cutoff above actually expires, and
+// in what order — see ticketsEligibleForExpiry() in server.js. NULL limit
+// means "expire everyone past the cutoff", the original all-or-nothing
+// behavior, so every event predating this stays exactly as it was. A limit
+// is a running cap on how many tickets this event has ever had expired (any
+// source — cutoff, sweep, or a manual per-ticket expire all count toward
+// it), not "expire N more every time the sweep ticks".
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiryLimit INTEGER`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiryOrder TEXT DEFAULT 'oldest'`); } catch {}
 
 // Superseded by waitlistEmailTemplate below (the full block editor) — column
 // kept so a value someone already set doesn't just vanish, but nothing reads
@@ -665,6 +674,8 @@ export function rowToEvent(row) {
         shuttleLinkEnabled: !!row.shuttleLinkEnabled,
         skipConfirmationEmails: !!row.skipConfirmationEmails,
         waitlistClaimHours: row.waitlistClaimHours ?? 48,
+        ticketExpiryLimit: row.ticketExpiryLimit ?? null,
+        ticketExpiryOrder: row.ticketExpiryOrder === 'newest' ? 'newest' : 'oldest',
         emailPolicy: (() => { try { return row.emailPolicy ? JSON.parse(row.emailPolicy) : null; } catch { return null; } })(),
         walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
         emailTemplate: (() => { try { return row.emailTemplate ? JSON.parse(row.emailTemplate) : null; } catch { return null; } })(),
@@ -728,6 +739,7 @@ export const stmt = {
         setDisplayToken: db.prepare(`UPDATE events SET displayToken=? WHERE id=?`),
         setGiveawayToken: db.prepare(`UPDATE events SET giveawayToken=? WHERE id=?`),
         setWaitlistClaimHours: db.prepare(`UPDATE events SET waitlistClaimHours=? WHERE id=?`),
+        setTicketExpiryScope: db.prepare(`UPDATE events SET ticketExpiryLimit=?, ticketExpiryOrder=? WHERE id=?`),
         setReminderSentAt: db.prepare(`UPDATE events SET reminderSentAt=? WHERE id=?`),
         setReminder: db.prepare(`UPDATE events SET reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=? WHERE id=?`),
         setCustomFields: db.prepare(`UPDATE events SET customFields=? WHERE id=?`),
@@ -771,6 +783,10 @@ export const stmt = {
         // Not-yet-used, not-yet-expired tickets for an event — what the
         // ticket-expiry cutoff sweep and PUT /api/event/:id act on.
         activeUnexpiredByEventId: db.prepare(`SELECT * FROM tickets WHERE eventId = ? AND used_at IS NULL AND expiredAt IS NULL`),
+        // How many tickets this event has ever had expired, by any means —
+        // the running total ticketsEligibleForExpiry() in server.js weighs
+        // against events.ticketExpiryLimit.
+        countExpiredByEventId: db.prepare(`SELECT COUNT(*) as cnt FROM tickets WHERE eventId = ? AND expiredAt IS NOT NULL`),
         byEventAndEmail: db.prepare('SELECT * FROM tickets WHERE eventId = ? AND lower(email) = ? LIMIT 1'),
         insert: db.prepare(`INSERT INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at, email_opened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
         updateInfo: db.prepare(`UPDATE tickets SET name=?, firstName=?, lastName=?, email=?, customFields=? WHERE id=?`),

@@ -2,6 +2,8 @@
 // the scoping rules that decide whose rooms show up in whose list.
 import test, { before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import Database from 'better-sqlite3';
 import { startServer } from './helpers/server.js';
 import { createClient } from './helpers/client.js';
 import { newUser, createEvent, updateEvent, addTicket, listTickets } from './helpers/factories.js';
@@ -248,5 +250,29 @@ describe('deleting events', () => {
 
         assert.equal((await owner.client.get(`/api/event/${mine.id}`)).status, 404);
         assert.equal((await other.client.get(`/api/event/${theirs.id}`)).status, 200);
+    });
+
+    // discountCodes and waitlist rows have no route that can surface them
+    // once their event is gone, so a leak here is invisible from the API —
+    // only a direct read of the database file catches it.
+    test('also removes discount codes and waitlist entries, not just tickets', async () => {
+        const db = new Database(path.join(server.dir, 'tickets.db'));
+        try {
+            const ev = await createEvent(owner.client, { name: 'Doomed With Extras', waitlist: true });
+            const code = await owner.client.post(`/api/event/${ev.id}/discount-codes`, { code: 'GONE10', type: 'percent', value: 10 });
+            assert.equal(code.status, 200, `discount code creation failed: ${code.text}`);
+            const wl = await owner.client.post(`/api/event/${ev.id}/waitlist`, { name: 'Waiting Person', email: 'waiting@test.local' });
+            assert.equal(wl.status, 200, `waitlist join failed: ${wl.text}`);
+
+            assert.equal(db.prepare('SELECT COUNT(*) AS n FROM discountCodes WHERE eventId=?').get(ev.id).n, 1);
+            assert.equal(db.prepare('SELECT COUNT(*) AS n FROM waitlist WHERE eventId=?').get(ev.id).n, 1);
+
+            assert.equal((await owner.client.del(`/api/event/${ev.id}`)).status, 200);
+
+            assert.equal(db.prepare('SELECT COUNT(*) AS n FROM discountCodes WHERE eventId=?').get(ev.id).n, 0);
+            assert.equal(db.prepare('SELECT COUNT(*) AS n FROM waitlist WHERE eventId=?').get(ev.id).n, 0);
+        } finally {
+            db.close();
+        }
     });
 });

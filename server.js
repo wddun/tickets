@@ -4762,6 +4762,15 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     if (req.body.ticketExpiresAt !== undefined) {
         stmt.events.setTicketExpiresAt.run(req.body.ticketExpiresAt || null, req.params.id);
     }
+    if (req.body.ticketExpiryLimit !== undefined || req.body.ticketExpiryOrder !== undefined) {
+        const limit = req.body.ticketExpiryLimit !== undefined
+            ? (req.body.ticketExpiryLimit === '' || req.body.ticketExpiryLimit === null ? null : Math.max(1, parseInt(req.body.ticketExpiryLimit, 10) || 1))
+            : event.ticketExpiryLimit;
+        const order = req.body.ticketExpiryOrder !== undefined
+            ? (req.body.ticketExpiryOrder === 'newest' ? 'newest' : 'oldest')
+            : event.ticketExpiryOrder;
+        stmt.events.setTicketExpiryScope.run(limit, order, req.params.id);
+    }
 
     const priceCents = req.body.ticketPrice !== undefined
         ? Math.round(Math.max(0, parseFloat(req.body.ticketPrice) || 0) * 100)
@@ -4778,7 +4787,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
     // closing things out right now, rather than scheduling ahead) shouldn't
     // wait for the next sweep tick to actually take effect.
     if (updated.ticketExpiresAt && updated.ticketExpiresAt <= new Date().toISOString()) {
-        const eligible = stmt.tickets.activeUnexpiredByEventId.all(req.params.id).map(rowToTicket);
+        const eligible = ticketsEligibleForExpiry(updated);
         for (const ticket of eligible) {
             try { await expireTicket(ticket, updated, req); }
             catch (err) { log('ticket-expiry', `[ERR] Immediate expire failed — ticket: ${ticket.id}  err: ${err.message}`); }
@@ -5260,6 +5269,8 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.seatHolds.deleteByEventId.run(req.params.id);
         stmt.apiKeys.deleteByEventId.run(req.params.id);
         stmt.giveawayWinners.deleteByEventId.run(req.params.id);
+        stmt.discountCodes.deleteByEventId.run(req.params.id);
+        stmt.waitlist.deleteByEventId.run(req.params.id);
         deleteEventSharing(req.params.id);
         const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
         if (watcher) {
@@ -5296,6 +5307,8 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
             stmt.scannerAccess.deleteByEventId.run(eventId);
             stmt.seatHolds.deleteByEventId.run(eventId);
             stmt.giveawayWinners.deleteByEventId.run(eventId);
+            stmt.discountCodes.deleteByEventId.run(eventId);
+            stmt.waitlist.deleteByEventId.run(eventId);
             deleteEventSharing(eventId);
             const watcher = stmt.sheetWatchers.byEventId.get(eventId);
             if (watcher) {
@@ -5507,6 +5520,56 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
     res.json({ success: true, tickets: updatedTickets });
     pushWalletIfChanged(updatedTickets, event).catch(() => { });
 });
+
+// Which not-yet-used, not-yet-expired tickets the ticketExpiresAt cutoff
+// actually expires, once it's reached — called from both trigger points
+// (the immediate-expire-on-save branch of PUT /api/event/:id, and the
+// periodic sweep below). With no events.ticketExpiryLimit set this is just
+// everyone eligible — the original, simplest behavior, unchanged for every
+// event that predates this setting.
+//
+// With a limit set, it's a running cap: "this event should never have more
+// than N tickets expired, total" — not "expire N more every time this
+// runs". Re-deriving `remaining` from countExpiredByEventId on every call is
+// what makes that safe to call repeatedly (the sweep re-scans every
+// TICKET_EXPIRY_SWEEP_MS): once the cap's been reached, remaining is 0 and
+// nothing further happens, however many times this fires. It also means an
+// organiser un-expiring a ticket (freeing up budget under the cap) lets the
+// next sweep tick expire another one to refill it — the cap holds going
+// forward, not just at the one moment the cutoff was first reached.
+//
+// Selection itself mirrors no-show-release: tickets are grouped by
+// registration (a family sharing one registration expires together, never
+// split) and whole registrations are taken oldest- or newest-first (per
+// events.ticketExpiryOrder) until the remaining budget is met — so the
+// actual count expired can run slightly over the limit to keep a
+// registration intact, exactly like no-show-release's own count param.
+function ticketsEligibleForExpiry(event) {
+    const active = stmt.tickets.activeUnexpiredByEventId.all(event.id).map(rowToTicket);
+    if (!event.ticketExpiryLimit) return active;
+
+    const alreadyExpired = stmt.tickets.countExpiredByEventId.get(event.id)?.cnt ?? 0;
+    const remaining = Math.max(0, event.ticketExpiryLimit - alreadyExpired);
+    if (remaining <= 0) return [];
+
+    const byRegistration = new Map();
+    for (const t of active) {
+        const rid = t.registrationId || t.id;
+        if (!byRegistration.has(rid)) byRegistration.set(rid, []);
+        byRegistration.get(rid).push(t);
+    }
+    const registrations = [...byRegistration.values()].sort((a, b) => {
+        const cmp = String(a[0].created_at || '').localeCompare(String(b[0].created_at || ''));
+        return event.ticketExpiryOrder === 'newest' ? -cmp : cmp;
+    });
+
+    const selected = [];
+    for (const regTickets of registrations) {
+        if (selected.length >= remaining) break;
+        selected.push(...regTickets);
+    }
+    return selected;
+}
 
 // Expires one not-yet-used ticket — the single place that stamps
 // tickets.expiredAt, voids its Wallet pass (same treatment as a deleted
@@ -8653,8 +8716,10 @@ setInterval(async () => {
 // a cutoff that's already in the past is saved, but a cutoff set for later
 // (the normal case — "expires at midnight" set that afternoon) needs
 // something watching the clock. expireTicket() no-ops on a ticket that's
-// already expired (or used), so re-scanning the same events every tick is
-// cheap once a batch has been processed. Same system-actor shape as
+// already expired (or used), and ticketsEligibleForExpiry() re-derives its
+// own remaining budget from events.ticketExpiryLimit each call, so
+// re-scanning the same events every tick is cheap and safe once a batch (or
+// the whole limit) has already been processed. Same system-actor shape as
 // WAITLIST_SWEEP_REQ, for the same reason: no real session to log audit
 // entries under. TICKET_EXPIRY_SWEEP_MS is a test hook only, same as
 // WAITLIST_SWEEP_MS.
@@ -8664,7 +8729,7 @@ setInterval(async () => {
     const nowIso = new Date().toISOString();
     const withExpiry = stmt.events.all.all().map(rowToEvent).filter(e => e.ticketExpiresAt && e.ticketExpiresAt <= nowIso);
     for (const event of withExpiry) {
-        const tickets = stmt.tickets.activeUnexpiredByEventId.all(event.id).map(rowToTicket);
+        const tickets = ticketsEligibleForExpiry(event);
         for (const ticket of tickets) {
             try { await expireTicket(ticket, event, TICKET_EXPIRY_SWEEP_REQ); }
             catch (err) { log('ticket-expiry', `[ERR] Sweep expire failed — ticket: ${ticket.id}  err: ${err.message}`); }
