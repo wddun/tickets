@@ -5269,6 +5269,8 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.seatHolds.deleteByEventId.run(req.params.id);
         stmt.apiKeys.deleteByEventId.run(req.params.id);
         stmt.giveawayWinners.deleteByEventId.run(req.params.id);
+        stmt.discountCodes.deleteByEventId.run(req.params.id);
+        stmt.waitlist.deleteByEventId.run(req.params.id);
         deleteEventSharing(req.params.id);
         const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
         if (watcher) {
@@ -5305,6 +5307,8 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
             stmt.scannerAccess.deleteByEventId.run(eventId);
             stmt.seatHolds.deleteByEventId.run(eventId);
             stmt.giveawayWinners.deleteByEventId.run(eventId);
+            stmt.discountCodes.deleteByEventId.run(eventId);
+            stmt.waitlist.deleteByEventId.run(eventId);
             deleteEventSharing(eventId);
             const watcher = stmt.sheetWatchers.byEventId.get(eventId);
             if (watcher) {
