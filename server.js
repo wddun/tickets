@@ -1861,18 +1861,18 @@ app.use(session({
 // unconditionally — static file matches short-circuit the pipeline, so this
 // must run first (scanner is PIN-protected itself, so excluded).
 app.get('/admin.html', (req, res) => res.redirect('/dashboard.html'));
-// The dashboard is for anyone who actually has a room to manage — the event's
-// owner, someone it was shared with, or the admin. Every API it calls is
-// scoped to the caller, so a collaborator opening this page sees only their
-// own rooms; the admin-only panels inside it are hidden client-side and
-// enforced by requireAdmin server-side. Someone with no rooms at all has
-// nothing to show, so they go back to the public site.
+// The dashboard is for any signed-in account — same as the admin, who can
+// always open it and create their first event from an empty room list. Every
+// API it calls is scoped to the caller, so a collaborator (or a brand-new
+// account with no rooms yet) sees only their own rooms and the "+ New" button
+// to create one; the admin-only panels inside it are hidden client-side and
+// enforced by requireAdmin server-side. There is no reason to turn away an
+// account with zero rooms — creating an event only requires being logged in
+// (see POST /api/events), so that's exactly the account this page is for.
 app.get('/dashboard.html', (req, res, next) => {
     if (!req.session.userId) return res.redirect('/login.html');
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
     if (!user) return res.redirect('/login.html');
-    const isAdmin = user.email === process.env.ADMIN_EMAIL;
-    if (!isAdmin && personalEventIdsForUser(req.session.userId).size === 0) return res.redirect('/');
     next();
 });
 // A bulk-seed/delete tool for QA — real registrations, real deletes, a
@@ -2236,10 +2236,7 @@ app.get('/api/auth/me', (req, res) => {
     }
     const user = rowToUser(stmt.users.byId.get(req.session.userId));
     const isAdmin = user.email === process.env.ADMIN_EMAIL;
-    // hasRooms tells the login page whether to land this user on the dashboard
-    // or the public site — it's the same test the /dashboard.html guard uses.
-    const hasRooms = isAdmin || personalEventIdsForUser(user.id).size > 0;
-    res.json({ user: { id: user.id, email: user.email, isAdmin, hasRooms, createdAt: user.createdAt } });
+    res.json({ user: { id: user.id, email: user.email, isAdmin, createdAt: user.createdAt } });
 });
 
 
@@ -2715,7 +2712,7 @@ function personalEventIdsForUser(userId) {
     for (const a of stmt.scannerAccess.byUserId.all(userId)) ids.add(a.eventId);
     // Grants can outlive the event they point at (older deletions didn't clean
     // up sheetLinks/sheetAccess). Drop the dead ones so callers that just count
-    // this set — the dashboard guard, hasRooms — aren't fooled by a ghost.
+    // this set — /api/my-rooms, /api/events/counts — aren't fooled by a ghost.
     for (const id of ids) {
         if (!stmt.events.byId.get(id)) ids.delete(id);
     }

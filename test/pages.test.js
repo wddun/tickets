@@ -92,11 +92,10 @@ describe('who may open the dashboard', () => {
         assert.match(r.headers.get('location'), /login\.html/);
     });
 
-    test('an account with no rooms is sent to the public site', async () => {
+    test('an account with no rooms gets the page too — creating an event only needs a login', async () => {
         const roomless = await newUser(server);
         const r = await roomless.client.get('/dashboard.html');
-        assert.equal(r.status, 302);
-        assert.equal(r.headers.get('location'), '/');
+        assert.equal(r.status, 200);
     });
 
     test('an owner gets the page', async () => {
@@ -108,21 +107,11 @@ describe('who may open the dashboard', () => {
     test('a collaborator gets the page too', async () => {
         const ev = await createEvent(owner.client, { name: 'Shared Dashboard Room' });
         const mate = await newUser(server);
-        assert.equal((await mate.client.get('/dashboard.html')).status, 302);
+        assert.equal((await mate.client.get('/dashboard.html')).status, 200);
 
         await share(owner.client, ev.id, mate.email, ['checkin']);
         assert.equal((await mate.client.get('/dashboard.html')).status, 200,
             'someone a room was shared with has something to manage');
-    });
-
-    test('hasRooms on /api/auth/me matches who the page lets in', async () => {
-        const user = await newUser(server);
-        assert.equal((await user.client.get('/api/auth/me')).body.user.hasRooms, false);
-        assert.equal((await user.client.get('/dashboard.html')).status, 302);
-
-        await createEvent(user.client, { name: 'Now They Have One' });
-        assert.equal((await user.client.get('/api/auth/me')).body.user.hasRooms, true);
-        assert.equal((await user.client.get('/dashboard.html')).status, 200);
     });
 });
 

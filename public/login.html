@@ -113,21 +113,6 @@
                 </button>
             </div>
 
-            <!-- Signed in, but this account has no events to manage — shown
-                 instead of silently bouncing to '/', which otherwise loops
-                 the moment the visitor clicks "Organizer Login" again. -->
-            <div id="noAccessState" style="display:none; text-align:center; padding: 8px 0 4px;">
-                <div style="font-size:14px; color:var(--text-muted); line-height:1.6; margin-bottom:22px;">
-                    You're signed in as <strong id="noAccessEmail"></strong>, but this account isn't an owner or collaborator on any event yet. Ask an organizer to share an event with you, or sign in with a different account.
-                </div>
-                <a href="/" style="display:block;background:var(--red);color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 22px;border-radius:10px;width:100%;box-sizing:border-box;margin-bottom:10px;">
-                    Go to homepage
-                </a>
-                <button onclick="signOutForNoAccess()" style="background:none;border:none;color:var(--text-muted);font-size:13px;font-weight:500;cursor:pointer;padding:4px;">
-                    Sign out
-                </button>
-            </div>
-
             <!-- Two-factor code state (after password succeeds on a 2FA-enabled account) -->
             <div id="totpState" style="display:none;">
                 <div style="font-size:14px; color:var(--text-muted); text-align:center; margin-bottom:20px;" id="totpPrompt">
@@ -182,22 +167,8 @@
             try {
                 const r = await fetch('/api/auth/me', { cache: 'no-store' });
                 if (r.ok) {
-                    const user = (await r.json()).user;
                     const next = new URLSearchParams(window.location.search).get('next');
-                    if (next && next.startsWith('/')) {
-                        window.location.replace(next);
-                        return;
-                    }
-                    if (user.hasRooms) {
-                        window.location.replace('/dashboard.html');
-                        return;
-                    }
-                    // No rooms and nowhere specific to send them — show why,
-                    // instead of silently bouncing to '/'. A silent bounce
-                    // loops forever the moment they click "Organizer Login"
-                    // again from the homepage, since they're still signed in.
-                    showNoAccessState(user.email);
-                    document.getElementById('authWrap').style.visibility = 'visible';
+                    window.location.replace((next && next.startsWith('/')) ? next : '/dashboard.html');
                     return;
                 }
             } catch {}
@@ -262,13 +233,7 @@
                         window.location.href = next;
                         return;
                     }
-                    const userR = await fetch('/api/auth/me', { cache: 'no-store' });
-                    const meUser = userR.ok ? (await userR.json()).user : null;
-                    if (meUser && meUser.hasRooms) {
-                        window.location.href = '/dashboard.html';
-                    } else {
-                        showNoAccessState(meUser ? meUser.email : email);
-                    }
+                    window.location.href = '/dashboard.html';
                 } else {
                     alert('Error: ' + data.error);
                 }
@@ -292,31 +257,13 @@
         }
 
         function showAuthForm() {
-            document.getElementById('authForm').style.display     = 'block';
-            document.getElementById('forgotRow').style.display    = '';
-            document.getElementById('toggleRow').style.display    = '';
-            document.getElementById('verifyState').style.display  = 'none';
-            document.getElementById('totpState').style.display    = 'none';
-            document.getElementById('noAccessState').style.display = 'none';
+            document.getElementById('authForm').style.display    = 'block';
+            document.getElementById('forgotRow').style.display   = '';
+            document.getElementById('toggleRow').style.display   = '';
+            document.getElementById('verifyState').style.display = 'none';
+            document.getElementById('totpState').style.display   = 'none';
             authTitle.textContent = isLogin ? 'Organizer Login' : 'Create Account';
             authDesc.textContent  = isLogin ? 'Manage your events and tickets.' : 'Start hosting your own events today.';
-        }
-
-        function showNoAccessState(email) {
-            document.getElementById('authForm').style.display      = 'none';
-            document.getElementById('forgotRow').style.display     = 'none';
-            document.getElementById('toggleRow').style.display     = 'none';
-            document.getElementById('verifyState').style.display   = 'none';
-            document.getElementById('totpState').style.display     = 'none';
-            document.getElementById('noAccessState').style.display = 'block';
-            document.getElementById('noAccessEmail').textContent   = email || '';
-            authTitle.textContent = 'Nothing to manage yet';
-            authDesc.textContent  = '';
-        }
-
-        async function signOutForNoAccess() {
-            try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
-            window.location.href = '/login.html';
         }
 
         let pendingTotpToken = '';

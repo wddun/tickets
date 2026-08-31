@@ -5,7 +5,7 @@ import test, { before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer, TEST_PASSWORD, ADMIN_EMAIL } from './helpers/server.js';
 import { createClient } from './helpers/client.js';
-import { newUser, newAdmin, uniqueEmail, createEvent } from './helpers/factories.js';
+import { newUser, newAdmin, uniqueEmail } from './helpers/factories.js';
 
 let server;
 before(async () => { server = await startServer(); });
@@ -107,13 +107,6 @@ describe('login', () => {
 });
 
 describe('/api/auth/me', () => {
-    test('reports hasRooms false before any event exists and true after', async () => {
-        const { client } = await newUser(server);
-        assert.equal((await client.get('/api/auth/me')).body.user.hasRooms, false);
-        await createEvent(client, { name: 'Has A Room' });
-        assert.equal((await client.get('/api/auth/me')).body.user.hasRooms, true);
-    });
-
     test('flags the admin account', async () => {
         const admin = await newAdmin(server);
         const me = await admin.client.get('/api/auth/me');
