@@ -3104,7 +3104,13 @@
         function renderSidebar() {
             const list = document.getElementById('eventList');
             if (!events.length) {
-                list.innerHTML = '<div style="padding:20px; color:var(--text-muted); font-size:13px;">No events yet.<br>Create one from your Google Sheet.</div>';
+                list.innerHTML = `
+            <div style="padding:60px 20px; text-align:center;">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--border)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:16px;"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>
+                <p style="font-size:17px; font-weight:700; color:var(--text); margin:0 0 6px;">Create your first event</p>
+                <p style="font-size:13px; color:var(--text-muted); max-width:280px; margin:0 auto 20px;">Set up tickets, check-in, and Apple Wallet passes in a couple of minutes.</p>
+                <button class="btn btn-primary" onclick="openNewEventModal()">+ Create Event</button>
+            </div>`;
                 return;
             }
             list.innerHTML = '';
