@@ -319,6 +319,20 @@ describe('registrations through the API', () => {
         assert.equal((await listTickets(owner.client, event.id)).length, 0);
     });
 
+    test('deleting a registration promotes the longest-waiting entry when the event has a waitlist', async () => {
+        const { event, api } = await eventWithKey(['checkin', 'manage_tickets'], { capacity: 1, waitlist: true });
+        const made = await api.post('/api/v1/registrations', { name: 'Occupied Seat', email: 'occupied@test.local' });
+        const waiterEmail = 'api-delete-waiter@test.local';
+        await createClient(server.base).post(`/api/event/${event.id}/waitlist`, { name: 'Waiting Person', email: waiterEmail });
+
+        const gone = await api.del(`/api/v1/registrations/${made.body.id}`);
+        assert.equal(gone.status, 200, gone.text);
+        assert.equal(gone.body.deleted, 1);
+        assert.equal(gone.body.promoted, 1);
+
+        assert.ok((await listTickets(owner.client, event.id)).some(t => t.email === waiterEmail));
+    });
+
     test('filters by check-in state and by email', async () => {
         const { api } = await eventWithKey(['checkin', 'manage_tickets']);
         const a = await api.post('/api/v1/registrations', { name: 'Arrived', email: 'arrived@test.local' });

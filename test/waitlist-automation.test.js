@@ -269,6 +269,55 @@ describe('auto-promote on ticket expiry', () => {
     });
 });
 
+describe('auto-promote on registration delete', () => {
+    test('deleting a registration frees the seat and promotes the longest-waiting entry', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Occupied Seat' });
+        const waiterEmail = uniqueEmail('delete-promote-waiter');
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Waiting Person', email: waiterEmail });
+
+        const [seatTicket] = await listTickets(owner.client, ev.id);
+        const r = await owner.client.del('/api/registrations/bulk', { registrationIds: [seatTicket.registrationId] });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.promoted, 1);
+
+        const waitlist = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body;
+        assert.equal(waitlist.find(w => w.email === waiterEmail).status, 'converted');
+        assert.ok((await listTickets(owner.client, ev.id)).some(t => t.email === waiterEmail));
+    });
+
+    test('deleting several registrations at once promotes that many off the waitlist', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 2, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Seat A' });
+        await addTicket(owner.client, ev.id, { name: 'Seat B' });
+        const firstWaiter = uniqueEmail('delete-promote-first');
+        const secondWaiter = uniqueEmail('delete-promote-second');
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'First Waiter', email: firstWaiter });
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Second Waiter', email: secondWaiter });
+
+        const seatTickets = await listTickets(owner.client, ev.id);
+        const r = await owner.client.del('/api/registrations/bulk', {
+            registrationIds: seatTickets.map(t => t.registrationId),
+        });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.promoted, 2);
+
+        const emails = (await listTickets(owner.client, ev.id)).map(t => t.email);
+        assert.ok(emails.includes(firstWaiter));
+        assert.ok(emails.includes(secondWaiter));
+    });
+
+    test('does not promote when the event has no waitlist', async () => {
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1 });
+        await addTicket(owner.client, ev.id, { name: 'Solo Seat' });
+        const [t] = await listTickets(owner.client, ev.id);
+
+        const r = await owner.client.del('/api/registrations/bulk', { registrationIds: [t.registrationId] });
+        assert.equal(r.status, 200);
+        assert.equal(r.body.promoted, 0);
+    });
+});
+
 describe('live waitlist status stream', () => {
     test('pushes a change ping when someone ahead in line leaves, instead of requiring a poll', async () => {
         const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1, waitlist: true });

@@ -334,7 +334,10 @@
     <p>Change <code>name</code>, <code>email</code> or <code>customFields</code>. Applies to every ticket in the group. Omitted fields are left alone.</p>
 
     <div class="ep"><span class="verb delete">DELETE</span><span class="path">/api/v1/registrations/:id</span><span class="scope">manage_tickets</span></div>
-    <p>Removes the registration and all its tickets. Returns <code>{"deleted": 2}</code>.</p>
+    <p>
+        Removes the registration and all its tickets. Returns <code>{"deleted": 2, "promoted": 1}</code> —
+        if the event runs a waitlist, the freed seats are immediately handed to whoever has waited longest.
+    </p>
 
     <h2 id="door">Check-in &amp; scanning</h2>
 

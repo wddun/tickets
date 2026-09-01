@@ -5392,7 +5392,27 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
     for (const eventId of deletedEventIds) {
         logAudit(req, { eventId, action: 'registrations.deleted', details: { count: allowedRegistrationIds.size } });
     }
-    res.json({ success: true, deleted });
+
+    // A deleted ticket frees its seat the same as an expired one — see
+    // expireTicket() — so promote up to as many waitlist entries, per event,
+    // as tickets were freed on that event.
+    let promoted = 0;
+    for (const eventId of deletedEventIds) {
+        const event = eventsById.get(eventId);
+        if (!event.waitlistEnabled) continue;
+        const freedCount = deletedTickets.filter(t => t.eventId === eventId).length;
+        for (let i = 0; i < freedCount; i++) {
+            const next = stmt.waitlist.nextWaitingByEventId.get(eventId);
+            if (!next) break;
+            const nextEntry = rowToWaitlistEntry(next);
+            const result = await promoteWaitlistEntry(nextEntry, event);
+            if (result.success) {
+                promoted++;
+                logAudit(req, { eventId, action: result.notified ? 'waitlist.notified' : 'waitlist.promoted', details: { email: nextEntry.email, source: 'registration_deleted' } });
+            }
+        }
+    }
+    res.json({ success: true, deleted, promoted });
 });
 
 // Create ticket manually
@@ -9612,7 +9632,7 @@ app.patch('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), (req, res)
     res.json(apiRegistration(updated));
 });
 
-app.delete('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), (req, res) => {
+app.delete('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), async (req, res) => {
     const tickets = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket)
         .filter(t => t.eventId === req.apiEvent.id);
     if (!tickets.length) return apiError(res, 404, 'not_found', 'No registration with that id on this event.');
@@ -9621,7 +9641,23 @@ app.delete('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), (req, res
     voidWalletTickets(tickets, req.apiEvent);
     ticketStatusCache.clear();
     logApiAudit(req, 'api.registration_deleted', { registrationId: req.params.id, name: tickets[0].name });
-    res.json({ deleted: tickets.length });
+
+    // Frees `tickets.length` seats — promote that many off the waitlist, same
+    // as expireTicket() does for a single expired ticket.
+    let promoted = 0;
+    if (req.apiEvent.waitlistEnabled) {
+        for (let i = 0; i < tickets.length; i++) {
+            const next = stmt.waitlist.nextWaitingByEventId.get(req.apiEvent.id);
+            if (!next) break;
+            const nextEntry = rowToWaitlistEntry(next);
+            const result = await promoteWaitlistEntry(nextEntry, req.apiEvent);
+            if (result.success) {
+                promoted++;
+                logApiAudit(req, result.notified ? 'waitlist.notified' : 'waitlist.promoted', { email: nextEntry.email, source: 'registration_deleted' });
+            }
+        }
+    }
+    res.json({ deleted: tickets.length, promoted });
 });
 
 // ── The door ──────────────────────────────────────────────────────────────

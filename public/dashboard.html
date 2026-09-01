@@ -3736,9 +3736,11 @@
                     body: JSON.stringify({ registrationIds: [...checkedRegIds] })
                 });
                 if (r.ok) {
+                    const d = await r.json().catch(() => ({}));
                     checkedRegIds.clear();
                     const event = events.find(e => e.id === eventId);
                     if (event) await fetchAndRender(event);
+                    if (d.promoted) showToast(`Deleted. ${d.promoted} promoted from the waitlist.`);
                 } else {
                     showToast('Could not delete registrations.');
                 }
@@ -8571,9 +8573,11 @@
                 body: JSON.stringify({ registrationIds: [regId] })
             });
             if (r.ok) {
+                const d = await r.json().catch(() => ({}));
                 closeEditTicketModal();
                 const event = events.find(e => e.id === selectedId);
                 if (event) await fetchAndRender(event, true);
+                if (d.promoted) showToast(`Deleted. ${d.promoted} promoted from the waitlist.`);
             } else {
                 showToast('Could not delete registration.');
             }
