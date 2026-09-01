@@ -3,9 +3,42 @@
 // the web dashboard and the iOS app branch on.
 import test, { before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { startServer, TEST_PASSWORD, ADMIN_EMAIL } from './helpers/server.js';
 import { createClient } from './helpers/client.js';
 import { newUser, newAdmin, uniqueEmail } from './helpers/factories.js';
+
+// Mirrors server.js's totp() (RFC 6238, SHA1, 30s step, 6 digits) so tests
+// can compute a code for the secret /api/account/2fa/setup hands back,
+// instead of needing a mocked authenticator.
+function base32Decode(str) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    let bits = '';
+    for (const c of str.replace(/=+$/, '').toUpperCase()) {
+        const val = alphabet.indexOf(c);
+        if (val === -1) continue;
+        bits += val.toString(2).padStart(5, '0');
+    }
+    const bytes = [];
+    for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+    return Buffer.from(bytes);
+}
+function totpCode(secret, time = Date.now()) {
+    const counter = Math.floor(time / 1000 / 30);
+    const key = base32Decode(secret);
+    const buf = Buffer.alloc(8);
+    buf.writeBigUInt64BE(BigInt(counter));
+    const hmac = crypto.createHmac('sha1', key).update(buf).digest();
+    const offset = hmac[hmac.length - 1] & 0xf;
+    const code = ((hmac[offset] & 0x7f) << 24 | (hmac[offset + 1] & 0xff) << 16 | (hmac[offset + 2] & 0xff) << 8 | (hmac[offset + 3] & 0xff)) % 1_000_000;
+    return String(code).padStart(6, '0');
+}
+async function enableTotp(client) {
+    const setup = await client.post('/api/account/2fa/setup', {});
+    const enable = await client.post('/api/account/2fa/enable', { code: totpCode(setup.body.secret) });
+    assert.equal(enable.status, 200, enable.text);
+    return setup.body.secret;
+}
 
 let server;
 before(async () => { server = await startServer(); });
@@ -187,6 +220,63 @@ describe('two-factor', () => {
         const anon = createClient(server.base);
         assert.equal((await anon.get('/api/account/2fa/status')).status, 401);
         assert.equal((await anon.post('/api/account/2fa/setup', {})).status, 401);
+    });
+
+    test('logging in with 2FA enabled asks for a code instead of starting a session', async () => {
+        const { client, email, password } = await newUser(server);
+        await enableTotp(client);
+
+        const fresh = createClient(server.base);
+        const login = await fresh.post('/api/auth/login', { email, password });
+        assert.equal(login.status, 200);
+        assert.equal(login.body.needsTotp, true);
+        assert.ok(login.body.pendingToken, 'no pendingToken in the needsTotp response');
+        assert.equal((await fresh.get('/api/account/2fa/status')).status, 401, 'no session should exist yet');
+    });
+
+    test('the correct code exchanges the pendingToken for a real session', async () => {
+        const { client, email, password } = await newUser(server);
+        const secret = await enableTotp(client);
+
+        const fresh = createClient(server.base);
+        const login = await fresh.post('/api/auth/login', { email, password });
+        const verify = await fresh.post('/api/auth/login/totp-verify', { pendingToken: login.body.pendingToken, code: totpCode(secret) });
+        assert.equal(verify.status, 200, verify.text);
+        assert.equal((await fresh.get('/api/account/2fa/status')).status, 200);
+    });
+
+    test('a wrong code does not exchange the pendingToken', async () => {
+        const { client, email, password } = await newUser(server);
+        await enableTotp(client);
+
+        const fresh = createClient(server.base);
+        const login = await fresh.post('/api/auth/login', { email, password });
+        const verify = await fresh.post('/api/auth/login/totp-verify', { pendingToken: login.body.pendingToken, code: '000000' });
+        assert.equal(verify.status, 401);
+        assert.equal((await fresh.get('/api/account/2fa/status')).status, 401);
+    });
+
+    describe('TOTP_ENFORCEMENT_DISABLED override', () => {
+        let bypassServer;
+        before(async () => { bypassServer = await startServer({ env: { TOTP_ENFORCEMENT_DISABLED: '1' } }); });
+        after(async () => { await bypassServer?.stop(); });
+
+        test('logs straight in without asking for a code, and leaves the stored secret untouched', async () => {
+            const { client, email, password } = await newUser(bypassServer);
+            await enableTotp(client);
+            assert.equal((await client.get('/api/account/2fa/status')).body.enabled, true);
+
+            const fresh = createClient(bypassServer.base);
+            const login = await fresh.post('/api/auth/login', { email, password });
+            assert.equal(login.status, 200);
+            assert.equal(login.body.success, true);
+            assert.equal(login.body.needsTotp, undefined, 'should not be asked for a code while the override is on');
+
+            // The account itself was never touched — status still reports
+            // fully enabled, so turning the override back off restores 2FA
+            // immediately with nothing to redo.
+            assert.equal((await fresh.get('/api/account/2fa/status')).body.enabled, true);
+        });
     });
 });
 

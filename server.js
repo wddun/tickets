@@ -2078,6 +2078,17 @@ app.post('/api/auth/setup-admin', loginLimiter, async (req, res) => {
     res.json({ success: true, message: `Admin account created for ${adminEmail}` });
 });
 
+// Temporary operational override — set TOTP_ENFORCEMENT_DISABLED=1 in .env
+// and restart to make every login skip the 2FA step, for every account,
+// without touching a single row in the users table. totpEnabled/totpSecret/
+// backupCodes are left exactly as they are, so turning this back off (unset
+// the var, restart) restores 2FA immediately with nobody needing to redo
+// setup or re-scan a QR code. Meant for a short, deliberate window (e.g. an
+// old client build can't complete the code-entry step yet) — NOT a setting
+// to leave on, since it removes the 2FA check for every account that has it
+// turned on, not just one. Every login this actually affects is logged.
+const TOTP_ENFORCEMENT_DISABLED = process.env.TOTP_ENFORCEMENT_DISABLED === '1';
+
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
     const { email, password, rememberMe } = req.body;
     const normalizedEmail = (email || '').toLowerCase();
@@ -2103,7 +2114,9 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 
     const isAdmin = user.email === process.env.ADMIN_EMAIL;
 
-    if (user.totpEnabled) {
+    if (user.totpEnabled && TOTP_ENFORCEMENT_DISABLED) {
+        log('login', `[2fa] [BYPASS] Enforcement disabled via TOTP_ENFORCEMENT_DISABLED — email: ${normalizedEmail}  id: ${user.id}  ip: ${getIP(req)}`);
+    } else if (user.totpEnabled) {
         let deviceTrusted = false;
         const rawDeviceToken = parseCookies(req).rememberDevice;
         const verifiedToken = verifyDeviceToken(rawDeviceToken);
