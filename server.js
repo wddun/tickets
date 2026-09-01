@@ -5402,12 +5402,16 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
 
     // A deleted ticket frees its seat the same as an expired one — see
     // expireTicket() — so promote up to as many waitlist entries, per event,
-    // as tickets were freed on that event.
+    // as tickets were freed on that event. An already-expired ticket never
+    // occupied a counted seat in the first place (see eventSeatUsage /
+    // isTicketExpired), so deleting one frees nothing — counting it here
+    // would promote someone into a seat that was never actually taken,
+    // pushing the event over capacity instead of just tidying up the list.
     let promoted = 0;
     for (const eventId of deletedEventIds) {
         const event = eventsById.get(eventId);
         if (!event.waitlistEnabled) continue;
-        const freedCount = deletedTickets.filter(t => t.eventId === eventId).length;
+        const freedCount = deletedTickets.filter(t => t.eventId === eventId && !isTicketExpired(t)).length;
         for (let i = 0; i < freedCount; i++) {
             const next = stmt.waitlist.nextWaitingByEventId.get(eventId);
             if (!next) break;
@@ -9675,11 +9679,14 @@ app.delete('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), async (re
     logApiAudit(req, 'api.registration_deleted', { registrationId: req.params.id, name: tickets[0].name });
     broadcastEventCounts(req.apiEvent.id);
 
-    // Frees `tickets.length` seats — promote that many off the waitlist, same
-    // as expireTicket() does for a single expired ticket.
+    // Frees a seat per non-expired ticket — promote that many off the
+    // waitlist, same as expireTicket() does for a single expired ticket.
+    // An already-expired ticket never occupied a counted seat (see
+    // eventSeatUsage / isTicketExpired), so it doesn't free one either.
+    const freedCount = tickets.filter(t => !isTicketExpired(t)).length;
     let promoted = 0;
     if (req.apiEvent.waitlistEnabled) {
-        for (let i = 0; i < tickets.length; i++) {
+        for (let i = 0; i < freedCount; i++) {
             const next = stmt.waitlist.nextWaitingByEventId.get(req.apiEvent.id);
             if (!next) break;
             const nextEntry = rowToWaitlistEntry(next);

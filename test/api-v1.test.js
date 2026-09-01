@@ -333,6 +333,26 @@ describe('registrations through the API', () => {
         assert.ok((await listTickets(owner.client, event.id)).some(t => t.email === waiterEmail));
     });
 
+    test('deleting an already-expired registration promotes nobody — it never counted toward capacity', async () => {
+        const { event, api } = await eventWithKey(['checkin', 'manage_tickets'], { capacity: 1, waitlist: true });
+        const made = await api.post('/api/v1/registrations', { name: 'Original Seat', email: 'api-expire-original@test.local' });
+        const firstWaiterEmail = 'api-expire-first@test.local';
+        await createClient(server.base).post(`/api/event/${event.id}/waitlist`, { name: 'First Waiter', email: firstWaiterEmail });
+
+        const expireResult = await owner.client.post(`/api/ticket/${made.body.tickets[0].id}/expire`);
+        assert.equal(expireResult.body.promoted, firstWaiterEmail);
+
+        const secondWaiterEmail = 'api-expire-second@test.local';
+        await createClient(server.base).post(`/api/event/${event.id}/waitlist`, { name: 'Second Waiter', email: secondWaiterEmail });
+
+        const gone = await api.del(`/api/v1/registrations/${made.body.id}`);
+        assert.equal(gone.status, 200, gone.text);
+        assert.equal(gone.body.promoted, 0, 'an expired ticket frees no seat, so deleting it should promote nobody');
+
+        const waitlist = (await owner.client.get(`/api/event/${event.id}/waitlist`)).body;
+        assert.equal(waitlist.find(w => w.email === secondWaiterEmail).status, 'waiting');
+    });
+
     test('filters by check-in state and by email', async () => {
         const { api } = await eventWithKey(['checkin', 'manage_tickets']);
         const a = await api.post('/api/v1/registrations', { name: 'Arrived', email: 'arrived@test.local' });

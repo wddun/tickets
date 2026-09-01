@@ -316,6 +316,43 @@ describe('auto-promote on registration delete', () => {
         assert.equal(r.status, 200);
         assert.equal(r.body.promoted, 0);
     });
+
+    test('deleting an already-expired ticket frees nothing — it never counted toward capacity', async () => {
+        // Reproduces a production incident: an expired-but-never-deleted
+        // ticket doesn't count toward capacity (see eventSeatUsage), but
+        // deleting it was treated as freeing a seat anyway — promoting
+        // someone with no seat actually freed, and pushing the event over
+        // capacity.
+        const ev = await createEvent(owner.client, { publicRegistration: true, capacity: 1, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Original Seat' });
+        const firstWaiterEmail = uniqueEmail('expired-delete-first');
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'First Waiter', email: firstWaiterEmail });
+
+        const [original] = await listTickets(owner.client, ev.id);
+        const expireResult = await owner.client.post(`/api/ticket/${original.id}/expire`);
+        assert.equal(expireResult.body.promoted, firstWaiterEmail, 'expiring should backfill the seat from the waitlist');
+
+        // The event is full again (firstWaiter's new ticket), so a second
+        // waiter correctly waits rather than being seated.
+        const secondWaiterEmail = uniqueEmail('expired-delete-second');
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Second Waiter', email: secondWaiterEmail });
+
+        // Deleting the now-expired original ticket should promote nobody —
+        // it was already excluded from capacity, so there's no seat to hand
+        // out. Confirmed via the registration's own id, not the original
+        // ticket id — this file's Attendees list groups by registration.
+        const r = await owner.client.del('/api/registrations/bulk', { registrationIds: [original.registrationId] });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.promoted, 0, 'an expired ticket frees no seat, so deleting it should promote nobody');
+
+        const waitlist = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body;
+        assert.equal(waitlist.find(w => w.email === secondWaiterEmail).status, 'waiting');
+
+        const activeEmails = (await listTickets(owner.client, ev.id))
+            .filter(t => !t.expired)
+            .map(t => t.email);
+        assert.deepEqual(activeEmails, [firstWaiterEmail], 'capacity is 1 — only the backfilled ticket should be active');
+    });
 });
 
 describe('live waitlist status stream', () => {
