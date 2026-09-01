@@ -65,6 +65,9 @@ enum APIError: Error, LocalizedError {
     case serverMessage(String)
     case decodingError
     case unauthorized
+    /// Email/password were correct but the account has 2FA enabled — carries
+    /// the short-lived token the second step (code entry) exchanges for a session.
+    case needsTotp(pendingToken: String)
     case unknown
 
     var errorDescription: String? {
@@ -74,6 +77,7 @@ enum APIError: Error, LocalizedError {
         case .serverMessage(let message): return message
         case .decodingError: return "Failed to decode response"
         case .unauthorized: return "Not logged in"
+        case .needsTotp: return "Two-factor authentication code required"
         case .unknown: return "Unknown error"
         }
     }
@@ -146,6 +150,8 @@ class APIService: ObservableObject {
         saveCredentials(email: email, password: password)
     }
 
+    private struct NeedsTotpResponse: Decodable { let needsTotp: Bool?; let pendingToken: String? }
+
     private func performLogin(email: String, password: String) async throws {
         guard let url = URL(string: "\(baseURL)/api/auth/login") else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
@@ -163,9 +169,43 @@ class APIService: ObservableObject {
         if http.statusCode == 401 { throw APIError.unauthorized }
         if http.statusCode != 200 { throw apiError(from: data, status: http.statusCode) }
 
+        // A 200 here doesn't always mean a session was started — an account
+        // with 2FA enabled (and no trusted-device cookie for this install)
+        // gets a pendingToken instead, and needs completeTotpLogin() to
+        // actually finish signing in.
+        if let needsTotp = try? JSONDecoder().decode(NeedsTotpResponse.self, from: data),
+           needsTotp.needsTotp == true, let pendingToken = needsTotp.pendingToken {
+            throw APIError.needsTotp(pendingToken: pendingToken)
+        }
+
         let user = try await getCurrentUser()
         currentUser = user
         isAuthenticated = true
+    }
+
+    private struct TotpVerifyBody: Encodable { let pendingToken: String; let code: String; let remember: Bool }
+
+    /// Second step of a 2FA login: exchanges the pendingToken from login()'s
+    /// .needsTotp error plus the code the person just typed for a real
+    /// session. `remember` marks this device trusted for 30 days (see
+    /// server.js's REMEMBER_DEVICE_MAX_AGE_MS) via a cookie in the app's own
+    /// URLSession cookie storage, so this prompt is normally only ever seen
+    /// once per install, not on every relaunch.
+    func completeTotpLogin(email: String, password: String, pendingToken: String, code: String, remember: Bool = true) async throws {
+        guard let url = URL(string: "\(baseURL)/api/auth/login/totp-verify") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(TotpVerifyBody(pendingToken: pendingToken, code: code, remember: remember))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        if http.statusCode != 200 { throw apiError(from: data, status: http.statusCode) }
+
+        let user = try await getCurrentUser()
+        currentUser = user
+        isAuthenticated = true
+        saveCredentials(email: email, password: password)
     }
 
     func getCurrentUser() async throws -> AuthUser {

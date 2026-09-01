@@ -155,6 +155,7 @@ struct LoginView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showScanLinkSheet = false
+    @State private var pendingTotp: IdentifiableString?
 
     var body: some View {
         if #available(iOS 16, *) {
@@ -246,6 +247,11 @@ struct LoginView: View {
                 switchToScanner()
             }
         }
+        .sheet(item: $pendingTotp) { token in
+            TotpEntryView(email: email, password: password, pendingToken: token.value) {
+                pendingTotp = nil
+            }
+        }
     }
 
     private func login() {
@@ -256,10 +262,122 @@ struct LoginView: View {
                 try await api.login(email: email, password: password)
             } catch APIError.unauthorized {
                 errorMessage = "Incorrect email or password."
+            } catch APIError.needsTotp(let pendingToken) {
+                pendingTotp = IdentifiableString(value: pendingToken)
             } catch {
                 errorMessage = error.localizedDescription
             }
             isLoading = false
+        }
+    }
+}
+
+/// SwiftUI's `.sheet(item:)` needs an `Identifiable` — this wraps the plain
+/// `String` pendingToken so LoginView can drive the TOTP sheet from one
+/// `Optional` instead of a separate Bool + token pair.
+private struct IdentifiableString: Identifiable {
+    let value: String
+    var id: String { value }
+}
+
+// MARK: - TOTP Entry (2FA login, step two)
+
+/// Shown after login() reports the account has 2FA enabled. Takes the
+/// 6-digit authenticator code (or a one-time backup code) and exchanges it,
+/// together with the pendingToken from step one, for a real session.
+struct TotpEntryView: View {
+    let email: String
+    let password: String
+    let pendingToken: String
+    var onDone: () -> Void
+
+    @StateObject private var api = APIService.shared
+    @State private var code = ""
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        if #available(iOS 16, *) {
+            NavigationStack { content }
+        } else {
+            NavigationView { content }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        VStack(spacing: 20) {
+            Spacer().frame(height: 20)
+
+            Image(systemName: "lock.shield")
+                .font(.system(size: 44))
+                .foregroundStyle(.secondary)
+
+            Text("Two-Factor Authentication")
+                .font(.title2.bold())
+
+            Text("Enter the 6-digit code from your authenticator app, or one of your backup codes.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            TextField("Code", text: $code)
+                .keyboardType(.asciiCapable)
+                .autocapitalization(.allCharacters)
+                .disableAutocorrection(true)
+                .multilineTextAlignment(.center)
+                .font(.title3.monospaced())
+                .padding()
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal)
+
+            if let error = errorMessage {
+                Text(error)
+                    .foregroundStyle(.red)
+                    .font(.footnote)
+            }
+
+            Button(action: submit) {
+                Group {
+                    if isLoading {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Verify").font(.headline)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.accentColor)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .disabled(isLoading || code.trimmingCharacters(in: .whitespaces).isEmpty)
+            .padding(.horizontal)
+
+            Spacer()
+        }
+        .navigationTitle("Verify It's You")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { onDone() }
+            }
+        }
+    }
+
+    private func submit() {
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                try await api.completeTotpLogin(email: email, password: password, pendingToken: pendingToken, code: code)
+                onDone()
+            } catch {
+                errorMessage = error.localizedDescription
+                isLoading = false
+            }
         }
     }
 }
