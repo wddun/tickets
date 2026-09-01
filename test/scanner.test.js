@@ -24,6 +24,16 @@ async function eventWithTicket(fields = {}, name = 'Scan Me') {
     return { ev, ticket };
 }
 
+// The ticket-expiry cutoff only actually expires anything once the event is
+// full and someone is waiting for a seat — see ticketsEligibleForExpiry() in
+// server.js. Tests exercising a real expiry build the event with capacity 1
+// (the single ticket eventWithTicket adds fills it) and join a waiter.
+async function eventFullWithWaiter(name) {
+    const { ev, ticket } = await eventWithTicket({ capacity: 1, waitlist: true }, name);
+    await anon().post(`/api/event/${ev.id}/waitlist`, { name: 'Waiter', email: `waiter-${ev.id}@example.com` });
+    return { ev, ticket };
+}
+
 describe('validating a ticket', () => {
     test('a first scan checks the person in', async () => {
         const { ev, ticket } = await eventWithTicket({}, 'Ada Lovelace');
@@ -80,7 +90,7 @@ describe('validating a ticket', () => {
 
 describe('ticket expiry cutoff', () => {
     test('a not-yet-used ticket refuses to scan once the cutoff has passed', async () => {
-        const { ev, ticket } = await eventWithTicket({}, 'Cutoff Guest');
+        const { ev, ticket } = await eventFullWithWaiter('Cutoff Guest');
         await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
 
         const r = await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
@@ -110,7 +120,7 @@ describe('ticket expiry cutoff', () => {
     });
 
     test('GET tickets exposes expired for not-yet-used tickets past the cutoff', async () => {
-        const { ev } = await eventWithTicket({}, 'Listed Guest');
+        const { ev } = await eventFullWithWaiter('Listed Guest');
         await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
         const [ticket] = await listTickets(owner.client, ev.id);
         assert.equal(ticket.expired, true);
@@ -120,7 +130,7 @@ describe('ticket expiry cutoff', () => {
         // Expiry is a deliberate, one-way action once it happens (it can
         // hand the freed seat to someone on the waitlist) — changing the
         // event's cutoff afterward must never silently undo it.
-        const { ev, ticket } = await eventWithTicket({}, 'Already Expired');
+        const { ev, ticket } = await eventFullWithWaiter('Already Expired');
         await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
         await setTicketExpiresAt(owner.client, ev.id, null);
 

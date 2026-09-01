@@ -4261,7 +4261,7 @@
                     <label for="editEventTicketExpiresAt" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Tickets Expire At <span style="font-weight:400;color:var(--text-muted);">(optional)</span>${helpIcon('general.ticketExpiresAt')}</label>
                     <input type="datetime-local" id="editEventTicketExpiresAt" value="${_toZonedDT(ev.ticketExpiresAt, ev.timezone || browserTimezone())}"
                         style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
-                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Any ticket not checked in by this time stops scanning and is marked expired. Its Apple Wallet pass is voided, the same as a deleted ticket. Checked-in tickets are not affected. Leave blank if tickets should never expire.</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Any ticket not checked in by this time stops scanning and is marked expired. Its Apple Wallet pass is voided, the same as a deleted ticket. Checked-in tickets are not affected. Leave blank if tickets should never expire. Only takes effect while the event is full and the waitlist has people waiting &mdash; it exists to free seats for them, not to remove tickets nobody needs.</div>
                 </div>
                 <div style="margin-bottom:20px;">
                     <label for="editEventTicketExpiryLimit" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Limit How Many Expire <span style="font-weight:400;color:var(--text-muted);">(optional)</span>${helpIcon('general.ticketExpiryLimit')}</label>

@@ -125,9 +125,11 @@ window.HELP_CONTENT = {
         title: 'Tickets Expire At',
         summary: 'A cutoff after which any not-yet-checked-in ticket stops scanning and is marked expired — its Apple Wallet pass is voided, the same as a deleted ticket.',
         details: [
+            `Only does anything if the event actually needs it: the waitlist must be enabled, at least one person must still be waiting, and the event must be full. This exists purely to free seats for a waitlist, so it never expires a ticket nobody's waiting for.`,
+            `As the waitlist empties out (everyone still waiting gets promoted), the cutoff naturally stops expiring further tickets — there's nobody left for the freed seat to go to. Adding more people to the waitlist lets it resume.`,
             `Never retroactive: once someone is checked in, this cutoff can never apply to them, no matter when it's set.`,
             `A cutoff that's already in the past when you save it takes effect immediately, in the same request — you don't have to wait for the periodic sweep (which otherwise re-checks every few minutes).`,
-            `If the event has a waitlist enabled, every ticket this expires frees a seat and immediately offers it to whoever's been waiting longest.`,
+            `Every ticket this expires frees a seat and immediately offers it to whoever's been waiting longest.`,
             `Clearing this field does <strong>not</strong> un-expire tickets that already expired under a previous cutoff — bring one back individually with its own "Un-expire" action.`,
             `Leaving this blank means tickets never expire on their own.`,
             `See <strong>Limit How Many Expire</strong> below for narrowing this from "everyone" to a specific count.`,

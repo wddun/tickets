@@ -5537,6 +5537,16 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 // everyone eligible — the original, simplest behavior, unchanged for every
 // event that predates this setting.
 //
+// The whole mechanism exists to free seats for a waitlist, so it only ever
+// does anything when that would actually help someone: the event needs a
+// waitlist enabled, with at least one person still in 'waiting' status, and
+// the event needs to actually be full (eventSeatUsage().soldOut — an event
+// with no capacity set can never be "full", so it never applies here
+// either). Re-checked fresh on every call, same as the limit budget below,
+// so as the waitlist empties out (everyone still waiting gets promoted) the
+// cutoff naturally stops expiring further tickets — there's nobody left for
+// the freed seat to go to.
+//
 // With a limit set, it's a running cap: "this event should never have more
 // than N tickets expired, total" — not "expire N more every time this
 // runs". Re-deriving `remaining` from countExpiredByEventId on every call is
@@ -5554,6 +5564,11 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 // actual count expired can run slightly over the limit to keep a
 // registration intact, exactly like no-show-release's own count param.
 function ticketsEligibleForExpiry(event) {
+    if (!event.waitlistEnabled) return [];
+    const waitingCount = stmt.waitlist.countWaitingByEventId.get(event.id)?.cnt ?? 0;
+    if (waitingCount === 0) return [];
+    if (!eventSeatUsage(event.id).soldOut) return [];
+
     const active = stmt.tickets.activeUnexpiredByEventId.all(event.id).map(rowToTicket);
     if (!event.ticketExpiryLimit) return active;
 
