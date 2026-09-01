@@ -112,6 +112,45 @@
         body.themed .btn-outline { background: transparent; color: var(--rt-text); border: 1.5px solid var(--rt-border); }
         body.themed .nav a { color: var(--rt-accent); }
 
+        /* A theme's palette (above) is the organiser's fixed light-mode
+           look — applyTheme() sets it from the event's own config, with no
+           idea what the viewer's dark/light toggle is set to. Without this,
+           switching to dark mode barely changed anything on a themed page:
+           the body and the status box both stayed the theme's light colors,
+           and the only thing that actually went dark was the thin sliver of
+           .card visible around the status box, which body.themed never
+           touched in the first place. This forces the neutral surfaces back
+           to the site's own dark tokens, same as the untenanted page above
+           already gets, while leaving the organiser's brand accent (badges,
+           the claim button, the banner photo/gradient) alone — that's their
+           actual branding, not a neutral surface, so it isn't something
+           dark mode should be overriding. */
+        [data-theme="dark"] body.themed { background: var(--bg) !important; color: var(--text) !important; }
+        [data-theme="dark"] body.themed .status-box { background: var(--card) !important; border-color: var(--border) !important; color: var(--text) !important; }
+        [data-theme="dark"] body.themed .status-title { color: var(--text) !important; }
+        [data-theme="dark"] body.themed .status-sub { color: var(--text-muted) !important; }
+        [data-theme="dark"] body.themed .btn-outline { background: transparent !important; color: var(--text) !important; border-color: var(--border) !important; }
+        /* Not every theme's accent is legible as text on a dark background
+           (professional's navy accent all but disappears against the dark
+           bg it would then sit on) — revert to the site's own dark-safe
+           link color rather than trying to special-case each preset. */
+        [data-theme="dark"] body.themed .nav a { color: var(--red-text) !important; }
+
+        /* The waiting/left icons are the only .status-icon uses that draw in
+           the plain neutral text color (success/danger icons keep their own
+           semantic color regardless of theme) — on a themed page they need
+           to follow the theme's text color instead, or an organiser's dark
+           theme (e.g. Midnight) leaves a dark-on-dark icon invisible while
+           the viewer is in light site mode. Same reasoning as everything
+           above then forces it back to the site's own dark text once dark
+           mode is on, rather than the theme's original (possibly light)
+           value — --rt-text itself never changes with the toggle, only
+           what consumes it does. */
+        body.themed #waitingView .status-icon,
+        body.themed #leftView .status-icon { stroke: var(--rt-text); }
+        [data-theme="dark"] body.themed #waitingView .status-icon,
+        [data-theme="dark"] body.themed #leftView .status-icon { stroke: var(--text) !important; }
+
         .event-banner {
             display: none; width: 100%; height: var(--rt-header-h);
             background: var(--rt-header-bg, var(--rt-accent));
