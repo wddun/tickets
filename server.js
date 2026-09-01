@@ -5566,19 +5566,20 @@ app.put('/api/ticket/:id', requireAuth, async (req, res) => {
 // Which not-yet-used, not-yet-expired tickets the ticketExpiresAt cutoff
 // actually expires, once it's reached — called from both trigger points
 // (the immediate-expire-on-save branch of PUT /api/event/:id, and the
-// periodic sweep below). With no events.ticketExpiryLimit set this is just
-// everyone eligible — the original, simplest behavior, unchanged for every
-// event that predates this setting.
+// periodic sweep below).
 //
 // The whole mechanism exists to free seats for a waitlist, so it only ever
 // does anything when that would actually help someone: the event needs a
 // waitlist enabled, with at least one person still in 'waiting' status, and
 // the event needs to actually be full (eventSeatUsage().soldOut — an event
 // with no capacity set can never be "full", so it never applies here
-// either). Re-checked fresh on every call, same as the limit budget below,
-// so as the waitlist empties out (everyone still waiting gets promoted) the
-// cutoff naturally stops expiring further tickets — there's nobody left for
-// the freed seat to go to.
+// either). With no events.ticketExpiryLimit set, the budget is however many
+// people are actually waiting right now — not "everyone eligible" — so a
+// stale cutoff left over from earlier testing can't expire more tickets
+// than there are waiters to hand them to. Both budgets are re-checked fresh
+// on every call, so as the waitlist empties out (everyone still waiting
+// gets promoted) the cutoff naturally stops expiring further tickets —
+// there's nobody left for the freed seat to go to.
 //
 // With a limit set, it's a running cap: "this event should never have more
 // than N tickets expired, total" — not "expire N more every time this
@@ -5603,10 +5604,14 @@ function ticketsEligibleForExpiry(event) {
     if (!eventSeatUsage(event.id).soldOut) return [];
 
     const active = stmt.tickets.activeUnexpiredByEventId.all(event.id).map(rowToTicket);
-    if (!event.ticketExpiryLimit) return active;
 
-    const alreadyExpired = stmt.tickets.countExpiredByEventId.get(event.id)?.cnt ?? 0;
-    const remaining = Math.max(0, event.ticketExpiryLimit - alreadyExpired);
+    // With no explicit limit, the budget is however many people are actually
+    // waiting — not "everyone eligible". Expiring past that cancels a ticket
+    // with nobody to hand the seat to, which is exactly backwards for a
+    // mechanism that exists purely to free seats for a waitlist.
+    const remaining = event.ticketExpiryLimit
+        ? Math.max(0, event.ticketExpiryLimit - (stmt.tickets.countExpiredByEventId.get(event.id)?.cnt ?? 0))
+        : waitingCount;
     if (remaining <= 0) return [];
 
     const byRegistration = new Map();

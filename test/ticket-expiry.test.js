@@ -71,23 +71,24 @@ async function addWaiter(eventId, tag) {
     return email;
 }
 
-describe('no limit set — the original all-or-nothing behavior is unchanged', () => {
-    test('a past cutoff on save expires every not-checked-in ticket', async () => {
+describe('no limit set — capped by how many are actually waiting', () => {
+    test('a past cutoff on save expires only as many tickets as there are waiters, oldest first', async () => {
         const ev = await createEvent(owner.client, { capacity: 3, waitlist: true });
         const emails = [uniqueEmail('all-a'), uniqueEmail('all-b'), uniqueEmail('all-c')];
-        await addTicket(owner.client, ev.id, { name: 'A', email: emails[0] });
-        await addTicket(owner.client, ev.id, { name: 'B', email: emails[1] });
-        await addTicket(owner.client, ev.id, { name: 'C', email: emails[2] });
+        await addSpacedRegistration(owner.client, ev.id, { name: 'A', email: emails[0] });
+        await addSpacedRegistration(owner.client, ev.id, { name: 'B', email: emails[1] });
+        await addSpacedRegistration(owner.client, ev.id, { name: 'C', email: emails[2] });
         await addWaiter(ev.id, 'all-waiter');
 
         await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
 
-        // The one seat this frees is immediately handed to the waiter, so
-        // the event also gains a fresh, unexpired ticket of its own — assert
-        // on the three original registrations specifically, not the total.
+        // Only one waiter, so only the single oldest registration should
+        // expire — expiring the other two would just cancel a ticket with
+        // nobody to hand the seat to.
         const tickets = await listTickets(owner.client, ev.id);
-        const original = emails.map(email => tickets.find(t => t.email === email));
-        assert.ok(original.every(t => t?.expiredAt), 'every original ticket should expire with no limit configured');
+        assert.ok(tickets.find(t => t.email === emails[0]).expiredAt, 'the oldest registration should expire');
+        assert.equal(tickets.find(t => t.email === emails[1]).expiredAt, null, 'no waiter left to receive this seat');
+        assert.equal(tickets.find(t => t.email === emails[2]).expiredAt, null, 'no waiter left to receive this seat');
     });
 
     test('a freshly created event has no limit and defaults to oldest order', async () => {
@@ -232,6 +233,33 @@ describe('waitlist integration', () => {
         const waitlist = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body;
         assert.equal(waitlist.find(w => w.email === waiterA).status, 'converted');
         assert.equal(waitlist.find(w => w.email === waiterB).status, 'converted');
+    });
+
+    test('a stale past cutoff caught by the periodic sweep still respects the waitingCount budget', async () => {
+        // Reproduces a production incident: a ticketExpiresAt left over from
+        // earlier testing was already in the past by the time the event next
+        // became full with a waitlist, so the periodic sweep (not a fresh
+        // save) is what caught it — and with far more eligible tickets than
+        // waiters, it expired every one of them instead of just the one
+        // seat there was actually a waiter for.
+        const ev = await createEvent(owner.client, { capacity: 3, waitlist: true });
+        const emails = [uniqueEmail('stale-a'), uniqueEmail('stale-b'), uniqueEmail('stale-c')];
+        await addSpacedRegistration(owner.client, ev.id, { name: 'A', email: emails[0] });
+        await addSpacedRegistration(owner.client, ev.id, { name: 'B', email: emails[1] });
+        await addSpacedRegistration(owner.client, ev.id, { name: 'C', email: emails[2] });
+        await addWaiter(ev.id, 'stale-waiter');
+
+        // Future cutoff so no immediate-expire-on-save branch fires — only
+        // the periodic sweep (TICKET_EXPIRY_SWEEP_MS=300 for this file)
+        // should catch it once it lapses.
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() + 150).toISOString());
+        await waitFor(async () => (await ticketFor(owner.client, ev.id, emails[0]))?.expiredAt);
+
+        await sleep(500);
+        const tickets = await listTickets(owner.client, ev.id);
+        assert.ok(tickets.find(t => t.email === emails[0]).expiredAt);
+        assert.equal(tickets.find(t => t.email === emails[1]).expiredAt, null, 'no waiter left to receive this seat');
+        assert.equal(tickets.find(t => t.email === emails[2]).expiredAt, null, 'no waiter left to receive this seat');
     });
 });
 
@@ -384,20 +412,21 @@ describe('scope validation', () => {
         assert.equal((await owner.client.get(`/api/event/${ev.id}`)).body.ticketExpiryOrder, 'oldest');
     });
 
-    test('clearing the limit reverts to expiring everyone', async () => {
+    test('clearing the limit reverts to the waitingCount budget instead of the old explicit one', async () => {
         const ev = await createEvent(owner.client, { capacity: 2, waitlist: true });
         const emails = [uniqueEmail('clear-a'), uniqueEmail('clear-b')];
         await addTicket(owner.client, ev.id, { name: 'A', email: emails[0] });
         await addTicket(owner.client, ev.id, { name: 'B', email: emails[1] });
-        await addWaiter(ev.id, 'clear-waiter');
+        await addWaiter(ev.id, 'clear-waiter-1');
+        await addWaiter(ev.id, 'clear-waiter-2');
 
         await setTicketExpiryScope(owner.client, ev.id, { limit: 1 });
         await setTicketExpiryScope(owner.client, ev.id, { limit: null });
         assert.equal((await owner.client.get(`/api/event/${ev.id}`)).body.ticketExpiryLimit, null);
 
         await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
-        // The freed seat goes straight to the waiter, so a fresh unexpired
-        // ticket also exists now — check the two originals specifically.
+        // Two waiters now, not one — both originals should expire, which
+        // only happens if the limit:1 budget from earlier didn't stick.
         const tickets = await listTickets(owner.client, ev.id);
         const original = emails.map(email => tickets.find(t => t.email === email));
         assert.ok(original.every(t => t?.expiredAt));
