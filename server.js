@@ -3616,6 +3616,7 @@ async function joinWaitlist(event, name, email, sendEmailFlag = true) {
     }
 
     broadcastWaitlistChanged(event.id);
+    broadcastEventCounts(event.id);
     return { waitlisted: true, position, waitlistId: id };
 }
 
@@ -3671,6 +3672,7 @@ app.post('/api/waitlist/entry/:id/leave', publicWriteLimiter, async (req, res) =
     stmt.waitlist.deleteById.run(entry.id);
     logAudit(req, { eventId: entry.eventId, action: 'waitlist.left', details: { email: entry.email } });
     broadcastWaitlistChanged(entry.eventId);
+    broadcastEventCounts(entry.eventId);
 
     if (claimActive && event && event.waitlistEnabled) {
         const next = stmt.waitlist.nextWaitingByEventId.get(entry.eventId);
@@ -3867,6 +3869,7 @@ async function promoteWaitlistEntry(entry, event) {
             }).catch(() => {});
         }
         broadcastWaitlistChanged(event.id);
+        broadcastEventCounts(event.id);
         return { success: true, notified: true };
     }
 
@@ -3874,6 +3877,7 @@ async function promoteWaitlistEntry(entry, event) {
     if (!issued) return { success: false, error: 'Failed to issue ticket' };
     stmt.waitlist.setStatus.run('converted', entry.id);
     broadcastWaitlistChanged(event.id);
+    broadcastEventCounts(event.id);
     return { success: true, ticket: issued.ticket };
 }
 
@@ -3904,6 +3908,7 @@ app.delete('/api/waitlist/:id', requireAuth, (req, res) => {
     stmt.waitlist.deleteById.run(req.params.id);
     logAudit(req, { eventId: entry.eventId, action: 'waitlist.removed', details: { email: entry.email } });
     broadcastWaitlistChanged(entry.eventId);
+    broadcastEventCounts(entry.eventId);
     res.json({ success: true });
 });
 
@@ -3927,7 +3932,7 @@ app.post('/api/event/:id/waitlist/bulk-remove', requireAuth, (req, res) => {
         removed++;
         logAudit(req, { eventId: event.id, action: 'waitlist.removed', details: { email: entry.email } });
     }
-    if (removed) broadcastWaitlistChanged(event.id);
+    if (removed) { broadcastWaitlistChanged(event.id); broadcastEventCounts(event.id); }
     res.json({ success: true, removed });
 });
 
@@ -3996,6 +4001,7 @@ app.post('/api/event/:id/no-show-release', requireAuth, async (req, res) => {
     del();
     voidWalletTickets(toRelease, [event]);
     logAudit(req, { eventId: event.id, action: 'waitlist.noShowReleased', details: { count: toRelease.length } });
+    broadcastEventCounts(event.id);
 
     const promotedEmails = [];
     for (let i = 0; i < toRelease.length; i++) {
@@ -5391,6 +5397,7 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
     voidWalletTickets(deletedTickets, [...eventsById.values()]);
     for (const eventId of deletedEventIds) {
         logAudit(req, { eventId, action: 'registrations.deleted', details: { count: allowedRegistrationIds.size } });
+        broadcastEventCounts(eventId);
     }
 
     // A deleted ticket frees its seat the same as an expired one — see
@@ -5648,6 +5655,7 @@ async function expireTicket(ticket, event, req) {
     ticket.updated_at = now;
     logAudit(req, { eventId: event.id, action: 'ticket.expired', details: { ticketId: ticket.id, name: ticket.name, email: ticket.email } });
     pushWalletIfChanged([ticket], event).catch(() => {});
+    broadcastEventCounts(event.id);
 
     if (!event.waitlistEnabled) return { promoted: null };
     const next = stmt.waitlist.nextWaitingByEventId.get(event.id);
@@ -5695,6 +5703,7 @@ app.post('/api/ticket/:id/unexpire', requireAuth, (req, res) => {
     ticket.updated_at = now;
     logAudit(req, { eventId: event.id, action: 'ticket.unexpired', details: { ticketId: ticket.id, name: ticket.name, email: ticket.email } });
     pushWalletIfChanged([ticket], event).catch(() => {});
+    broadcastEventCounts(event.id);
     res.json({ success: true });
 });
 
@@ -8839,6 +8848,24 @@ function broadcastToMonitors(eventId, payload) {
     log('monitor-broadcast', `[${payload.type}] event=${eventId} sent=${sent}/${eligible} (${monitorClients.size} total clients)`);
 }
 
+// Pushes a fresh snapshot of the dashboard's headline numbers — valid
+// tickets, checked in, expired, waiting — to every monitor client watching
+// this event, so the stat row updates live wherever it's open instead of
+// only on the next manual refresh. Called from every mutation that can
+// change one of those four counts (expire/unexpire, waitlist join/leave/
+// promote, registration delete). Recomputed from scratch each time rather
+// than incremented, since it can fire from several independent call sites
+// in the same request (e.g. a delete that also triggers a promotion) —
+// a snapshot can't drift out of sync the way a running tally could.
+function broadcastEventCounts(eventId) {
+    const tickets = stmt.tickets.byEventId.all(eventId).map(rowToTicket);
+    const total = tickets.filter(t => t.used_at || !isTicketExpired(t)).length;
+    const scanned = tickets.filter(t => t.used_at).length;
+    const expired = tickets.filter(t => isTicketExpired(t)).length;
+    const waiting = stmt.waitlist.countWaitingByEventId.get(eventId)?.cnt ?? 0;
+    broadcastToMonitors(eventId, { type: 'counts_update', eventId, total, scanned, expired, waiting });
+}
+
 function getClientIP(req) {
     return (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
 }
@@ -9646,6 +9673,7 @@ app.delete('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), async (re
     voidWalletTickets(tickets, req.apiEvent);
     ticketStatusCache.clear();
     logApiAudit(req, 'api.registration_deleted', { registrationId: req.params.id, name: tickets[0].name });
+    broadcastEventCounts(req.apiEvent.id);
 
     // Frees `tickets.length` seats — promote that many off the waitlist, same
     // as expireTicket() does for a single expired ticket.

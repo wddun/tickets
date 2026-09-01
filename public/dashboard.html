@@ -3011,6 +3011,8 @@
                     const msg = JSON.parse(e.data);
                     if (msg.type === 'ticket_scan') {
                         handleLiveTicketScan(msg);
+                    } else if (msg.type === 'counts_update') {
+                        handleLiveCountsUpdate(msg);
                     } else if (msg.type === 'scanner_update' && msg.scanner?.lastResult) {
                         // Use scanner_update as a backup source of truth for counts
                         const lr = msg.scanner.lastResult;
@@ -3138,6 +3140,45 @@
             row.addEventListener('animationend', () => {
                 row.classList.remove('row-flash-in', 'row-flash-out', 'row-flash-dup', 'row-flash-bad');
             }, { once: true });
+        }
+
+        // Patches the stat row from a server-computed snapshot (see
+        // broadcastEventCounts in server.js) — covers expire/unexpire,
+        // registration delete, and every waitlist join/leave/promote, none
+        // of which ticket_scan's per-scan handler above knows about. Doesn't
+        // touch individual attendee rows (expired/waitlist state per row) —
+        // those catch up on the next 15s poll or the next action taken in
+        // this tab.
+        function handleLiveCountsUpdate(msg) {
+            const { eventId, total, scanned, expired, waiting } = msg;
+
+            const evEntry = events.find(e => e.id === eventId);
+            if (evEntry) {
+                evEntry._counts = { ...evEntry._counts, total, scanned, waiting };
+                renderSidebar();
+            }
+
+            if (!selectedId || eventId !== selectedId) return;
+
+            const pct = total ? Math.round(scanned / total * 100) : 0;
+            const totalEl    = document.getElementById('liveStatTotal');
+            const fullPctEl  = document.getElementById('liveStatFullPct');
+            const scannedEl  = document.getElementById('liveStatScanned');
+            const pendingEl  = document.getElementById('liveStatPending');
+            const pctEl      = document.getElementById('liveStatPct');
+            const barEl      = document.getElementById('liveProgressBar');
+            const waitingEl  = document.getElementById('liveStatWaiting');
+            const expiredEl  = document.getElementById('liveStatExpired');
+            const expiredBox = document.getElementById('expiredStatBox');
+            if (totalEl) totalEl.textContent = total;
+            if (fullPctEl && evEntry?.capacity) fullPctEl.textContent = Math.round(total / evEntry.capacity * 100);
+            if (scannedEl) scannedEl.textContent = scanned;
+            if (pendingEl) pendingEl.textContent = total - scanned;
+            if (pctEl) pctEl.textContent = `${pct}% checked in`;
+            if (barEl) barEl.style.width = `${pct}%`;
+            if (waitingEl) waitingEl.textContent = waiting;
+            if (expiredEl) expiredEl.textContent = expired;
+            if (expiredBox) expiredBox.style.display = expired > 0 ? '' : 'none';
         }
 
         async function loadEvents() {
@@ -3347,6 +3388,7 @@
             const total = activeTickets.length;
             const scanned = activeTickets.filter(t => t.used_at).length;
             const pct = total ? Math.round((scanned / total) * 100) : 0;
+            const expiredCount = tickets.filter(t => !t.used_at && t.expired).length;
             const grouped = groupTickets(tickets);
 
             const el = document.getElementById('eventDetail');
@@ -3397,27 +3439,31 @@
         <div id="scanAccessCardSlot"></div>
 
         <div class="stats-row">
-            <div class="stat-box${activeStatFilter === 'all' ? ' stat-active' : ''}" onclick="setStatFilter('all')">
-                <div class="stat-num">${total}${event.capacity ? `<span style="font-size:13px;font-weight:500;color:var(--text-muted);"> / ${event.capacity}</span>` : ''}</div>
-                <div class="stat-label">Valid Tickets${event.capacity ? ` · ${Math.round(total/event.capacity*100)}% full` : ''}</div>
+            <div class="stat-box${activeStatFilter === 'all' ? ' stat-active' : ''}" data-filter="all" onclick="setStatFilter('all')">
+                <div class="stat-num"><span id="liveStatTotal">${total}</span>${event.capacity ? `<span style="font-size:13px;font-weight:500;color:var(--text-muted);"> / ${event.capacity}</span>` : ''}</div>
+                <div class="stat-label">Valid Tickets${event.capacity ? ` · <span id="liveStatFullPct">${Math.round(total/event.capacity*100)}</span>% full` : ''}</div>
             </div>
-            <div class="stat-box${activeStatFilter === 'checked' ? ' stat-active' : ''}" onclick="setStatFilter('checked')">
+            <div class="stat-box${activeStatFilter === 'checked' ? ' stat-active' : ''}" data-filter="checked" onclick="setStatFilter('checked')">
                 <div class="stat-num" style="color:#10b981;" id="liveStatScanned">${scanned}</div>
                 <div class="stat-label">Checked In</div>
                 <div class="progress-bar-wrap">
                     <div class="progress-bar-fill" id="liveProgressBar" style="width:${pct}%"></div>
                 </div>
             </div>
-            <div class="stat-box${activeStatFilter === 'pending' ? ' stat-active' : ''}" onclick="setStatFilter('pending')">
+            <div class="stat-box${activeStatFilter === 'pending' ? ' stat-active' : ''}" data-filter="pending" onclick="setStatFilter('pending')">
                 <div class="stat-num" style="color:#f59e0b;" id="liveStatPending">${total - scanned}</div>
                 <div class="stat-label">Not Yet In</div>
                 <div style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="liveStatPct">${pct}% checked in</div>
             </div>
             ${event.waitlistEnabled ? `
-            <div class="stat-box" onclick="showSettingsView('${event.id}', 'tab-waitlist')">
+            <div class="stat-box" id="waitingStatBox" onclick="showSettingsView('${event.id}', 'tab-waitlist')">
                 <div class="stat-num" style="color:#6366f1;" id="liveStatWaiting">${event._counts?.waiting ?? 0}</div>
                 <div class="stat-label">Waiting</div>
             </div>` : ''}
+            <div class="stat-box${activeStatFilter === 'expired' ? ' stat-active' : ''}" data-filter="expired" id="expiredStatBox" style="${expiredCount > 0 ? '' : 'display:none;'}" onclick="setStatFilter('expired')">
+                <div class="stat-num" style="color:#b45309;" id="liveStatExpired">${expiredCount}</div>
+                <div class="stat-label">Expired</div>
+            </div>
         </div>
 
         <div class="section-header">
@@ -3480,6 +3526,8 @@
                 result = result.filter(g => g.tickets.length > 0 && g.tickets.every(t => t.used_at));
             else if (activeStatFilter === 'pending')
                 result = result.filter(g => g.tickets.some(t => !t.used_at));
+            else if (activeStatFilter === 'expired')
+                result = result.filter(g => g.tickets.some(t => t.expired && !t.used_at));
 
             // Sort
             if (sortState.field === 'firstname') {
@@ -3762,10 +3810,12 @@
 
         function setStatFilter(filter) {
             activeStatFilter = activeStatFilter === filter ? 'all' : filter;
-            // Re-render stats row active states without full refetch
-            document.querySelectorAll('.stat-box').forEach((box, i) => {
-                const filters = ['all', 'checked', 'pending'];
-                box.classList.toggle('stat-active', activeStatFilter === filters[i]);
+            // Re-render stats row active states without full refetch. Matched
+            // by data-filter, not position — the Waiting box sits between
+            // Pending and Expired only when the waitlist is enabled, which
+            // would throw off a plain index lookup.
+            document.querySelectorAll('.stat-box[data-filter]').forEach(box => {
+                box.classList.toggle('stat-active', activeStatFilter === box.dataset.filter);
             });
             rerenderTable();
         }
