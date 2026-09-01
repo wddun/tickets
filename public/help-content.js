@@ -138,7 +138,7 @@ window.HELP_CONTENT = {
             `As the waitlist empties out (everyone still waiting gets promoted), the cutoff naturally stops expiring further tickets — there's nobody left for the freed seat to go to. Adding more people to the waitlist lets it resume.`,
             `Never retroactive: once someone is checked in, this cutoff can never apply to them, no matter when it's set.`,
             `A cutoff that's already in the past when you save it takes effect immediately, in the same request — you don't have to wait for the periodic sweep (which otherwise re-checks every few minutes).`,
-            `Every ticket this expires frees a seat and immediately offers it to whoever's been waiting longest.`,
+            `Every ticket this expires frees a seat and, by default, immediately offers it to whoever's been waiting longest — turn off <strong>Promote the waitlist when tickets expire</strong> below if you just want the cutoff to void unused QR codes without seating anyone new.`,
             `Clearing this field does <strong>not</strong> un-expire tickets that already expired under a previous cutoff — bring one back individually with its own "Un-expire" action.`,
             `Leaving this blank means tickets never expire on their own.`,
             `See <strong>Limit How Many Expire</strong> below for narrowing this from "everyone" to a specific count.`,
@@ -154,6 +154,16 @@ window.HELP_CONTENT = {
             `A shared registration (several tickets bought together) always expires as one unit and is never split — so the actual number expired can run slightly over your configured limit to keep a group intact.`,
             `Order picks which registrations are chosen first once the limit narrows things down: oldest-registered or newest-registered. Default is oldest.`,
             `A value of 0 or a negative number is clamped up to 1 rather than rejected.`,
+        ],
+    },
+    'general.ticketExpiryPromotesWaitlist': {
+        title: 'Promote the Waitlist When Tickets Expire',
+        summary: 'On by default: a ticket expiring under the cutoff above (or expired manually) hands its freed seat to the next waitlist entry and emails them. Turn off to let the cutoff void QR codes without touching the waitlist.',
+        details: [
+            `The ticket still expires and its scan stops working either way — this only decides whether that also triggers a waitlist promotion.`,
+            `With this off, nobody is emailed as a result of an expiry — the only email a waitlisted person still gets is their original "you're on the waitlist" confirmation, unless you promote someone yourself from the waitlist table.`,
+            `Applies uniformly to every path that expires a ticket: the cutoff above, the periodic sweep, and the manual "Expire Ticket"/bulk-expire actions. It has no effect on <strong>Release no-show tickets to the waitlist</strong>, which is a separate, always-explicit action.`,
+            `Useful for a same-day event where the cutoff exists to kill unclaimed QR codes at a fixed time (e.g. midnight) rather than to keep working through the waitlist.`,
         ],
     },
     'general.ticketPrice': {

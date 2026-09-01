@@ -406,6 +406,14 @@ try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiresAt TEXT`); } catch {}
 try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiryLimit INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiryOrder TEXT DEFAULT 'oldest'`); } catch {}
 
+// Whether an expiring ticket (cutoff sweep, or a manual/bulk expire) hands its
+// freed seat to the next waitlist entry — see expireTicket() in server.js.
+// Defaults to 1 (the original behavior, the whole reason the cutoff exists)
+// so every event predating this column is unaffected; an organiser can turn
+// it off when the cutoff is just meant to kill unused QR codes at day's end
+// rather than start seating more people.
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiryPromotesWaitlist INTEGER DEFAULT 1`); } catch {}
+
 // Superseded by waitlistEmailTemplate below (the full block editor) — column
 // kept so a value someone already set doesn't just vanish, but nothing reads
 // it anymore.
@@ -683,6 +691,7 @@ export function rowToEvent(row) {
         scanResultDurationMs: row.scanResultDurationMs ?? null,
         ticketExpiryLimit: row.ticketExpiryLimit ?? null,
         ticketExpiryOrder: row.ticketExpiryOrder === 'newest' ? 'newest' : 'oldest',
+        ticketExpiryPromotesWaitlist: row.ticketExpiryPromotesWaitlist === null || row.ticketExpiryPromotesWaitlist === undefined ? true : !!row.ticketExpiryPromotesWaitlist,
         emailPolicy: (() => { try { return row.emailPolicy ? JSON.parse(row.emailPolicy) : null; } catch { return null; } })(),
         walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
         emailTemplate: (() => { try { return row.emailTemplate ? JSON.parse(row.emailTemplate) : null; } catch { return null; } })(),
@@ -748,6 +757,7 @@ export const stmt = {
         setWaitlistClaimHours: db.prepare(`UPDATE events SET waitlistClaimHours=? WHERE id=?`),
         setScanResultDuration: db.prepare(`UPDATE events SET scanResultDurationMs=? WHERE id=?`),
         setTicketExpiryScope: db.prepare(`UPDATE events SET ticketExpiryLimit=?, ticketExpiryOrder=? WHERE id=?`),
+        setTicketExpiryPromotesWaitlist: db.prepare(`UPDATE events SET ticketExpiryPromotesWaitlist=? WHERE id=?`),
         setReminderSentAt: db.prepare(`UPDATE events SET reminderSentAt=? WHERE id=?`),
         setReminder: db.prepare(`UPDATE events SET reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=? WHERE id=?`),
         setCustomFields: db.prepare(`UPDATE events SET customFields=? WHERE id=?`),

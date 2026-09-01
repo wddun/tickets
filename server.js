@@ -3838,6 +3838,25 @@ app.get('/api/event/:id/waitlist', requireAuth, (req, res) => {
     res.json(stmt.waitlist.byEventId.all(eventId).map(rowToWaitlistEntry));
 });
 
+app.get('/api/event/:id/waitlist/export-csv', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_waitlist')) {
+        return res.status(403).json({ error: 'Not authorized' });
+    }
+    const entries = stmt.waitlist.byEventId.all(event.id).map(rowToWaitlistEntry);
+    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csvRows = [['Name', 'Email', 'Status', 'Joined'].map(esc).join(',')];
+    for (const w of entries) {
+        const joined = w.createdAt ? new Date(w.createdAt).toLocaleString('en-US', { timeZone: eventTimeZone(event) }) : '';
+        csvRows.push([w.name || '', w.email, w.status, joined].map(esc).join(','));
+    }
+    const safeName = (event.name || 'event').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'event';
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-waitlist.csv"`);
+    res.send(csvRows.join('\r\n'));
+});
+
 // Join the waitlist directly (shown by register.html when an event is full).
 app.post('/api/event/:id/waitlist', publicWriteLimiter, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
@@ -4814,6 +4833,9 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
             : event.ticketExpiryOrder;
         stmt.events.setTicketExpiryScope.run(limit, order, req.params.id);
     }
+    if (req.body.ticketExpiryPromotesWaitlist !== undefined) {
+        stmt.events.setTicketExpiryPromotesWaitlist.run(req.body.ticketExpiryPromotesWaitlist === 'false' ? 0 : 1, req.params.id);
+    }
 
     const priceCents = req.body.ticketPrice !== undefined
         ? Math.round(Math.max(0, parseFloat(req.body.ticketPrice) || 0) * 100)
@@ -5678,6 +5700,7 @@ async function expireTicket(ticket, event, req) {
     broadcastEventCounts(event.id);
 
     if (!event.waitlistEnabled) return { promoted: null };
+    if (event.ticketExpiryPromotesWaitlist === false) return { promoted: null };
     const next = stmt.waitlist.nextWaitingByEventId.get(event.id);
     if (!next) return { promoted: null };
     const nextEntry = rowToWaitlistEntry(next);

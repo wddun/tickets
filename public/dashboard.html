@@ -4410,6 +4410,15 @@
                     <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">By default the cutoff above expires every not-checked-in ticket. Set a number here to expire only that many instead &mdash; a registration covering several tickets at once always expires together, so this can go slightly over. Has no effect without a cutoff time set above.</div>
                 </div>
                 <div style="margin-bottom:20px;">
+                    <label class="settings-toggle">
+                        <input type="checkbox" id="editEventTicketExpiryPromotesWaitlist" ${ev.ticketExpiryPromotesWaitlist !== false ? 'checked' : ''}>
+                        <div>
+                            <div class="settings-toggle-title">Promote the waitlist when tickets expire${helpIcon('general.ticketExpiryPromotesWaitlist')}</div>
+                            <div class="settings-toggle-desc">Turn off if the cutoff above is just meant to void unused QR codes &mdash; expired tickets still stop scanning, but nobody gets moved off the waitlist or emailed.</div>
+                        </div>
+                    </label>
+                </div>
+                <div style="margin-bottom:20px;">
                     <label for="editEventTicketPrice" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Ticket Price <span style="font-weight:400;color:var(--text-muted);">(leave blank or 0 for free)</span>${helpIcon('general.ticketPrice')}</label>
                     <div style="position:relative;">
                         <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:14px;">$</span>
@@ -4462,6 +4471,7 @@
             const ticketExpiresAtISO = ticketExpiresAt ? zonedWallClockToISO(ticketExpiresAt, eventTz) : '';
             const ticketExpiryLimit = document.getElementById('editEventTicketExpiryLimit').value;
             const ticketExpiryOrder = document.getElementById('editEventTicketExpiryOrder').value;
+            const ticketExpiryPromotesWaitlist = document.getElementById('editEventTicketExpiryPromotesWaitlist').checked;
 
             const allowReentry = document.getElementById('editEventAllowReentry').checked;
             const capacity = document.getElementById('editEventCapacity').value;
@@ -4495,6 +4505,7 @@
             fd.append('ticketExpiresAt', ticketExpiresAtISO);
             fd.append('ticketExpiryLimit', ticketExpiryLimit || '');
             fd.append('ticketExpiryOrder', ticketExpiryOrder || 'oldest');
+            fd.append('ticketExpiryPromotesWaitlist', String(ticketExpiryPromotesWaitlist));
             fd.append('ticketPrice', ticketPrice || '0');
             fd.append('timezone', eventTimezoneValue());
             if (lat) fd.append('lat', lat);
@@ -6712,6 +6723,10 @@
             waitlistRerenderTable(eventId);
         }
 
+        function exportWaitlistCSV(eventId) {
+            window.location.href = `/api/event/${eventId}/waitlist/export-csv`;
+        }
+
         async function waitlistBulkRemove(eventId) {
             const ids = [...(waitlistSelection[eventId] || [])];
             if (!ids.length) return;
@@ -6842,7 +6857,8 @@
                         <option value="notified">Spot offered</option>
                         <option value="converted">Converted to ticket</option>
                         <option value="expired">Offer expired</option>
-                    </select>${helpIcon('waitlist.table')}
+                    </select>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="exportWaitlistCSV('${eventId}')">Export CSV</button>${helpIcon('waitlist.table')}
                 </div>
                 <div id="waitlistRows" data-no-dirty>${rows}</div>
                 ${noShowPanel}
