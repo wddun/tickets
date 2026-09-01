@@ -516,6 +516,9 @@
         }
         .settings-card-row:last-child { border-bottom: none; }
         .settings-card-label { color: rgba(255,255,255,0.55); }
+        .settings-slider-row { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+        .settings-slider-row input[type="range"] { width: 100%; accent-color: #6366f1; }
+        .settings-slider-row input[type="range"]:disabled { opacity: 0.4; }
         .settings-back-btn {
             display: flex; align-items: center; gap: 4px;
             background: none; border: none; color: #fff; font-size: 16px;
@@ -839,6 +842,19 @@
         <button class="dp-rotate-btn" id="dpRotateBtn" onclick="rotateDisplayToken()">Regenerate Link</button>
 
         <div class="settings-section-label" style="margin-top:16px;">Scanning</div>
+        <div class="settings-card" style="margin-bottom:12px;">
+            <div class="settings-slider-row">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span class="settings-card-label">Result Display Time</span>
+                    <span id="resultDurationValue" style="color:#fff;font-size:14px;font-weight:600;">1.2s</span>
+                </div>
+                <input type="range" id="resultDurationSlider" min="300" max="3000" step="100" value="1200" oninput="onResultDurationInput(this.value)">
+            </div>
+        </div>
+        <div class="settings-hint-row" id="resultDurationOverrideNote" style="display:none;margin-bottom:12px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12.01" y2="16"/><path d="M12 8v4"/></svg>
+            <span>Set by the organiser for this event — your own preference above is ignored while it's on.</span>
+        </div>
         <button class="settings-nav-row" id="settingsSwitchEventRow" onclick="openEventPicker()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
             Switch Event
@@ -1019,7 +1035,8 @@ function playEnteringAnimation(ev, opts = {}) {
 function lockToEvent(event) {
     currentEvent = {
         eventId: event.id, eventName: event.name, color: event.color,
-        allowReentry: event.allowReentry, source: 'selected',
+        allowReentry: event.allowReentry, scanResultDurationMs: event.scanResultDurationMs ?? null,
+        source: 'selected',
     };
     localStorage.setItem('selectedEventId', event.id);
     displayQREventId = null;
@@ -1249,7 +1266,7 @@ async function initScanLinkMode(scanToken, opts = {}) {
     // scanToken is kept on currentEvent (not just used to resolve the link)
     // so every subsequent /api/validate and /api/checkout call can prove
     // this device holds a real, still-valid scan-link token for this event.
-    currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, source: 'link', scanLinkToken: scanToken };
+    currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, scanResultDurationMs: link.scanResultDurationMs ?? null, source: 'link', scanLinkToken: scanToken };
     scanLinkCapabilities = link.capabilities || [];
     // Resolving the link also scoped the session to this event server-side, so
     // the check-in list and door display work here the same as when signed in.
@@ -1274,6 +1291,7 @@ function resumeScanLinkMode(scanLink) {
         eventName: scanLink.eventName,
         color: scanLink.color,
         allowReentry: scanLink.allowReentry,
+        scanResultDurationMs: scanLink.scanResultDurationMs ?? null,
         source: 'link',
     };
     scanLinkCapabilities = scanLink.capabilities || [];
@@ -1460,11 +1478,81 @@ function openScannerSSE() {
 // the SSE stream with the new eventId, without stacking another interval.
 function initScannerChannel() {
     sendHeartbeat();
+    refreshScanResultDuration();
     if (!heartbeatIntervalStarted) {
         heartbeatIntervalStarted = true;
         setInterval(sendHeartbeat, 30000);
+        setInterval(refreshScanResultDuration, 30000);
     }
     openScannerSSE();
+}
+
+// ── Result display duration ────────────────────────────────
+// How long a scan result stays full-screen — a per-device preference (same
+// idea as the iOS app's own slider), unless the organiser has set an
+// event-level default (PUT /api/event/:id/scan-result-duration), which then
+// wins for every scanner working this event, web or iOS.
+const RESULT_DURATION_KEY = 'scanResultDurationMs';
+const RESULT_DURATION_DEFAULT = 1200;
+
+function getEffectiveResultDuration() {
+    const override = currentEvent?.scanResultDurationMs;
+    if (override) return override;
+    const stored = parseInt(localStorage.getItem(RESULT_DURATION_KEY));
+    return Number.isFinite(stored) ? stored : RESULT_DURATION_DEFAULT;
+}
+
+function onResultDurationInput(value) {
+    const ms = parseInt(value) || RESULT_DURATION_DEFAULT;
+    localStorage.setItem(RESULT_DURATION_KEY, ms);
+    document.getElementById('resultDurationValue').textContent = (ms / 1000).toFixed(1) + 's';
+}
+
+function renderResultDurationControl() {
+    const slider = document.getElementById('resultDurationSlider');
+    if (!slider) return;
+    const override = currentEvent?.scanResultDurationMs;
+    const shown = getEffectiveResultDuration();
+    slider.value = shown;
+    slider.disabled = !!override;
+    document.getElementById('resultDurationValue').textContent = (shown / 1000).toFixed(1) + 's';
+    document.getElementById('resultDurationOverrideNote').style.display = override ? 'flex' : 'none';
+}
+
+// Picks up an organiser's dashboard change on its own — same 30s cadence as
+// the heartbeat above — so a scanner left open at the door doesn't need to
+// be reopened to follow a change made mid-event.
+async function refreshScanResultDuration() {
+    if (!currentEvent) return;
+    try {
+        let ms = null;
+        if (currentEvent.source === 'link' && currentEvent.scanLinkToken) {
+            // Re-resolving the link directly works regardless of session
+            // state — unlike /api/auth/me below, which reports this browser's
+            // signed-in account instead of the scan-link grant whenever both
+            // happen to be present at once (an organiser testing their own
+            // door link while still logged in, say).
+            const r = await fetch(`/api/scanner-links/${currentEvent.scanLinkToken}`);
+            if (r.ok) {
+                const d = await r.json();
+                ms = d.scanResultDurationMs ?? null;
+            }
+        } else if (currentEvent.source === 'link') {
+            const r = await fetch('/api/auth/me');
+            if (r.ok) {
+                const d = await r.json();
+                if (d.scanLink && d.scanLink.eventId === currentEvent.eventId) ms = d.scanLink.scanResultDurationMs ?? null;
+            }
+        } else if (currentEvent.eventId) {
+            const r = await fetch(`/api/event/${currentEvent.eventId}`);
+            if (r.ok) {
+                const d = await r.json();
+                ms = d.scanResultDurationMs ?? null;
+            }
+        }
+        currentEvent.scanResultDurationMs = ms;
+        renderResultDurationControl();
+    } catch (_) {}
 }
 
 function requestNotificationPermission() { /* no-op — using in-app notifications */ }
@@ -1685,7 +1773,7 @@ function showFlash(data) {
     }
     
     clearTimeout(flashTimer);
-    flashTimer = setTimeout(closeResult, 3000);
+    flashTimer = setTimeout(closeResult, getEffectiveResultDuration());
     addToHistory(data, status);
 }
 
@@ -2108,6 +2196,7 @@ function switchTab(tab) {
     if (isSettings) {
         closeAccountSettings();
         loadDisplayQR();
+        renderResultDurationControl();
     }
 }
 

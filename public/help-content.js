@@ -102,6 +102,15 @@ window.HELP_CONTENT = {
             `Riders can be checked any number of times boarding repeatedly; there's no one-time-use gate on this path.`,
         ],
     },
+    'general.scanResultDuration': {
+        title: 'Fixed Scan Result Display Time',
+        summary: 'Sets how long a scan result stays full-screen before the scanner returns to ready, the same for every scanner working this event.',
+        details: [
+            `Off by default — each scanner (the web scanner or the iOS app) uses its own local preference, set from that device's own Settings. Turning this on overrides every scanner's own preference with one fixed value for as long as it stays on.`,
+            `Meant for keeping door staff in sync with each other rather than for personal taste — if scanners are showing results for noticeably different lengths of time at the same door, this is usually why.`,
+            `Also saves the instant you change it, independent of the tab's batched Save bar — same as Allow Shuttle Linking.`,
+        ],
+    },
     'general.walletLockScreen': {
         title: 'Show on Lock Screen',
         summary: 'Controls whether the Apple Wallet pass surfaces a lock-screen reminder near the event time and when the phone is close to the venue.',

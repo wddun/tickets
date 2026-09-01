@@ -570,3 +570,39 @@ describe('the shuttle / external ticket check', () => {
         assert.equal((await anon().post('/api/ticket-check', { eventId: 'x' })).status, 400);
     });
 });
+
+describe('scan result display duration', () => {
+    test('defaults to no override, can be set and cleared, and clamps to a sane range', async () => {
+        const ev = await createEvent(owner.client, { name: 'Result Duration' });
+        assert.equal(ev.scanResultDurationMs, null);
+
+        const set = await owner.client.put(`/api/event/${ev.id}/scan-result-duration`, { ms: 2000 });
+        assert.equal(set.status, 200, set.text);
+        assert.equal(set.body.scanResultDurationMs, 2000);
+
+        const fresh = await owner.client.get(`/api/event/${ev.id}`);
+        assert.equal(fresh.body.scanResultDurationMs, 2000);
+
+        const tooLow = await owner.client.put(`/api/event/${ev.id}/scan-result-duration`, { ms: 10 });
+        assert.equal(tooLow.body.scanResultDurationMs, 300);
+        const tooHigh = await owner.client.put(`/api/event/${ev.id}/scan-result-duration`, { ms: 99999 });
+        assert.equal(tooHigh.body.scanResultDurationMs, 5000);
+
+        const cleared = await owner.client.put(`/api/event/${ev.id}/scan-result-duration`, { ms: null });
+        assert.equal(cleared.body.scanResultDurationMs, null);
+    });
+
+    test('needs manage_event', async () => {
+        const ev = await createEvent(owner.client, { name: 'Result Duration Auth' });
+        const stranger = await newUser(server);
+        assert.equal((await stranger.client.put(`/api/event/${ev.id}/scan-result-duration`, { ms: 2000 })).status, 403);
+    });
+
+    test('reaches a scan-link scanner, which has no session of its own', async () => {
+        const ev = await createEvent(owner.client, { name: 'Result Duration Link' });
+        await owner.client.put(`/api/event/${ev.id}/scan-result-duration`, { ms: 1800 });
+
+        const { info } = await scanLinkClient(server, owner.client, ev.id, 'Door 1');
+        assert.equal(info.scanResultDurationMs, 1800);
+    });
+});

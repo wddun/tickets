@@ -2241,6 +2241,7 @@ app.get('/api/auth/me', (req, res) => {
                     eventName: event ? event.name : '',
                     color: event ? event.color : null,
                     allowReentry: event ? event.allowReentry : false,
+                    scanResultDurationMs: event ? event.scanResultDurationMs : null,
                     capabilities: SCAN_LINK_CAPABILITIES.slice(),
                 },
             });
@@ -3745,6 +3746,21 @@ app.put('/api/event/:id/waitlist-claim-hours', requireAuth, (req, res) => {
     stmt.events.setWaitlistClaimHours.run(hours, req.params.id);
     logAudit(req, { eventId: event.id, action: 'waitlist.claimHoursChanged', details: { hours } });
     res.json({ success: true, waitlistClaimHours: hours });
+});
+
+// How long a scan result stays full-screen before a scanner (web or iOS)
+// returns to ready. Overrides every scanner working this event — see
+// scanResultDurationMs in db-sqlite.js. `ms: null` clears the override,
+// handing control back to each scanner's own local preference.
+app.put('/api/event/:id/scan-result-duration', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
+    const raw = req.body.ms;
+    const ms = raw === null || raw === undefined || raw === '' ? null : Math.max(300, Math.min(5000, parseInt(raw) || 1200));
+    stmt.events.setScanResultDuration.run(ms, req.params.id);
+    logAudit(req, { eventId: event.id, action: 'scanner.resultDurationChanged', details: { ms } });
+    res.json({ success: true, scanResultDurationMs: ms });
 });
 
 
@@ -5691,6 +5707,43 @@ app.post('/api/ticket/:id/expire', requireAuth, async (req, res) => {
     res.json({ success: true, promoted: result?.promoted || null });
 });
 
+// Bulk expire, for the dashboard's multi-select — reuses expireTicket() per
+// ticket rather than a bespoke loop, so this behaves exactly like the
+// single-ticket button: silently skips a ticket that's already checked in
+// or already expired, and auto-promotes a waitlist entry per ticket
+// actually expired (see expireTicket() above). Silently skips any
+// registration the caller lacks manage_tickets on, same as the other bulk
+// routes — the selection was built from a list the caller already had
+// access to.
+app.post('/api/tickets/expire-bulk', requireAuth, async (req, res) => {
+    const { registrationIds } = req.body;
+    if (!Array.isArray(registrationIds) || !registrationIds.length) return res.status(400).json({ error: 'registrationIds required' });
+
+    let expired = 0;
+    let promoted = 0;
+
+    for (const regId of registrationIds) {
+        const tickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
+        if (!tickets.length) continue;
+        const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+        if (!event) continue;
+        if (!userHasEventCapability(req.session.userId, event.id, 'manage_tickets')) continue;
+
+        for (const t of tickets) {
+            if (t.used_at || t.expiredAt) continue;
+            const result = await expireTicket(t, event, req);
+            if (result) {
+                expired++;
+                if (result.promoted) promoted++;
+            }
+        }
+    }
+
+    ticketStatusCache.clear();
+    log('ticket-expiry', `[bulk] Expired ${expired} ticket(s) across ${registrationIds.length} registration(s)  by: ${req.session.userId}`);
+    res.json({ success: true, expired, promoted });
+});
+
 app.post('/api/ticket/:id/unexpire', requireAuth, (req, res) => {
     const ticket = rowToTicket(stmt.tickets.byId.get(req.params.id));
     if (!ticket) return res.status(404).json({ error: 'Not found' });
@@ -6695,6 +6748,7 @@ app.get('/api/scanner-links/:token', (req, res) => {
         eventName: event.name,
         color: event.color,
         allowReentry: event.allowReentry,
+        scanResultDurationMs: event.scanResultDurationMs,
         capabilities: req.session.userId
             ? userEventCapabilities(req.session.userId, event.id)
             : SCAN_LINK_CAPABILITIES.slice(),

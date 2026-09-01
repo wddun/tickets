@@ -159,7 +159,7 @@ struct SettingsView: View {
                     }
                     Slider(value: $resultDisplayDuration, in: 0.3...3.0, step: 0.1)
 
-                    Text("How long a scan result stays full-screen on this device.")
+                    Text("How long a scan result stays full-screen on this device. An organiser can override this for everyone scanning a specific event from their dashboard, which then takes priority over this setting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

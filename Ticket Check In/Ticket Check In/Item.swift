@@ -18,6 +18,10 @@ struct Event: Codable, Identifiable, Hashable {
     let atDoorEnabled: Bool?
     let ticketPrice: Int?   // cents; 0 or nil = free event
     let userId: String?     // owner's user id
+    // Organiser-set override for how long a scan result stays full-screen —
+    // wins over every scanner's own local preference when present. See
+    // scanResultDurationMs in db-sqlite.js. nil means no override.
+    let scanResultDurationMs: Int?
     // Owner, admin, or a 'full' sheetAccess grant — computed server-side per
     // caller in GET /api/events. View-only collaborators can check people in
     // but can't undo it.
@@ -82,6 +86,7 @@ struct ScannerLinkInfo: Codable {
     let eventName: String
     let color: String?
     let allowReentry: Bool?
+    let scanResultDurationMs: Int?
     // Not part of the server response — set locally (see resolveScannerLink)
     // to the token this info was resolved from, then persisted alongside the
     // rest so every later validate/checkout call can prove this device holds

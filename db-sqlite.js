@@ -501,6 +501,12 @@ try { db.exec(`ALTER TABLE sheetWatchers ADD COLUMN boostSeconds INTEGER DEFAULT
         db.exec(`UPDATE tickets SET confirmation_sent_at = created_at WHERE confirmation_sent_at IS NULL`);
     }
 }
+// How long a scan result stays full-screen before the scanner returns to
+// ready, in milliseconds. NULL means "no event-level policy" — each
+// scanner (web or iOS) falls back to its own local per-device preference.
+// Setting this from the dashboard overrides that for every scanner working
+// this event, so door staff can't drift out of sync with each other.
+try { db.exec(`ALTER TABLE events ADD COLUMN scanResultDurationMs INTEGER`); } catch {}
 
 // Recorded giveaway wins — one row per draw, kept even after the pool resets
 // or the page reloads, so "who won" survives the operator closing the tab
@@ -674,6 +680,7 @@ export function rowToEvent(row) {
         shuttleLinkEnabled: !!row.shuttleLinkEnabled,
         skipConfirmationEmails: !!row.skipConfirmationEmails,
         waitlistClaimHours: row.waitlistClaimHours ?? 48,
+        scanResultDurationMs: row.scanResultDurationMs ?? null,
         ticketExpiryLimit: row.ticketExpiryLimit ?? null,
         ticketExpiryOrder: row.ticketExpiryOrder === 'newest' ? 'newest' : 'oldest',
         emailPolicy: (() => { try { return row.emailPolicy ? JSON.parse(row.emailPolicy) : null; } catch { return null; } })(),
@@ -739,6 +746,7 @@ export const stmt = {
         setDisplayToken: db.prepare(`UPDATE events SET displayToken=? WHERE id=?`),
         setGiveawayToken: db.prepare(`UPDATE events SET giveawayToken=? WHERE id=?`),
         setWaitlistClaimHours: db.prepare(`UPDATE events SET waitlistClaimHours=? WHERE id=?`),
+        setScanResultDuration: db.prepare(`UPDATE events SET scanResultDurationMs=? WHERE id=?`),
         setTicketExpiryScope: db.prepare(`UPDATE events SET ticketExpiryLimit=?, ticketExpiryOrder=? WHERE id=?`),
         setReminderSentAt: db.prepare(`UPDATE events SET reminderSentAt=? WHERE id=?`),
         setReminder: db.prepare(`UPDATE events SET reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=? WHERE id=?`),

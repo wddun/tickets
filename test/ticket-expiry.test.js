@@ -439,3 +439,62 @@ describe('scope validation', () => {
         assert.equal(r.status, 403);
     });
 });
+
+describe('bulk expire (dashboard multi-select)', () => {
+    test('expires the selected registrations and promotes a waiter per seat freed', async () => {
+        const ev = await createEvent(owner.client, { capacity: 2, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'A', email: uniqueEmail('bulk-expire-a') });
+        await addTicket(owner.client, ev.id, { name: 'B', email: uniqueEmail('bulk-expire-b') });
+        const waiterEmail = await addWaiter(ev.id, 'bulk-expire-waiter');
+
+        const tickets = await listTickets(owner.client, ev.id);
+        const r = await owner.client.post('/api/tickets/expire-bulk', {
+            registrationIds: tickets.map(t => t.registrationId),
+        });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.expired, 2);
+        assert.equal(r.body.promoted, 1, 'only one waiter existed to promote');
+
+        const after = await listTickets(owner.client, ev.id);
+        assert.equal(after.filter(t => t.expired).length, 2);
+        assert.ok(after.some(t => t.email === waiterEmail));
+    });
+
+    test('skips a checked-in ticket and an already-expired one, without erroring', async () => {
+        const ev = await createEvent(owner.client, { capacity: 3 });
+        await addTicket(owner.client, ev.id, { name: 'Checked In', email: uniqueEmail('bulk-skip-in') });
+        await addTicket(owner.client, ev.id, { name: 'Already Expired', email: uniqueEmail('bulk-skip-exp') });
+        await addTicket(owner.client, ev.id, { name: 'Fresh', email: uniqueEmail('bulk-skip-fresh') });
+        const tickets = await listTickets(owner.client, ev.id);
+        const checkedIn = tickets.find(t => t.email.startsWith('bulk-skip-in'));
+        const alreadyExpired = tickets.find(t => t.email.startsWith('bulk-skip-exp'));
+        const fresh = tickets.find(t => t.email.startsWith('bulk-skip-fresh'));
+
+        await owner.client.post('/api/validate', { token: checkedIn.token, eventId: ev.id });
+        await owner.client.post(`/api/ticket/${alreadyExpired.id}/expire`);
+
+        const r = await owner.client.post('/api/tickets/expire-bulk', {
+            registrationIds: tickets.map(t => t.registrationId),
+        });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.expired, 1, 'only the fresh ticket should actually expire');
+
+        const after = await listTickets(owner.client, ev.id);
+        assert.equal(after.find(t => t.id === checkedIn.id).expired, false);
+        assert.equal(after.find(t => t.id === fresh.id).expired, true);
+    });
+
+    test('needs manage_tickets and rejects an empty selection', async () => {
+        const ev = await createEvent(owner.client, {});
+        await addTicket(owner.client, ev.id, { name: 'Solo' });
+        const [t] = await listTickets(owner.client, ev.id);
+
+        assert.equal((await owner.client.post('/api/tickets/expire-bulk', { registrationIds: [] })).status, 400);
+
+        const stranger = await newUser(server);
+        const r = await stranger.client.post('/api/tickets/expire-bulk', { registrationIds: [t.registrationId] });
+        assert.equal(r.status, 200, r.text); // silently skips what the caller can't touch
+        assert.equal(r.body.expired, 0);
+        assert.equal((await listTickets(owner.client, ev.id))[0].expired, false);
+    });
+});

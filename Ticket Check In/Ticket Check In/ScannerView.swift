@@ -393,7 +393,7 @@ struct ScannerView: View {
             withAnimation(.easeInOut(duration: 0.15)) { flashVisible = true }
         }
 
-        let durationNanos = UInt64(max(resultDisplayDuration, 0.3) * 1_000_000_000)
+        let durationNanos = UInt64(max(effectiveResultDuration, 0.3) * 1_000_000_000)
         flashTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: durationNanos)
             guard !Task.isCancelled else { return }
@@ -515,6 +515,15 @@ struct ScannerView: View {
         return selectedOwnEvent?.id
     }
 
+    // An organiser's dashboard override (PUT /api/event/:id/scan-result-duration)
+    // wins over this device's own Settings > Scanner preference, for every
+    // scanner working the event — see scanResultDurationMs in db-sqlite.js.
+    private var effectiveResultDuration: Double {
+        let overrideMs = scanLinkEvent?.scanResultDurationMs ?? selectedOwnEvent?.scanResultDurationMs
+        if let overrideMs { return Double(overrideMs) / 1000.0 }
+        return resultDisplayDuration
+    }
+
     // A scan-link lock never needs an account, so it's exempt from this
     // check entirely — only an own-account event selection can go stale
     // (signed out, or switched to an account without access to it).
@@ -529,9 +538,17 @@ struct ScannerView: View {
             return
         }
         let events = (try? await api.getEvents()) ?? []
-        eventAccessIssue = events.contains(where: { $0.id == event.id })
-            ? nil
-            : .noAccess(eventName: event.name)
+        guard let fresh = events.first(where: { $0.id == event.id }) else {
+            eventAccessIssue = .noAccess(eventName: event.name)
+            return
+        }
+        eventAccessIssue = nil
+        // This already fetched the current event from the server — refresh
+        // the cached copy everything else reads (selectedOwnEvent), not just
+        // this one access check, or a dashboard change (like a scan result
+        // duration override) would sit unused until lastSelectedEventData
+        // got overwritten some other way, e.g. relaunching the app.
+        if let encoded = try? JSONEncoder().encode(fresh) { lastSelectedEventData = encoded }
     }
 
     private func switchAccount() {
@@ -702,6 +719,11 @@ struct ScannerView: View {
         heartbeatTask = Task { @MainActor in
             while !Task.isCancelled {
                 await api.sendHeartbeat(pairToken: scannerPairToken, eventId: selectedEventId())
+                // Same cadence covers refreshing the selected event's own
+                // data (see verifyEventAccess) — a scanner left open at the
+                // door then picks up an organiser's dashboard change on its
+                // own, not just when the tab is reopened or the app relaunched.
+                await verifyEventAccess()
                 try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 s
             }
         }

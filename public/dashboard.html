@@ -3479,6 +3479,7 @@
                     <button class="btn btn-secondary btn-sm" onclick="openBulkEmailModal('${event.id}', 0, true)">Email Selected</button>
                     <button class="btn btn-secondary btn-sm" onclick="exportSelectedCSV()">Export CSV</button>
                     <button class="btn btn-secondary btn-sm" onclick="printSelectedTickets()">Print Selected</button>
+                    <button class="btn btn-secondary btn-sm" onclick="expireSelectedTickets('${event.id}', this)">Expire Selected</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteSelectedTickets('${event.id}', this)">Delete Selected</button>
                 </span>
                 <span class="refresh-hint"><span class="live-dot"></span>auto-refreshing</span>
@@ -3629,7 +3630,7 @@
                 return `
         <div class="attendee-row${isChecked ? ' row-selected' : ''}" data-regid="${g.registrationId}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
-                onchange="toggleTicketCheck('${g.registrationId}', this.checked)">
+                onclick="handleTicketCheckboxClick(event, '${g.registrationId}')">
             <div>
                 <div class="attendee-name">${esc(g.name)}</div>
                 <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap;">
@@ -3660,6 +3661,36 @@
                 const cb = row.querySelector('.ticket-checkbox[data-regid]');
                 if (cb && cb.dataset.regid === regId) row.classList.toggle('row-selected', checked);
             });
+        }
+
+        // Shift-click selects every row between this one and the last one
+        // clicked (in whatever order they're currently sorted/filtered in),
+        // matching this checkbox's new state — the standard file-manager /
+        // spreadsheet range-select gesture. lastClickedRegId resets to plain
+        // single-row toggling whenever there's no anchor to range from yet.
+        let lastClickedRegId = null;
+        function handleTicketCheckboxClick(e, regId) {
+            const checked = e.target.checked;
+            if (e.shiftKey && lastClickedRegId && lastClickedRegId !== regId) {
+                const boxes = [...document.querySelectorAll('.ticket-checkbox[data-regid]')];
+                const ids = boxes.map(cb => cb.dataset.regid);
+                const from = ids.indexOf(lastClickedRegId);
+                const to = ids.indexOf(regId);
+                if (from !== -1 && to !== -1) {
+                    const [start, end] = from < to ? [from, to] : [to, from];
+                    for (let i = start; i <= end; i++) {
+                        const id = ids[i];
+                        if (checked) checkedRegIds.add(id); else checkedRegIds.delete(id);
+                        boxes[i].checked = checked;
+                        boxes[i].closest('.attendee-row')?.classList.toggle('row-selected', checked);
+                    }
+                    updateTicketBulkBar();
+                    lastClickedRegId = regId;
+                    return;
+                }
+            }
+            toggleTicketCheck(regId, checked);
+            lastClickedRegId = regId;
         }
 
         function toggleAllTickets(checked, regIds) {
@@ -3791,6 +3822,36 @@
                     if (d.promoted) showToast(`Deleted. ${d.promoted} promoted from the waitlist.`);
                 } else {
                     showToast('Could not delete registrations.');
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
+            }
+        }
+
+        async function expireSelectedTickets(eventId, btn) {
+            if (!checkedRegIds.size) return;
+            if (!await confirmDialog(
+                `Expire ${checkedRegIds.size} registration(s)? Already checked-in or already-expired tickets are left alone. If the event has a waitlist, each freed spot is offered to the longest-waiting entry.`,
+                { title: 'Expire selected tickets?', confirmText: 'Expire', danger: true },
+            )) return;
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const r = await fetch('/api/tickets/expire-bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ registrationIds: [...checkedRegIds] })
+                });
+                if (r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    checkedRegIds.clear();
+                    const event = events.find(e => e.id === eventId);
+                    if (event) await fetchAndRender(event);
+                    showToast(`Expired ${d.expired} ticket${d.expired === 1 ? '' : 's'}.${d.promoted ? ` ${d.promoted} promoted from the waitlist.` : ''}`);
+                } else {
+                    showToast('Could not expire the selected tickets.');
                 }
             } finally {
                 btn.disabled = false;
@@ -4272,6 +4333,27 @@
                                 must confirm each check-out. QR code stays active on Apple Wallet pass.</div>
                         </div>
                     </label>
+                </div>
+                <div
+                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;" data-no-dirty>
+                    <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+                        <input type="checkbox" id="scanResultDurationToggle" ${ev.scanResultDurationMs ? 'checked' : ''}
+                            onchange="toggleScanResultDurationOverride('${eventId}', this.checked)"
+                            style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
+                        <div style="flex:1;">
+                            <div style="font-size:13px;font-weight:600;">Fixed Scan Result Display Time${helpIcon('general.scanResultDuration')}</div>
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">How long a scan result stays full-screen before a scanner returns to
+                                ready. Off means every scanner (web or iOS) uses its own device setting; on applies the same timing to every scanner working this event.</div>
+                        </div>
+                    </label>
+                    <div id="scanResultDurationRow" style="display:${ev.scanResultDurationMs ? 'flex' : 'none'};align-items:center;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+                        <input type="range" id="scanResultDurationSlider" min="300" max="5000" step="100"
+                            value="${ev.scanResultDurationMs || 1200}"
+                            oninput="document.getElementById('scanResultDurationLabel').textContent = (this.value/1000).toFixed(1) + 's'"
+                            onchange="saveScanResultDuration('${eventId}', this.value)"
+                            style="flex:1;accent-color:var(--navy);">
+                        <span id="scanResultDurationLabel" style="font-size:13px;font-weight:600;min-width:36px;text-align:right;">${((ev.scanResultDurationMs || 1200)/1000).toFixed(1)}s</span>
+                    </div>
                 </div>
                 <div
                     style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;">
@@ -6870,6 +6952,28 @@
                 if (ev) ev.shuttleLinkEnabled = enabled;
             } catch {
                 showToast('Failed to update shuttle linking.');
+            }
+        }
+
+        function toggleScanResultDurationOverride(eventId, enabled) {
+            document.getElementById('scanResultDurationRow').style.display = enabled ? 'flex' : 'none';
+            const slider = document.getElementById('scanResultDurationSlider');
+            saveScanResultDuration(eventId, enabled ? slider.value : null);
+        }
+
+        async function saveScanResultDuration(eventId, ms) {
+            try {
+                const r = await fetch(`/api/event/${eventId}/scan-result-duration`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ms })
+                });
+                if (!r.ok) throw new Error();
+                const d = await r.json();
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.scanResultDurationMs = d.scanResultDurationMs;
+            } catch {
+                showToast('Failed to update scan result display time.');
             }
         }
 
