@@ -50,11 +50,16 @@
         .btn-outline:hover { background: var(--border); }
 
         .btn-text {
-            background: none; border: none; color: var(--text-muted);
-            font-size: 13px; text-decoration: underline; cursor: pointer;
+            width: auto; min-height: 0; background: none; border: none; color: var(--text-muted);
+            font-size: 13px; font-weight: 400; text-decoration: underline; cursor: pointer;
             padding: 6px; margin-top: 4px;
         }
-        .btn-text:hover { color: var(--text); }
+        .btn-text:hover { background: none; color: var(--text); }
+        /* [data-theme="dark"] button (style.css) is as specific as .btn-text
+           and declared first, so without this override dark mode gets back
+           the solid indigo button background this class exists to remove. */
+        [data-theme="dark"] .btn-text { width: auto; min-height: 0; background: none; }
+        [data-theme="dark"] .btn-text:hover { background: none; }
 
         @media (max-width: 480px) {
             .container { padding: 16px 12px 32px; }
