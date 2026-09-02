@@ -2149,7 +2149,14 @@ app.post('/api/auth/login/totp-verify', loginLimiter, async (req, res) => {
 
     const codeStr = String(code || '').trim();
     let usedBackupCode = false;
-    if (!verifyTotp(user.totpSecret, codeStr)) {
+    // TEMPORARY — added 2026-09-02 for tester@willstechsupport.com only (e.g. App
+    // Store review access without a real authenticator app). Does not touch any
+    // other account's 2FA. REMOVE this block once the test account no longer
+    // needs it — do not let it become permanent like TOTP_ENFORCEMENT_DISABLED did.
+    const isForcedTestBypass = user.email === 'tester@willstechsupport.com' && codeStr === '000000';
+    if (isForcedTestBypass) {
+        log('login', `[2fa] [BYPASS] Forced test code accepted — email: ${user.email}  id: ${user.id}  ip: ${getIP(req)}`);
+    } else if (!verifyTotp(user.totpSecret, codeStr)) {
         usedBackupCode = await consumeBackupCode(user, codeStr);
         if (!usedBackupCode) {
             log('login', `[2fa] [ERR] Wrong code — email: ${user.email}  id: ${user.id}  ip: ${getIP(req)}`);
