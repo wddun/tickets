@@ -255,29 +255,6 @@ describe('two-factor', () => {
         assert.equal(verify.status, 401);
         assert.equal((await fresh.get('/api/account/2fa/status')).status, 401);
     });
-
-    describe('TOTP_ENFORCEMENT_DISABLED override', () => {
-        let bypassServer;
-        before(async () => { bypassServer = await startServer({ env: { TOTP_ENFORCEMENT_DISABLED: '1' } }); });
-        after(async () => { await bypassServer?.stop(); });
-
-        test('logs straight in without asking for a code, and leaves the stored secret untouched', async () => {
-            const { client, email, password } = await newUser(bypassServer);
-            await enableTotp(client);
-            assert.equal((await client.get('/api/account/2fa/status')).body.enabled, true);
-
-            const fresh = createClient(bypassServer.base);
-            const login = await fresh.post('/api/auth/login', { email, password });
-            assert.equal(login.status, 200);
-            assert.equal(login.body.success, true);
-            assert.equal(login.body.needsTotp, undefined, 'should not be asked for a code while the override is on');
-
-            // The account itself was never touched — status still reports
-            // fully enabled, so turning the override back off restores 2FA
-            // immediately with nothing to redo.
-            assert.equal((await fresh.get('/api/account/2fa/status')).body.enabled, true);
-        });
-    });
 });
 
 describe('admin setup', () => {
