@@ -763,6 +763,34 @@ export function rowToGiveawayWinner(row) {
     return { ...row };
 }
 
+// The event columns a duplicate carries over, in one explicit list.
+//
+// A `SELECT *` copy is the tempting version and the wrong one: it would
+// silently clone `displayToken` and `giveawayToken` — live credentials that
+// let a door display and a giveaway room subscribe to an event — into a
+// second event, so two events would answer to one token. What gets copied
+// has to be a decision, not a default, which is what this list is.
+//
+// Deliberately NOT here, and why:
+//   displayToken, giveawayToken  live per-event credentials (above)
+//   reminderSentAt               the copy's reminder must still be able to fire
+//   ticketExpiresAt              an absolute cutoff pinned to the original's date
+//
+// `scannerPin` IS in the list, but the caller passes a freshly generated one
+// rather than the original's — the column is copied, the value is not.
+export const DUPLICABLE_EVENT_COLUMNS = [
+    'id', 'userId', 'name', 'time', 'endTime', 'color', 'imageUrl', 'scannerPin',
+    'location', 'allowReentry', 'capacity', 'customFields', 'createdAt', 'timezone',
+    'allowPublicRegistration', 'ticketPrice', 'atDoorEnabled', 'waitlistEnabled', 'theme',
+    'allowMultipleRegistrations', 'oneRegistrationPerDevice', 'blockDuplicateEmails',
+    'shuttleLinkEnabled', 'walletLockScreenEnabled', 'emailTemplate', 'winnerEmailTemplate',
+    'skipConfirmationEmails', 'emailPolicy', 'waitlistClaimHours',
+    'ticketExpiryLimit', 'ticketExpiryOrder', 'ticketExpiryPromotesWaitlist',
+    'waitlistMessage', 'waitlistEmailTemplate', 'waitlistClaimEmailTemplate',
+    'scanResultDurationMs', 'reminderEnabled', 'reminderMessage', 'reminderHoursBefore',
+    'ticketReturnsEnabled', 'ticketReturnRefund', 'ticketReturnCutoffMinutes', 'ticketReturnCutoffUnit',
+];
+
 // ── Prepared statements ────────────────────────────────────────────────────────
 
 export const stmt = {
@@ -821,6 +849,9 @@ export const stmt = {
         setTimezone: db.prepare(`UPDATE events SET timezone=? WHERE id=?`),
         setSheetFields: db.prepare(`UPDATE events SET name=?, time=?, endTime=?, color=?, location=? WHERE id=?`),
         setOwner: db.prepare(`UPDATE events SET userId=? WHERE id=?`),
+        // Placeholders generated from the column list itself, so the two can
+        // never drift out of count — see DUPLICABLE_EVENT_COLUMNS above.
+        duplicate: db.prepare(`INSERT INTO events (${DUPLICABLE_EVENT_COLUMNS.join(', ')}) VALUES (${DUPLICABLE_EVENT_COLUMNS.map(() => '?').join(', ')})`),
         deleteById: db.prepare(`DELETE FROM events WHERE id=?`),
         deleteByUserId: db.prepare(`DELETE FROM events WHERE userId=?`),
         reminderDue: db.prepare(`SELECT * FROM events WHERE reminderEnabled=1 AND reminderSentAt IS NULL`),

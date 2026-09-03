@@ -1,5 +1,5 @@
 import express from 'express';
-import { db, stmt, rowToTicket, rowToEvent, rowToUser, rowToDiscountCode, rowToWaitlistEntry, rowToGiveawayWinner, getWalletDevicesBySerials, getTicketsByTokens } from './db-sqlite.js';
+import { db, stmt, rowToTicket, rowToEvent, rowToUser, rowToDiscountCode, rowToWaitlistEntry, rowToGiveawayWinner, getWalletDevicesBySerials, getTicketsByTokens, DUPLICABLE_EVENT_COLUMNS } from './db-sqlite.js';
 import { nanoid } from 'nanoid';
 import QRCode from 'qrcode';
 import { SESClient, SendEmailCommand, SendRawEmailCommand } from '@aws-sdk/client-ses';
@@ -4646,6 +4646,81 @@ app.post('/api/events', requireAuth, async (req, res) => {
     if (isValidTimeZone(timezone)) stmt.events.setTimezone.run(timezone, newEvent.id);
     logAudit(req, { eventId: newEvent.id, action: 'event.created', details: { name: newEvent.name } });
     res.json({ success: true, eventId: newEvent.id, event: newEvent });
+});
+
+// Copy an event's setup into a brand-new event — the season, the tour, the
+// monthly meetup. What makes this worth a route rather than "create one and
+// fill it in again" is how much setup an established event carries that never
+// appears on the create form: custom fields, the registration theme, the
+// email template and per-source email policy, signup limits, waitlist
+// settings, the reminder, the return policy. Retyping all of it is where the
+// mistakes come from.
+//
+// Requires `manage_event` on the source — you have to be able to see every
+// setting to be allowed to copy it — and the copy is owned by whoever asked
+// for it, not by the original's owner, since it is a new event of theirs.
+//
+// Nothing that happened *to* the original comes across: no tickets, waitlist,
+// orders, discount codes, API keys, scan links, audit log or giveaway
+// winners. A duplicate is a copy of the setup, not of the history.
+app.post('/api/event/:id/duplicate', requireAuth, (req, res) => {
+    const source = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!source) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, source.id, 'manage_event')) {
+        return res.status(403).json({ error: 'Not authorized to duplicate this event' });
+    }
+
+    const rawName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const name = (rawName || `${source.name || 'Event'} (Copy)`).slice(0, 200);
+    // The date is the one setting a duplicate deliberately does NOT inherit.
+    // A copy of a past event is nearly always for a future date, and carrying
+    // the original's over would create an event that is already finished —
+    // with its reminder and every "before the event starts" deadline already
+    // blown. Omitted (or blank) means "no date yet"; a caller who really does
+    // want the same date passes it explicitly.
+    const time = typeof req.body?.time === 'string' ? (req.body.time.trim() || null) : null;
+    const endTime = typeof req.body?.endTime === 'string' ? (req.body.endTime.trim() || null) : null;
+
+    const row = stmt.events.byId.get(source.id);
+    const newId = nanoid(10);
+    const overrides = {
+        id: newId,
+        userId: req.session.userId,
+        name,
+        time,
+        endTime,
+        createdAt: new Date().toISOString(),
+        // A door PIN is a shared secret for one event. Copying it would mean
+        // one leaked PIN opens two events, so the copy gets its own.
+        scannerPin: Math.floor(100000 + Math.random() * 900000).toString(),
+    };
+    stmt.events.duplicate.run(...DUPLICABLE_EVENT_COLUMNS.map(col => (
+        Object.prototype.hasOwnProperty.call(overrides, col) ? overrides[col] : (row[col] ?? null)
+    )));
+
+    // Collaborators, optionally. Off unless asked for: a duplicate is a new
+    // event, and silently granting several people access to it is not
+    // something to do by default.
+    let copiedAccess = 0;
+    if (req.body?.includeAccess) {
+        const sourceLink = stmt.sheetLinks.byEventId.get(source.id);
+        const grants = sourceLink ? stmt.sheetAccess.byLinkId.all(sourceLink.id) : [];
+        if (grants.length) {
+            const newEvent = rowToEvent(stmt.events.byId.get(newId));
+            const newLink = ensureSheetLink(newEvent);
+            for (const g of grants) {
+                // The copy's owner is whoever asked for it; a grant to them
+                // would be redundant with owning it.
+                if (g.userId === req.session.userId) continue;
+                stmt.sheetAccess.insert.run(nanoid(10), g.userId, newLink.id, new Date().toISOString(), g.permission, g.capabilities, req.session.userId);
+                copiedAccess++;
+            }
+        }
+    }
+
+    logAudit(req, { eventId: newId, action: 'event.duplicated', details: { from: source.id, fromName: source.name, name, copiedAccess } });
+    log('events', `[duplicate] "${source.name}" -> "${name}"  newId: ${newId}  access copied: ${copiedAccess}  by: ${req.session.userId}`);
+    res.json({ success: true, eventId: newId, event: rowToEvent(stmt.events.byId.get(newId)), copiedAccess });
 });
 
 app.get('/api/events/counts', requireAuth, (req, res) => {
@@ -9541,13 +9616,28 @@ app.get('/api/event/:id/metrics', requireAuth, (req, res) => {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
+    const allTickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
+    // Same rule as eventSeatUsage(): an expired or returned ticket that was
+    // never used gave its seat back, so it is not part of "how many people are
+    // coming" — it is reported separately below instead of quietly inflating
+    // the totals the check-in percentage is measured against.
+    const tickets = allTickets.filter(t => t.used_at || !t.expiredAt);
     const total = tickets.length;
     const scanned = tickets.filter(t => t.used_at).length;
     const pct = total ? Math.round(scanned / total * 100) : 0;
     const uniqueRegistrations = new Set(tickets.map(t => t.registrationId || t.id)).size;
     const walletDownloads = tickets.filter(t => t.wallet_downloaded_at).length;
     const emailOpens = tickets.filter(t => t.email_opened_at).length;
+
+    // Everything below is additive — the dashboard's metrics modal predates
+    // it and reads only the fields above. It exists so the iOS Stats tab can
+    // answer "how is the door doing right now" from this one call rather than
+    // stitching together /api/events, /api/events/counts and the waitlist.
+    const givenUp = allTickets.filter(t => !t.used_at && t.expiredAt);
+    const expired = givenUp.filter(t => !t.returnedAt).length;
+    const returned = givenUp.filter(t => t.returnedAt).length;
+    const usage = eventSeatUsage(event.id);
+    const waiting = event.waitlistEnabled ? (stmt.waitlist.countWaitingByEventId.get(event.id)?.cnt ?? 0) : 0;
 
     // Check-in timeline grouped by hour (server local time)
     const checkinByHour = {};
@@ -9583,7 +9673,20 @@ app.get('/api/event/:id/metrics', requireAuth, (req, res) => {
         });
     });
 
-    res.json({ total, scanned, pct, uniqueRegistrations, walletDownloads, emailOpens, checkinTimeline, registrationTimeline, customFieldBreakdowns });
+    res.json({
+        total, scanned, pct, uniqueRegistrations, walletDownloads, emailOpens,
+        checkinTimeline, registrationTimeline, customFieldBreakdowns,
+        eventName: event.name,
+        eventTime: event.time || null,
+        capacity: usage?.capacity ?? null,
+        remaining: usage?.remaining ?? null,
+        soldOut: !!usage?.soldOut,
+        held: usage?.held ?? 0,
+        waitlistEnabled: !!event.waitlistEnabled,
+        waiting,
+        expired,
+        returned,
+    });
 });
 
 // ── Admin Overview Metrics ───────────────────────────────────────────────────

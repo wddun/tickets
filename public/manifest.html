@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Attendee Manifest | WTS Tickets</title>
+    <style>
+        /* Deliberately its own stylesheet rather than style.css: this page's
+           job is paper. It is always light, always the same, and every rule
+           here is about what survives a printer — the app's theme tokens,
+           dark mode and card chrome would all have to be undone again for
+           print, and a themed manifest is a manifest that wastes toner. */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #f4f5f8; color: #111827; font-size: 13px; line-height: 1.45;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .sheet { max-width: 940px; margin: 0 auto; padding: 24px 20px 60px; }
+
+        .toolbar {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            background: #fff; border: 1px solid #dde3ed; border-radius: 12px;
+            padding: 12px 14px; margin-bottom: 20px;
+        }
+        .toolbar label { font-size: 12px; font-weight: 600; color: #475569; }
+        .toolbar select {
+            font-size: 13px; padding: 7px 9px; border: 1px solid #dde3ed;
+            border-radius: 8px; background: #fff; color: #111827;
+        }
+        .toolbar .spacer { flex: 1 1 auto; }
+        .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #475569; }
+        .chk input { width: 15px; height: 15px; }
+        .btn {
+            font-size: 13px; font-weight: 700; padding: 8px 16px; border-radius: 8px;
+            border: 1px solid transparent; cursor: pointer;
+        }
+        .btn-primary { background: #1a1f3c; color: #fff; }
+        .btn-primary:hover { background: #252b52; }
+        .btn-secondary { background: #fff; color: #334155; border-color: #dde3ed; }
+        .btn-secondary:hover { background: #f1f5f9; }
+
+        .page {
+            background: #fff; border: 1px solid #dde3ed; border-radius: 12px;
+            padding: 26px 28px;
+        }
+
+        .head { display: flex; align-items: flex-start; gap: 16px; border-bottom: 2px solid #111827; padding-bottom: 12px; margin-bottom: 4px; }
+        .head-main { flex: 1; min-width: 0; }
+        .event-name { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
+        .event-meta { font-size: 12px; color: #4b5563; margin-top: 3px; }
+        .head-side { text-align: right; font-size: 11px; color: #4b5563; white-space: nowrap; }
+        .head-side strong { display: block; font-size: 15px; color: #111827; }
+
+        .summary {
+            display: flex; gap: 22px; flex-wrap: wrap;
+            font-size: 11.5px; color: #4b5563;
+            padding: 9px 0 14px; border-bottom: 1px solid #e5e7eb; margin-bottom: 12px;
+        }
+        .summary b { color: #111827; }
+
+        table { width: 100%; border-collapse: collapse; }
+        thead th {
+            text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.6px; color: #4b5563; border-bottom: 1.5px solid #9ca3af;
+            padding: 0 8px 6px;
+        }
+        tbody td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+        tbody tr:nth-child(even) { background: #f9fafb; }
+        .c-name { font-weight: 600; }
+        .c-num { text-align: center; white-space: nowrap; }
+        .c-muted { color: #4b5563; }
+        .c-tick { width: 42px; }
+        /* An empty box to pen a tick into — the entire point of a paper
+           manifest is that it keeps working when the door has no signal. */
+        .tickbox { width: 17px; height: 17px; border: 1.5px solid #6b7280; border-radius: 3px; display: block; margin: 1px auto 0; }
+
+        .tag {
+            display: inline-block; font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.4px; padding: 2px 6px; border-radius: 99px;
+            border: 1px solid #d1d5db; color: #374151; background: #f3f4f6; white-space: nowrap;
+        }
+        .tag.in      { border-color: #6ee7b7; background: #ecfdf5; color: #065f46; }
+        .tag.pending { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+        .tag.void    { border-color: #d1d5db; background: #f3f4f6; color: #4b5563; }
+
+        .empty { padding: 40px 0; text-align: center; color: #6b7280; font-size: 13px; }
+        .foot { margin-top: 16px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 10.5px; color: #6b7280; display: flex; justify-content: space-between; gap: 16px; }
+
+        @media print {
+            /* The toolbar is the only thing on this page that isn't the
+               manifest, so it is the only thing that goes. */
+            body { background: #fff; font-size: 11.5px; }
+            .toolbar { display: none; }
+            .sheet { max-width: none; margin: 0; padding: 0; }
+            .page { border: none; border-radius: 0; padding: 0; }
+            /* Repeat the column headings on every sheet of a long list, and
+               never split one attendee across a page break. */
+            thead { display: table-header-group; }
+            tr { page-break-inside: avoid; break-inside: avoid; }
+            tbody tr:nth-child(even) { background: #f4f4f5; }
+            @page { margin: 14mm 12mm; }
+        }
+    </style>
+</head>
+<body>
+    <div class="sheet">
+        <div class="toolbar" id="toolbar">
+            <label for="filterSel">Show</label>
+            <select id="filterSel"></select>
+            <label class="chk"><input type="checkbox" id="optEmail" checked> Email</label>
+            <label class="chk"><input type="checkbox" id="optFields"> Custom fields</label>
+            <label class="chk"><input type="checkbox" id="optTick" checked> Tick box</label>
+            <label for="sortSel">Sort</label>
+            <select id="sortSel">
+                <option value="lastname">Last name</option>
+                <option value="firstname">First name</option>
+                <option value="registered">Registered</option>
+                <option value="checkedin">Check-in time</option>
+            </select>
+            <span class="spacer"></span>
+            <button class="btn btn-secondary" id="closeBtn" type="button">Close</button>
+            <button class="btn btn-primary" id="printBtn" type="button">Print</button>
+        </div>
+
+        <div class="page" id="page">
+            <div class="empty" id="loading">Loading&hellip;</div>
+            <div id="content" style="display:none;">
+                <div class="head">
+                    <div class="head-main">
+                        <div class="event-name" id="eventName"></div>
+                        <div class="event-meta" id="eventMeta"></div>
+                    </div>
+                    <div class="head-side">
+                        <strong id="rowCount"></strong>
+                        <span id="filterLabel"></span>
+                    </div>
+                </div>
+                <div class="summary" id="summary"></div>
+                <div id="tableWrap"></div>
+                <div class="foot">
+                    <span id="footLeft"></span>
+                    <span id="footRight"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(location.search);
+        const eventId = params.get('event');
+
+        // The dashboard hands over a specific selection (the rows an organiser
+        // ticked) through localStorage rather than the URL: a few hundred
+        // registration ids is well past what a query string can carry, and it
+        // survives a reload of this page, which a one-shot postMessage would
+        // not. Same origin, and it holds nothing that isn't already on the
+        // dashboard behind the same session.
+        const SELECTION_KEY = 'wts-manifest-selection';
+        function storedSelection() {
+            try {
+                const raw = localStorage.getItem(SELECTION_KEY);
+                if (!raw) return null;
+                const parsed = JSON.parse(raw);
+                if (!parsed || parsed.eventId !== eventId || !Array.isArray(parsed.ids) || !parsed.ids.length) return null;
+                return new Set(parsed.ids);
+            } catch { return null; }
+        }
+        const selection = storedSelection();
+
+        // Every filter this page can print. `waiting`/`waitlist` read the
+        // waitlist rather than the ticket list, which is why each one declares
+        // its own source — the two have different columns and there is no
+        // useful way to show them in one table.
+        const FILTERS = [
+            { key: 'all',        label: 'All ticket holders', source: 'tickets', match: () => true },
+            { key: 'checkedin',  label: 'Checked in',         source: 'tickets', match: g => g.checkedIn > 0 },
+            { key: 'notin',      label: 'Not checked in',     source: 'tickets', match: g => g.checkedIn === 0 && !g.allVoid },
+            { key: 'partial',    label: 'Partly checked in',  source: 'tickets', match: g => g.checkedIn > 0 && g.checkedIn < g.live },
+            { key: 'returned',   label: 'Returned tickets',   source: 'tickets', match: g => g.returned > 0 },
+            { key: 'expired',    label: 'Expired tickets',    source: 'tickets', match: g => g.expired > 0 },
+            { key: 'waiting',    label: 'Waitlist — waiting', source: 'waitlist', match: w => w.status === 'waiting' },
+            { key: 'waitlist',   label: 'Waitlist — everyone', source: 'waitlist', match: () => true },
+        ];
+        const SELECTION_FILTER = { key: 'selection', label: 'Selected attendees', source: 'tickets', match: g => selection.has(g.registrationId) };
+
+        const availableFilters = selection ? [SELECTION_FILTER, ...FILTERS] : FILTERS;
+        let currentFilter = params.get('filter') || availableFilters[0].key;
+        if (!availableFilters.some(f => f.key === currentFilter)) currentFilter = availableFilters[0].key;
+
+        let event = null, groups = [], waitlist = [], loadError = null;
+
+        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        function fmt(iso, withTime = true) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return '';
+            return d.toLocaleString(undefined, withTime
+                ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+                : { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+        function fmtFull(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return '';
+            return d.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        }
+
+        // One row per registration, not per ticket — a family of four is one
+        // line on the door list with "4" in the tickets column, which is how
+        // someone actually works down a printed sheet.
+        function groupTickets(tickets) {
+            const by = new Map();
+            for (const t of tickets) {
+                const key = t.registrationId || t.id;
+                if (!by.has(key)) by.set(key, []);
+                by.get(key).push(t);
+            }
+            return [...by.entries()].map(([registrationId, ts]) => {
+                const first = ts[0];
+                const voided = ts.filter(t => !t.used_at && t.expiredAt);
+                return {
+                    registrationId,
+                    name: first.name || '',
+                    lastName: first.lastName || (first.name || '').split(/\s+/).slice(-1)[0] || '',
+                    firstName: first.firstName || (first.name || '').split(/\s+/)[0] || '',
+                    email: first.email || '',
+                    customFields: first.customFields || {},
+                    createdAt: first.created_at || null,
+                    total: ts.length,
+                    live: ts.filter(t => t.used_at || !t.expiredAt).length,
+                    checkedIn: ts.filter(t => t.used_at).length,
+                    returned: voided.filter(t => t.returnedAt).length,
+                    expired: voided.filter(t => !t.returnedAt).length,
+                    allVoid: voided.length === ts.length,
+                    firstCheckIn: ts.filter(t => t.used_at).map(t => t.used_at).sort()[0] || null,
+                };
+            });
+        }
+
+        function customFieldKeys(rows) {
+            const keys = new Set();
+            for (const g of rows) Object.keys(g.customFields || {}).forEach(k => { if (g.customFields[k] !== '' && g.customFields[k] != null) keys.add(k); });
+            return [...keys];
+        }
+
+        function sortRows(rows, source) {
+            const mode = document.getElementById('sortSel').value;
+            const by = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' });
+            const copy = [...rows];
+            if (source === 'waitlist') {
+                // The queue's own order is the only meaningful one for a
+                // waitlist — position is the whole point of the list.
+                if (mode === 'registered' || mode === 'checkedin') return copy.sort((a, b) => by(a.createdAt, b.createdAt));
+                return copy.sort((a, b) => mode === 'firstname' ? by(a.name, b.name) : by((a.name || '').split(/\s+/).slice(-1)[0], (b.name || '').split(/\s+/).slice(-1)[0]));
+            }
+            switch (mode) {
+                case 'firstname':  return copy.sort((a, b) => by(a.firstName, b.firstName) || by(a.lastName, b.lastName));
+                case 'registered': return copy.sort((a, b) => by(a.createdAt, b.createdAt));
+                // Nobody checked in yet sorts to the end rather than the top,
+                // so a partly-worked list reads as "who has arrived, in order".
+                case 'checkedin':  return copy.sort((a, b) => (a.firstCheckIn ? 0 : 1) - (b.firstCheckIn ? 0 : 1) || by(a.firstCheckIn, b.firstCheckIn));
+                default:           return copy.sort((a, b) => by(a.lastName, b.lastName) || by(a.firstName, b.firstName));
+            }
+        }
+
+        function statusTag(g) {
+            if (g.allVoid) return `<span class="tag void">${g.returned > 0 ? 'Returned' : 'Expired'}</span>`;
+            if (g.checkedIn === 0) return `<span class="tag pending">Not in</span>`;
+            if (g.checkedIn >= g.live) return `<span class="tag in">Checked in</span>`;
+            return `<span class="tag pending">${g.checkedIn}/${g.live} in</span>`;
+        }
+
+        function renderTicketTable(rows) {
+            const showEmail = document.getElementById('optEmail').checked;
+            const showFields = document.getElementById('optFields').checked;
+            const showTick = document.getElementById('optTick').checked;
+            const cfKeys = showFields ? customFieldKeys(rows) : [];
+
+            const head = [
+                showTick ? '<th class="c-tick"></th>' : '',
+                '<th>Name</th>',
+                showEmail ? '<th>Email</th>' : '',
+                ...cfKeys.map(k => `<th>${esc(k)}</th>`),
+                '<th class="c-num">Tickets</th>',
+                '<th>Status</th>',
+                '<th class="c-num">Checked in</th>',
+            ].join('');
+
+            const body = rows.map(g => [
+                showTick ? '<td class="c-tick"><span class="tickbox"></span></td>' : '',
+                `<td class="c-name">${esc(g.name)}</td>`,
+                showEmail ? `<td class="c-muted">${esc(g.email)}</td>` : '',
+                ...cfKeys.map(k => `<td class="c-muted">${esc(g.customFields?.[k] ?? '')}</td>`),
+                `<td class="c-num">${g.total}</td>`,
+                `<td>${statusTag(g)}</td>`,
+                `<td class="c-num c-muted">${esc(fmt(g.firstCheckIn))}</td>`,
+            ].join('')).map(r => `<tr>${r}</tr>`).join('');
+
+            return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+        }
+
+        function renderWaitlistTable(rows) {
+            const showEmail = document.getElementById('optEmail').checked;
+            const showTick = document.getElementById('optTick').checked;
+            const head = [
+                showTick ? '<th class="c-tick"></th>' : '',
+                '<th class="c-num">#</th>',
+                '<th>Name</th>',
+                showEmail ? '<th>Email</th>' : '',
+                '<th>Status</th>',
+                '<th class="c-num">Joined</th>',
+            ].join('');
+            const body = rows.map((w, i) => [
+                showTick ? '<td class="c-tick"><span class="tickbox"></span></td>' : '',
+                `<td class="c-num c-muted">${i + 1}</td>`,
+                `<td class="c-name">${esc(w.name || '')}</td>`,
+                showEmail ? `<td class="c-muted">${esc(w.email || '')}</td>` : '',
+                `<td><span class="tag">${esc(w.status || '')}</span></td>`,
+                `<td class="c-num c-muted">${esc(fmt(w.createdAt))}</td>`,
+            ].join('')).map(r => `<tr>${r}</tr>`).join('');
+            return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+        }
+
+        function render() {
+            const filter = availableFilters.find(f => f.key === currentFilter) || availableFilters[0];
+            const fromWaitlist = filter.source === 'waitlist';
+            const rows = sortRows((fromWaitlist ? waitlist : groups).filter(filter.match), filter.source);
+
+            document.getElementById('eventName').textContent = event?.name || 'Event';
+            const metaBits = [];
+            if (event?.time) metaBits.push(fmtFull(event.time));
+            const loc = [event?.location?.name, event?.location?.address].filter(Boolean).join(', ');
+            if (loc) metaBits.push(loc);
+            document.getElementById('eventMeta').textContent = metaBits.join('  ·  ');
+
+            document.getElementById('rowCount').textContent = `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`;
+            document.getElementById('filterLabel').textContent = filter.label;
+
+            // A running total at the top, so the sheet still answers "how many
+            // are we expecting" when it is the only thing in someone's hand.
+            const totalTickets = groups.reduce((n, g) => n + g.live, 0);
+            const checkedInTickets = groups.reduce((n, g) => n + g.checkedIn, 0);
+            const summary = [
+                `<span><b>${groups.length}</b> registrations</span>`,
+                `<span><b>${totalTickets}</b> tickets</span>`,
+                `<span><b>${checkedInTickets}</b> checked in</span>`,
+                event?.capacity ? `<span>capacity <b>${event.capacity}</b></span>` : '',
+                waitlist.length ? `<span><b>${waitlist.filter(w => w.status === 'waiting').length}</b> waiting</span>` : '',
+            ].filter(Boolean).join('');
+            document.getElementById('summary').innerHTML = summary;
+
+            document.getElementById('tableWrap').innerHTML = rows.length
+                ? (fromWaitlist ? renderWaitlistTable(rows) : renderTicketTable(rows))
+                : `<div class="empty">Nobody matches "${esc(filter.label)}".</div>`;
+
+            document.getElementById('footLeft').textContent = `${event?.name || 'Event'} — ${filter.label}`;
+            document.getElementById('footRight').textContent = `Printed ${new Date().toLocaleString()}`;
+            document.title = `${event?.name || 'Manifest'} — ${filter.label}`;
+        }
+
+        function fail(message) {
+            document.getElementById('loading').textContent = message;
+            document.getElementById('toolbar').style.display = 'none';
+        }
+
+        async function load() {
+            if (!eventId) return fail('No event was specified for this manifest.');
+
+            const sel = document.getElementById('filterSel');
+            sel.innerHTML = availableFilters.map(f => `<option value="${f.key}"${f.key === currentFilter ? ' selected' : ''}>${esc(f.label)}</option>`).join('');
+
+            const [evRes, tkRes] = await Promise.all([
+                fetch(`/api/event/${encodeURIComponent(eventId)}`),
+                fetch(`/api/event/${encodeURIComponent(eventId)}/tickets`),
+            ]);
+            if (tkRes.status === 401) return fail('Sign in on the dashboard first, then open this manifest again.');
+            if (!evRes.ok || !tkRes.ok) return fail('Could not load this event. You may not have access to it.');
+
+            event = await evRes.json();
+            groups = groupTickets(await tkRes.json());
+
+            // The waitlist is a separate permission, so a collaborator without
+            // it still gets a perfectly good ticket manifest — those filters
+            // just drop off the menu rather than erroring.
+            try {
+                const wl = await fetch(`/api/event/${encodeURIComponent(eventId)}/waitlist`);
+                if (wl.ok) waitlist = await wl.json();
+            } catch { waitlist = []; }
+            if (!waitlist.length) {
+                for (const key of ['waiting', 'waitlist']) {
+                    const i = availableFilters.findIndex(f => f.key === key);
+                    if (i >= 0) availableFilters.splice(i, 1);
+                }
+                if (!availableFilters.some(f => f.key === currentFilter)) currentFilter = availableFilters[0].key;
+                sel.innerHTML = availableFilters.map(f => `<option value="${f.key}"${f.key === currentFilter ? ' selected' : ''}>${esc(f.label)}</option>`).join('');
+            }
+
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+            render();
+
+            // Opened with ?print=1 straight from the dashboard's Print button:
+            // go to the print dialog without a second click, but only after
+            // the table is on screen so the preview isn't of an empty page.
+            if (params.get('print') === '1') setTimeout(() => window.print(), 350);
+        }
+
+        document.getElementById('filterSel').addEventListener('change', (e) => {
+            currentFilter = e.target.value;
+            // Keep the URL honest so a reload, a bookmark or a second window
+            // shows the same list rather than snapping back to "all".
+            const url = new URL(location.href);
+            url.searchParams.set('filter', currentFilter);
+            url.searchParams.delete('print');
+            history.replaceState(null, '', url);
+            render();
+        });
+        for (const id of ['optEmail', 'optFields', 'optTick', 'sortSel']) {
+            document.getElementById(id).addEventListener('change', render);
+        }
+        document.getElementById('printBtn').addEventListener('click', () => window.print());
+        document.getElementById('closeBtn').addEventListener('click', () => window.close());
+
+        load().catch(() => fail('Could not load this manifest.'));
+    </script>
+</body>
+</html>

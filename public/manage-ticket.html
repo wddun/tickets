@@ -15,6 +15,14 @@
     </script>
     <link rel="stylesheet" href="style.css">
     <style>
+        /* style.css owns the site's palette; these two are local to this page.
+           --badge-bg is NOT a style.css token (only pages that declare their
+           own :root, like link.html, have one), so it has to be defined for
+           both schemes here — inherited, it resolves to nothing and every
+           surface using it renders transparent. */
+        :root, [data-theme="light"] { --badge-bg: #f0f1f7; }
+        [data-theme="dark"]         { --badge-bg: #252b52; }
+
         .container { max-width: 480px; padding: 24px 16px 40px; }
 
         .status-box {
@@ -90,13 +98,33 @@
         body.themed .status-title { color: var(--rt-text); }
         body.themed .status-sub, body.themed .event-meta { color: var(--rt-muted); }
         body.themed .ticket-row-name { color: var(--rt-text); }
+        /* Once a theme is applied, the site's own .card wrapper is a second
+           surface behind the themed one — and on a *dark* organiser theme
+           (Midnight) viewed in light site mode it showed as a bright white
+           ring around a dark box, with the page behind it dark too. The
+           themed .status-box is the only surface this page needs, so the
+           wrapper stops painting one. */
+        body.themed .card { background: transparent; border-color: transparent; box-shadow: none; }
+        /* The tinted surfaces follow the organiser's theme too. `color-mix`
+           is unavailable in older mobile Safari, so these blend over the
+           theme's own surface with a plain translucent overlay instead — it
+           lands correctly on a light or a dark theme without either being
+           special-cased. */
+        body.themed .notice,
+        body.themed .ticket-row { background: rgba(127, 127, 127, 0.12); border-color: var(--rt-border); }
+        body.themed .ticket-tag { background: rgba(127, 127, 127, 0.16); color: var(--rt-muted); }
+        body.themed .notice { color: var(--rt-muted); }
+        body.themed .notice strong { color: var(--rt-text); }
 
         [data-theme="dark"] body.themed { background: var(--bg) !important; color: var(--text) !important; }
         [data-theme="dark"] body.themed .status-box { background: var(--card) !important; border-color: var(--border) !important; color: var(--text) !important; }
         [data-theme="dark"] body.themed .status-title { color: var(--text) !important; }
         [data-theme="dark"] body.themed .status-sub,
         [data-theme="dark"] body.themed .event-meta { color: var(--text-muted) !important; }
-        [data-theme="dark"] body.themed .ticket-row { background: var(--bg) !important; border-color: var(--border) !important; }
+        [data-theme="dark"] body.themed .ticket-row,
+        [data-theme="dark"] body.themed .notice { background: var(--bg) !important; border-color: var(--border) !important; color: var(--text-muted) !important; }
+        [data-theme="dark"] body.themed .notice strong { color: var(--text) !important; }
+        [data-theme="dark"] body.themed .ticket-tag { background: var(--badge-bg) !important; color: var(--text-muted) !important; }
         [data-theme="dark"] body.themed .ticket-row-name { color: var(--text) !important; }
         [data-theme="dark"] body.themed .nav a { color: var(--red-text) !important; }
 

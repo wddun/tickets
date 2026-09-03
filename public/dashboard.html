@@ -3425,6 +3425,10 @@
                     ${event.atDoorEnabled ? `<a href="/at-door.html?id=${event.id}" target="_blank" class="btn-settings" style="text-decoration:none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v4a1 1 0 0 0 1 1 2 2 0 1 1 0 4 1 1 0 0 0-1 1v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4a1 1 0 0 0-1-1 2 2 0 1 1 0-4 1 1 0 0 0 1-1V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/></svg> At Door</a>` : ''}
                     <button class="btn-settings" onclick="openMetricsModal('${event.id}')">📊 Metrics</button>
                     <button class="btn-settings" onclick="openBulkEmailModal('${event.id}', ${grouped.length})">✉️ Email All</button>
+                    <button class="btn-settings" onclick="openManifest('${event.id}')" title="Printable door list">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                        Print List
+                    </button>
                     <a href="/giveaway.html?eventId=${event.id}" target="_blank" class="btn-settings" style="text-decoration:none;">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/><circle cx="12" cy="12" r="2.5"/></svg>
                         Giveaway
@@ -3469,7 +3473,7 @@
 
         <div class="section-header">
             <div style="display:flex;align-items:center;gap:12px;">
-                <span class="section-title">Attendees</span>
+                <span class="section-title">Attendees</span>${helpIcon('attendees.printList')}
                 <button class="btn btn-primary btn-sm" onclick="openBulkImportModal()">➕ Add Tickets</button>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
@@ -3480,6 +3484,7 @@
                     <button class="btn btn-secondary btn-sm" onclick="openBulkEmailModal('${event.id}', 0, true)">Email Selected</button>
                     <button class="btn btn-secondary btn-sm" onclick="exportSelectedCSV()">Export CSV</button>
                     <button class="btn btn-secondary btn-sm" onclick="printSelectedTickets()">Print Selected</button>
+                    <button class="btn btn-secondary btn-sm" onclick="openManifest('${event.id}', true)" title="Printable door list of just these people">Print List</button>
                     <button class="btn btn-secondary btn-sm" onclick="expireSelectedTickets('${event.id}', this)">Expire Selected</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteSelectedTickets('${event.id}', this)">Delete Selected</button>
                 </span>
@@ -3733,6 +3738,24 @@
             if (!checkedRegIds.size) return;
             const ids = [...checkedRegIds].join(',');
             window.location.href = '/api/tickets/export-csv?regIds=' + encodeURIComponent(ids);
+        }
+
+        // The printable door list (manifest.html) — a paper roll-call, as
+        // opposed to printSelectedTickets() above, which prints the attendees'
+        // actual QR tickets. Different job, so a separate page.
+        //
+        // A selection is handed over in localStorage rather than the query
+        // string: a few hundred registration ids is well past what a URL can
+        // carry, and it survives the manifest being reloaded or re-filtered.
+        function openManifest(eventId, useSelection = false) {
+            const ids = useSelection ? [...checkedRegIds] : [];
+            if (useSelection && !ids.length) return;
+            try {
+                if (ids.length) localStorage.setItem('wts-manifest-selection', JSON.stringify({ eventId, ids }));
+                else localStorage.removeItem('wts-manifest-selection');
+            } catch {}
+            const filter = ids.length ? 'selection' : 'all';
+            window.open(`/manifest.html?event=${encodeURIComponent(eventId)}&filter=${filter}`, '_blank');
         }
 
         async function bulkCheckIn(eventId, btn) {
@@ -4443,7 +4466,101 @@
                         to have your Stripe account connected. Leave this blank or 0 to keep the event free.
                     </div>
                 </div>
+
+                <hr class="settings-divider">
+                <div class="settings-subhead">Duplicate</div>
+                <div class="settings-hint" style="margin-bottom:12px;">
+                    Start a new event from this one's setup &mdash; custom fields, theme, email template and policy, signup limits, waitlist and return settings all carried over. Nobody's tickets, waitlist entries, orders or history come with it.
+                </div>
+                <div data-no-dirty>
+                    <button type="button" class="btn btn-secondary" onclick="openDuplicateEventModal('${eventId}')">Duplicate This Event${helpIcon('general.duplicate')}</button>
+                </div>
             `;
+        }
+
+        // Duplicating an event asks for the two things that are almost never
+        // right to copy verbatim — its name and its date — and nothing else.
+        // Everything else is the point of duplicating, so it comes across
+        // without being asked about (see POST /api/event/:id/duplicate).
+        function openDuplicateEventModal(eventId) {
+            const ev = events.find(e => e.id === eventId);
+            if (!ev) return;
+            const tz = ev.timezone || browserTimezone();
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.style.zIndex = '1700';
+            overlay.innerHTML = `
+                <div class="modal help-modal">
+                    <div class="modal-header"><h2>Duplicate Event</h2></div>
+                    <div style="margin-bottom:16px;">
+                        <label for="dupName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Name</label>
+                        <input type="text" id="dupName" value="${esc((ev.name || 'Event') + ' (Copy)')}"
+                            style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <label for="dupTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date &amp; time <span style="font-weight:400;color:var(--text-muted);">(leave blank to set later)</span></label>
+                        <input type="datetime-local" id="dupTime" value=""
+                            style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:5px;">Deliberately blank rather than copied: a duplicate of a past event would otherwise start life already over, with its reminder and every deadline already missed.</div>
+                    </div>
+                    <label class="settings-toggle" style="margin-bottom:8px;">
+                        <input type="checkbox" id="dupAccess">
+                        <div>
+                            <div class="settings-toggle-title">Also copy who has access</div>
+                            <div class="settings-toggle-desc">Gives everyone currently sharing this event the same permissions on the copy. They are not emailed about it.</div>
+                        </div>
+                    </label>
+                    <div id="dupError" style="display:none;color:#dc2626;font-size:13px;margin-bottom:10px;"></div>
+                    <div style="display:flex;justify-content:flex-end;gap:8px;">
+                        <button class="btn btn-secondary" id="dupCancel">Cancel</button>
+                        <button class="btn btn-primary" id="dupSubmit">Create Copy</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            const close = () => overlay.remove();
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+            overlay.querySelector('#dupCancel').onclick = close;
+
+            overlay.querySelector('#dupSubmit').onclick = async () => {
+                const btn = overlay.querySelector('#dupSubmit');
+                const err = overlay.querySelector('#dupError');
+                const name = overlay.querySelector('#dupName').value.trim();
+                const timeVal = overlay.querySelector('#dupTime').value;
+                if (!name) { err.textContent = 'Give the copy a name.'; err.style.display = 'block'; return; }
+                err.style.display = 'none';
+                btn.disabled = true; btn.textContent = 'Copying…';
+                try {
+                    const r = await fetch(`/api/event/${eventId}/duplicate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name,
+                            // An empty field means "no date yet", not "keep the
+                            // original's" — hence always sending the key.
+                            time: timeVal ? zonedWallClockToISO(timeVal, tz) : '',
+                            endTime: '',
+                            includeAccess: overlay.querySelector('#dupAccess').checked,
+                        }),
+                    });
+                    const d = await r.json();
+                    if (!r.ok || !d.success) {
+                        err.textContent = d.error || 'Could not duplicate this event.';
+                        err.style.display = 'block';
+                        btn.disabled = false; btn.textContent = 'Create Copy';
+                        return;
+                    }
+                    close();
+                    await loadEvents();
+                    selectEvent(d.eventId);
+                    showToast(`Copied to "${name}".${d.copiedAccess ? ` ${d.copiedAccess} collaborator${d.copiedAccess === 1 ? '' : 's'} carried over.` : ''}`);
+                } catch {
+                    err.textContent = 'Network error while duplicating.';
+                    err.style.display = 'block';
+                    btn.disabled = false; btn.textContent = 'Create Copy';
+                }
+            };
+            setTimeout(() => overlay.querySelector('#dupName')?.select(), 80);
         }
 
         function renderDangerZoneSection(eventId) {

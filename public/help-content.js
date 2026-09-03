@@ -166,6 +166,29 @@ window.HELP_CONTENT = {
             `Useful for a same-day event where the cutoff exists to kill unclaimed QR codes at a fixed time (e.g. midnight) rather than to keep working through the waitlist.`,
         ],
     },
+    'attendees.printList': {
+        title: 'Print List',
+        summary: 'Opens a printable door list — a paper roll-call of who is expected, with a tick box against each name.',
+        details: [
+            `Filterable to all ticket holders, checked in, not checked in, partly checked in, returned or expired tickets, or the waitlist (waiting only, or everyone).`,
+            `"Print List" on the toolbar prints everyone; the same button in the selection bar prints just the attendees you have ticked.`,
+            `One line per registration, not per ticket — a family of four is one row with 4 in the Tickets column, which is how you actually work down a sheet.`,
+            `Optional columns: email, custom field answers, and the tick box itself. Sort by last name, first name, when they registered, or when they checked in.`,
+            `This is the paper fallback for when the door has no signal. It is a different thing from "Print Selected", which prints the attendees' actual QR tickets.`,
+        ],
+    },
+    'general.duplicate': {
+        title: 'Duplicate This Event',
+        summary: 'Creates a new event from this one\'s setup. Useful for a season, a tour, or a meetup that runs every month — the settings that take longest to get right are exactly the ones that never change between runs.',
+        details: [
+            `<strong>Copied:</strong> capacity, colour and image, venue, custom fields, registration theme, the ticket email template and per-source email policy, signup limits, at-door and public-registration settings, waitlist settings and messages, reminder settings, ticket price, scan-result duration, and the ticket-return policy.`,
+            `<strong>Not copied:</strong> tickets, waitlist entries, orders, discount codes, API keys, scan links, giveaway winners and the audit log. A duplicate copies the setup, not what happened.`,
+            `<strong>Deliberately reset:</strong> the door display and giveaway room tokens (one leaked token must never open two events), the scanner PIN (same reason), the "tickets expire at" cutoff (it was an absolute time pinned to the old date), and the reminder's "already sent" mark, so the copy's reminder can still fire.`,
+            `The date is left blank rather than copied — a duplicate of a past event would otherwise be created already over, with every deadline missed.`,
+            `Access sharing is copied only if you tick the box. The people it is shared with are not emailed about the copy.`,
+            `The copy is owned by you, even if you were duplicating an event shared with you. It needs "Manage event settings" on the original.`,
+        ],
+    },
     'general.ticketPrice': {
         title: 'Ticket Price',
         summary: 'Charged via Stripe Checkout at registration. Leave blank or 0 for a free event.',
