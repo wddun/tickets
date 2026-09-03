@@ -26,7 +26,8 @@ describe('public pages', () => {
     const publicPages = [
         '/', '/index.html', '/login.html', '/register.html', '/support.html',
         '/privacy.html', '/forgot-password.html', '/reset-password.html',
-        '/verify-email.html', '/waitlist-status.html', '/display.html', '/scanner.html',
+        '/verify-email.html', '/waitlist-status.html', '/manage-ticket.html',
+        '/display.html', '/scanner.html',
     ];
 
     for (const page of publicPages) {

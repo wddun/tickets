@@ -2810,6 +2810,7 @@
                 if (atDoor) await setAtDoorEnabled(id, atDoor.checked);
                 await saveEmailPolicy(id);
                 await saveRegistrationLimits(id);
+                await saveTicketReturns(id);
             },
             'tab-waitlist': async (id) => {
                 const wl = document.getElementById('waitlistToggle');
@@ -3593,6 +3594,14 @@
                 const total = g.tickets.length;
                 const scanned = g.tickets.filter(t => t.used_at).length;
                 const expiredCount = g.tickets.filter(t => !t.used_at && t.expired).length;
+                // Whether the voided tickets in this booking were handed back
+                // by the attendee or expired by the organiser/sweep. Judged on
+                // the voided ones only — a booking with two returns and one
+                // still-live ticket has nothing expired in it, and labelling
+                // that "Expired" reads like the system took their ticket away.
+                const voided = g.tickets.filter(t => !t.used_at && t.expired);
+                const allReturned = voided.length > 0 && voided.every(t => t.returnedAt);
+                const voidLabel = allReturned ? 'Returned' : 'Expired';
                 const isChecked = checkedRegIds.has(g.registrationId);
                 let pill;
                 if (scanned === 0) {
@@ -3635,7 +3644,7 @@
                 <div class="attendee-name">${esc(g.name)}</div>
                 <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap;">
                     ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : g.tickets[0]?.confirmation_sent_at ? `<span title="Email not opened" style="font-size:10px;font-weight:600;color:var(--text-muted);">Sent</span>` : ''}
-                    ${expiredCount > 0 ? `<span title="Not checked in before the ticket expiry cutoff" style="font-size:10px;font-weight:600;color:#b45309;">Expired</span>` : ''}
+                    ${expiredCount > 0 ? `<span title="${allReturned ? 'Handed back by the attendee' : 'Not checked in before the ticket expiry cutoff'}" style="font-size:10px;font-weight:600;color:#b45309;">${voidLabel}</span>` : ''}
                     ${(() => { const wins = g.tickets[0]?.giveawayWins || []; if (!wins.length) return ''; const prizes = wins.map(w => w.prizeLabel).filter(Boolean).join(', '); return `<span class="winner-badge" title="${esc(prizes || 'Giveaway winner')}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a2 2 0 0 0 0 4h.5M17 6h3a2 2 0 0 1 0 4h-.5"/></svg>${wins.length > 1 ? `Won &times;${wins.length}` : 'Winner'}</span>`; })()}
                     ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:var(--text-muted);">Downloaded to Wallet</span>` : ''}
                     ${lastSeenBadge}
@@ -3644,7 +3653,7 @@
             <div class="col-email">
                 <div class="attendee-email">${esc(g.email || '')}</div>
             </div>
-            <div class="ticket-count">${expiredCount === total ? '<span style="color:#b45309;">Expired</span>' : `${total} ticket${total !== 1 ? 's' : ''}`}</div>
+            <div class="ticket-count">${expiredCount === total ? `<span style="color:#b45309;">${voidLabel}</span>` : `${total} ticket${total !== 1 ? 's' : ''}`}</div>
             <div>${pill}</div>
             <div>${btns}</div>
         </div>`;
@@ -4816,6 +4825,7 @@
                         `<div class="settings-section" id="tab-danger">${renderDangerZoneSection(eventId)}</div>`;
                     togglePushDeviceList();
                     renderThemePicker(eventId);
+                    updateReturnCutoffSummary();
                     return;
                 }
 
@@ -4843,6 +4853,7 @@
                     `<div class="settings-section" id="tab-danger">${renderDangerZoneSection(eventId)}</div>`;
                 togglePushDeviceList();
                 renderThemePicker(eventId);
+                updateReturnCutoffSummary();
             } catch (err) {
                 document.getElementById('settingsContent').innerHTML = '<div class="settings-empty">Error loading settings.</div>';
             }
@@ -5386,6 +5397,10 @@
             const allowMultiple = ev?.allowMultipleRegistrations !== false;
             const perDevice = !!ev?.oneRegistrationPerDevice;
             const blockDupes = !!ev?.blockDuplicateEmails;
+            const returnsOn = !!ev?.ticketReturnsEnabled;
+            const returnRefund = ev?.ticketReturnRefund === 'auto' ? 'auto' : 'none';
+            const returnCutoffUnit = RETURN_CUTOFF_UNITS[ev?.ticketReturnCutoffUnit] ? ev.ticketReturnCutoffUnit : 'hours';
+            const returnCutoffValue = (ev?.ticketReturnCutoffMinutes ?? 0) / RETURN_CUTOFF_UNITS[returnCutoffUnit];
             const isPaid  = !!ev?.ticketPrice;
             const regUrl = `${location.origin}/register.html?id=${eventId}`;
             const atDoorDesc = isPaid
@@ -5480,6 +5495,48 @@
                 </label>
 
                 <hr class="settings-divider">
+                <div class="settings-subhead">Ticket Returns</div>
+                <div class="settings-hint" style="margin-bottom:10px;">
+                    Lets someone who finds they can't come hand their own ticket back, from a link in their confirmation email, instead of emailing you to be taken off the list. The seat is freed the moment they do &mdash; and goes straight to the next person on the waitlist if you run one.
+                </div>
+                <label class="settings-toggle">
+                    <input type="checkbox" id="ticketReturnsToggle" ${returnsOn ? 'checked' : ''}
+                        onchange="document.getElementById('ticketReturnsBox').style.display = this.checked ? 'block' : 'none';">
+                    <div>
+                        <div class="settings-toggle-title">Allow Attendees to Return Tickets${helpIcon('registration.ticketReturns')}</div>
+                        <div class="settings-toggle-desc">Adds a "Can't make it? Return your ticket" link to every confirmation email for this event.</div>
+                    </div>
+                </label>
+                <div id="ticketReturnsBox" class="settings-card" style="${returnsOn ? '' : 'display:none;'}">
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+                        <label style="font-size:13px;font-weight:600;white-space:nowrap;">Returns close${helpIcon('registration.ticketReturnCutoff')}</label>
+                        <input type="number" id="ticketReturnCutoff" inputmode="numeric" value="${returnCutoffValue}" min="0" max="9999"
+                            oninput="updateReturnCutoffSummary()"
+                            style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
+                        <select id="ticketReturnCutoffUnit" onchange="updateReturnCutoffSummary()"
+                            style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;background:var(--card);color:var(--text);">
+                            ${Object.keys(RETURN_CUTOFF_UNITS).map(u => `<option value="${u}" ${u === returnCutoffUnit ? 'selected' : ''}>${u}</option>`).join('')}
+                        </select>
+                        <label style="font-size:13px;font-weight:600;white-space:nowrap;">before the event starts</label>
+                    </div>
+                    <div id="ticketReturnCutoffSummary" style="font-size:12px;color:var(--text-muted);margin:-8px 0 14px;"></div>
+                    ${isPaid ? `
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <label style="font-size:13px;font-weight:600;white-space:nowrap;">When a paid ticket is returned${helpIcon('registration.ticketReturnRefund')}</label>
+                        <select id="ticketReturnRefund" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;background:var(--card);color:var(--text);">
+                            <option value="none" ${returnRefund === 'none' ? 'selected' : ''}>Release the seat, don't refund</option>
+                            <option value="auto" ${returnRefund === 'auto' ? 'selected' : ''}>Release the seat and refund in full</option>
+                        </select>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:8px;">
+                        A full refund goes back through Stripe the moment they return, with no approval step. On a part-returned group booking only that share is refunded. Either way the attendee is told exactly what happened to their money.
+                    </div>` : `
+                    <div style="font-size:12px;color:var(--text-muted);">
+                        This event is free, so there is nothing to refund &mdash; returning simply gives the spot back.
+                    </div>`}
+                </div>
+
+                <hr class="settings-divider">
                 <div class="settings-subhead">Registration Page Look${helpIcon('registration.theme')}</div>
                 <div class="settings-hint" style="margin-bottom:10px;">
                     How the public registration page is styled. The event image (set under General) becomes the banner across the top.
@@ -5556,6 +5613,58 @@
                 if (ev) Object.assign(ev, body);
             } catch {
                 showToast('Network error while saving signup limits.');
+            }
+        }
+
+        // Must match RETURN_CUTOFF_UNITS in server.js — the dashboard renders
+        // the picker from it and converts back for display, the server does
+        // the authoritative conversion on save.
+        const RETURN_CUTOFF_UNITS = { minutes: 1, hours: 60, days: 1440, weeks: 10080 };
+
+        // Says in words what the two controls add up to, because "3" next to
+        // "days" is easy to read as "3 days after" or to leave half-edited.
+        function updateReturnCutoffSummary() {
+            const el = document.getElementById('ticketReturnCutoffSummary');
+            if (!el) return;
+            const value = parseInt(document.getElementById('ticketReturnCutoff')?.value, 10) || 0;
+            const unit = document.getElementById('ticketReturnCutoffUnit')?.value || 'hours';
+            el.textContent = value === 0
+                ? 'Returns stay open right up to the start time. An event with no start time set never closes them.'
+                : `Returns close ${value} ${value === 1 ? unit.replace(/s$/, '') : unit} before the event starts.`;
+        }
+
+        async function saveTicketReturns(eventId) {
+            const toggle = document.getElementById('ticketReturnsToggle');
+            if (!toggle) return;
+            const cutoffEl = document.getElementById('ticketReturnCutoff');
+            const cutoffUnitEl = document.getElementById('ticketReturnCutoffUnit');
+            const refundEl = document.getElementById('ticketReturnRefund');
+            const body = {
+                enabled: toggle.checked,
+                // The refund select is only rendered for a paid event, so fall
+                // back to whatever is already stored rather than silently
+                // resetting a price that was removed and later put back.
+                refund: refundEl ? refundEl.value : (events.find(e => e.id === eventId)?.ticketReturnRefund || 'none'),
+                cutoffValue: cutoffEl ? (parseInt(cutoffEl.value, 10) || 0) : 0,
+                cutoffUnit: cutoffUnitEl ? cutoffUnitEl.value : 'hours',
+            };
+            try {
+                const r = await fetch(`/api/event/${eventId}/ticket-returns`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) { showToast('Could not save ticket returns.'); return; }
+                const d = await r.json();
+                const ev = events.find(e => e.id === eventId);
+                if (ev) {
+                    ev.ticketReturnsEnabled = d.ticketReturnsEnabled;
+                    ev.ticketReturnRefund = d.ticketReturnRefund;
+                    ev.ticketReturnCutoffMinutes = d.ticketReturnCutoffMinutes;
+                    ev.ticketReturnCutoffUnit = d.ticketReturnCutoffUnit;
+                }
+            } catch {
+                showToast('Network error while saving ticket returns.');
             }
         }
 
@@ -8617,7 +8726,13 @@
                 const reentryEvent = events.find(e => e.id === tk.eventId);
                 let statusBadge;
                 if (!checkedIn && tk.expiredAt) {
-                    statusBadge = `<span style="background:#e5e7eb;color:#4b5563;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;" title="Expired ${new Date(tk.expiredAt).toLocaleString()}">Expired</span>`;
+                    // A returned ticket is an expired one the attendee gave
+                    // back themselves (see expireTicket's returnedByAttendee).
+                    // Worth saying which, so "why did this ticket stop working"
+                    // doesn't need the audit log to answer.
+                    const gaveBack = !!tk.returnedAt;
+                    const when = new Date(tk.returnedAt || tk.expiredAt).toLocaleString();
+                    statusBadge = `<span style="background:#e5e7eb;color:#4b5563;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;" title="${gaveBack ? 'Returned by the attendee' : 'Expired'} ${when}">${gaveBack ? 'Returned' : 'Expired'}</span>`;
                 } else if (!checkedIn) {
                     statusBadge = `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">Not checked in</span>`;
                 } else if (reentryEvent?.allowReentry) {
@@ -8639,7 +8754,7 @@
                 // Only meaningful before check-in — a used ticket already did
                 // its job and can't be expired (see isTicketExpired()).
                 const expireBtn = checkedIn || !reentryEvent?.fullAccess ? '' : tk.expiredAt
-                    ? `<button onclick="setTicketExpiredInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;margin-left:6px;padding:3px 10px;font-size:11px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;">Restore Ticket</button>`
+                    ? `<button onclick="setTicketExpiredInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;margin-left:6px;padding:3px 10px;font-size:11px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;">${tk.returnedAt ? 'Reinstate Ticket' : 'Restore Ticket'}</button>`
                     : `<button onclick="setTicketExpiredInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;margin-left:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Expire Ticket</button>`;
                 const size = showLarge ? 120 : 80;
                 const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Ticket ${i + 1}</div>` : '';

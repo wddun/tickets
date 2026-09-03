@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Your Ticket | WTS Tickets</title>
+    <meta name="theme-color" content="#1a1f3c">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .container { max-width: 480px; padding: 24px 16px 40px; }
+
+        .status-box {
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 14px; padding: 26px 20px;
+            text-align: center;
+        }
+        .status-icon { width: 52px; height: 52px; margin: 0 auto 12px; display: block; }
+        .status-title { font-size: 20px; font-weight: 800; color: var(--text); margin-bottom: 6px; }
+        .status-sub   { font-size: 14px; color: var(--text-muted); margin-bottom: 6px; line-height: 1.5; }
+
+        .event-meta { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin-bottom: 18px; }
+
+        /* One row per ticket in the registration. A single-ticket booking
+           renders the same list with the checkbox hidden — the row is still
+           worth showing so the person can see whose ticket they are about to
+           give back before they give it back. */
+        .ticket-list { text-align: left; margin: 4px 0 18px; }
+        .ticket-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 11px 13px; margin-bottom: 8px;
+            background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+        }
+        .ticket-row input { width: 17px; height: 17px; flex-shrink: 0; margin: 0; cursor: pointer; }
+        .ticket-row-name { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; word-break: break-word; }
+        .ticket-row.inactive { opacity: .6; }
+        .ticket-row.inactive input { cursor: not-allowed; }
+        .ticket-tag {
+            flex-shrink: 0; font-size: 10px; font-weight: 700; letter-spacing: .4px;
+            text-transform: uppercase; padding: 3px 8px; border-radius: 99px;
+            background: var(--badge-bg); color: var(--text-muted);
+        }
+
+        .notice {
+            font-size: 12.5px; line-height: 1.55; text-align: left;
+            padding: 11px 13px; border-radius: 10px; margin-bottom: 16px;
+            background: var(--badge-bg); color: var(--text-muted);
+        }
+        .notice strong { color: var(--text); }
+
+        .btn-danger-outline {
+            background: var(--danger-soft-bg); color: var(--danger-soft-text);
+            border: 1.5px solid var(--danger-soft-border);
+            font-size: 15px; font-weight: 700;
+        }
+        .btn-danger-outline:hover { background: var(--danger-soft-border); }
+        .btn-danger-outline:disabled { opacity: .5; cursor: not-allowed; }
+        [data-theme="dark"] .btn-danger-outline {
+            background: var(--danger-soft-bg); color: var(--danger-soft-text);
+            border: 1.5px solid var(--danger-soft-border);
+        }
+
+        @media (max-width: 480px) {
+            .container { padding: 16px 12px 32px; }
+        }
+
+        /* ── Organiser theming ──────────────────────────────────────────────
+           Same treatment as waitlist-status.html: the page picks up whatever
+           registration theme the organiser already chose (see themeForEvent
+           in server.js) so it doesn't land as an unbranded stranger halfway
+           through someone's journey, and the site's own dark mode then wins
+           back the neutral surfaces — background, card, text — while leaving
+           the organiser's accent (the banner) alone, since that is their
+           actual branding rather than a surface dark mode should override. */
+        body.themed {
+            background: var(--rt-bg); color: var(--rt-text);
+            font-family: var(--rt-font, inherit);
+        }
+        body.themed .status-box {
+            background: var(--rt-surface); border-color: var(--rt-border);
+            border-radius: var(--rt-radius); color: var(--rt-text);
+        }
+        body.themed .status-title { color: var(--rt-text); }
+        body.themed .status-sub, body.themed .event-meta { color: var(--rt-muted); }
+        body.themed .ticket-row-name { color: var(--rt-text); }
+
+        [data-theme="dark"] body.themed { background: var(--bg) !important; color: var(--text) !important; }
+        [data-theme="dark"] body.themed .status-box { background: var(--card) !important; border-color: var(--border) !important; color: var(--text) !important; }
+        [data-theme="dark"] body.themed .status-title { color: var(--text) !important; }
+        [data-theme="dark"] body.themed .status-sub,
+        [data-theme="dark"] body.themed .event-meta { color: var(--text-muted) !important; }
+        [data-theme="dark"] body.themed .ticket-row { background: var(--bg) !important; border-color: var(--border) !important; }
+        [data-theme="dark"] body.themed .ticket-row-name { color: var(--text) !important; }
+        [data-theme="dark"] body.themed .nav a { color: var(--red-text) !important; }
+
+        /* The neutral (non-semantic) icons follow the theme's text colour, or
+           an organiser's dark theme leaves a dark-on-dark icon invisible while
+           the viewer is still in light site mode. */
+        body.themed #manageView .status-icon { stroke: var(--rt-text); }
+        [data-theme="dark"] body.themed #manageView .status-icon { stroke: var(--text) !important; }
+
+        .event-banner {
+            display: none; width: 100%; height: var(--rt-header-h);
+            background: var(--rt-header-bg, var(--rt-accent));
+            background-size: contain; background-repeat: no-repeat; background-position: center;
+            margin: -1px -1px 18px; width: calc(100% + 2px); border-radius: var(--rt-radius) var(--rt-radius) 0 0;
+        }
+        .event-banner.show { display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+        </div>
+        <div class="card">
+            <div class="event-banner" id="eventBanner"></div>
+
+            <div id="loadingView">
+                <div class="status-box"><div class="status-sub">Loading your booking&hellip;</div></div>
+            </div>
+
+            <div id="manageView" style="display:none;">
+                <div class="status-box">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/></svg>
+                    <div class="status-title" id="manageEventName"></div>
+                    <div class="event-meta" id="manageEventMeta"></div>
+
+                    <div id="ticketList" class="ticket-list"></div>
+                    <div id="returnNotice" class="notice"></div>
+
+                    <button type="button" class="btn-danger-outline" id="returnBtn">Return</button>
+                    <div class="status-sub" style="margin:14px 0 0;font-size:12.5px;">Keep your ticket if you might still come &mdash; returning it cannot be undone from this page.</div>
+                </div>
+            </div>
+
+            <div id="closedView" style="display:none;">
+                <div class="status-box">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <div class="status-title" id="closedTitle">Returns are closed</div>
+                    <div class="status-sub" id="closedMessage"></div>
+                    <div class="event-meta" id="closedEventMeta" style="margin-top:14px;"></div>
+                    <div id="closedTicketList" class="ticket-list"></div>
+                </div>
+            </div>
+
+            <div id="doneView" style="display:none;">
+                <div class="status-box">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
+                    <div class="status-title" id="doneTitle">Ticket returned</div>
+                    <div class="status-sub" id="doneMessage"></div>
+                    <div class="status-sub" id="doneRefund" style="display:none;"></div>
+                    <div class="status-sub" style="margin-top:12px;">Thank you for letting the organizer know &mdash; your spot can now go to someone else.</div>
+                </div>
+            </div>
+
+            <div id="errorView" style="display:none;">
+                <div class="status-box">
+                    <div class="status-title">Not found</div>
+                    <div class="status-sub">This link is invalid, or the booking it points to no longer exists.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="nav">
+            <a href="/">Home</a>
+        </div>
+    </div>
+
+    <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.innerHTML = document.documentElement.getAttribute('data-theme') === 'dark' ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
+
+        const params = new URLSearchParams(window.location.search);
+        const id = params.get('id');
+        let data = null;
+
+        const VIEWS = ['loadingView', 'manageView', 'closedView', 'doneView', 'errorView'];
+        function showView(name) {
+            for (const v of VIEWS) document.getElementById(v).style.display = v === name ? 'block' : 'none';
+        }
+
+        function esc(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // Mirrors themeForEvent() in server.js — same variables the
+        // registration page and the waitlist status page consume.
+        function applyTheme(style) {
+            if (!style || !style.vars) return;
+            const root = document.documentElement.style;
+            const v = style.vars;
+            const set = (k, val) => { if (val) root.setProperty(k, val); };
+            set('--rt-bg', v.bg);          set('--rt-surface', v.surface);
+            set('--rt-text', v.text);      set('--rt-muted', v.muted);
+            set('--rt-accent', v.accent);  set('--rt-accent-text', v.accentText);
+            set('--rt-border', v.border);  set('--rt-radius', v.radius);
+            set('--rt-header-h', v.headerHeight); set('--rt-font', v.font);
+            set('--rt-header-bg', v.headerGradient || v.accent);
+            document.body.classList.add('themed');
+            const meta = document.querySelector('meta[name="theme-color"]');
+            if (meta && v.accent) meta.setAttribute('content', v.accent);
+        }
+
+        function renderBanner(imageUrl, style) {
+            const el = document.getElementById('eventBanner');
+            if (imageUrl) {
+                el.style.backgroundImage = `url('${imageUrl}')`;
+                el.classList.add('show');
+            } else if (style?.vars?.headerGradient) {
+                el.classList.add('show');
+            }
+        }
+
+        function fmtWhen(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return '';
+            return d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        }
+
+        function eventMetaHtml(d) {
+            const bits = [];
+            const when = fmtWhen(d.eventTime);
+            if (when) bits.push(esc(when));
+            if (d.eventLocation) bits.push(esc(d.eventLocation));
+            return bits.join('<br>');
+        }
+
+        // One row per ticket. Rows that can't be returned (already scanned in,
+        // already given back) still appear, greyed out and labelled — hiding
+        // them would leave someone staring at a shorter list than the one they
+        // booked with no explanation of where the rest went.
+        function renderTickets(container, tickets, { selectable }) {
+            const many = tickets.length > 1;
+            container.innerHTML = tickets.map(t => {
+                const tag = t.checkedIn ? 'Checked in' : (t.returned ? 'Returned' : (t.expired ? 'No longer valid' : ''));
+                const box = selectable && t.returnable && many
+                    ? `<input type="checkbox" class="ticket-check" value="${esc(t.id)}" checked>`
+                    : '';
+                return `<div class="ticket-row${t.returnable ? '' : ' inactive'}">
+                    ${box}
+                    <div class="ticket-row-name">${esc(t.name || 'Ticket')}</div>
+                    ${tag ? `<div class="ticket-tag">${esc(tag)}</div>` : ''}
+                </div>`;
+            }).join('');
+        }
+
+        function selectedTicketIds() {
+            const boxes = [...document.querySelectorAll('#ticketList .ticket-check')];
+            if (!boxes.length) return data.tickets.filter(t => t.returnable).map(t => t.id);
+            return boxes.filter(b => b.checked).map(b => b.value);
+        }
+
+        function syncReturnButton() {
+            const btn = document.getElementById('returnBtn');
+            const n = selectedTicketIds().length;
+            const total = data.tickets.filter(t => t.returnable).length;
+            btn.disabled = n === 0;
+            btn.textContent = n === 0 ? 'Select a ticket to return'
+                : (total > 1 && n < total ? `Return ${n} ticket${n === 1 ? '' : 's'}` : (total > 1 ? 'Return all tickets' : 'Return my ticket'));
+        }
+
+        function returnNoticeHtml(d) {
+            if (!d.isPaid) return 'Your spot goes back to the organizer, and to the waitlist if the event has one. To come after all, you would need to register again &mdash; subject to space.';
+            if (d.returns.refund === 'auto') return '<strong>You will be refunded automatically.</strong> The refund goes back to the card you paid with and usually appears within a few working days.';
+            return '<strong>This does not refund you automatically.</strong> Returning gives up your spot; contact the organizer about the money you paid.';
+        }
+
+        function closedMessageFor(d) {
+            if (d.returns.reason === 'disabled') {
+                return 'This event does not accept ticket returns online. If you can no longer come, please contact the organizer directly so they can free up your spot.';
+            }
+            const closedWhen = fmtWhen(d.returns.closesAt);
+            return `The window for returning a ticket to this event has closed${closedWhen ? ` (it ended ${closedWhen})` : ''}. If you can no longer come, please contact the organizer directly.`;
+        }
+
+        async function load() {
+            if (!id) return showView('errorView');
+            let res;
+            try {
+                res = await fetch(`/api/registration/${encodeURIComponent(id)}/manage`);
+            } catch {
+                return showView('errorView');
+            }
+            if (!res.ok) return showView('errorView');
+            data = await res.json();
+
+            document.title = `Your ticket — ${data.eventName}`;
+            applyTheme(data.theme);
+            renderBanner(data.eventImageUrl, data.theme);
+
+            const returnable = data.tickets.filter(t => t.returnable);
+
+            // Nothing left to give back: every ticket is used or already
+            // returned. Reuses the closed view rather than a fourth near-
+            // identical one, with a message about *this booking* instead of
+            // about the event's return window.
+            if (!returnable.length) {
+                document.getElementById('closedTitle').textContent = 'Nothing to return';
+                document.getElementById('closedMessage').textContent =
+                    data.tickets.some(t => t.returned)
+                        ? 'These tickets have already been returned.'
+                        : 'These tickets have already been used at the door, so there is nothing left to give back.';
+                document.getElementById('closedEventMeta').innerHTML = eventMetaHtml(data);
+                renderTickets(document.getElementById('closedTicketList'), data.tickets, { selectable: false });
+                return showView('closedView');
+            }
+
+            if (!data.returns.open) {
+                document.getElementById('closedTitle').textContent = 'Returns are closed';
+                document.getElementById('closedMessage').innerHTML = closedMessageFor(data);
+                document.getElementById('closedEventMeta').innerHTML = eventMetaHtml(data);
+                renderTickets(document.getElementById('closedTicketList'), data.tickets, { selectable: false });
+                return showView('closedView');
+            }
+
+            document.getElementById('manageEventName').textContent = data.eventName;
+            document.getElementById('manageEventMeta').innerHTML = eventMetaHtml(data);
+            document.getElementById('returnNotice').innerHTML = returnNoticeHtml(data);
+            renderTickets(document.getElementById('ticketList'), data.tickets, { selectable: true });
+            document.getElementById('ticketList').addEventListener('change', syncReturnButton);
+            syncReturnButton();
+            showView('manageView');
+        }
+
+        async function doReturn() {
+            const ids = selectedTicketIds();
+            if (!ids.length) return;
+            const all = ids.length === data.tickets.filter(t => t.returnable).length;
+            const what = ids.length === 1 ? 'this ticket' : `these ${ids.length} tickets`;
+            const money = data.isPaid && data.returns.refund === 'auto'
+                ? ' You will be refunded automatically.'
+                : (data.isPaid ? ' This does not refund you.' : '');
+            if (!confirm(`Return ${what}? Your ${all && ids.length > 1 ? 'spots go' : 'spot goes'} back to the organizer and this cannot be undone here.${money}`)) return;
+
+            const btn = document.getElementById('returnBtn');
+            btn.disabled = true;
+            btn.textContent = 'Returning…';
+            let res, body;
+            try {
+                res = await fetch(`/api/registration/${encodeURIComponent(id)}/return`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ticketIds: ids }),
+                });
+                body = await res.json().catch(() => ({}));
+            } catch {
+                alert('Connection error. Your ticket has not been returned — please try again.');
+                syncReturnButton();
+                return;
+            }
+            if (!res.ok) {
+                alert(body.error || 'Could not return this ticket. Please contact the organizer.');
+                // The most likely reason a return is refused is that the
+                // booking moved under us (scanned in at the door, window just
+                // closed), so re-read rather than leaving a stale form up.
+                return load();
+            }
+
+            const n = body.returned || ids.length;
+            document.getElementById('doneTitle').textContent = n === 1 ? 'Ticket returned' : `${n} tickets returned`;
+            document.getElementById('doneMessage').textContent =
+                `Your ${n === 1 ? 'ticket' : 'tickets'} for ${data.eventName} ${n === 1 ? 'has' : 'have'} been given back.`;
+
+            // Say what actually happened to the money rather than what was
+            // meant to: an auto-refund can fail or find nothing to refund
+            // (a comped or fully-discounted ticket), and telling someone
+            // they've been refunded when they haven't is the one thing this
+            // message must never do.
+            const refundEl = document.getElementById('doneRefund');
+            const r = body.refund || {};
+            if (r.attempted && r.status === 'refunded') {
+                const amount = typeof r.amount === 'number'
+                    ? ` of ${(r.amount / 100).toLocaleString(undefined, { style: 'currency', currency: (r.currency || 'usd').toUpperCase() })}`
+                    : '';
+                refundEl.textContent = `A refund${amount} has been issued to the card you paid with. It usually appears within a few working days.`;
+                refundEl.style.display = 'block';
+            } else if (r.attempted && (r.status === 'failed' || r.status === 'unavailable')) {
+                refundEl.textContent = 'Your spot has been released, but the refund could not be processed automatically. Please contact the organizer about your refund.';
+                refundEl.style.display = 'block';
+            } else if (data.isPaid && data.returns.refund !== 'auto') {
+                refundEl.textContent = 'Refunds for this event are handled by the organizer — contact them about the money you paid.';
+                refundEl.style.display = 'block';
+            }
+            showView('doneView');
+        }
+
+        document.getElementById('returnBtn').addEventListener('click', doReturn);
+        load();
+    </script>
+    <footer class="wts-footer">
+        <img src="/logo-nav.svg" alt="Will's Tech Support" style="height:14px;width:auto;opacity:.6">
+        <span>&copy; 2026 Will's Tech Support</span>
+    </footer>
+</body>
+</html>

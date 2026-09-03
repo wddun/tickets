@@ -1213,6 +1213,26 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
     }
     flushBody();
 
+    // The self-service return link, appended outside the block template on
+    // purpose. It is a control the ticket-holder needs in order to use a
+    // feature the organiser has switched on — the same category of thing as
+    // an unsubscribe link, not decoration. Leaving it to a template block
+    // would mean an organiser who turns returns on but has a saved custom
+    // template without that block advertises nothing at all, and their
+    // attendees have no way to reach it. The organiser's on/off control is
+    // the setting itself. Rendered only while returns are enabled, so an
+    // event that never opted in sends a byte-identical email to before.
+    const returnRegistrationId = tickets[0]?.registrationId;
+    if (returnRegistrationId && ticketReturnWindow(event).enabled) {
+        rows.push(`<tr><td style="padding:0 32px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="border-top:1px solid #e5e7eb;padding-top:16px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.6;">Can't make it?
+      <a href="${BASE_URL}/manage-ticket.html?id=${returnRegistrationId}" style="color:#4b5563;font-weight:600;">Return your ${n > 1 ? 'tickets' : 'ticket'}</a>
+      so someone else can take the ${n > 1 ? 'spots' : 'spot'}.</p>
+  </div>
+</td></tr>`);
+    }
+
     // Every color here (page/card background, block text, an organiser's
     // custom accent) is authored assuming light mode and never adapts —
     // there's no dark-mode palette to switch into. Left undeclared, Apple
@@ -5676,20 +5696,77 @@ function ticketsEligibleForExpiry(event) {
     return selected;
 }
 
+// The units an organiser may express the return cutoff in, and what each one
+// is worth in minutes. Minutes are the canonical stored quantity — the unit
+// exists so the dashboard can show back "2 days" instead of "2880 minutes",
+// and never takes part in deciding whether the window is open.
+const RETURN_CUTOFF_UNITS = { minutes: 1, hours: 60, days: 1440, weeks: 10080 };
+const RETURN_CUTOFF_UNIT_KEYS = Object.keys(RETURN_CUTOFF_UNITS);
+// A year, in minutes. Only there so a typo'd cutoff can't close returns
+// before the confirmation email carrying the link has even been sent.
+const RETURN_CUTOFF_MAX_MINUTES = 525600;
+
+// Whether an attendee may hand this event's tickets back right now, and why
+// not when they may not. `closesAt` is the moment returns shut: the event's
+// start time pulled back by the cutoff, so 0 (the default) keeps them open
+// right up to the moment the event begins. An event with no start time has
+// nothing to count back from, so its returns simply stay open rather than
+// being silently impossible. `refund` is reported as 'none' on a free event
+// whatever the stored setting says — there is no money to give back.
+function ticketReturnWindow(event) {
+    const enabled = !!event?.ticketReturnsEnabled;
+    const cutoffMinutes = Math.max(0, parseInt(event?.ticketReturnCutoffMinutes, 10) || 0);
+    const cutoffUnit = RETURN_CUTOFF_UNIT_KEYS.includes(event?.ticketReturnCutoffUnit) ? event.ticketReturnCutoffUnit : 'hours';
+    const isPaid = (event?.ticketPrice || 0) > 0;
+    let closesAt = null;
+    if (event?.time) {
+        const start = new Date(event.time);
+        if (!isNaN(start.getTime())) closesAt = new Date(start.getTime() - cutoffMinutes * 60000).toISOString();
+    }
+    const closed = !!closesAt && closesAt <= new Date().toISOString();
+    return {
+        enabled,
+        cutoffMinutes,
+        cutoffUnit,
+        // The number as the organiser typed it, so a client can render the
+        // pair back without having to re-derive it from the minutes.
+        cutoffValue: cutoffMinutes / RETURN_CUTOFF_UNITS[cutoffUnit],
+        closesAt,
+        refund: isPaid && event?.ticketReturnRefund === 'auto' ? 'auto' : 'none',
+        open: enabled && !closed,
+        reason: !enabled ? 'disabled' : (closed ? 'closed' : null),
+    };
+}
+
 // Expires one not-yet-used ticket — the single place that stamps
 // tickets.expiredAt, voids its Wallet pass (same treatment as a deleted
 // ticket — see generatePassBuffer), and, if the event runs a waitlist,
 // immediately hands the seat it just freed to whoever has waited longest.
 // Called from the organiser's manual "Expire Ticket" action, the cutoff
-// sweep below, and PUT /api/event/:id when a newly-saved cutoff is already
-// in the past. `req` is only used for logAudit's actor — the sweep passes a
-// system-actor shape the same way the waitlist sweep does.
-async function expireTicket(ticket, event, req) {
+// sweep below, PUT /api/event/:id when a newly-saved cutoff is already in the
+// past, and the attendee's own self-service return. `req` is only used for
+// logAudit's actor — the sweep passes a system-actor shape the same way the
+// waitlist sweep does.
+//
+// A return *is* an expiry — the seat is freed, the pass is voided and the
+// waitlist moves in exactly the same way — so it goes through here rather
+// than reimplementing any of that. `returnedByAttendee` only changes who the
+// record says did it: the extra returnedAt stamp, the audit action, and the
+// source the promoted waitlist entry is attributed to.
+async function expireTicket(ticket, event, req, { returnedByAttendee = false } = {}) {
     const now = new Date().toISOString();
     if (stmt.tickets.setExpired.run(now, now, ticket.id).changes === 0) return null;
     ticket.expiredAt = now;
     ticket.updated_at = now;
-    logAudit(req, { eventId: event.id, action: 'ticket.expired', details: { ticketId: ticket.id, name: ticket.name, email: ticket.email } });
+    if (returnedByAttendee) {
+        stmt.tickets.setReturned.run(now, ticket.id);
+        ticket.returnedAt = now;
+    }
+    logAudit(req, {
+        eventId: event.id,
+        action: returnedByAttendee ? 'ticket.returned' : 'ticket.expired',
+        details: { ticketId: ticket.id, name: ticket.name, email: ticket.email },
+    });
     pushWalletIfChanged([ticket], event).catch(() => {});
     broadcastEventCounts(event.id);
 
@@ -5701,10 +5778,10 @@ async function expireTicket(ticket, event, req) {
     try {
         const result = await promoteWaitlistEntry(nextEntry, event);
         if (!result.success) return { promoted: null };
-        logAudit(req, { eventId: event.id, action: result.notified ? 'waitlist.notified' : 'waitlist.promoted', details: { email: nextEntry.email, source: 'ticket_expired' } });
+        logAudit(req, { eventId: event.id, action: result.notified ? 'waitlist.notified' : 'waitlist.promoted', details: { email: nextEntry.email, source: returnedByAttendee ? 'ticket_returned' : 'ticket_expired' } });
         return { promoted: nextEntry.email };
     } catch (err) {
-        log('waitlist', `[ERR] Auto-promote after expiry failed — email: ${nextEntry.email}  err: ${err.message}`);
+        log('waitlist', `[ERR] Auto-promote after ${returnedByAttendee ? 'return' : 'expiry'} failed — email: ${nextEntry.email}  err: ${err.message}`);
         return { promoted: null };
     }
 }
@@ -5774,11 +5851,167 @@ app.post('/api/ticket/:id/unexpire', requireAuth, (req, res) => {
     const now = new Date().toISOString();
     stmt.tickets.clearExpired.run(now, ticket.id);
     ticket.expiredAt = null;
+    // Reinstating a ticket the attendee handed back un-returns it too — see
+    // stmt.tickets.clearExpired. This is the organiser's route back for
+    // someone who returned a ticket and then found they could come after all.
+    ticket.returnedAt = null;
     ticket.updated_at = now;
     logAudit(req, { eventId: event.id, action: 'ticket.unexpired', details: { ticketId: ticket.id, name: ticket.name, email: ticket.email } });
     pushWalletIfChanged([ticket], event).catch(() => {});
     broadcastEventCounts(event.id);
     res.json({ success: true });
+});
+
+// ── Self-service ticket returns ────────────────────────────────────────────
+// An attendee who can't come giving their own ticket back, without having to
+// email the organiser and ask to be removed. Off unless the organiser turns
+// it on per event (PUT /api/event/:id/ticket-returns below).
+//
+// Trust model is the same as the waitlist's own self-service pages: the
+// registrationId is a nanoid known only to the person it was emailed to, and
+// it already acts as a bearer token for that registration's Wallet passes
+// (see GET /api/passes/bundle/:registrationId, linked from every confirmation
+// email). It grants no more than "see and give up your own tickets", so these
+// two routes need no session of their own. Ticket QR tokens are deliberately
+// *not* in the response — a manage link must not double as a scannable
+// ticket.
+
+app.get('/api/registration/:id/manage', (req, res) => {
+    const tickets = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket);
+    if (!tickets.length) return res.status(404).json({ error: 'Not found' });
+    const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+    if (!event) return res.status(404).json({ error: 'Not found' });
+
+    const window = ticketReturnWindow(event);
+    res.json({
+        eventId: event.id,
+        eventName: event.name,
+        eventTime: event.time || null,
+        eventEndTime: event.endTime || null,
+        eventLocation: eventLocationLine(event) || null,
+        isPaid: (event.ticketPrice || 0) > 0,
+        returns: window,
+        tickets: tickets.map(t => ({
+            id: t.id,
+            name: t.name,
+            checkedIn: !!t.used_at,
+            expired: !!t.expiredAt,
+            returned: !!t.returnedAt,
+            // The one field the page actually gates its checkboxes on, decided
+            // here rather than re-derived client-side, so the button can never
+            // offer something POST .../return would then refuse.
+            returnable: !t.used_at && !t.expiredAt,
+        })),
+        // Same branding the registration page and waitlist status page already
+        // carry, so this doesn't land as an unstyled stranger mid-journey.
+        theme: themeForEvent(event),
+        eventImageUrl: safeEmailImageUrl(event.imageUrl) || null,
+    });
+});
+
+app.post('/api/registration/:id/return', publicWriteLimiter, async (req, res) => {
+    const all = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket);
+    if (!all.length) return res.status(404).json({ error: 'Not found' });
+    const event = rowToEvent(stmt.events.byId.get(all[0].eventId));
+    if (!event) return res.status(404).json({ error: 'Not found' });
+
+    const window = ticketReturnWindow(event);
+    if (!window.enabled) return res.status(403).json({ error: 'This event does not accept ticket returns. Please contact the organizer.' });
+    if (!window.open) return res.status(409).json({ error: 'Returns for this event have closed. Please contact the organizer.' });
+
+    // No ticketIds means "all of them" — the single-ticket case, and the
+    // "I'm not coming at all" button on a group booking.
+    const requested = Array.isArray(req.body?.ticketIds) ? req.body.ticketIds.map(String) : null;
+    const pool = requested ? all.filter(t => requested.includes(t.id)) : all;
+    const returnable = pool.filter(t => !t.used_at && !t.expiredAt);
+    if (!returnable.length) {
+        return res.status(409).json({ error: 'None of those tickets can be returned — they have already been used or returned.' });
+    }
+
+    let promoted = 0;
+    for (const t of returnable) {
+        const result = await expireTicket(t, event, req, { returnedByAttendee: true });
+        if (result?.promoted) promoted++;
+    }
+    ticketStatusCache.clear();
+    log('ticket-return', `[return] ${returnable.length} ticket(s) returned — registration: ${req.params.id}  event: ${event.name}  promoted: ${promoted}  ip: ${getIP(req)}`);
+
+    const refund = await refundReturnedTickets({ event, registrationId: req.params.id, returnedCount: returnable.length, orderSize: all.length, window, req });
+    res.json({ success: true, returned: returnable.length, refund });
+});
+
+// Money side of a return, kept out of the route so the seat-release above
+// reads as the one thing it is. Deliberately never throws: by the time this
+// runs the tickets are already given back and the waitlist may already have
+// moved, and rolling that back to re-seat someone who has said they aren't
+// coming would be worse than a refund that needs chasing. A failure is
+// reported to the attendee, logged, and left visible in the Payments panel as
+// an order that is still un-refunded.
+async function refundReturnedTickets({ event, registrationId, returnedCount, orderSize, window, req }) {
+    if (window.refund !== 'auto') return { attempted: false };
+    if (!stripe) {
+        log('ticket-return', `[refund] SKIPPED, Stripe not configured — registration: ${registrationId}  event: ${event.name}`);
+        return { attempted: true, status: 'unavailable' };
+    }
+    const order = stmt.orders.byRegistrationId.get(registrationId);
+    if (!order || order.status === 'refunded' || !order.paymentIntentId) {
+        // No payment to give back: a comped ticket, a 100%-discount order
+        // (nothing was ever charged), or an order already fully refunded.
+        return { attempted: true, status: 'nothing_to_refund' };
+    }
+
+    const alreadyRefunded = order.refundAmount || 0;
+    const remaining = Math.max(0, (order.amount || 0) - alreadyRefunded);
+    if (!remaining) return { attempted: true, status: 'nothing_to_refund' };
+
+    // Give back this return's share of what was paid. If nothing from the
+    // registration is still live afterwards, hand back the whole remainder
+    // instead — otherwise repeated partial returns can leave a few cents
+    // stranded to rounding on an order that is now entirely given up.
+    const stillLive = stmt.tickets.byRegistrationId.all(registrationId)
+        .filter(t => !t.used_at && !t.expiredAt).length;
+    const share = orderSize > 0 ? Math.round((order.amount || 0) * returnedCount / orderSize) : remaining;
+    const amount = stillLive === 0 ? remaining : Math.min(remaining, share);
+    if (amount <= 0) return { attempted: true, status: 'nothing_to_refund' };
+
+    try {
+        const refund = await stripe.refunds.create({ payment_intent: order.paymentIntentId, amount });
+        const total = alreadyRefunded + refund.amount;
+        stmt.orders.recordRefund.run(total >= (order.amount || 0) ? 'refunded' : order.status, new Date().toISOString(), total, order.id);
+        logAudit(req, { eventId: event.id, action: 'order.refunded', details: { buyerEmail: order.buyerEmail, amount: refund.amount, source: 'ticket_return' } });
+        log('stripe', `[refund] Issued for return — order: ${order.id}  event: ${event.name}  amount: ${refund.amount}`);
+        return { attempted: true, status: 'refunded', amount: refund.amount, currency: order.currency || 'usd' };
+    } catch (err) {
+        log('stripe', `[refund] FAILED for return — order: ${order.id}  event: ${event.name}  error: ${err.message}`);
+        return { attempted: true, status: 'failed' };
+    }
+}
+
+app.put('/api/event/:id/ticket-returns', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) {
+        return res.status(403).json({ error: 'Not authorized to change event settings' });
+    }
+    const enabled = !!req.body?.enabled;
+    const refund = req.body?.refund === 'auto' ? 'auto' : 'none';
+    // The cutoff arrives as the organiser typed it — a number and a unit —
+    // and is stored as minutes plus the unit for redisplay, so "2 days" and
+    // "48 hours" are the same stored cutoff and compare identically.
+    const cutoffUnit = RETURN_CUTOFF_UNIT_KEYS.includes(req.body?.cutoffUnit) ? req.body.cutoffUnit : 'hours';
+    const rawValue = Math.max(0, parseInt(req.body?.cutoffValue, 10) || 0);
+    const cutoffMinutes = Math.min(RETURN_CUTOFF_MAX_MINUTES, rawValue * RETURN_CUTOFF_UNITS[cutoffUnit]);
+
+    stmt.events.setTicketReturns.run(enabled ? 1 : 0, refund, cutoffMinutes, cutoffUnit, event.id);
+    logAudit(req, { eventId: event.id, action: 'event.ticket_returns_updated', details: { enabled, refund, cutoffMinutes, cutoffUnit } });
+    res.json({
+        success: true,
+        ticketReturnsEnabled: enabled,
+        ticketReturnRefund: refund,
+        ticketReturnCutoffMinutes: cutoffMinutes,
+        ticketReturnCutoffUnit: cutoffUnit,
+        cutoffValue: cutoffMinutes / RETURN_CUTOFF_UNITS[cutoffUnit],
+    });
 });
 
 // Resend ticket email without changing any data

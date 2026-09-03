@@ -516,6 +516,36 @@ try { db.exec(`ALTER TABLE sheetWatchers ADD COLUMN boostSeconds INTEGER DEFAULT
 // this event, so door staff can't drift out of sync with each other.
 try { db.exec(`ALTER TABLE events ADD COLUMN scanResultDurationMs INTEGER`); } catch {}
 
+// Self-service ticket returns — an attendee who finds they can't come giving
+// their own ticket back, instead of the organiser having to expire it for
+// them. Off by default, so an event that never opts in behaves exactly as it
+// did before. `ticketReturnRefund` only means anything on a paid event:
+// 'none' releases the seat and leaves the money alone, 'auto' issues the full
+// Stripe refund at the moment of return. There is deliberately no approval
+// queue in between — the organiser makes that choice once, here, rather than
+// per return.
+//
+// The cutoff closes returns that long before the event starts, and is stored
+// in minutes so every unit an organiser might pick — "30 minutes", "2 days",
+// "1 week" — is one comparable number rather than a rounded-off count of
+// hours. `ticketReturnCutoffUnit` records only which unit they typed it in,
+// so the dashboard can show "2 days" back rather than "2880 minutes"; it
+// never takes part in the comparison itself. 0 minutes (the default) leaves
+// returns open right up to the start time.
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketReturnsEnabled INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketReturnRefund TEXT DEFAULT 'none'`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketReturnCutoffMinutes INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketReturnCutoffUnit TEXT DEFAULT 'hours'`); } catch {}
+
+// Stamped alongside expiredAt when the *attendee* handed the ticket back,
+// rather than the organiser expiring it. A return is an expiry with a
+// different author, so everything that already keys off expiredAt — capacity
+// accounting via countActiveByEventId, the door scan's refusal in
+// isTicketExpired(), the voided Wallet pass — needs no change at all. This
+// column exists only to record who did it, so the dashboard, the audit log
+// and the attendee's own page can tell the two apart.
+try { db.exec(`ALTER TABLE tickets ADD COLUMN returnedAt TEXT`); } catch {}
+
 // Recorded giveaway wins — one row per draw, kept even after the pool resets
 // or the page reloads, so "who won" survives the operator closing the tab
 // mid-event and doubles as the "won" status shown against the registration's
@@ -691,6 +721,14 @@ export function rowToEvent(row) {
         scanResultDurationMs: row.scanResultDurationMs ?? null,
         ticketExpiryLimit: row.ticketExpiryLimit ?? null,
         ticketExpiryOrder: row.ticketExpiryOrder === 'newest' ? 'newest' : 'oldest',
+        ticketReturnsEnabled: !!row.ticketReturnsEnabled,
+        // Anything that isn't the explicit opt-in reads as 'none', so a NULL
+        // from before the column existed can never mean "refund automatically".
+        ticketReturnRefund: row.ticketReturnRefund === 'auto' ? 'auto' : 'none',
+        ticketReturnCutoffMinutes: Math.max(0, parseInt(row.ticketReturnCutoffMinutes, 10) || 0),
+        // Display only — which unit the organiser typed the cutoff in. Never
+        // consulted when deciding whether the window is open.
+        ticketReturnCutoffUnit: ['minutes', 'hours', 'days', 'weeks'].includes(row.ticketReturnCutoffUnit) ? row.ticketReturnCutoffUnit : 'hours',
         ticketExpiryPromotesWaitlist: row.ticketExpiryPromotesWaitlist === null || row.ticketExpiryPromotesWaitlist === undefined ? true : !!row.ticketExpiryPromotesWaitlist,
         emailPolicy: (() => { try { return row.emailPolicy ? JSON.parse(row.emailPolicy) : null; } catch { return null; } })(),
         walletLockScreenEnabled: row.walletLockScreenEnabled === null || row.walletLockScreenEnabled === undefined ? true : !!row.walletLockScreenEnabled,
@@ -756,6 +794,7 @@ export const stmt = {
         setGiveawayToken: db.prepare(`UPDATE events SET giveawayToken=? WHERE id=?`),
         setWaitlistClaimHours: db.prepare(`UPDATE events SET waitlistClaimHours=? WHERE id=?`),
         setScanResultDuration: db.prepare(`UPDATE events SET scanResultDurationMs=? WHERE id=?`),
+        setTicketReturns: db.prepare(`UPDATE events SET ticketReturnsEnabled=?, ticketReturnRefund=?, ticketReturnCutoffMinutes=?, ticketReturnCutoffUnit=? WHERE id=?`),
         setTicketExpiryScope: db.prepare(`UPDATE events SET ticketExpiryLimit=?, ticketExpiryOrder=? WHERE id=?`),
         setTicketExpiryPromotesWaitlist: db.prepare(`UPDATE events SET ticketExpiryPromotesWaitlist=? WHERE id=?`),
         setReminderSentAt: db.prepare(`UPDATE events SET reminderSentAt=? WHERE id=?`),
@@ -814,7 +853,11 @@ export const stmt = {
         reentryExit: db.prepare(`UPDATE tickets SET reentry_status='outside', updated_at=? WHERE id=?`),
         undoCheckIn: db.prepare(`UPDATE tickets SET used_at=NULL, reentry_status=NULL, updated_at=? WHERE id=?`),
         setExpired: db.prepare(`UPDATE tickets SET expiredAt=?, updated_at=? WHERE id=? AND used_at IS NULL AND expiredAt IS NULL`),
-        clearExpired: db.prepare(`UPDATE tickets SET expiredAt=NULL, updated_at=? WHERE id=?`),
+        // Un-expiring also clears returnedAt: reinstating a ticket the
+        // attendee gave back means it is no longer returned, and leaving the
+        // stamp would keep it labelled "Returned" while being perfectly valid.
+        clearExpired: db.prepare(`UPDATE tickets SET expiredAt=NULL, returnedAt=NULL, updated_at=? WHERE id=?`),
+        setReturned: db.prepare(`UPDATE tickets SET returnedAt=? WHERE id=?`),
         setPassHash: db.prepare(`UPDATE tickets SET passHash=?, updated_at=? WHERE id=?`),
         setWalletDownloaded: db.prepare(`UPDATE tickets SET wallet_downloaded_at=? WHERE token=?`),
         setEmailOpened: db.prepare(`UPDATE tickets SET email_opened_at=? WHERE registrationId=? AND email_opened_at IS NULL`),
@@ -912,6 +955,12 @@ export const stmt = {
         insert: db.prepare(`INSERT INTO orders (id, sessionId, eventId, registrationId, buyerName, buyerEmail, amount, currency, status, createdAt, discountCodeId, discountAmount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`),
         fulfill: db.prepare(`UPDATE orders SET status='fulfilled', registrationId=?, fulfilledAt=?, paymentIntentId=? WHERE sessionId=?`),
         refund: db.prepare(`UPDATE orders SET status='refunded', refundedAt=?, refundAmount=? WHERE id=?`),
+        byRegistrationId: db.prepare('SELECT * FROM orders WHERE registrationId=? ORDER BY createdAt DESC'),
+        // Partial-refund-aware sibling of `refund` above: a self-service return
+        // may give back only some of a multi-ticket order, so status and the
+        // running refunded total are both decided by the caller rather than
+        // hardcoded to a single full refund.
+        recordRefund: db.prepare(`UPDATE orders SET status=?, refundedAt=?, refundAmount=? WHERE id=?`),
     },
     auditLog: {
         insert: db.prepare(`INSERT INTO auditLog (id, userId, userEmail, eventId, action, details, ip, createdAt) VALUES (?,?,?,?,?,?,?,?)`),

@@ -240,6 +240,41 @@ window.HELP_CONTENT = {
             `Off by default.`,
         ],
     },
+    'registration.ticketReturns': {
+        title: 'Allow Attendees to Return Tickets',
+        summary: 'Adds a "Can\'t make it? Return your ticket" link to every confirmation email for this event, so someone who can no longer come can hand their own ticket back instead of emailing you to be taken off the list.',
+        details: [
+            `The link goes to a page listing that booking's tickets. On a group booking they can return some and keep the rest, ticket by ticket.`,
+            `A return is an expiry the attendee performed themselves: the seat is freed immediately, the Apple Wallet pass is voided, and the QR code stops working at the door — exactly as if you had pressed "Expire Ticket" yourself.`,
+            `If the event runs a waitlist, the freed seat is offered to the next person in line straight away, the same as any other expiry.`,
+            `The dashboard labels a given-back ticket <strong>Returned</strong> rather than <strong>Expired</strong>, so you can tell at a glance which ones you did and which ones they did. "Reinstate Ticket" puts one back if they change their mind.`,
+            `A checked-in ticket can never be returned — it has already done its job. Neither can one that is already expired or returned.`,
+            `Off by default. Turning it off again does not un-return anything already returned; it only stops the link appearing in future emails and refuses further returns.`,
+        ],
+    },
+    'registration.ticketReturnCutoff': {
+        title: 'When Returns Close',
+        summary: 'How long before the event starts the return link stops working — a number and a unit, from minutes up to weeks. 0 (the default) leaves returns open right up to the start time.',
+        details: [
+            `Set this once a decision of yours starts depending on the headcount: <strong>2 days</strong> if catering is ordered the day before, <strong>90 minutes</strong> if you just want the door list to stop moving while staff are setting up.`,
+            `The unit is only how you type it — "2 days" and "48 hours" are the same cutoff and behave identically. It is remembered so the field reads back the way you wrote it.`,
+            `Counted back from the event's start time, so an event with no start time set never closes returns at all.`,
+            `Past the cutoff the page still loads and still shows the booking — it explains that returns have closed and asks the person to contact you directly, rather than showing a dead button.`,
+            `This only governs the attendee's own self-service return. You can still expire a ticket yourself from the dashboard at any time.`,
+        ],
+    },
+    'registration.ticketReturnRefund': {
+        title: 'Refunds on Returned Tickets',
+        summary: 'On a paid event, whether returning a ticket also gives the money back. Free events never show this — there is nothing to refund.',
+        details: [
+            `<strong>Release the seat, don't refund</strong> — the default. The ticket is given back and the seat freed, the payment is untouched, and the attendee is told plainly to contact you about the money.`,
+            `<strong>Release the seat and refund in full</strong> — a full Stripe refund is issued the moment they return, with no approval step in between. Only turn this on if you're happy for any ticket buyer to refund themselves unattended up to your cutoff.`,
+            `On a part-returned group booking only that share of the order is refunded; returning the remainder later refunds the rest, rounding included.`,
+            `Nothing to refund is not a failure: a comped ticket, or one bought with a 100%-off code, never had a payment behind it. The seat is still released.`,
+            `If the refund itself fails, the seat is <em>still</em> released — undoing that would re-seat someone who has said they aren't coming. The attendee is told the refund didn't go through and to contact you, and the order stays visible as un-refunded in the Payments panel.`,
+            `Paid ticketing is still in beta — see the Payments tab.`,
+        ],
+    },
     'registration.theme': {
         title: 'Registration Page Look',
         summary: 'Picks the visual theme for the public registration page. The event\'s own photo (set under General) becomes the banner on every theme.',
