@@ -45,6 +45,14 @@ struct ScannerView: View {
     @State private var lastScannedToken: String?
     @State private var lastScanTime: Date?
     @State private var pendingCheckoutToken: String?
+    // A scan that has been read off the camera and sent, but whose answer
+    // hasn't come back yet. Until this existed, the moment between reading a
+    // QR code and the server replying showed *nothing at all*: on a venue's
+    // overloaded wifi that is several seconds of a door person holding a phone
+    // at a ticket with no idea whether it took, which is exactly when they
+    // re-present the code or wave the guest through.
+    @State private var pendingScan: PendingScan?
+    @State private var pendingSlowTask: Task<Void, Never>?
     @State private var flashResult: ScanResult?
     @State private var flashVisible = false
     @State private var flashTask: Task<Void, Never>?
@@ -67,6 +75,12 @@ struct ScannerView: View {
             bottomBar
             // Full-screen overlay only for reentry exit confirmation
             exitConfirmOverlay
+            // "Got it — checking" while /api/validate is in flight
+            if let pending = pendingScan {
+                ScanPendingOverlay(isSlow: pending.isSlow)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
             // 1-second fullscreen scan flash
             if flashVisible, let result = flashResult {
                 ScanFlashOverlay(result: result)
@@ -318,17 +332,74 @@ struct ScannerView: View {
             return
         }
 
+        beginPending(for: token)
         Task {
             do {
                 if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
                 let response = try await APIService.shared.validateTicket(token: token, pairToken: scannerPairToken, eventId: selectedEventId(), scanLinkToken: scanLinkEvent?.token)
-                await MainActor.run { showResult(for: response, token: token) }
+                await MainActor.run {
+                    endPending(for: token)
+                    showResult(for: response, token: token)
+                }
             } catch {
                 await MainActor.run {
-                    showBanner(ScanResult(status: .error, title: "Error", name: error.localizedDescription))
+                    endPending(for: token)
+                    // The scan is the one thing that definitely happened, so
+                    // say which ticket failed rather than only that something
+                    // did — a bare "The request timed out" gives a door person
+                    // nothing to act on.
+                    showBanner(ScanResult(status: .error, title: "Couldn't Check This Ticket", name: friendlyScanError(error)))
                     CheckInFeedback.shared.error()
                 }
             }
+        }
+    }
+
+    // MARK: - Pending scan
+    //
+    // Acknowledging the scan is separate from answering it. The code has been
+    // read the instant this runs — that part never needs the network — so the
+    // overlay goes up immediately and only the *verdict* waits. If the answer
+    // is slow enough to worry about, the overlay says so rather than leaving
+    // someone guessing whether the phone is working.
+
+    /// How long the server gets before the overlay admits the connection is slow.
+    private var slowScanThreshold: TimeInterval { 1.2 }
+
+    private func beginPending(for token: String) {
+        pendingSlowTask?.cancel()
+        withAnimation(.easeOut(duration: 0.12)) { pendingScan = PendingScan(token: token) }
+        // A light tap, distinct from the success/error patterns: it means
+        // "read", not "checked in", and must never be mistaken for the latter.
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+        pendingSlowTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(slowScanThreshold * 1_000_000_000))
+            guard !Task.isCancelled, pendingScan?.token == token else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { pendingScan?.isSlow = true }
+        }
+    }
+
+    /// Only clears the overlay if it still belongs to this scan — two codes
+    /// read in quick succession would otherwise have the first reply take down
+    /// the second one's overlay and leave it waiting with no indicator at all.
+    private func endPending(for token: String) {
+        guard pendingScan?.token == token else { return }
+        pendingSlowTask?.cancel()
+        pendingSlowTask = nil
+        pendingScan = nil
+    }
+
+    /// Network errors as something a person at a door can act on.
+    private func friendlyScanError(_ error: Error) -> String {
+        let urlError = error as? URLError
+        switch urlError?.code {
+        case .some(.timedOut):
+            return "The connection timed out. Check the signal and scan again."
+        case .some(.notConnectedToInternet), .some(.networkConnectionLost), .some(.cannotConnectToHost), .some(.cannotFindHost):
+            return "No connection to the server. Check the signal and scan again."
+        default:
+            return error.localizedDescription
         }
     }
 
@@ -1162,6 +1233,54 @@ struct EventAccessIssueOverlay: View {
             }
             .padding(28)
             .frame(maxWidth: 340)
+        }
+    }
+}
+
+/// The scan that has been read and sent but not yet answered.
+struct PendingScan: Equatable {
+    /// Which scan this belongs to, so a reply for an earlier code can't take
+    /// down a later code's overlay.
+    let token: String
+    var isSlow = false
+}
+
+/// Shown between reading a QR code and hearing back about it.
+///
+/// Deliberately dimmed and neutral rather than a full colour wash: the three
+/// coloured full-screen states (green/amber/red) each mean a verdict has been
+/// reached, and this one exists precisely because none has. The camera stays
+/// visible behind it so it reads as "working on it", not "stopped".
+struct ScanPendingOverlay: View {
+    let isSlow: Bool
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+            VStack(spacing: 16) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(1.8)
+                Text("Checking ticket…")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                if isSlow {
+                    // Only appears once the wait is long enough to be worth
+                    // explaining. Saying "slow connection" on every scan would
+                    // train people to ignore it on the one that matters.
+                    VStack(spacing: 4) {
+                        Label("Slow connection", systemImage: "wifi.exclamationmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.orange)
+                        Text("Still waiting on the server — don't scan again yet.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 40)
+                    .transition(.opacity)
+                }
+            }
         }
     }
 }

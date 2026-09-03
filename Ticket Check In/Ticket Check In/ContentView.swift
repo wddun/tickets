@@ -27,9 +27,12 @@ struct ContentView: View {
                 ManualCheckInView(switchToScanner: { selectedTab = 0 })
                     .tabItem { Label("Manual Check-In", systemImage: "person.text.rectangle") }
                     .tag(1)
+                StatsView(switchToScanner: { selectedTab = 0 })
+                    .tabItem { Label("Stats", systemImage: "chart.bar.fill") }
+                    .tag(2)
                 SettingsView()
                     .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                    .tag(2)
+                    .tag(3)
             }
             .onChange(of: api.isAuthenticated) { authenticated in
                 if !authenticated { selectedTab = 1 }

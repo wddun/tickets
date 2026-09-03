@@ -253,6 +253,19 @@ class APIService: ObservableObject {
         return events
     }
 
+    /// Live numbers for the Stats tab. Same access check as the rest of the
+    /// event, so a scan-link device (which has no account) gets a 401 here and
+    /// the tab shows its signed-out state rather than an error.
+    func getMetrics(eventId: String) async throws -> EventMetrics {
+        guard let url = URL(string: "\(baseURL)/api/event/\(eventId)/metrics") else { throw APIError.invalidURL }
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        if http.statusCode == 401 { throw APIError.unauthorized }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+        guard let metrics = try? JSONDecoder().decode(EventMetrics.self, from: data) else { throw APIError.decodingError }
+        return metrics
+    }
+
     // MARK: - Scan Links (no-login scanner access)
 
     func resolveScannerLink(token: String) async throws -> ScannerLinkInfo {

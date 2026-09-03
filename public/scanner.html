@@ -346,6 +346,51 @@
         }
         .wt-dots span.active { background: #c4294a; width: 20px; border-radius: 4px; }
 
+        /* ── "Reading it, waiting on the server" overlay ──────────────────
+           The gap between reading a QR code and hearing back used to show
+           nothing at all. On a venue's overloaded wifi that is several
+           seconds of a door person holding a phone at a ticket with no idea
+           whether it took — which is when they re-present the code, or give
+           up and wave the guest through.
+
+           Deliberately dim and neutral, not one of the three verdict colours:
+           those all mean an answer has arrived, and this exists because none
+           has. Lower z-index than #resultOverlay so a real result always
+           covers it. */
+        #pendingOverlay {
+            position: fixed;
+            inset: 0;
+            z-index: 45;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.55);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.12s ease-out;
+        }
+        #pendingOverlay.show { opacity: 1; }
+        .pending-box { text-align: center; padding: 0 32px; }
+        .pending-spinner {
+            width: 46px; height: 46px; margin: 0 auto 18px;
+            border: 4px solid rgba(255, 255, 255, 0.25);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: pending-spin 0.8s linear infinite;
+        }
+        @keyframes pending-spin { to { transform: rotate(360deg); } }
+        .pending-title { font-size: 22px; font-weight: 800; color: #fff; }
+        .pending-slow {
+            margin-top: 14px;
+            display: none;
+        }
+        #pendingOverlay.slow .pending-slow { display: block; }
+        .pending-slow-head {
+            font-size: 15px; font-weight: 700; color: #fbbf24;
+            display: flex; align-items: center; justify-content: center; gap: 7px;
+        }
+        .pending-slow-sub { font-size: 13px; color: rgba(255,255,255,0.75); margin-top: 4px; line-height: 1.45; }
+
         /* ── Full-screen result overlay — reentry exit confirm only ── */
         #resultOverlay {
             position: fixed;
@@ -758,6 +803,20 @@
 </div>
 
 <!-- Full-screen scan result overlay -->
+<div id="pendingOverlay">
+    <div class="pending-box">
+        <div class="pending-spinner"></div>
+        <div class="pending-title">Checking ticket&hellip;</div>
+        <div class="pending-slow">
+            <div class="pending-slow-head">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+                Slow connection
+            </div>
+            <div class="pending-slow-sub">Still waiting on the server &mdash; don't scan again yet.</div>
+        </div>
+    </div>
+</div>
+
 <div id="resultOverlay" onclick="handleOverlayTap(event)">
     <div class="ro-content">
         <div class="ro-top">
@@ -1979,6 +2038,10 @@ function onScanSuccess(decodedText) {
     lastScannedToken = token;
     lastScanTs = now;
 
+    // The code has been read — that part never needed the network — so say so
+    // immediately and let only the verdict wait. See #pendingOverlay's CSS.
+    beginPendingScan(token);
+
     fetch('/api/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1988,6 +2051,7 @@ function onScanSuccess(decodedText) {
     })
     .then(r => r.json().then(data => ({ status: r.status, data })))
     .then(({ status, data }) => {
+        endPendingScan(token);
         if (status === 401) {
             playSound('error');
             showFlash({ status: 'error', name: 'Not signed in — reload and sign in or rescan the event QR code.' });
@@ -2013,10 +2077,52 @@ function onScanSuccess(decodedText) {
         }
     })
     .catch(() => {
+        endPendingScan(token);
         if (pendingCheckoutToken) return;
         playSound('error');
-        showFlash({ status: 'error', name: 'Server Error' });
+        showFlash({
+            status: 'error',
+            // A door person can act on "check the signal"; they can't act on
+            // "Server Error".
+            name: navigator.onLine === false
+                ? 'This device is offline. Reconnect and scan again.'
+                : 'Could not reach the server. Check the signal and scan again.',
+        });
     });
+}
+
+// ── Pending scan ───────────────────────────────────────────────────────────
+// Acknowledging a scan is separate from answering it. `pendingScanToken`
+// tracks which scan the overlay belongs to, so when two codes are read in
+// quick succession the first reply can't take down the second one's overlay
+// and leave it waiting with nothing on screen.
+let pendingScanToken = null;
+let pendingSlowTimer = null;
+// How long the server gets before the overlay admits the connection is slow.
+// Saying it on every scan would train people to ignore it on the one where it
+// actually matters.
+const PENDING_SLOW_MS = 1200;
+
+function beginPendingScan(token) {
+    pendingScanToken = token;
+    const overlay = document.getElementById('pendingOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('slow');
+    overlay.classList.add('show');
+    clearTimeout(pendingSlowTimer);
+    pendingSlowTimer = setTimeout(() => {
+        if (pendingScanToken === token) overlay.classList.add('slow');
+    }, PENDING_SLOW_MS);
+}
+
+function endPendingScan(token) {
+    if (pendingScanToken !== token) return;
+    pendingScanToken = null;
+    clearTimeout(pendingSlowTimer);
+    pendingSlowTimer = null;
+    const overlay = document.getElementById('pendingOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('show', 'slow');
 }
 
 let videoEl = null;

@@ -65,6 +65,43 @@ struct ValidateResponse: Codable {
     let customFields: [String: String]?
 }
 
+/// GET /api/event/:id/metrics — everything the Stats tab shows, in one call.
+///
+/// Deliberately one request rather than stitching /api/events, /api/events/counts
+/// and the waitlist together on the phone: at a door on a weak connection, three
+/// round trips that can each half-fail is three ways for the numbers on screen to
+/// disagree with each other.
+struct EventMetrics: Codable {
+    let eventName: String?
+    let eventTime: String?
+    /// Tickets that still hold a seat: issued, minus the expired and returned
+    /// ones that gave theirs back. What `scanned` is measured against.
+    let total: Int
+    let scanned: Int
+    let pct: Int
+    let uniqueRegistrations: Int
+    let walletDownloads: Int
+    let emailOpens: Int
+    let capacity: Int?
+    let remaining: Int?
+    let soldOut: Bool?
+    /// Seats currently held by people mid-signup on the public form.
+    let held: Int?
+    let waitlistEnabled: Bool?
+    let waiting: Int?
+    let expired: Int?
+    let returned: Int?
+    let checkinTimeline: [CheckinBucket]?
+
+    struct CheckinBucket: Codable, Identifiable {
+        let hour: String
+        let count: Int
+        var id: String { hour }
+    }
+
+    var notYetIn: Int { max(0, total - scanned) }
+}
+
 struct AuthUser: Codable {
     let id: String
     let email: String
