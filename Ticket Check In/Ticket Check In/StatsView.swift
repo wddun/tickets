@@ -42,10 +42,42 @@ struct StatsView: View {
 
     var body: some View {
         Group {
-            if #available(iOS 16, *) {
+            if !api.isAuthenticated {
+                // The real sign-in screen, not a message about needing one.
+                // Stats are the tab someone is most likely to open first on a
+                // fresh device — telling them "these belong to an account" and
+                // leaving them to find the sign-in form on another tab is a
+                // dead end. LoginView brings its own navigation container, its
+                // own 2FA step, and the "Skip — Scanner Only" and "Have a scan
+                // link?" ways out, so a door volunteer who has no account and
+                // never will can still get where they're going from here.
+                LoginView(switchToScanner: switchToScanner)
+            } else if #available(iOS 16, *) {
                 NavigationStack { content }
             } else {
                 NavigationView { content }
+            }
+        }
+        // On the outer Group, not on `content`: signed out, `content` isn't in
+        // the hierarchy at all, so a task attached to it would never run and
+        // the tab could never discover it was in fact signed in.
+        .task {
+            await api.checkAuth()
+            await load()
+            startAutoRefresh()
+        }
+        .onDisappear { refreshTask?.cancel() }
+        .onChange(of: api.isAuthenticated) { authenticated in
+            // Signing in from this very tab should fill it in, rather than
+            // leaving an empty Stats screen until the operator switches tabs
+            // and back.
+            if authenticated {
+                Task { await load() }
+                startAutoRefresh()
+            } else {
+                refreshTask?.cancel()
+                metrics = nil
+                lastUpdated = nil
             }
         }
         .sheet(isPresented: $showEventPicker) {
@@ -67,9 +99,7 @@ struct StatsView: View {
     @ViewBuilder
     private var content: some View {
         Group {
-            if !api.isAuthenticated {
-                signedOutState
-            } else if let event = currentEvent {
+            if let event = currentEvent {
                 loadedState(for: event)
             } else {
                 noEventState
@@ -83,12 +113,6 @@ struct StatsView: View {
                 }
             }
         }
-        .task {
-            await api.checkAuth()
-            await load()
-            startAutoRefresh()
-        }
-        .onDisappear { refreshTask?.cancel() }
     }
 
     // MARK: - Loaded
@@ -250,27 +274,6 @@ struct StatsView: View {
         }
     }
 
-    @ViewBuilder
-    private var signedOutState: some View {
-        if #available(iOS 17, *) {
-            ContentUnavailableView {
-                Label("Sign In for Stats", systemImage: "person.crop.circle.badge.questionmark")
-            } description: {
-                Text("Stats belong to an account. A scan link can check people in, but it can't see an event's numbers.")
-            }
-        } else {
-            VStack(spacing: 14) {
-                Image(systemName: "person.crop.circle.badge.questionmark").font(.largeTitle)
-                Text("Sign In for Stats").font(.headline)
-                Text("Stats belong to an account. A scan link can check people in, but it can't see an event's numbers.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-        }
-    }
-
     // MARK: - Loading
 
     private func load() async {
@@ -286,7 +289,7 @@ struct StatsView: View {
         } catch {
             // The previously-loaded numbers stay on screen behind this — at a
             // door, slightly stale numbers beat a blank screen.
-            loadError = error.localizedDescription
+            loadError = friendlyMetricsError(error)
         }
     }
 
@@ -298,6 +301,28 @@ struct StatsView: View {
                 if Task.isCancelled { return }
                 await load()
             }
+        }
+    }
+
+    /// Failures as something the person holding the phone can act on. "HTTP
+    /// error 404" in particular is unreadable *and* misleading — it means the
+    /// selected event is gone from this account (deleted, or the device is
+    /// signed into a different one), which is fixable right here with Switch.
+    private func friendlyMetricsError(_ error: Error) -> String {
+        if case APIError.httpError(let code) = error {
+            switch code {
+            case 404: return "That event no longer exists on this account. Tap Switch to pick another."
+            case 403: return "This account doesn't have access to that event any more."
+            default:  return "The server returned an error (\(code)). Try again in a moment."
+            }
+        }
+        switch (error as? URLError)?.code {
+        case .some(.timedOut):
+            return "The connection timed out. Check the signal and pull down to retry."
+        case .some(.notConnectedToInternet), .some(.networkConnectionLost), .some(.cannotConnectToHost), .some(.cannotFindHost):
+            return "No connection to the server. Check the signal and pull down to retry."
+        default:
+            return error.localizedDescription
         }
     }
 
