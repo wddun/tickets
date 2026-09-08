@@ -313,6 +313,70 @@ describe('oneTicketPerEmail and the skip-existing sweep together', () => {
     });
 });
 
+// sheetWatcherSeen used to be keyed by the sheet watcher row's own ephemeral
+// id, not the event — so disconnecting and reconnecting (a fresh watcher
+// row, a fresh id) started this table over from nothing. That was silently
+// dangerous: a row that already had a real ticket looked brand new to the
+// reconnected watcher's memory, which the connect-time "skip existing"
+// sweep would then absorb back into "seen" — the immediate practical
+// effect was more re-sweep churn than actual double-issuing (the sweep
+// itself never issues), but it meant any future change to that ordering
+// was one edit away from a real duplicate-ticket bug, and it made "who's
+// already been decided" reset on every reconnect instead of meaning what
+// it says. Re-keying by the event's own id, which never changes, is what
+// makes that memory actually permanent.
+describe('reconnecting the same sheet', () => {
+    test('does not forget who already has a ticket, or double-issue them', async () => {
+        const lines = ['Timestamp,First Name,Last Name,Email,Interested'];
+        lines.push(['2024-01-01T00:00:00', 'Priya', 'Patel', 'priya@sheetfixture.test.local', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'reconnect.csv'), lines.join('\n'));
+
+        const ev = await createEvent(owner.client, { name: 'Reconnect Test' });
+        const connectBody = {
+            url: 'test-fixture:reconnect.csv',
+            conditionGroup: { match: 'all', children: [{ column: 'Interested', operator: 'equals', value: 'Yes' }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            oneTicketPerEmail: true,
+            includeExisting: true, // Priya's row is issued for real, not swept
+            sendEmail: false,
+            intervalMinutes: 15,
+        };
+        const connect1 = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, connectBody);
+        assert.equal(connect1.status, 200, connect1.text);
+
+        const poll1 = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(poll1.body.summary.issued, 1, 'Priya should get a real ticket on the first connect');
+
+        const disconnect = await owner.client.del(`/api/event/${ev.id}/sheet-watch`);
+        assert.equal(disconnect.status, 200, disconnect.text);
+
+        // Reconnect to the exact same sheet — Priya's row is still sitting
+        // there, still matching, exactly as it would be in practice.
+        const connect2 = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, connectBody);
+        assert.equal(connect2.status, 200, connect2.text);
+
+        const poll2 = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(poll2.status, 200, poll2.text);
+        assert.equal(poll2.body.summary.issued, 0, 'reconnecting must not re-issue someone who already has a ticket');
+        assert.equal(poll2.body.summary.alreadySeen, 1);
+
+        const tickets = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(tickets.body.length, 1, 'still exactly one ticket after the reconnect');
+
+        // A genuinely new row submitted after the reconnect must still work
+        // normally — the fix isn't "nothing new can ever come in again".
+        lines.push(['2024-01-02T00:00:00', 'Omar', 'Osei', 'omar@sheetfixture.test.local', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'reconnect.csv'), lines.join('\n'));
+        const poll3 = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(poll3.body.summary.issued, 1, 'a real new submission after the reconnect must still be issued');
+
+        const ticketsAfter = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(ticketsAfter.body.length, 2);
+    });
+});
+
 describe('date conditions ("only rows after a given date/time")', () => {
     test('dateAfter matches only rows timestamped later than the picked value', async () => {
         const lines = ['Timestamp,First Name,Last Name,Email'];

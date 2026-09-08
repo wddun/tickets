@@ -481,11 +481,36 @@ try {
             createdAt TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS sheetWatcherSeen (
-            watcherId TEXT NOT NULL,
+            eventId TEXT NOT NULL,
             seenKey TEXT NOT NULL,
             processedAt TEXT NOT NULL,
-            PRIMARY KEY (watcherId, seenKey)
+            PRIMARY KEY (eventId, seenKey)
         );
+    `);
+} catch {}
+
+// sheetWatcherSeen used to be keyed by sheetWatchers.id — the specific
+// connection instance — rather than the event itself. That meant every
+// disconnect+reconnect (a fresh watcher row, a fresh id) started this
+// table over from nothing: the connect-time "skip existing rows" sweep
+// would re-run against the *whole* sheet again, and anyone whose row
+// already existed at that moment — including someone who'd already been
+// correctly skipped, or worse, already issued a ticket under the old
+// watcher id — looked brand new again. Re-keying by the event's own id,
+// which never changes across any number of reconnects to the same event,
+// is what actually makes "ignore rows already in the sheet" permanent
+// instead of something a reconnect quietly undoes.
+try { db.exec(`ALTER TABLE sheetWatcherSeen RENAME COLUMN watcherId TO eventId`); } catch {}
+// One-time data fix for rows written before the rename above: their
+// eventId column still holds the old connection-instance watcher id, not
+// the event id. Only touches rows whose value currently matches a live
+// watcher's id — an already-migrated row holds a real event id, which
+// never collides with a watcher id, so this is safe to run on every boot.
+try {
+    db.exec(`
+        UPDATE sheetWatcherSeen
+        SET eventId = (SELECT eventId FROM sheetWatchers WHERE sheetWatchers.id = sheetWatcherSeen.eventId)
+        WHERE eventId IN (SELECT id FROM sheetWatchers)
     `);
 } catch {}
 
@@ -1081,10 +1106,13 @@ export const stmt = {
         deleteByEventId: db.prepare(`DELETE FROM sheetWatchers WHERE eventId=?`),
     },
     sheetWatcherSeen: {
-        exists: db.prepare('SELECT 1 FROM sheetWatcherSeen WHERE watcherId=? AND seenKey=?'),
-        countByWatcherId: db.prepare('SELECT COUNT(*) as cnt FROM sheetWatcherSeen WHERE watcherId=?'),
-        insert: db.prepare(`INSERT OR IGNORE INTO sheetWatcherSeen (watcherId, seenKey, processedAt) VALUES (?,?,?)`),
-        deleteByWatcherId: db.prepare(`DELETE FROM sheetWatcherSeen WHERE watcherId=?`),
+        // Keyed by eventId (not the sheet watcher row's own id — see the
+        // rename comment above the table's creation) so this survives any
+        // number of disconnect+reconnects to the same event.
+        exists: db.prepare('SELECT 1 FROM sheetWatcherSeen WHERE eventId=? AND seenKey=?'),
+        countByEventId: db.prepare('SELECT COUNT(*) as cnt FROM sheetWatcherSeen WHERE eventId=?'),
+        insert: db.prepare(`INSERT OR IGNORE INTO sheetWatcherSeen (eventId, seenKey, processedAt) VALUES (?,?,?)`),
+        deleteByEventId: db.prepare(`DELETE FROM sheetWatcherSeen WHERE eventId=?`),
     },
     giveawayWinners: {
         byId: db.prepare('SELECT * FROM giveawayWinners WHERE id=?'),

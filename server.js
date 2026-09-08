@@ -5574,10 +5574,11 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         stmt.waitlist.deleteByEventId.run(req.params.id);
         deleteEventSharing(req.params.id);
         const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
-        if (watcher) {
-            stmt.sheetWatcherSeen.deleteByWatcherId.run(watcher.id);
-            stmt.sheetWatchers.deleteById.run(watcher.id);
-        }
+        if (watcher) stmt.sheetWatchers.deleteById.run(watcher.id);
+        // Keyed by event id now (see db-sqlite.js), and disconnecting a
+        // watcher no longer clears it — so this is the only place seen-rows
+        // for a watcher that predates this event's deletion get cleaned up.
+        stmt.sheetWatcherSeen.deleteByEventId.run(req.params.id);
         stmt.events.deleteById.run(req.params.id);
     });
     deleteEvent();
@@ -5613,10 +5614,8 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
             stmt.waitlist.deleteByEventId.run(eventId);
             deleteEventSharing(eventId);
             const watcher = stmt.sheetWatchers.byEventId.get(eventId);
-            if (watcher) {
-                stmt.sheetWatcherSeen.deleteByWatcherId.run(watcher.id);
-                stmt.sheetWatchers.deleteById.run(watcher.id);
-            }
+            if (watcher) stmt.sheetWatchers.deleteById.run(watcher.id);
+            stmt.sheetWatcherSeen.deleteByEventId.run(eventId);
             stmt.events.deleteById.run(eventId);
         }
     });
@@ -8592,12 +8591,12 @@ async function pollSheetWatcher(watcher) {
             // is noise, not signal.
             const email = String(row[emailIdx] || '').trim();
             const positionKey = watcherRowPositionKey(row, r, tsIdx, email);
-            if (stmt.sheetWatcherSeen.exists.get(watcher.id, positionKey)) { summary.alreadySeen++; continue; }
+            if (stmt.sheetWatcherSeen.exists.get(watcher.eventId, positionKey)) { summary.alreadySeen++; continue; }
             // Separately, under oneTicketPerEmail: has this address already
             // gotten a ticket from a *different* row (checked only here, not
             // by the skip-existing sweep — see watcherRowKey above).
             const key = watcherRowKey(row, r, tsIdx, email, cfg);
-            if (key !== positionKey && stmt.sheetWatcherSeen.exists.get(watcher.id, key)) { summary.alreadySeen++; continue; }
+            if (key !== positionKey && stmt.sheetWatcherSeen.exists.get(watcher.eventId, key)) { summary.alreadySeen++; continue; }
             if (!email.includes('@')) { summary.failed++; lastError = `Row ${r + 2}: missing or invalid email`; continue; }
 
             let firstName = String(row[firstIdx] || '').trim();
@@ -8661,8 +8660,8 @@ async function pollSheetWatcher(watcher) {
                 // never reprocesses it) and, under oneTicketPerEmail, the
                 // bare email too (so a *different* future row from the same
                 // address is now correctly blocked — it wasn't before this).
-                stmt.sheetWatcherSeen.insert.run(watcher.id, positionKey, new Date().toISOString());
-                if (key !== positionKey) stmt.sheetWatcherSeen.insert.run(watcher.id, key, new Date().toISOString());
+                stmt.sheetWatcherSeen.insert.run(watcher.eventId, positionKey, new Date().toISOString());
+                if (key !== positionKey) stmt.sheetWatcherSeen.insert.run(watcher.eventId, key, new Date().toISOString());
                 stmt.sheetWatchers.incrementIssued.run(1, watcher.id);
                 summary.issued++;
                 log('sheet-watch', `[issued] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`);
@@ -8792,7 +8791,7 @@ app.get('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
     if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
     const w = stmt.sheetWatchers.byEventId.get(req.params.id);
     if (!w) return res.json({ watcher: null });
-    res.json({ watcher: { ...sheetWatcherView(w), seenCount: stmt.sheetWatcherSeen.countByWatcherId.get(w.id).cnt } });
+    res.json({ watcher: { ...sheetWatcherView(w), seenCount: stmt.sheetWatcherSeen.countByEventId.get(w.eventId).cnt } });
 });
 
 // Create or update the event's watcher.
@@ -8880,7 +8879,7 @@ app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
             rows.forEach((row, r) => {
                 if (!watcherMatches(cfg, headers, row)) return;
                 const email = String(row[emailIdx] || '').trim();
-                stmt.sheetWatcherSeen.insert.run(watcher.id, watcherRowPositionKey(row, r, tsIdx, email), new Date().toISOString());
+                stmt.sheetWatcherSeen.insert.run(watcher.eventId, watcherRowPositionKey(row, r, tsIdx, email), new Date().toISOString());
             });
         } catch { /* the first scheduled poll will surface any fetch error */ }
     }
@@ -8945,7 +8944,11 @@ app.delete('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
     if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
     const w = stmt.sheetWatchers.byEventId.get(req.params.id);
     if (!w) return res.status(404).json({ error: 'No sheet watcher configured for this event' });
-    stmt.sheetWatcherSeen.deleteByWatcherId.run(w.id);
+    // Deliberately does NOT clear sheetWatcherSeen — that's keyed by this
+    // event, not this watcher row, precisely so it survives a disconnect.
+    // Reconnecting (even to the same sheet under a brand-new watcher row)
+    // must not forget who already got a ticket, or re-run the "skip
+    // existing rows" sweep as if nothing had ever been decided.
     stmt.sheetWatchers.deleteById.run(w.id);
     logAudit(req, { eventId: req.params.id, action: 'sheet_watch.disconnected', details: { url: w.url } });
     res.json({ success: true });
