@@ -8556,10 +8556,19 @@ async function pollSheetWatcher(watcher) {
             if (!watcherMatches(cfg, headers, row)) continue;
             summary.matched++;
 
+            // Checked before any validation, deliberately — a row already
+            // marked seen (issued before, or swept into "seen" at connect
+            // time by the include-existing-rows skip) is done either way,
+            // and re-validating it every poll forever just to re-report the
+            // same unfixable problem (e.g. a legacy row with no real email)
+            // is noise, not signal. watcherRowKey only needs the raw,
+            // untrimmed-for-validity email string — same as the connect-time
+            // backfill computed it with — so this doesn't change what counts
+            // as "the same row" for dedup purposes.
             const email = String(row[emailIdx] || '').trim();
-            if (!email.includes('@')) { summary.failed++; lastError = `Row ${r + 2}: missing or invalid email`; continue; }
             const key = watcherRowKey(row, r, tsIdx, email, cfg);
             if (stmt.sheetWatcherSeen.exists.get(watcher.id, key)) { summary.alreadySeen++; continue; }
+            if (!email.includes('@')) { summary.failed++; lastError = `Row ${r + 2}: missing or invalid email`; continue; }
 
             let firstName = String(row[firstIdx] || '').trim();
             let lastName = lastIdx >= 0 ? String(row[lastIdx] || '').trim() : '';

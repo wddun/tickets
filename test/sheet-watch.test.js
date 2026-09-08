@@ -184,6 +184,61 @@ describe('condition matching at scale (10,000+ rows)', () => {
     });
 });
 
+// A production sheet watcher connected (without "include existing rows") to
+// a long-running sheet with a handful of legacy rows that have no usable
+// email ("N/U", a typo missing the @) — those rows get swept into "seen" at
+// connect time same as every other already-matching row, but used to still
+// fail email validation on every later poll anyway (the check ran before the
+// seen check), permanently overwriting lastError with the same unfixable,
+// unactionable complaint about a row nobody can do anything about.
+describe('a bad row that was already marked seen at connect time', () => {
+    test('never resurfaces as lastError once swept in by the include-existing-rows skip', async () => {
+        const lines = ['Timestamp,First Name,Last Name,Email,Interested'];
+        lines.push(['2024-01-01T00:00:00', 'Alice', 'Anderson', 'alice@sheetfixture.test.local', 'Yes'].join(','));
+        lines.push(['2024-01-01T00:00:01', 'Bob', 'Broken', 'N/U', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'legacy-bad-email.csv'), lines.join('\n'));
+
+        const ev = await createEvent(owner.client);
+        const connect = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, {
+            url: 'test-fixture:legacy-bad-email.csv',
+            conditionGroup: { match: 'all', children: [{ column: 'Interested', operator: 'equals', value: 'Yes' }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            includeExisting: false, // both rows are swept into "seen" without issuing
+            sendEmail: false,
+            intervalMinutes: 15,
+        });
+        assert.equal(connect.status, 200, connect.text);
+        assert.equal(connect.body.watcher.lastError, null, 'connecting must not itself report the legacy row as an error');
+
+        // Poll repeatedly, the way the real scheduler would — Bob's row is
+        // "seen" from connect time, so it should be silently skipped
+        // (alreadySeen), not re-validated and re-reported, every single time.
+        for (let i = 0; i < 3; i++) {
+            const poll = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+            assert.equal(poll.status, 200, poll.text);
+            assert.equal(poll.body.summary.matched, 2);
+            assert.equal(poll.body.summary.issued, 0, 'both rows predate the watcher and must not be issued');
+            assert.equal(poll.body.summary.alreadySeen, 2, 'Bob\'s bad-email row is already seen, not freshly failed');
+            assert.equal(poll.body.summary.failed, 0);
+            assert.equal(poll.body.watcher.lastError, null, `poll ${i + 1} must not resurface the legacy row's stale error`);
+        }
+
+        // A genuinely NEW row with a bad email — appended after connect, so
+        // it was never swept into "seen" — must still be caught and reported;
+        // this isn't about silencing real, actionable problems.
+        lines.push(['2024-01-01T00:00:02', 'Cara', 'NewBadEmail', 'not-an-email', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'legacy-bad-email.csv'), lines.join('\n'));
+        const pollAfterNewRow = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(pollAfterNewRow.status, 200, pollAfterNewRow.text);
+        assert.equal(pollAfterNewRow.body.summary.matched, 3);
+        assert.equal(pollAfterNewRow.body.summary.alreadySeen, 2);
+        assert.equal(pollAfterNewRow.body.summary.failed, 1);
+        assert.match(pollAfterNewRow.body.watcher.lastError, /Row 4: missing or invalid email/);
+    });
+});
+
 describe('date conditions ("only rows after a given date/time")', () => {
     test('dateAfter matches only rows timestamped later than the picked value', async () => {
         const lines = ['Timestamp,First Name,Last Name,Email'];
