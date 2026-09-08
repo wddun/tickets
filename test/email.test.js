@@ -313,6 +313,36 @@ describe('turning confirmation emails off actually turns them off', () => {
         assert.equal(server.emails().filter(m => m.to === email).length, 0);
     });
 
+    // register-bulk (the sheet watcher, CSV import, Apps Script) overflowing
+    // into the waitlist used to check the 'import' policy instead of
+    // 'waitlistJoined' for whether to email the person it just waitlisted —
+    // so an organiser with import confirmations on but waitlistJoined off
+    // still got every overflow row emailed "you're on the waitlist" against
+    // their explicit setting. Deliberately the mirror image of the previous
+    // test: same policy, same silence expected, different entry point.
+    test('waitlistJoined off also silences a register-bulk overflow, even with import emails on', async () => {
+        const ev = await createEvent(owner.client, { name: 'Quiet Import Overflow', capacity: 1, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Only Seat' });
+        const policy = await owner.client.put(`/api/event/${ev.id}/email-policy`, { waitlistJoined: false, import: true });
+        assert.equal(policy.body.emailPolicy.waitlistJoined, false);
+        assert.equal(policy.body.emailPolicy.import, true, 'import confirmations must stay on — that is the point of this test');
+
+        const apiKey = await eventApiKey(owner.client, ev.id);
+        const email = uniqueEmail('quiet-import-overflow');
+        server.clearEmails();
+
+        const r = await visitor().post('/api/register-bulk', {
+            firstName: 'Overflow', lastName: 'Row', email,
+            eventId: ev.id, ticketCount: 1, apiKey,
+        });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.waitlisted, true, 'the event is full, so this row must land on the waitlist, not get a ticket');
+
+        await new Promise(res => setTimeout(res, 400));
+        assert.equal(server.emails().filter(m => m.to === email).length, 0,
+            'waitlistJoined is off — the row being sheet-imported must not override it');
+    });
+
     test('waitlistPromoted off still seats a free-event promotion, just silently', async () => {
         const ev = await createEvent(owner.client, { name: 'Quiet Promotion', publicRegistration: true, capacity: 1, waitlist: true });
         await addTicket(owner.client, ev.id, { name: 'Only Seat' });

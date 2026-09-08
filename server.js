@@ -4319,7 +4319,13 @@ app.post('/api/register-bulk', async (req, res) => {
         const registered = usage.taken;
         if (registered + count > event.capacity) {
             if (event.waitlistEnabled) {
-                const result = await joinWaitlist(event, `${firstName} ${lastName}`, email, shouldSendConfirmation('import', req.body.sendEmail, event));
+                // 'waitlistJoined', not 'import' — this person didn't get a
+                // ticket, they joined the waitlist, and that has its own
+                // policy toggle for exactly this reason. Checking 'import'
+                // here meant an organiser with import confirmations on but
+                // waitlistJoined off still got every overflow row emailed
+                // "you're on the waitlist" against their explicit setting.
+                const result = await joinWaitlist(event, `${firstName} ${lastName}`, email, shouldSendConfirmation('waitlistJoined', req.body.sendEmail, event));
                 return res.json(result);
             }
             return res.status(409).json({ error: heldSeatMessage(usage, count) });
