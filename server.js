@@ -898,7 +898,12 @@ const DEFAULT_TICKET_EMAIL_TEMPLATE = {
         // those context-specific messages — including "you won!" — was
         // computed server-side and then silently dropped.
         { id: 'b-intro', type: 'intro', props: {} },
-        { id: 'b-body', type: 'text', props: { text: "Thank you for registering for **{{eventName}}**. This email confirms your registration and contains your ticket. Please retain this email, as it is required for check-in at the event.", size: 'sm', align: 'left', color: '#555555' } },
+        // Deliberately says nothing the status line above it already said
+        // ("your registration is confirmed" / "...updated" / "you won!") —
+        // this is the one line in the default template that's the same on
+        // every send, so it only carries the one piece of info that's true
+        // regardless of context: the ticket lives in this email.
+        { id: 'b-body', type: 'text', props: { text: "Please retain this email — it contains your ticket and is required for check-in at the event.", size: 'sm', align: 'left', color: '#555555' } },
         { id: 'b-details', type: 'eventDetails', props: { showMaps: true } },
         { id: 'b-calendar', type: 'calendar', props: { google: true, ics: true } },
         { id: 'b-changes', type: 'changes', props: {} },
