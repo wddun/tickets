@@ -313,6 +313,43 @@ describe('oneTicketPerEmail and the skip-existing sweep together', () => {
     });
 });
 
+// register-bulk's own duplicate-email guard (see api-access.test.js for the
+// guard itself) must not silently swallow a watcher deliberately configured
+// to allow it — "dedupe by email" off means one ticket per *row*, even from
+// a repeat address, and that's the whole point of turning it off.
+describe('oneTicketPerEmail off', () => {
+    test('a repeat address gets a separate ticket per row, not silently deduped', async () => {
+        const lines = ['Timestamp,First Name,Last Name,Email,Interested'];
+        lines.push(['2024-01-01T00:00:00', 'Jordan', 'Lee', 'jordan@sheetfixture.test.local', 'Yes'].join(','));
+        lines.push(['2024-01-01T00:00:01', 'Jordan', 'Lee', 'jordan@sheetfixture.test.local', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'no-dedupe.csv'), lines.join('\n'));
+
+        const ev = await createEvent(owner.client, { name: 'Multi Entry' });
+        const connect = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, {
+            url: 'test-fixture:no-dedupe.csv',
+            conditionGroup: { match: 'all', children: [{ column: 'Interested', operator: 'equals', value: 'Yes' }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            oneTicketPerEmail: false,
+            includeExisting: true,
+            sendEmail: false,
+            intervalMinutes: 15,
+        });
+        assert.equal(connect.status, 200, connect.text);
+
+        const poll = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(poll.status, 200, poll.text);
+        assert.equal(poll.body.summary.matched, 2);
+        assert.equal(poll.body.summary.issued, 2, 'both rows must be issued — dedupe-by-email is explicitly off');
+
+        const tickets = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(tickets.body.length, 2);
+        assert.ok(tickets.body.every(t => t.email === 'jordan@sheetfixture.test.local'));
+        assert.notEqual(tickets.body[0].registrationId, tickets.body[1].registrationId, 'two rows, two separate registrations');
+    });
+});
+
 // Disconnecting is a deliberate reset: it forgets which rows were already
 // decided, so a later reconnect draws the "ignore what's already in the
 // sheet" line fresh, at whatever the sheet looks like at that moment —

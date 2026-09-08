@@ -4291,6 +4291,12 @@ function requireSheetApiKey(eventId, apiKey) {
 app.post('/api/register-bulk', async (req, res) => {
     const { firstName, lastName, email, eventId, ticketCount, apiKey } = req.body;
     const isResend = req.body.resend === true;
+    // Opt-in escape hatch for the duplicate-email guard below: a caller
+    // that means for the same address to get more than one ticket (e.g.
+    // the sheet watcher with "dedupe by email" turned off — one row per
+    // submission is the whole point there, not a bug to refuse) sets this
+    // explicitly. Default stays refuse, same as before this existed.
+    const force = req.body.force === true;
 
     if (!requireSheetApiKey(eventId, apiKey)) {
         return res.status(401).json({ error: 'Invalid or missing apiKey for this room' });
@@ -4428,8 +4434,9 @@ app.post('/api/register-bulk', async (req, res) => {
             // bookkeeping, two overlapping imports, a retried request).
             // This is the one place — independent of whatever the caller
             // believes it already knows — that refuses to hand out a
-            // second ticket to the same email.
-            if (emailAlreadyRegistered(eventId, email)) {
+            // second ticket to the same email, unless the caller explicitly
+            // asked for one anyway (force — see above).
+            if (!force && emailAlreadyRegistered(eventId, email)) {
                 return res.json({ success: true, alreadyRegistered: true, tokens: [], tickets: [] });
             }
             const registrationId = nanoid(10);
@@ -8662,6 +8669,15 @@ async function pollSheetWatcher(watcher) {
                     // `cfg.sendEmail !== false` here would turn an unset watcher
                     // into a hard `true` and silently override that setting.
                     sendEmail: cfg.sendEmail,
+                    // With "dedupe by email" off, the organiser is explicitly
+                    // asking for a separate ticket per row even from a repeat
+                    // address — register-bulk's own duplicate-email guard
+                    // must not silently swallow those, so tell it to allow
+                    // one here. With it on, this watcher's own key is already
+                    // the bare email (watcherRowKey above), so a second row
+                    // from the same address never reaches this call at all —
+                    // force is irrelevant either way in that mode.
+                    force: !cfg.oneTicketPerEmail,
                 }),
             });
             if (resp.ok) {

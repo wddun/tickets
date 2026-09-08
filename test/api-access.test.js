@@ -95,6 +95,25 @@ describe('POST /api/register-bulk', () => {
         assert.equal(tickets.length, 1, 'still only the one ticket from the first call');
     });
 
+    test('force:true bypasses the duplicate-email guard for a caller that wants it', async () => {
+        const ev = await createEvent(owner.client, { name: 'Forced Duplicate Bulk' });
+        const apiKey = await eventApiKey(owner.client, ev.id);
+        const email = uniqueEmail('forced-row');
+        const row = { firstName: 'Twice', lastName: 'Entered', email, eventId: ev.id, ticketCount: 1, apiKey, sendEmail: false };
+
+        const first = await external().post('/api/register-bulk', row);
+        assert.equal(first.status, 200, first.text);
+        assert.equal(first.body.tokens.length, 1);
+
+        const second = await external().post('/api/register-bulk', { ...row, force: true });
+        assert.equal(second.status, 200, second.text);
+        assert.equal(second.body.tokens.length, 1, 'force must actually issue a second ticket, not just avoid the refusal');
+        assert.notEqual(second.body.tokens[0], first.body.tokens[0]);
+
+        const tickets = await listTickets(owner.client, ev.id);
+        assert.equal(tickets.length, 2, 'both tickets exist — force is a real override, not a no-op');
+    });
+
     test('carries the sheet\'s extra columns through as custom fields', async () => {
         const ev = await createEvent(owner.client, { name: 'Custom Bulk' });
         const apiKey = await eventApiKey(owner.client, ev.id);
