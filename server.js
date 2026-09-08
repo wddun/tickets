@@ -330,17 +330,24 @@ function sendVerificationEmail(email, verifyToken) {
 // had no way at all to stop the public registration form emailing every entrant.
 // Now each source is switchable on its own.
 //
-//   public — someone registering themselves: the public link, the kiosk, and
-//            the paid checkout receipt (which carries their only ticket)
-//   door   — staff issuing a ticket at the door from the iOS app
-//   import — the Google Sheet watcher, CSV import, Apps Script, API imports
-//   manual — adding or editing an attendee from the dashboard
+//   public           — someone registering themselves: the public link, the
+//                       kiosk, and the paid checkout receipt (which carries
+//                       their only ticket)
+//   door             — staff issuing a ticket at the door from the iOS app
+//   import           — the Google Sheet watcher, CSV import, Apps Script,
+//                       API imports
+//   manual           — adding or editing an attendee from the dashboard
+//   waitlistJoined   — sent the moment someone joins the waitlist
+//   waitlistPromoted — sent when a waitlisted person is promoted: the claim
+//                       link on a paid event, or the ticket itself on a free
+//                       one (issueTicketForPayment's `source: 'waitlistPromoted'`
+//                       calls route through here rather than always sending)
 //
 // Deliberately NOT covered, because switching them off would break the thing
-// they exist for rather than just quieten it: waitlist claim links (the email
-// *is* the promotion), password resets, and the operator's own Resend / Direct
-// email / Bulk email actions, which are an explicit instruction to send.
-const EMAIL_SOURCES = ['public', 'door', 'import', 'manual'];
+// they exist for rather than just quieten it: password resets, and the
+// operator's own Resend / Direct email / Bulk email actions, which are an
+// explicit instruction to send.
+const EMAIL_SOURCES = ['public', 'door', 'import', 'manual', 'waitlistJoined', 'waitlistPromoted'];
 
 function eventEmailPolicy(event) {
     const stored = event && event.emailPolicy;
@@ -352,7 +359,7 @@ function eventEmailPolicy(event) {
     // Never configured: reproduce the old flag's behaviour exactly, so no
     // existing event changes what it does the moment this ships.
     const skip = !!(event && event.skipConfirmationEmails);
-    return { public: true, door: true, import: !skip, manual: !skip };
+    return { public: true, door: true, import: !skip, manual: !skip, waitlistJoined: true, waitlistPromoted: true };
 }
 
 // `explicitFlag` is a per-request override (the sheet watcher's own setting, an
@@ -3119,7 +3126,7 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
     const seat = consumeHoldOrCheckRoom(event, holdToken);
     if (!seat.ok) {
         if (event.waitlistEnabled) {
-            return res.json(await joinWaitlist(event, name, email));
+            return res.json(await joinWaitlist(event, name, email, shouldSendConfirmation('waitlistJoined', null, event)));
         }
         return res.status(400).json({
             error: seat.filledUnderHold
@@ -3208,10 +3215,14 @@ function validateDiscountCode(eventId, rawCode, baseAmount) {
     return { discountCode, discountAmount, finalAmount: Math.max(0, baseAmount - discountAmount) };
 }
 
-// `source` decides whether the event's confirmation-email policy applies:
-// 'public' for checkout, 'door' for a staff at-door sale, and null for a
-// waitlist promotion, where the email is the promotion itself and suppressing
-// it would leave someone holding a seat they were never told about.
+// `source` decides which slice of the event's confirmation-email policy
+// applies: 'public' for checkout, 'door' for a staff at-door sale,
+// 'waitlistPromoted' for a free-event waitlist promotion (issuing the ticket
+// directly has no separate "claim" step to notify, so this same policy toggle
+// covers both that and the paid-event claim-link email sent from
+// promoteWaitlistEntry). Turning waitlistPromoted off still reserves/issues
+// the seat — it only silences the notification, so the organiser is choosing
+// to tell that person some other way.
 async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 'public' }) {
     const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
     if (!dbEvent) return null;
@@ -3306,7 +3317,7 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
             && heldByCaller.status === 'active' && heldByCaller.expiresAt > new Date().toISOString();
         if (!callerHoldsSeat && usage.taken >= usage.capacity) {
             if (event.waitlistEnabled) {
-                return res.json(await joinWaitlist(event, name, email));
+                return res.json(await joinWaitlist(event, name, email, shouldSendConfirmation('waitlistJoined', null, event)));
             }
             return res.status(400).json({ error: 'This event is sold out' });
         }
@@ -3878,7 +3889,7 @@ app.post('/api/event/:id/waitlist', publicWriteLimiter, async (req, res) => {
     if (!event.waitlistEnabled) return res.status(403).json({ error: 'This event does not have a waitlist' });
     const { name, email } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
-    res.json(await joinWaitlist(event, name, email));
+    res.json(await joinWaitlist(event, name, email, shouldSendConfirmation('waitlistJoined', null, event)));
 });
 
 // Shared by the manual Promote button, the claim-expiry auto-chain sweep, and
@@ -3903,7 +3914,7 @@ async function promoteWaitlistEntry(entry, event) {
         const claimMs = parseInt(process.env.WAITLIST_CLAIM_MS_OVERRIDE) || (claimHours * 60 * 60 * 1000);
         const claimExpiresAt = new Date(Date.now() + claimMs).toISOString();
         stmt.waitlist.setClaim.run(new Date().toISOString(), claimToken, claimExpiresAt, entry.id);
-        if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID) {
+        if (process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID && shouldSendConfirmation('waitlistPromoted', null, event)) {
             const claimUrl = `${BASE_URL}/register.html?id=${event.id}&claim=${claimToken}`;
             const windowLabel = claimHours % 24 === 0 ? `${claimHours / 24} day${claimHours === 24 ? '' : 's'}` : `${claimHours} hours`;
             const nameParts = (entry.name || '').trim().split(/\s+/).filter(Boolean);
@@ -3922,7 +3933,7 @@ async function promoteWaitlistEntry(entry, event) {
         return { success: true, notified: true };
     }
 
-    const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email, source: null });
+    const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email, source: 'waitlistPromoted' });
     if (!issued) return { success: false, error: 'Failed to issue ticket' };
     stmt.waitlist.setStatus.run('converted', entry.id);
     broadcastWaitlistChanged(event.id);
@@ -10203,7 +10214,7 @@ app.post('/api/v1/waitlist/:id/promote', ...apiRoute('manage_waitlist'), async (
         return apiError(res, 409, 'paid_event',
             'Promoting on a paid event sends a personal checkout link, which only the dashboard can do — money changes hands through Stripe alone.');
     }
-    const issued = await issueTicketForPayment({ eventId: req.apiEvent.id, buyerName: entry.name, buyerEmail: entry.email, source: null });
+    const issued = await issueTicketForPayment({ eventId: req.apiEvent.id, buyerName: entry.name, buyerEmail: entry.email, source: 'waitlistPromoted' });
     if (!issued) return apiError(res, 500, 'promote_failed', 'Could not issue the ticket.');
     stmt.waitlist.setStatus.run('converted', entry.id);
     broadcastWaitlistChanged(req.apiEvent.id);

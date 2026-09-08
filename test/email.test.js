@@ -295,6 +295,63 @@ describe('turning confirmation emails off actually turns them off', () => {
         assert.equal(server.emails().filter(m => m.to === email).length, 0,
             'skipConfirmationEmails has to hold when the caller expresses no preference');
     });
+
+    test('waitlistJoined can be silenced without affecting the ticket-confirmation sources', async () => {
+        const ev = await createEvent(owner.client, { name: 'Quiet List', publicRegistration: true, capacity: 1, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Only Seat' });
+        const r = await owner.client.put(`/api/event/${ev.id}/email-policy`, { waitlistJoined: false });
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.emailPolicy.waitlistJoined, false);
+        assert.equal(r.body.emailPolicy.public, true, 'the other sources must be left alone');
+
+        const email = uniqueEmail('quiet-joiner');
+        server.clearEmails();
+        const joined = await publicRegister(visitor(), ev.id, { name: 'Silently Waiting', email });
+        assert.equal(joined.status, 200, joined.text);
+        assert.equal(joined.body.waitlisted, true);
+        await new Promise(res => setTimeout(res, 400));
+        assert.equal(server.emails().filter(m => m.to === email).length, 0);
+    });
+
+    test('waitlistPromoted off still seats a free-event promotion, just silently', async () => {
+        const ev = await createEvent(owner.client, { name: 'Quiet Promotion', publicRegistration: true, capacity: 1, waitlist: true });
+        await addTicket(owner.client, ev.id, { name: 'Only Seat' });
+        await owner.client.put(`/api/event/${ev.id}/email-policy`, { waitlistPromoted: false });
+
+        const email = uniqueEmail('quiet-promoted');
+        await publicRegister(visitor(), ev.id, { name: 'Unnotified Winner', email });
+        const entry = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body[0];
+        server.clearEmails();
+
+        const r = await owner.client.post(`/api/waitlist/${entry.id}/promote`, {});
+        assert.equal(r.status, 200, r.text);
+        assert.ok(r.body.ticket?.token, 'the seat must still be issued even though the email is off');
+
+        await new Promise(res => setTimeout(res, 400));
+        assert.equal(server.emails().filter(m => m.to === email).length, 0);
+    });
+
+    test('waitlistPromoted off still reserves a paid-event claim, just without the claim-link email', async () => {
+        const ev = await createEvent(owner.client, { name: 'Quiet Claim', publicRegistration: true, capacity: 1, waitlist: true, ticketPrice: 25 });
+        await addTicket(owner.client, ev.id, { name: 'Paid Seat' });
+        await owner.client.put(`/api/event/${ev.id}/email-policy`, { waitlistPromoted: false });
+
+        const email = uniqueEmail('quiet-claim');
+        await visitor().post(`/api/event/${ev.id}/waitlist`, { name: 'Unnotified Claimant', email });
+        const entry = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body[0];
+        server.clearEmails();
+
+        const r = await owner.client.post(`/api/waitlist/${entry.id}/promote`, {});
+        assert.equal(r.status, 200, r.text);
+        assert.equal(r.body.notified, true);
+
+        const status = await visitor().get(`/api/waitlist/entry/${entry.id}`);
+        assert.equal(status.body.status, 'notified');
+        assert.ok(status.body.claimUrl?.includes('claim='), 'the reservation must still exist even though the email is off');
+
+        await new Promise(res => setTimeout(res, 400));
+        assert.equal(server.emails().filter(m => m.to === email).length, 0);
+    });
 });
 
 describe('nothing ever reaches a real mailbox during a test run', () => {

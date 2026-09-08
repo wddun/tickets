@@ -5581,7 +5581,7 @@
                     </label>`).join('')}
                 </div>
                 <div class="settings-hint" style="margin-top:8px;">
-                    Sent either way: waitlist claim links (the email <em>is</em> the offer), password resets, and anything you send yourself with Resend, Direct Email or Bulk Email.
+                    Sent either way: password resets, and anything you send yourself with Resend, Direct Email or Bulk Email.
                 </div>
 
                 <hr class="settings-divider">
@@ -6766,6 +6766,16 @@
                 title: 'Manual adds',
                 desc: 'Adding or editing an attendee yourself from the dashboard.',
             },
+            {
+                key: 'waitlistJoined',
+                title: 'Joined the waitlist',
+                desc: 'Sent the moment someone joins the waitlist, confirming their position and linking to a live status page.',
+            },
+            {
+                key: 'waitlistPromoted',
+                title: 'Promoted off the waitlist',
+                desc: 'The claim-your-spot link on a paid event, or the ticket itself on a free one. Turning this off still reserves or issues the seat — it just stops telling them, so only turn it off if you plan to notify them yourself.',
+            },
         ];
 
         // Mirrors eventEmailPolicy() in server.js: an event that predates the
@@ -6779,7 +6789,7 @@
                 return out;
             }
             const skip = !!(ev && ev.skipConfirmationEmails);
-            return { public: true, door: true, import: !skip, manual: !skip };
+            return { public: true, door: true, import: !skip, manual: !skip, waitlistJoined: true, waitlistPromoted: true };
         }
 
         function emailPolicySummary(policy) {
