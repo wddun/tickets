@@ -6115,6 +6115,9 @@
         // holds nothing back — so the table below only ever builds DOM for
         // the rows actually scrolled into view (see swRenderSampleTable),
         // not one <tr> per row.
+        const SW_PREVIEW_INFO_STYLE = 'font-size:11px;color:#4338ca;background:#eef2ff;border-radius:6px;padding:6px 8px;margin:8px 0 4px;';
+        const SW_PREVIEW_WARN_STYLE = 'font-size:11px;color:#78350f;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:6px 8px;margin:8px 0 4px;';
+
         function swUpdateMatchPreview() {
             const preview = document.getElementById('swMatchPreview');
             const table = document.getElementById('swSampleTable');
@@ -6122,6 +6125,7 @@
             const { headers, sampleRows, rowCount, truncated } = window.__swPreview;
             const ready = swGroupReady(window.__swGroup);
             if (!ready || !sampleRows.length) {
+                preview.style.cssText = SW_PREVIEW_INFO_STYLE;
                 preview.textContent = 'Fill in every condition to preview matches.';
                 if (table) table.innerHTML = '';
                 swVirtual = null;
@@ -6133,7 +6137,23 @@
             const coverageNote = truncated
                 ? ` (checked the first ${sampleRows.length.toLocaleString()} of ${rowCount.toLocaleString()} rows — the sheet is too large to check in full)`
                 : '';
-            preview.innerHTML = `<strong>${matchCount}</strong> of ${sampleRows.length.toLocaleString()} rows would trigger a ticket right now${coverageNote}.`;
+            // "Include rows already in the sheet" only exists on first connect
+            // (see swRenderConnectForm) — an already-connected watcher has no
+            // such toggle, and there a condition edit really would issue for
+            // any row that newly matches. Only the connect flow needs this
+            // caveat: left unchecked (the default), every row matching right
+            // now gets swept into "seen" without a ticket the moment you
+            // connect, so this preview must not read as a promise that they
+            // fire — it's showing what matches, not what will be issued.
+            const includeExistingEl = document.getElementById('swIncludeExisting');
+            const willSkipExisting = includeExistingEl && !includeExistingEl.checked;
+            if (willSkipExisting) {
+                preview.style.cssText = SW_PREVIEW_WARN_STYLE;
+                preview.innerHTML = `<strong>${matchCount}</strong> of ${sampleRows.length.toLocaleString()} rows match this condition right now${coverageNote} — but with "Include rows already in the sheet" off, <strong>none of them will get a ticket</strong>. Only rows submitted after you connect will.`;
+            } else {
+                preview.style.cssText = SW_PREVIEW_INFO_STYLE;
+                preview.innerHTML = `<strong>${matchCount}</strong> of ${sampleRows.length.toLocaleString()} rows would trigger a ticket right now${coverageNote}.`;
+            }
             if (table) swRenderSampleTable(headers, sampleRows, matchFlags, map);
         }
 
@@ -6444,7 +6464,7 @@
                     </div>
                     ${isEdit ? '' : `
                     <label style="display:flex;gap:6px;font-size:12px;align-items:center;margin-bottom:8px;">
-                        <input type="checkbox" id="swIncludeExisting">
+                        <input type="checkbox" id="swIncludeExisting" onchange="swUpdateMatchPreview()">
                         <span>Include rows already in the sheet</span>
                     </label>`}
                     <label style="display:flex;gap:6px;font-size:12px;align-items:center;margin-bottom:8px;">
