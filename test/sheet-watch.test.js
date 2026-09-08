@@ -239,6 +239,80 @@ describe('a bad row that was already marked seen at connect time', () => {
     });
 });
 
+// The connect-time "skip existing" sweep used to record bare-email keys
+// under oneTicketPerEmail, exactly like a real issue does — so an address
+// that merely appeared somewhere in the sheet's pre-connect history (e.g. a
+// long-running weekly sign-in sheet reused for a one-off giveaway) was
+// permanently barred from ever getting a ticket, even from a genuinely new
+// row submitted well after the watcher connected. "Ignore everything
+// already in the sheet" must mean per *row*, not blacklist the email.
+describe('oneTicketPerEmail and the skip-existing sweep together', () => {
+    test('a new row from an email seen only in pre-connect history still gets a ticket', async () => {
+        const lines = ['Timestamp,First Name,Last Name,Email,Interested'];
+        // Several old rows already used this address, long before the watcher
+        // ever existed — same shape as a year of recurring meeting sign-ins.
+        lines.push(['2024-01-01T00:00:00', 'Repeat', 'Visitor', 'repeat@sheetfixture.test.local', 'Yes'].join(','));
+        lines.push(['2024-02-01T00:00:00', 'Repeat', 'Visitor', 'repeat@sheetfixture.test.local', 'Yes'].join(','));
+        lines.push(['2024-03-01T00:00:00', 'Repeat', 'Visitor', 'repeat@sheetfixture.test.local', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'oneticket-history.csv'), lines.join('\n'));
+
+        const ev = await createEvent(owner.client);
+        const connect = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, {
+            url: 'test-fixture:oneticket-history.csv',
+            conditionGroup: { match: 'all', children: [{ column: 'Interested', operator: 'equals', value: 'Yes' }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            oneTicketPerEmail: true,
+            includeExisting: false, // all 3 historical rows swept into "seen", none issued
+            sendEmail: false,
+            intervalMinutes: 15,
+        });
+        assert.equal(connect.status, 200, connect.text);
+
+        const pollBefore = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(pollBefore.body.summary.matched, 3);
+        assert.equal(pollBefore.body.summary.issued, 0);
+        assert.equal(pollBefore.body.summary.alreadySeen, 3);
+
+        const tickets0 = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(tickets0.body.length, 0, 'no ticket yet for an email only ever seen in pre-connect history');
+
+        // A brand-new submission today from that same address — a real,
+        // fresh giveaway entry, not one of the old rows.
+        lines.push(['2026-09-08T20:00:00', 'Repeat', 'Visitor', 'repeat@sheetfixture.test.local', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'oneticket-history.csv'), lines.join('\n'));
+
+        const pollAfter = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(pollAfter.status, 200, pollAfter.text);
+        assert.equal(pollAfter.body.summary.matched, 4);
+        assert.equal(pollAfter.body.summary.issued, 1, 'the new row must be issued, not blocked by its own pre-connect history');
+        assert.equal(pollAfter.body.summary.alreadySeen, 3);
+
+        const tickets1 = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(tickets1.body.length, 1);
+        assert.equal(tickets1.body[0].email, 'repeat@sheetfixture.test.local');
+
+        // Now that this email has actually received a ticket, oneTicketPerEmail
+        // does its real job: a second new row from the same address today is
+        // correctly blocked, not issued a duplicate.
+        lines.push(['2026-09-08T20:05:00', 'Repeat', 'Visitor', 'repeat@sheetfixture.test.local', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'oneticket-history.csv'), lines.join('\n'));
+
+        const pollDup = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(pollDup.status, 200, pollDup.text);
+        assert.equal(pollDup.body.summary.matched, 5);
+        assert.equal(pollDup.body.summary.issued, 0, 'a second new row from an already-issued email must not get a second ticket');
+        // The 3 historical rows and the first new row are each already seen
+        // by position; the duplicate new row is a fresh position but is
+        // caught by the separate per-email check — all 5 land in alreadySeen.
+        assert.equal(pollDup.body.summary.alreadySeen, 5);
+
+        const tickets2 = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(tickets2.body.length, 1, 'still exactly one ticket for this email');
+    });
+});
+
 describe('date conditions ("only rows after a given date/time")', () => {
     test('dateAfter matches only rows timestamped later than the picked value', async () => {
         const lines = ['Timestamp,First Name,Last Name,Email'];

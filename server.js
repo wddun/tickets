@@ -8508,14 +8508,31 @@ function sanitizeGroup(node, depth = 0, budget = { nodes: 0 }) {
     };
 }
 
-// A row's dedupe key: normally form timestamp + email, so editing other
-// columns (e.g. a leader's follow-up notes) never re-triggers a row, and a
-// second submission by the same person (new timestamp) counts as a new row.
-// When cfg.oneTicketPerEmail is set, the key is just the email — any repeat
-// submission by the same address is treated as already seen.
+// A row's *position* identity: timestamp + email, always — independent of
+// oneTicketPerEmail. This answers "have I looked at this exact row before",
+// nothing more. It's what the connect-time skip-existing sweep records
+// (see the sheet-watch connect route below), and what every poll checks
+// first, so a row that predates the watcher is never re-examined —
+// including never re-validated, never re-issued — regardless of whether its
+// email happens to match some other row entirely.
+function watcherRowPositionKey(row, rowIndex, tsIdx, email) {
+    return `${tsIdx >= 0 ? String(row[tsIdx]).trim() : 'row' + rowIndex}|${email.toLowerCase()}`;
+}
+
+// A row's dedupe key for actually issuing: the position key, unless
+// cfg.oneTicketPerEmail is set, in which case it's just the email — a
+// second *new* row from the same address is treated as already handled.
+// Deliberately only ever recorded by pollSheetWatcher on a real successful
+// issue (see below), never by the skip-existing sweep — an email merely
+// appearing somewhere in the sheet's history is not itself a block, only
+// one that has actually received a ticket through this watcher is. That
+// split is what lets "ignore everything already in the sheet" and "one
+// ticket per email" both hold at once: a brand-new row from someone whose
+// email happens to show up in old, never-issued rows still gets a ticket;
+// a second new row from an email that already got one does not.
 function watcherRowKey(row, rowIndex, tsIdx, email, cfg) {
     if (cfg?.oneTicketPerEmail) return email.toLowerCase();
-    return `${tsIdx >= 0 ? String(row[tsIdx]).trim() : 'row' + rowIndex}|${email.toLowerCase()}`;
+    return watcherRowPositionKey(row, rowIndex, tsIdx, email);
 }
 
 // A poll processes rows one at a time, each through a real internal HTTP
@@ -8566,13 +8583,15 @@ async function pollSheetWatcher(watcher) {
             // time by the include-existing-rows skip) is done either way,
             // and re-validating it every poll forever just to re-report the
             // same unfixable problem (e.g. a legacy row with no real email)
-            // is noise, not signal. watcherRowKey only needs the raw,
-            // untrimmed-for-validity email string — same as the connect-time
-            // backfill computed it with — so this doesn't change what counts
-            // as "the same row" for dedup purposes.
+            // is noise, not signal.
             const email = String(row[emailIdx] || '').trim();
+            const positionKey = watcherRowPositionKey(row, r, tsIdx, email);
+            if (stmt.sheetWatcherSeen.exists.get(watcher.id, positionKey)) { summary.alreadySeen++; continue; }
+            // Separately, under oneTicketPerEmail: has this address already
+            // gotten a ticket from a *different* row (checked only here, not
+            // by the skip-existing sweep — see watcherRowKey above).
             const key = watcherRowKey(row, r, tsIdx, email, cfg);
-            if (stmt.sheetWatcherSeen.exists.get(watcher.id, key)) { summary.alreadySeen++; continue; }
+            if (key !== positionKey && stmt.sheetWatcherSeen.exists.get(watcher.id, key)) { summary.alreadySeen++; continue; }
             if (!email.includes('@')) { summary.failed++; lastError = `Row ${r + 2}: missing or invalid email`; continue; }
 
             let firstName = String(row[firstIdx] || '').trim();
@@ -8632,7 +8651,12 @@ async function pollSheetWatcher(watcher) {
                 }),
             });
             if (resp.ok) {
-                stmt.sheetWatcherSeen.insert.run(watcher.id, key, new Date().toISOString());
+                // Both keys: this literal row (so a re-fetch of the sheet
+                // never reprocesses it) and, under oneTicketPerEmail, the
+                // bare email too (so a *different* future row from the same
+                // address is now correctly blocked — it wasn't before this).
+                stmt.sheetWatcherSeen.insert.run(watcher.id, positionKey, new Date().toISOString());
+                if (key !== positionKey) stmt.sheetWatcherSeen.insert.run(watcher.id, key, new Date().toISOString());
                 stmt.sheetWatchers.incrementIssued.run(1, watcher.id);
                 summary.issued++;
                 log('sheet-watch', `[issued] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`);
@@ -8832,7 +8856,15 @@ app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
 
     // On first connect, unless the user asked to back-fill existing rows,
     // mark every currently-matching row as seen so only rows submitted
-    // from now on get tickets.
+    // from now on get tickets. Always by row *position* (watcherRowPositionKey),
+    // never by watcherRowKey's bare-email form even under oneTicketPerEmail —
+    // this must record "this specific existing row is spoken for", not "this
+    // email may never receive a ticket". A sheet accumulated over months
+    // routinely already contains someone's email from an earlier, unrelated
+    // context; blocking a genuinely new future row from that same address
+    // would defeat "one per email" (which should mean per email that has
+    // actually *received* a ticket, not per email that merely exists
+    // somewhere in the sheet's history) rather than honour it.
     if (isNew && !includeExisting) {
         try {
             const cfg = watcherConfig(watcher);
@@ -8842,7 +8874,7 @@ app.post('/api/event/:id/sheet-watch', requireAuth, async (req, res) => {
             rows.forEach((row, r) => {
                 if (!watcherMatches(cfg, headers, row)) return;
                 const email = String(row[emailIdx] || '').trim();
-                stmt.sheetWatcherSeen.insert.run(watcher.id, watcherRowKey(row, r, tsIdx, email, cfg), new Date().toISOString());
+                stmt.sheetWatcherSeen.insert.run(watcher.id, watcherRowPositionKey(row, r, tsIdx, email), new Date().toISOString());
             });
         } catch { /* the first scheduled poll will surface any fetch error */ }
     }
