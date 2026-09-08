@@ -8536,8 +8536,20 @@ function sanitizeGroup(node, depth = 0, budget = { nodes: 0 }) {
 // first, so a row that predates the watcher is never re-examined —
 // including never re-validated, never re-issued — regardless of whether its
 // email happens to match some other row entirely.
+//
+// Falls back to the row's own index whenever the timestamp cell is blank,
+// not just when there's no Timestamp column at all — a live Google Form
+// submission always auto-stamps, but a row typed or pasted directly into
+// the sheet doesn't, and a sheet with any history of that has more than
+// one blank-timestamp row. Using the literal empty string as "the
+// timestamp" collapses every blank-timestamp row for the same email onto
+// one identical key, so sweeping one already-blank historical row as
+// "existing" silently also swallows every future blank-timestamp row from
+// that same address — including a brand new one added after a reconnect,
+// which is indistinguishable from the old one by timestamp alone.
 function watcherRowPositionKey(row, rowIndex, tsIdx, email) {
-    return `${tsIdx >= 0 ? String(row[tsIdx]).trim() : 'row' + rowIndex}|${email.toLowerCase()}`;
+    const ts = tsIdx >= 0 ? String(row[tsIdx]).trim() : '';
+    return `${ts || 'row' + rowIndex}|${email.toLowerCase()}`;
 }
 
 // A row's dedupe key for actually issuing: the position key, unless

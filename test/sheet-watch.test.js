@@ -239,6 +239,59 @@ describe('a bad row that was already marked seen at connect time', () => {
     });
 });
 
+// A row's position key falls back to its blank timestamp cell as if that
+// were a real distinguishing value, unless the fix below is in — so several
+// pre-existing rows for the same email with no timestamp (typed or pasted
+// straight into the sheet, not a live Form submission) all collapse onto
+// one identical key. Sweeping the first of them as "existing" at connect
+// time used to also silently swallow a brand-new row for that same email
+// added after the reconnect, since it looked identical by position.
+describe('blank-timestamp rows for the same email', () => {
+    test('a new blank-timestamp row is not confused with an old one already swept', async () => {
+        const lines = ['Timestamp,First Name,Last Name,Email,Interested'];
+        // Several old, blank-timestamp rows for the same address — a typed
+        // or pasted entry, not a Form submission, same as the real sheet.
+        lines.push([',Old,One,repeat2@sheetfixture.test.local,Yes'].join(','));
+        lines.push([',Old,Two,repeat2@sheetfixture.test.local,Yes'].join(','));
+        lines.push([',Old,Three,repeat2@sheetfixture.test.local,Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'blank-ts-repeat.csv'), lines.join('\n'));
+
+        const ev = await createEvent(owner.client, { name: 'Blank Timestamp Repeat' });
+        const connect = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, {
+            url: 'test-fixture:blank-ts-repeat.csv',
+            conditionGroup: { match: 'all', children: [{ column: 'Interested', operator: 'equals', value: 'Yes' }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            oneTicketPerEmail: true,
+            includeExisting: false, // all 3 old rows swept into "seen" without issuing
+            sendEmail: false,
+            intervalMinutes: 15,
+        });
+        assert.equal(connect.status, 200, connect.text);
+
+        const pollBefore = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(pollBefore.body.summary.issued, 0);
+        assert.equal(pollBefore.body.summary.alreadySeen, 3);
+
+        // A genuinely new row for the same address, added after connect —
+        // also blank timestamp, exactly like someone typing it in by hand
+        // right after a reconnect.
+        lines.push([',New,Entry,repeat2@sheetfixture.test.local,Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'blank-ts-repeat.csv'), lines.join('\n'));
+
+        const pollAfter = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(pollAfter.status, 200, pollAfter.text);
+        assert.equal(pollAfter.body.summary.matched, 4);
+        assert.equal(pollAfter.body.summary.issued, 1, 'the new blank-timestamp row must not be mistaken for an already-swept old one');
+        assert.equal(pollAfter.body.summary.alreadySeen, 3);
+
+        const tickets = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(tickets.body.length, 1);
+        assert.equal(tickets.body[0].email, 'repeat2@sheetfixture.test.local');
+    });
+});
+
 // The connect-time "skip existing" sweep used to record bare-email keys
 // under oneTicketPerEmail, exactly like a real issue does — so an address
 // that merely appeared somewhere in the sheet's pre-connect history (e.g. a
