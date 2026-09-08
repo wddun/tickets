@@ -106,11 +106,23 @@ describe('what comes across', () => {
     test('custom fields', async () => {
         const ev = await createEvent(owner.client, { name: 'With Fields' });
         // Saved the way the dashboard's Custom Fields tab saves them.
-        assert.equal((await owner.client.patch(`/api/event/${ev.id}`, { customFields: ['T-Shirt Size', 'Dietary'] })).status, 200);
+        const fields = [
+            { label: 'T-Shirt Size', type: 'multiple_choice', options: ['S', 'M', 'L'], required: true, showOnPublicForm: true },
+            { label: 'Dietary', type: 'short_answer' },
+        ];
+        assert.equal((await owner.client.patch(`/api/event/${ev.id}`, { customFields: fields })).status, 200);
 
         const made = await duplicate(owner.client, ev.id);
-        const copy = (await owner.client.get(`/api/event/${made.body.eventId}`)).body;
-        assert.deepEqual(copy.customFields, ['T-Shirt Size', 'Dietary'], 'custom fields are most of the setup worth copying');
+        // /api/event/:id is the public, register.html-facing route — it only
+        // ever shows fields opted into the public form, so the full
+        // definitions (including the internal-only "Dietary" one) are read
+        // back from the authenticated event list instead.
+        const list = (await owner.client.get('/api/events')).body;
+        const copy = list.find(e => e.id === made.body.eventId);
+        assert.deepEqual(copy.customFields, [
+            { label: 'T-Shirt Size', type: 'multiple_choice', options: ['S', 'M', 'L'], required: true, showOnPublicForm: true },
+            { label: 'Dietary', type: 'short_answer', options: [], required: false, showOnPublicForm: false },
+        ], 'custom fields are most of the setup worth copying');
     });
 
     test('collaborators, but only when asked for', async () => {

@@ -84,11 +84,11 @@
         body.themed .event-name { color: var(--rt-text); }
         body.themed .event-meta { color: var(--rt-muted); }
         body.themed label { color: var(--rt-text); }
-        body.themed input {
+        body.themed input, body.themed select {
             background: var(--rt-surface); color: var(--rt-text);
             border: 1.5px solid var(--rt-border); border-radius: calc(var(--rt-radius) / 2);
         }
-        body.themed input:focus { border-color: var(--rt-accent); outline: none; }
+        body.themed input:focus, body.themed select:focus { border-color: var(--rt-accent); outline: none; }
         body.themed button[type="submit"] {
             background: var(--rt-accent); color: var(--rt-accent-text);
             border: none; border-radius: calc(var(--rt-radius) / 2); font-weight: 700;
@@ -236,6 +236,7 @@
                         <label for="email">Email Address</label>
                         <input type="email" id="email" placeholder="jane@example.com" required autocomplete="email">
                     </div>
+                    <div id="customFieldsBox"></div>
                     <button type="submit" id="submitBtn">Get My Ticket</button>
                 </form>
             </div>
@@ -348,6 +349,47 @@
             document.body.classList.add('themed');
             const meta = document.querySelector('meta[name="theme-color"]');
             if (meta && v.accent) meta.setAttribute('content', v.accent);
+        }
+
+        function escHtml(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // The organiser's own extra questions (T-Shirt size, meal choice, …),
+        // filtered server-side to only the ones opted into showing here — see
+        // GET /api/event/:id in server.js. Each carries a data-cf-label so the
+        // answers can be read back into a plain {label: value} object at
+        // submit time without needing a stable, guessable field id.
+        function renderCustomFields(fields) {
+            const box = document.getElementById('customFieldsBox');
+            if (!fields || !fields.length) { box.innerHTML = ''; return; }
+            box.innerHTML = fields.map((f, i) => {
+                const id = 'cf-' + i;
+                const optionalTag = f.required ? '' : ' <span style="font-weight:400;opacity:.65;">(optional)</span>';
+                if (f.type === 'multiple_choice') {
+                    const opts = (f.options || []).map(o => `<option value="${escHtml(o)}">${escHtml(o)}</option>`).join('');
+                    return `<div class="form-group">
+                        <label for="${id}">${escHtml(f.label)}${optionalTag}</label>
+                        <select id="${id}" data-cf-label="${escHtml(f.label)}" ${f.required ? 'required' : ''}>
+                            <option value="" ${f.required ? 'disabled selected' : 'selected'}>Select…</option>
+                            ${opts}
+                        </select>
+                    </div>`;
+                }
+                return `<div class="form-group">
+                    <label for="${id}">${escHtml(f.label)}${optionalTag}</label>
+                    <input type="text" id="${id}" data-cf-label="${escHtml(f.label)}" maxlength="500" ${f.required ? 'required' : ''}>
+                </div>`;
+            }).join('');
+        }
+
+        function collectCustomFieldValues() {
+            const values = {};
+            document.querySelectorAll('#customFieldsBox [data-cf-label]').forEach(el => {
+                const val = el.value.trim();
+                if (val) values[el.dataset.cfLabel] = val;
+            });
+            return values;
         }
 
         function renderBanner(event) {
@@ -639,6 +681,7 @@
                 document.getElementById('eventDesc').textContent  =
                     [event.location?.name, eventDateStr].filter(Boolean).join(' · ');
                 document.title = `Register — ${event.name}`;
+                renderCustomFields(event.customFields);
 
                 // Claim links (promoted waitlist entries) always get a shot at
                 // the form — the backend re-validates the claim regardless of
@@ -768,6 +811,7 @@
             const lastName  = document.getElementById('lastName').value.trim();
             const name  = `${firstName} ${lastName}`;
             const email = document.getElementById('email').value;
+            const customFields = collectCustomFieldValues();
             const resetBtnText = () => {
                 btn.textContent = isFullWaitlistable ? 'Join Waitlist'
                     : eventTicketPrice > 0 ? `Buy Ticket — $${(eventTicketPrice/100).toFixed(2)}`
@@ -779,7 +823,7 @@
                     const res  = await fetch(`/api/checkout/${eventId}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, email, claimToken: claimToken || undefined, holdToken: holdToken || undefined })
+                        body: JSON.stringify({ name, email, claimToken: claimToken || undefined, holdToken: holdToken || undefined, customFields })
                     });
                     const data = await res.json();
                     if (data.url) {
@@ -799,7 +843,7 @@
                     const res  = await fetch('/api/register', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, email, eventId, holdToken: holdToken || undefined })
+                        body: JSON.stringify({ name, email, eventId, holdToken: holdToken || undefined, customFields })
                     });
                     const data = await res.json();
                     if (data.success) {

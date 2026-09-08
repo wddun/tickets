@@ -215,12 +215,14 @@ window.HELP_CONTENT = {
     // ── Custom Fields tab ─────────────────────────────────────────────────
     'customFields.list': {
         title: 'Custom Fields',
-        summary: 'A list of extra field names (e.g. "T-Shirt Size") that pre-fill as rows in the manual Add/Edit Registration form for staff.',
+        summary: 'Extra questions for a ticket — short answer or multiple choice — that can pre-fill in the manual Add/Edit Registration form, or be asked directly on the public registration form.',
         details: [
-            `<strong>Not shown on the public registration form.</strong> A public registrant never sees or fills these in — they exist purely to save staff from retyping the same field name every time they manually add or edit a registration.`,
-            `Field names are matched exactly, case-sensitively — "Meal" and "meal" are treated as two different fields.`,
-            `Removing a field from this list does not delete any values already saved on tickets under that name — it just stops being pinned/pre-filled in the editor; the data (and an editable row for it) stays on any ticket that has it.`,
-            `Staff can always type in an arbitrary field name in the ticket editor regardless of what's defined here — this list is a convenience checklist, not an enforced schema.`,
+            `<strong>"Show on public registration form"</strong> is what actually puts a field in front of a registrant — leave it off and the field behaves exactly like the old-style fields: staff-only, filled in by hand when adding or editing a registration. A multiple-choice field on the public form renders as a dropdown of its own options, so a registrant can't submit anything you didn't define; a short-answer field is a free-text box.`,
+            `<strong>Required</strong> only blocks the public form — a registration blocked on a missing or invalid answer never reaches the server as a ticket. It has no effect on the manual editor, where staff can always leave a field blank.`,
+            `Field labels are matched exactly, case-sensitively — "Meal" and "meal" are treated as two different fields.`,
+            `Removing a field from this list does not delete any values already saved on tickets under that name — it just stops being pinned/pre-filled (or asked) in the editor and the public form; the data (and an editable row for it) stays on any ticket that has it.`,
+            `Staff can always type in an arbitrary field name in the ticket editor regardless of what's defined here — this list is a convenience checklist, not an enforced schema. The public form is the opposite: only a defined, public-facing field's label is ever accepted from a registration, so a visitor can't smuggle extra data onto a ticket.`,
+            `An answer given while joining a waitlist is carried onto the ticket automatically if that person is later promoted on a free event — they aren't asked again. A paid-event promotion goes back through the same registration form to check out, so those questions are asked again there.`,
             `Values collected under these names show up in: CSV export (only for fields actually filled in on at least one exported ticket), the optional "Custom fields" block in the confirmation email, the Apple Wallet pass, the scanner's check-in view, and the public API's ticket create/update calls.`,
         ],
     },

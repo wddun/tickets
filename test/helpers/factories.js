@@ -127,8 +127,8 @@ export async function addTicket(client, eventId, { name = 'Manual Guest', email 
 }
 
 /** Public self-registration, as register.html performs it. */
-export async function publicRegister(client, eventId, { name = 'Walk Up', email = uniqueEmail('public'), holdToken } = {}) {
-    return client.post('/api/register', { name, email, eventId, holdToken });
+export async function publicRegister(client, eventId, { name = 'Walk Up', email = uniqueEmail('public'), holdToken, customFields } = {}) {
+    return client.post('/api/register', { name, email, eventId, holdToken, customFields });
 }
 
 /** Every ticket for an event, via the API the dashboard/app use. */

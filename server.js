@@ -371,6 +371,90 @@ function shouldSendConfirmation(source, explicitFlag, event) {
     return eventEmailPolicy(event)[source] !== false;
 }
 
+// ── Custom field definitions ─────────────────────────────────────────────────
+// events.customFields used to be a bare array of label strings — a free-text
+// value box next to each one, filled in only by staff (manual add, import,
+// API). It's now an array of small definitions, so the same fields can be
+// asked as real questions on the public registration form:
+//   label            — the question text, and the key ticket.customFields
+//                       values are stored under (unchanged from before)
+//   type             — 'short_answer' (free text) or 'multiple_choice'
+//   options          — the choices, multiple_choice only
+//   required         — must be answered to submit the public form
+//   showOnPublicForm — appears on register.html at all; a field left off
+//                       still works exactly as before (staff-only)
+// A bare string (the old shape) normalizes to a short-answer field that
+// stays off the public form, so an event that predates this keeps behaving
+// exactly as it did — nothing new appears on anyone's registration page
+// until an organiser opts a field in.
+function normalizeCustomFieldDef(raw) {
+    if (typeof raw === 'string') {
+        const label = raw.trim().slice(0, 100);
+        return label ? { label, type: 'short_answer', options: [], required: false, showOnPublicForm: false } : null;
+    }
+    if (!raw || typeof raw !== 'object') return null;
+    const label = String(raw.label || '').trim().slice(0, 100);
+    if (!label) return null;
+    const type = raw.type === 'multiple_choice' ? 'multiple_choice' : 'short_answer';
+    const options = type === 'multiple_choice'
+        ? [...new Set((Array.isArray(raw.options) ? raw.options : []).map(o => String(o).trim().slice(0, 100)).filter(Boolean))].slice(0, 30)
+        : [];
+    // A multiple-choice field with nothing to choose from can't be answered —
+    // drop it rather than store a question with no possible response.
+    if (type === 'multiple_choice' && !options.length) return null;
+    return {
+        label,
+        type,
+        options,
+        required: raw.required === true,
+        showOnPublicForm: raw.showOnPublicForm === true,
+    };
+}
+
+// The event's field definitions, normalized and deduplicated by label
+// (case-insensitively — "Meal" and "meal" would otherwise collide as two
+// different ticket.customFields keys that look identical to an organiser).
+function eventCustomFieldDefs(event) {
+    const raw = Array.isArray(event?.customFields) ? event.customFields : [];
+    const out = [];
+    const seen = new Set();
+    for (const entry of raw) {
+        const def = normalizeCustomFieldDef(entry);
+        if (!def) continue;
+        const key = def.label.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(def);
+    }
+    return out.slice(0, 20);
+}
+
+// Shapes and validates whatever a public registration submission sent as
+// `customFields` against this event's public-facing definitions. Only a
+// defined public field's label is ever accepted as a key — the public form
+// can't smuggle arbitrary keys into a ticket's record by sending extra ones,
+// and a field the organiser never opted into showing publicly can't be
+// answered from here even if someone guesses its label.
+function collectPublicCustomFields(event, rawBody) {
+    const defs = eventCustomFieldDefs(event).filter(f => f.showOnPublicForm);
+    const raw = (rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)) ? rawBody : {};
+    const out = {};
+    for (const def of defs) {
+        let val = raw[def.label];
+        val = val === undefined || val === null ? '' : String(val).trim();
+        if (def.type === 'multiple_choice') {
+            if (val && !def.options.includes(val)) {
+                return { error: `"${val}" is not a valid option for "${def.label}".` };
+            }
+        } else {
+            val = val.slice(0, 500);
+        }
+        if (def.required && !val) return { error: `${def.label} is required.` };
+        if (val) out[def.label] = val;
+    }
+    return { fields: out };
+}
+
 // Shared HTML email template used by all ticket confirmation emails
 // Cached in memory (read once, reused for every email) so we're not doing
 // disk I/O per send — this is a small static asset that never changes.
@@ -3117,6 +3201,9 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
         return res.status(400).json({ error: 'This event is paid. Please use the checkout link to purchase a ticket.' });
     }
 
+    const cf = collectPublicCustomFields(event, req.body.customFields);
+    if (cf.error) return res.status(400).json({ error: cf.error });
+
     const blockedHere = signupBlockReason(req, event, email);
     if (blockedHere) return res.status(409).json({ error: blockedHere.error, reason: blockedHere.code });
 
@@ -3126,7 +3213,7 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
     const seat = consumeHoldOrCheckRoom(event, holdToken);
     if (!seat.ok) {
         if (event.waitlistEnabled) {
-            return res.json(await joinWaitlist(event, name, email, shouldSendConfirmation('waitlistJoined', null, event)));
+            return res.json(await joinWaitlist(event, name, email, shouldSendConfirmation('waitlistJoined', null, event), cf.fields));
         }
         return res.status(400).json({
             error: seat.filledUnderHold
@@ -3144,7 +3231,7 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
     const registrationId = nanoid(10);
     const now = new Date().toISOString();
 
-    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, name.trim(), firstName, lastName, email.trim().toLowerCase(), null, null, null, null, null, now, null, null);
+    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, name.trim(), firstName, lastName, email.trim().toLowerCase(), Object.keys(cf.fields).length ? JSON.stringify(cf.fields) : null, null, null, null, null, now, null, null);
     const ticket = rowToTicket(stmt.tickets.byToken.get(token));
 
     const qrDataUrl = await QRCode.toDataURL(`ticket:${token}`);
@@ -3223,7 +3310,7 @@ function validateDiscountCode(eventId, rawCode, baseAmount) {
 // promoteWaitlistEntry). Turning waitlistPromoted off still reserves/issues
 // the seat — it only silences the notification, so the organiser is choosing
 // to tell that person some other way.
-async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 'public' }) {
+async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 'public', customFields = null }) {
     const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
     if (!dbEvent) return null;
 
@@ -3235,7 +3322,8 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 
     const registrationId = nanoid(10);
     const now = new Date().toISOString();
 
-    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, buyerName, firstName, lastName, buyerEmail, null, null, null, null, null, now, null, null);
+    const cfJson = customFields && Object.keys(customFields).length ? JSON.stringify(customFields) : null;
+    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, buyerName, firstName, lastName, buyerEmail, cfJson, null, null, null, null, now, null, null);
     const ticket = rowToTicket(stmt.tickets.byToken.get(token));
 
     if (buyerEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID
@@ -3274,6 +3362,9 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
     const event = rowToEvent(stmt.events.byId.get(req.params.eventId));
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (!event.ticketPrice) return res.status(400).json({ error: 'This event is free. Please use /api/register.' });
+
+    const cf = collectPublicCustomFields(event, req.body.customFields);
+    if (cf.error) return res.status(400).json({ error: cf.error });
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanName  = name.trim();
@@ -3317,7 +3408,7 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
             && heldByCaller.status === 'active' && heldByCaller.expiresAt > new Date().toISOString();
         if (!callerHoldsSeat && usage.taken >= usage.capacity) {
             if (event.waitlistEnabled) {
-                return res.json(await joinWaitlist(event, name, email, shouldSendConfirmation('waitlistJoined', null, event)));
+                return res.json(await joinWaitlist(event, name, email, shouldSendConfirmation('waitlistJoined', null, event), cf.fields));
             }
             return res.status(400).json({ error: 'This event is sold out' });
         }
@@ -3340,7 +3431,7 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
     // doesn't support $0 payment-mode sessions, so issue the ticket directly
     // instead of round-tripping through Stripe for no reason.
     if (finalAmount <= 0) {
-        const issued = await issueTicketForPayment({ eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail });
+        const issued = await issueTicketForPayment({ eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail, customFields: cf.fields });
         if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
         if (discountCodeId) stmt.discountCodes.incrementUse.run(discountCodeId);
         stmt.orders.insert.run(nanoid(8), nanoid(16), event.id, issued.registrationId, cleanName, cleanEmail, 0, 'usd', 'fulfilled', new Date().toISOString(), discountCodeId, discountAmount);
@@ -3366,7 +3457,16 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
         }],
         mode: 'payment',
         customer_email: cleanEmail,
-        metadata: { eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail, discountCodeId: discountCodeId || '', waitlistId: claimEntry?.id || '', holdToken: paidHoldToken || '' },
+        metadata: {
+            eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail,
+            discountCodeId: discountCodeId || '', waitlistId: claimEntry?.id || '', holdToken: paidHoldToken || '',
+            // Stripe caps a metadata value at 500 characters — well past what
+            // the short-answer length cap and option list already keep this
+            // under in practice, but a session that somehow doesn't fit loses
+            // the answers rather than failing to create at all; the ticket
+            // still gets issued once payment completes.
+            customFields: (() => { const s = JSON.stringify(cf.fields); return s.length <= 500 ? s : ''; })(),
+        },
         success_url: `${BASE_URL}/register.html?session={CHECKOUT_SESSION_ID}&id=${event.id}`,
         cancel_url: `${BASE_URL}/register.html?id=${event.id}`,
     });
@@ -3453,7 +3553,11 @@ app.post('/api/stripe/webhook', async (req, res) => {
             }
         }
 
-        const issued = await issueTicketForPayment({ eventId, buyerName, buyerEmail });
+        let customFields = null;
+        if (session.metadata?.customFields) {
+            try { customFields = JSON.parse(session.metadata.customFields); } catch { customFields = null; }
+        }
+        const issued = await issueTicketForPayment({ eventId, buyerName, buyerEmail, customFields });
         if (!issued) return res.json({ received: true });
 
         stmt.orders.fulfill.run(issued.registrationId, new Date().toISOString(), session.payment_intent || null, session.id);
@@ -3612,7 +3716,7 @@ function waitlistPosition(eventId, entry) {
     return ahead + 1;
 }
 
-async function joinWaitlist(event, name, email, sendEmailFlag = true) {
+async function joinWaitlist(event, name, email, sendEmailFlag = true, customFields = null) {
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
     const existing = stmt.waitlist.byEventAndEmail.get(event.id, cleanEmail);
@@ -3624,7 +3728,8 @@ async function joinWaitlist(event, name, email, sendEmailFlag = true) {
     }
     const id = nanoid(10);
     const now = new Date().toISOString();
-    const inserted = stmt.waitlist.insert.run(id, event.id, cleanName, cleanEmail, null, 'waiting', now);
+    const cfJson = customFields && Object.keys(customFields).length ? JSON.stringify(customFields) : null;
+    const inserted = stmt.waitlist.insert.run(id, event.id, cleanName, cleanEmail, cfJson, 'waiting', now);
     const position = waitlistPosition(event.id, { createdAt: now, rowid: inserted.lastInsertRowid });
     log('waitlist', `[join] Added to waitlist — name: ${cleanName}  email: ${cleanEmail}  event: ${event.name}  position: ${position}`);
 
@@ -3889,7 +3994,9 @@ app.post('/api/event/:id/waitlist', publicWriteLimiter, async (req, res) => {
     if (!event.waitlistEnabled) return res.status(403).json({ error: 'This event does not have a waitlist' });
     const { name, email } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'Name and email required' });
-    res.json(await joinWaitlist(event, name, email, shouldSendConfirmation('waitlistJoined', null, event)));
+    const cf = collectPublicCustomFields(event, req.body.customFields);
+    if (cf.error) return res.status(400).json({ error: cf.error });
+    res.json(await joinWaitlist(event, name, email, shouldSendConfirmation('waitlistJoined', null, event), cf.fields));
 });
 
 // Shared by the manual Promote button, the claim-expiry auto-chain sweep, and
@@ -3933,7 +4040,7 @@ async function promoteWaitlistEntry(entry, event) {
         return { success: true, notified: true };
     }
 
-    const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email, source: 'waitlistPromoted' });
+    const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email, source: 'waitlistPromoted', customFields: entry.customFields });
     if (!issued) return { success: false, error: 'Failed to issue ticket' };
     stmt.waitlist.setStatus.run('converted', entry.id);
     broadcastWaitlistChanged(event.id);
@@ -4780,6 +4887,14 @@ app.get('/api/event/:id', (req, res) => {
     // data, so it never travels on the public event object. Organizers fetch
     // it from the dedicated, capability-checked /giveaway/token route.
     delete event.giveawayToken;
+    // Only fields the organiser explicitly opted into showing publicly reach
+    // this route — an internal-only field (staff notes, an import-mapping
+    // column) has no business being visible to, or answerable by, a stranger
+    // who merely knows the event id. required/showOnPublicForm beyond this
+    // point would just be noise for a form that already filtered on it.
+    event.customFields = eventCustomFieldDefs(event)
+        .filter(f => f.showOnPublicForm)
+        .map(({ label, type, options, required }) => ({ label, type, options, required }));
     res.json(event);
 });
 
@@ -4965,7 +5080,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
 // Update event custom field definitions
 app.patch('/api/event/:id', requireAuth, async (req, res) => {
     const { customFields } = req.body;
-    if (!Array.isArray(customFields)) return res.status(400).json({ error: 'customFields must be an array of strings' });
+    if (!Array.isArray(customFields)) return res.status(400).json({ error: 'customFields must be an array' });
 
     const event = rowToEvent(stmt.events.byId.get(req.params.id));
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -4974,10 +5089,10 @@ app.patch('/api/event/:id', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const cleaned = [...new Set(customFields.map(f => String(f).trim()).filter(Boolean))];
+    const cleaned = eventCustomFieldDefs({ customFields });
     stmt.events.setCustomFields.run(JSON.stringify(cleaned), req.params.id);
 
-    log('event-settings', `[edit] Updated customFields — event: ${event.name}  fields: [${cleaned.join(', ')}]  by: ${req.session.userId}`);
+    log('event-settings', `[edit] Updated customFields — event: ${event.name}  fields: [${cleaned.map(f => f.label).join(', ')}]  by: ${req.session.userId}`);
     res.json({ success: true, customFields: cleaned });
 });
 
@@ -10214,7 +10329,7 @@ app.post('/api/v1/waitlist/:id/promote', ...apiRoute('manage_waitlist'), async (
         return apiError(res, 409, 'paid_event',
             'Promoting on a paid event sends a personal checkout link, which only the dashboard can do — money changes hands through Stripe alone.');
     }
-    const issued = await issueTicketForPayment({ eventId: req.apiEvent.id, buyerName: entry.name, buyerEmail: entry.email, source: 'waitlistPromoted' });
+    const issued = await issueTicketForPayment({ eventId: req.apiEvent.id, buyerName: entry.name, buyerEmail: entry.email, source: 'waitlistPromoted', customFields: entry.customFields });
     if (!issued) return apiError(res, 500, 'promote_failed', 'Could not issue the ticket.');
     stmt.waitlist.setStatus.run('converted', entry.id);
     broadcastWaitlistChanged(req.apiEvent.id);

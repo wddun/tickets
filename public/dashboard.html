@@ -4784,54 +4784,115 @@
             }
         }
 
+        // customFields used to be a bare array of label strings. Mirrors
+        // normalizeCustomFieldDef/eventCustomFieldDefs in server.js so a local
+        // events cache that hasn't been re-saved since this shipped still
+        // renders correctly instead of choking on a plain string entry.
+        function customFieldDefs(ev) {
+            const raw = Array.isArray(ev?.customFields) ? ev.customFields : [];
+            return raw.map(f => typeof f === 'string'
+                ? { label: f, type: 'short_answer', options: [], required: false, showOnPublicForm: false }
+                : { label: f.label || '', type: f.type === 'multiple_choice' ? 'multiple_choice' : 'short_answer', options: Array.isArray(f.options) ? f.options : [], required: !!f.required, showOnPublicForm: !!f.showOnPublicForm }
+            ).filter(f => f.label);
+        }
+
         function renderSettingsCustomFields(eventId) {
             const ev = events.find(e => e.id === eventId);
-            const fields = ev?.customFields || [];
-            const rows = fields.map((f, i) => `
-                <div class="cf-row" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                    <span style="color:var(--text-muted);font-size:13px;cursor:ns-resize;padding:0 4px;">⠿</span>
-                    <input type="text" class="settings-cf-key" value="${esc(f)}"
-                        style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;">
-                    <button type="button" onclick="this.closest('.cf-row').remove()"
-                        style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;">&times;</button>
-                </div>`).join('');
+            const fields = customFieldDefs(ev);
+            const rows = fields.map(cfDefRowHtml).join('');
 
             return `
                 <div class="modal-section-title">Custom Fields${helpIcon('customFields.list')}</div>
-                <div class="settings-hint">Define fields that appear when adding or editing tickets (e.g. T-Shirt Size, Meal choice).</div>
+                <div class="settings-hint">Extra questions for a ticket — short answer or multiple choice. Show one on the public registration form to ask attendees directly, or leave it off to fill in yourself when adding or editing a ticket.</div>
                 <div id="settingsCfRows">${rows}</div>
                 <button type="button" onclick="addSettingsCfRow()"
                     style="width:100%;margin-top:6px;font-size:12px;color:var(--accent-indigo);background:none;border:1px dashed #c4b5fd;border-radius:6px;padding:7px 12px;cursor:pointer;">+ Add field</button>`;
         }
 
+        function cfDefRowHtml(f) {
+            const mc = f.type === 'multiple_choice';
+            const optionRows = (f.options.length ? f.options : ['']).map(cfOptionRowHtml).join('');
+            return `
+                <div class="cf-def-row" style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:10px;">
+                    <div style="display:flex;gap:6px;margin-bottom:8px;">
+                        <input type="text" class="cf-def-label" placeholder="e.g. T-Shirt Size" value="${esc(f.label)}"
+                            style="flex:1;min-width:0;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;">
+                        <select class="cf-def-type" onchange="onCfDefTypeChange(this)"
+                            style="padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--card);color:var(--text);">
+                            <option value="short_answer" ${!mc ? 'selected' : ''}>Short answer</option>
+                            <option value="multiple_choice" ${mc ? 'selected' : ''}>Multiple choice</option>
+                        </select>
+                        <button type="button" onclick="this.closest('.cf-def-row').remove(); markSettingsDirty('tab-fields');"
+                            style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;flex-shrink:0;">&times;</button>
+                    </div>
+                    <div class="cf-def-options" style="${mc ? '' : 'display:none;'}margin-bottom:8px;padding-left:4px;">
+                        <div class="cf-def-options-list">${optionRows}</div>
+                        <button type="button" onclick="addCfOptionRow(this)"
+                            style="font-size:11px;color:var(--accent-indigo);background:none;border:none;cursor:pointer;padding:4px 0;">+ Add option</button>
+                    </div>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+                            <input type="checkbox" class="cf-def-required" ${f.required ? 'checked' : ''}> Required
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+                            <input type="checkbox" class="cf-def-public" ${f.showOnPublicForm ? 'checked' : ''}> Show on public registration form
+                        </label>
+                    </div>
+                </div>`;
+        }
+
+        function cfOptionRowHtml(value) {
+            return `<div class="cf-def-option-row" style="display:flex;gap:6px;margin-bottom:6px;">
+                <input type="text" class="cf-def-option" placeholder="Option" value="${esc(value)}"
+                    style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;">
+                <button type="button" onclick="this.closest('.cf-def-option-row').remove(); markSettingsDirty('tab-fields');"
+                    style="background:none;border:none;color:var(--border);cursor:pointer;font-size:16px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>
+            </div>`;
+        }
+
+        function onCfDefTypeChange(select) {
+            const row = select.closest('.cf-def-row');
+            const optionsBox = row.querySelector('.cf-def-options');
+            const isMc = select.value === 'multiple_choice';
+            optionsBox.style.display = isMc ? '' : 'none';
+            if (isMc && !optionsBox.querySelector('.cf-def-option')) addCfOptionRow(select);
+        }
+
+        function addCfOptionRow(el) {
+            const list = el.closest('.cf-def-row').querySelector('.cf-def-options-list');
+            list.insertAdjacentHTML('beforeend', cfOptionRowHtml(''));
+            list.lastElementChild.querySelector('.cf-def-option').focus();
+        }
+
         function addSettingsCfRow() {
             const rows = document.getElementById('settingsCfRows');
             if (!rows) return;
-            const div = document.createElement('div');
-            div.className = 'cf-row';
-            div.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px;';
-            div.innerHTML = `
-                <span style="color:var(--text-muted);font-size:13px;padding:0 4px;">⠿</span>
-                <input type="text" class="settings-cf-key" placeholder="e.g. T-Shirt Size"
-                    style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;box-sizing:border-box;">
-                <button type="button" onclick="this.closest('.cf-row').remove()"
-                    style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;">&times;</button>`;
-            rows.appendChild(div);
-            div.querySelector('.settings-cf-key').focus();
+            rows.insertAdjacentHTML('beforeend', cfDefRowHtml({ label: '', type: 'short_answer', options: [], required: false, showOnPublicForm: true }));
+            rows.lastElementChild.querySelector('.cf-def-label').focus();
         }
 
         async function saveEventCustomFields(eventId) {
-            const keys = [...document.querySelectorAll('#settingsCfRows .settings-cf-key')]
-                .map(i => i.value.trim()).filter(Boolean);
+            const defs = [...document.querySelectorAll('#settingsCfRows .cf-def-row')].map(row => {
+                const label = row.querySelector('.cf-def-label').value.trim();
+                const type = row.querySelector('.cf-def-type').value === 'multiple_choice' ? 'multiple_choice' : 'short_answer';
+                const options = [...row.querySelectorAll('.cf-def-option')].map(i => i.value.trim()).filter(Boolean);
+                return {
+                    label, type, options,
+                    required: row.querySelector('.cf-def-required').checked,
+                    showOnPublicForm: row.querySelector('.cf-def-public').checked,
+                };
+            }).filter(f => f.label && (f.type !== 'multiple_choice' || f.options.length));
+
             const r = await fetch(`/api/event/${eventId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ customFields: keys })
+                body: JSON.stringify({ customFields: defs })
             });
             if (!r.ok) { showToast('Failed to save custom fields.'); return; }
+            const data = await r.json();
             // Update local events cache so ticket modals immediately reflect changes
             const ev = events.find(e => e.id === eventId);
-            if (ev) ev.customFields = keys;
+            if (ev) ev.customFields = data.customFields;
             // No success toast here — this only ever runs as part of the
             // floating settings save bar's batched save, which shows its own
             // single "All changes saved." toast once every dirty tab is done.
@@ -8459,14 +8520,23 @@
         }
     </style>
     <script>
-        function cfRowHtml(key, value, isEventField) {
+        function cfRowHtml(key, value, isEventField, def = null) {
             const keyAttrs = isEventField
                 ? `readonly style="width:36%;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text-muted);box-sizing:border-box;"`
                 : `placeholder="Field name" style="width:36%;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;"`;
+            // A multiple-choice field gets a dropdown of its own options rather
+            // than a free-text box, so staff adding a ticket by hand can't type
+            // something that doesn't match what the public form would offer.
+            const valueField = def && def.type === 'multiple_choice'
+                ? `<select class="cf-value" style="flex:1;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;background:var(--card);color:var(--text);">
+                    <option value=""></option>
+                    ${def.options.map(o => `<option value="${esc(o)}" ${o === value ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+                </select>`
+                : `<input type="text" class="cf-value" placeholder="Value"
+                    style="flex:1;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;" value="${esc(value)}">`;
             return `<div class="cf-row" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                 <input type="text" class="cf-key" ${keyAttrs} value="${esc(key)}">
-                <input type="text" class="cf-value" placeholder="Value"
-                    style="flex:1;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;" value="${esc(value)}">
+                ${valueField}
                 <button type="button" onclick="this.closest('.cf-row').remove()"
                     style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>
             </div>`;
@@ -8475,8 +8545,9 @@
         function renderCustomFieldsInputs(containerId, ticketValues = {}) {
             const container = document.getElementById(containerId);
             const ev = events.find(e => e.id === selectedId);
-            const eventFields = ev?.customFields || [];
-            const ticketOnlyKeys = Object.keys(ticketValues).filter(k => !eventFields.includes(k));
+            const eventFields = customFieldDefs(ev);
+            const eventLabels = eventFields.map(f => f.label);
+            const ticketOnlyKeys = Object.keys(ticketValues).filter(k => !eventLabels.includes(k));
 
             let html = '';
             if (eventFields.length || ticketOnlyKeys.length) {
@@ -8484,7 +8555,7 @@
             }
             html += `<div id="${containerId}-rows">`;
             eventFields.forEach(f => {
-                html += cfRowHtml(f, ticketValues[f] || '', true);
+                html += cfRowHtml(f.label, ticketValues[f.label] || '', true, f);
             });
             ticketOnlyKeys.forEach(k => {
                 html += cfRowHtml(k, ticketValues[k] || '', false);

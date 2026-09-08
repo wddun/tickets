@@ -117,14 +117,25 @@ describe('editing events', () => {
 
     test('PATCH sets the custom fields collected at registration', async () => {
         const ev = await createEvent(owner.client, { name: 'Custom Fields' });
-        const r = await owner.client.patch(`/api/event/${ev.id}`, { customFields: ['Dietary needs', 'T-shirt size', 'Dietary needs'] });
+        // A bare string is still accepted (the field shape this predates) and
+        // normalizes to a short-answer field kept off the public form.
+        const r = await owner.client.patch(`/api/event/${ev.id}`, {
+            customFields: ['Dietary needs', { label: 'T-shirt size' }, 'Dietary needs'],
+        });
         assert.equal(r.status, 200);
         // Duplicates are collapsed rather than stored twice.
-        assert.deepEqual(r.body.customFields, ['Dietary needs', 'T-shirt size']);
-        assert.deepEqual((await owner.client.get(`/api/event/${ev.id}`)).body.customFields, ['Dietary needs', 'T-shirt size']);
+        assert.equal(r.body.customFields.length, 2);
+        assert.deepEqual(r.body.customFields, [
+            { label: 'Dietary needs', type: 'short_answer', options: [], required: false, showOnPublicForm: false },
+            { label: 'T-shirt size', type: 'short_answer', options: [], required: false, showOnPublicForm: false },
+        ]);
+        // Neither field opted into the public form, so the route register.html
+        // reads from shows none of them — this is the same route, so an
+        // organiser previewing it sees exactly what a visitor would.
+        assert.deepEqual((await owner.client.get(`/api/event/${ev.id}`)).body.customFields, []);
     });
 
-    test('PATCH rejects anything that is not a list of field names', async () => {
+    test('PATCH rejects anything that is not a list of field definitions', async () => {
         const ev = await createEvent(owner.client, { name: 'Bad Custom Fields' });
         assert.equal((await owner.client.patch(`/api/event/${ev.id}`, { customFields: 'nope' })).status, 400);
     });
