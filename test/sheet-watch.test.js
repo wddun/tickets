@@ -313,20 +313,18 @@ describe('oneTicketPerEmail and the skip-existing sweep together', () => {
     });
 });
 
-// sheetWatcherSeen used to be keyed by the sheet watcher row's own ephemeral
-// id, not the event — so disconnecting and reconnecting (a fresh watcher
-// row, a fresh id) started this table over from nothing. That was silently
-// dangerous: a row that already had a real ticket looked brand new to the
-// reconnected watcher's memory, which the connect-time "skip existing"
-// sweep would then absorb back into "seen" — the immediate practical
-// effect was more re-sweep churn than actual double-issuing (the sweep
-// itself never issues), but it meant any future change to that ordering
-// was one edit away from a real duplicate-ticket bug, and it made "who's
-// already been decided" reset on every reconnect instead of meaning what
-// it says. Re-keying by the event's own id, which never changes, is what
-// makes that memory actually permanent.
+// Disconnecting is a deliberate reset: it forgets which rows were already
+// decided, so a later reconnect draws the "ignore what's already in the
+// sheet" line fresh, at whatever the sheet looks like at that moment —
+// same as any first-ever connect. That must never mean someone can get a
+// second ticket, though, so that guarantee lives one level down, in
+// register-bulk's own duplicate-email check (emailAlreadyRegistered) —
+// independent of whatever the watcher's own bookkeeping does or doesn't
+// remember. This test exercises both halves through the real
+// disconnect/reconnect flow; the dedicated register-bulk test below
+// exercises the guard itself directly.
 describe('reconnecting the same sheet', () => {
-    test('does not forget who already has a ticket, or double-issue them', async () => {
+    test('forgets nothing was "seen", but still never double-issues a ticket', async () => {
         const lines = ['Timestamp,First Name,Last Name,Email,Interested'];
         lines.push(['2024-01-01T00:00:00', 'Priya', 'Patel', 'priya@sheetfixture.test.local', 'Yes'].join(','));
         fs.writeFileSync(path.join(fixturesDir, 'reconnect.csv'), lines.join('\n'));

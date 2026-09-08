@@ -65,6 +65,36 @@ describe('POST /api/register-bulk', () => {
         assert.equal(tickets[0].registrationId, tickets[1].registrationId, 'one row is one registration');
     });
 
+    // Independent of anything the sheet watcher itself remembers about which
+    // rows it's already processed — a reconnect, a race between two polls,
+    // a retried request, anything that leads to this route being called
+    // twice for the same person must never hand out a second ticket.
+    test('never issues a second ticket to an email that already has one for this event', async () => {
+        const ev = await createEvent(owner.client, { name: 'No Duplicate Bulk' });
+        const apiKey = await eventApiKey(owner.client, ev.id);
+        const email = uniqueEmail('dupe-row');
+
+        const first = await external().post('/api/register-bulk', {
+            firstName: 'Once', lastName: 'Only', email,
+            eventId: ev.id, ticketCount: 1, apiKey, sendEmail: false,
+        });
+        assert.equal(first.status, 200, first.text);
+        assert.equal(first.body.tokens.length, 1);
+
+        // Same row processed again — new registrationId, no existingTokens,
+        // exactly what a watcher with no memory of the first call would send.
+        const second = await external().post('/api/register-bulk', {
+            firstName: 'Once', lastName: 'Only', email,
+            eventId: ev.id, ticketCount: 1, apiKey, sendEmail: false,
+        });
+        assert.equal(second.status, 200, second.text);
+        assert.equal(second.body.alreadyRegistered, true);
+        assert.equal(second.body.tokens.length, 0);
+
+        const tickets = await listTickets(owner.client, ev.id);
+        assert.equal(tickets.length, 1, 'still only the one ticket from the first call');
+    });
+
     test('carries the sheet\'s extra columns through as custom fields', async () => {
         const ev = await createEvent(owner.client, { name: 'Custom Bulk' });
         const apiKey = await eventApiKey(owner.client, ev.id);

@@ -4422,7 +4422,16 @@ app.post('/api/register-bulk', async (req, res) => {
                 bulkUpdate();
             }
         } else {
-            // New row (or resend with no existing tickets) — always create fresh tickets
+            // New row (or resend with no existing tickets) — but a "new"
+            // row can still correspond to someone who already has a ticket
+            // for this event (a sheet-watcher reconnect that reset its own
+            // bookkeeping, two overlapping imports, a retried request).
+            // This is the one place — independent of whatever the caller
+            // believes it already knows — that refuses to hand out a
+            // second ticket to the same email.
+            if (emailAlreadyRegistered(eventId, email)) {
+                return res.json({ success: true, alreadyRegistered: true, tokens: [], tickets: [] });
+            }
             const registrationId = nanoid(10);
             ticketsToSend = Array.from({ length: count }, () => ({
                 id: nanoid(8), token: nanoid(12), registrationId, eventId,
@@ -8662,9 +8671,18 @@ async function pollSheetWatcher(watcher) {
                 // address is now correctly blocked — it wasn't before this).
                 stmt.sheetWatcherSeen.insert.run(watcher.eventId, positionKey, new Date().toISOString());
                 if (key !== positionKey) stmt.sheetWatcherSeen.insert.run(watcher.eventId, key, new Date().toISOString());
-                stmt.sheetWatchers.incrementIssued.run(1, watcher.id);
-                summary.issued++;
-                log('sheet-watch', `[issued] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`);
+                const respBody = await resp.json().catch(() => ({}));
+                if (respBody.alreadyRegistered) {
+                    // register-bulk's own duplicate-email guard caught this
+                    // one, not us — count it as already handled, not a fresh
+                    // issue, so "Issued: N" doesn't overcount.
+                    summary.alreadySeen++;
+                    log('sheet-watch', `[already-registered] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`);
+                } else {
+                    stmt.sheetWatchers.incrementIssued.run(1, watcher.id);
+                    summary.issued++;
+                    log('sheet-watch', `[issued] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`);
+                }
             } else {
                 // Deliberately NOT marked seen — a transient failure (e.g. at
                 // capacity) retries on the next poll instead of losing the row.
@@ -8944,11 +8962,15 @@ app.delete('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
     if (!canManageEvent(req, req.params.id)) return res.status(403).json({ error: 'Admin access required' });
     const w = stmt.sheetWatchers.byEventId.get(req.params.id);
     if (!w) return res.status(404).json({ error: 'No sheet watcher configured for this event' });
-    // Deliberately does NOT clear sheetWatcherSeen — that's keyed by this
-    // event, not this watcher row, precisely so it survives a disconnect.
-    // Reconnecting (even to the same sheet under a brand-new watcher row)
-    // must not forget who already got a ticket, or re-run the "skip
-    // existing rows" sweep as if nothing had ever been decided.
+    // Disconnecting resets what counts as "already in the sheet, ignore
+    // it" — a later reconnect draws that line fresh, at whatever the
+    // sheet looks like at that moment (its own connect-time sweep, same
+    // as a first-ever connect). What it must NOT do is let anyone get a
+    // second ticket: that's guaranteed independently, by register-bulk's
+    // own duplicate-email check (see emailAlreadyRegistered above) rather
+    // than by this table remembering who was already issued one — so
+    // clearing it here is safe even for someone who already has a ticket.
+    stmt.sheetWatcherSeen.deleteByEventId.run(w.eventId);
     stmt.sheetWatchers.deleteById.run(w.id);
     logAudit(req, { eventId: req.params.id, action: 'sheet_watch.disconnected', details: { url: w.url } });
     res.json({ success: true });
