@@ -9356,21 +9356,22 @@
             divider:      { label: 'Divider',       singleton: false, desc: 'Horizontal rule' },
             spacer:       { label: 'Spacer',        singleton: false, desc: 'Vertical gap' },
             footerNote:   { label: 'Footer note',   singleton: true,  desc: 'Small print under the tickets' },
+            ticketReturn: { label: 'Return ticket link', singleton: true, desc: "\"Can't make it? Return your ticket\" — only shows when Allow Attendees to Return Tickets is on for this event" },
         };
 
         // Which block types each editor variant may use — a waitlist email has
         // no ticket, calendar entry, or per-registration edits yet, so its
         // palette (see server.js's WAITLIST_EMAIL_BLOCK_TYPES) is a subset.
         const EB_VARIANT_BLOCK_TYPES = {
-            ticket: ['header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'tickets', 'customFields', 'changes', 'button', 'image', 'divider', 'spacer', 'footerNote'],
-            winner: ['header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'tickets', 'customFields', 'changes', 'button', 'image', 'divider', 'spacer', 'footerNote'],
+            ticket: ['header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'tickets', 'customFields', 'changes', 'button', 'image', 'divider', 'spacer', 'footerNote', 'ticketReturn'],
+            winner: ['header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'tickets', 'customFields', 'changes', 'button', 'image', 'divider', 'spacer', 'footerNote', 'ticketReturn'],
             waitlist: ['header', 'text', 'waitlistPosition', 'eventImage', 'eventDetails', 'waitlistStatusButton', 'button', 'image', 'divider', 'spacer', 'footerNote'],
             waitlistClaim: ['header', 'text', 'waitlistClaimButton', 'eventImage', 'eventDetails', 'button', 'image', 'divider', 'spacer', 'footerNote'],
         };
 
         const EB_VARIANT_VARS = {
-            ticket: '{{firstName}}, {{lastName}}, {{fullName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{ticketCount}}',
-            winner: '{{firstName}}, {{lastName}}, {{fullName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{ticketCount}}',
+            ticket: '{{firstName}}, {{lastName}}, {{fullName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{ticketCount}}, {{returnUrl}}*, {{ticketWord}}*, {{spotWord}}* (*only set while ticket returns are enabled for this event)',
+            winner: '{{firstName}}, {{lastName}}, {{fullName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{ticketCount}}, {{returnUrl}}*, {{ticketWord}}*, {{spotWord}}* (*only set while ticket returns are enabled for this event)',
             waitlist: '{{firstName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{position}}',
             waitlistClaim: '{{firstName}}, {{eventName}}, {{eventDate}}, {{eventLocation}}, {{claimWindow}}',
         };
@@ -9393,6 +9394,7 @@
             divider: {},
             spacer: { height: 16 },
             footerNote: { lines: ["Retain this email as your entry ticket."] },
+            ticketReturn: { text: "Can't make it? [Return your {{ticketWord}}]({{returnUrl}}) so someone else can take the {{spotWord}}." },
         };
 
         let ebState = null;
@@ -9692,6 +9694,7 @@
                 case 'image': return p.url || 'No image set';
                 case 'spacer': return `${p.height}px`;
                 case 'footerNote': return (p.lines || []).join(' / ').slice(0, 60);
+                case 'ticketReturn': return (p.text || '').replace(/\s+/g, ' ').slice(0, 60);
                 case 'calendar': return [p.google && 'Google', p.ics && 'Apple / Outlook'].filter(Boolean).join(' + ') || 'No buttons';
                 case 'tickets': return [p.showWallet && 'Wallet', p.showToken && 'Code'].filter(Boolean).join(' + ') || 'QR only';
                 default: return EB_BLOCK_DEFS[block.type]?.desc || '';
@@ -9769,6 +9772,10 @@
                     return `<div class="eb-field"><label>Height (px)</label><input type="number" min="4" max="80" value="${p.height || 16}" oninput="${setNum('height')}"></div>`;
                 case 'footerNote':
                     return `<div class="eb-field"><label>Lines (one per line)</label><textarea oninput="ebSetProp('${id}','lines',this.value.split('\\n'))">${esc((p.lines || []).join('\n'))}</textarea></div>`;
+                case 'ticketReturn':
+                    return `
+                        <div class="eb-field"><label>Text</label><textarea oninput="${set('text')}">${esc(p.text || '')}</textarea></div>
+                        <div class="eb-dynamic-note">Only appears when "Allow Attendees to Return Tickets" is on for this event (Registration settings) — an event that hasn't turned that on sends no such link, whatever this block says. Use {{returnUrl}} for the link target and {{ticketWord}}/{{spotWord}} for "ticket(s)"/"spot(s)" that match the ticket count.${helpIcon('registration.ticketReturns')}</div>`;
                 case 'eventDetails':
                     return `<label class="eb-check"><input type="checkbox" ${p.showMaps !== false ? 'checked' : ''} onchange="${setChk('showMaps')}"> Show Google / Apple Maps links</label>
                         <div class="eb-dynamic-note">Date, time and location come from the event itself.</div>`;

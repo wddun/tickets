@@ -275,6 +275,7 @@ window.HELP_CONTENT = {
             `The dashboard labels a given-back ticket <strong>Returned</strong> rather than <strong>Expired</strong>, so you can tell at a glance which ones you did and which ones they did. "Reinstate Ticket" puts one back if they change their mind.`,
             `A checked-in ticket can never be returned — it has already done its job. Neither can one that is already expired or returned.`,
             `Off by default. Turning it off again does not un-return anything already returned; it only stops the link appearing in future emails and refuses further returns.`,
+            `The link itself is a "Return Ticket Link" block in the Ticket and Winner email editors — remove it there if you'd rather not mention it in a particular email's layout, or edit its wording. It only ever renders while this setting is on, block present or not.`,
         ],
     },
     'registration.ticketReturnCutoff': {
@@ -681,6 +682,15 @@ window.HELP_CONTENT = {
         details: [
             `Up to 6 lines, entered one per line.`,
             `Renders nothing at all if every line is left blank.`,
+        ],
+    },
+    'email.block.ticketReturn': {
+        title: 'Return Ticket Link',
+        summary: 'The "Can\'t make it? Return your ticket" line. Ticket and Winner emails only.',
+        details: [
+            `Renders nothing unless Allow Attendees to Return Tickets is switched on for this event, whatever the text says — the block being present isn't what turns the feature on.`,
+            `Text is fully editable, same as a Text block. {{returnUrl}} is the link target; {{ticketWord}} and {{spotWord}} substitute "ticket"/"tickets" and "spot"/"spots" to match how many tickets are on the registration.`,
+            `Remove it like any other block if you'd rather not offer the link in this particular email — the setting itself still governs whether returns work at all.`,
         ],
     },
 

@@ -778,6 +778,7 @@ function googleCalendarUrl(event) {
 
 const EMAIL_TEXT_SIZES = { sm: 15, md: 16, lg: 18, xl: 22 };
 const EMAIL_ALIGNMENTS = new Set(['left', 'center', 'right']);
+const DEFAULT_TICKET_RETURN_TEXT = "Can't make it? [Return your {{ticketWord}}]({{returnUrl}}) so someone else can take the {{spotWord}}.";
 
 function escEmailText(value) {
     return String(value ?? '')
@@ -857,6 +858,7 @@ function renderEmailInline(text, vars) {
 const EMAIL_BLOCK_TYPES = new Set([
     'header', 'text', 'intro', 'eventImage', 'eventDetails', 'calendar', 'changes',
     'customFields', 'tickets', 'button', 'divider', 'spacer', 'image', 'footerNote',
+    'ticketReturn',
 ]);
 
 // A waitlist-join email has no ticket to attach yet, nothing to add to a
@@ -903,6 +905,7 @@ const DEFAULT_TICKET_EMAIL_TEMPLATE = {
         { id: 'b-fields', type: 'customFields', props: {} },
         { id: 'b-tickets', type: 'tickets', props: { showWallet: true, showToken: true } },
         { id: 'b-footer', type: 'footerNote', props: { lines: ["Retain this email as your entry ticket.", "Do not share your QR code with others."] } },
+        { id: 'b-return', type: 'ticketReturn', props: { text: DEFAULT_TICKET_RETURN_TEXT } },
     ],
 };
 
@@ -984,6 +987,9 @@ function normalizeEmailTemplateWith(raw, allowedTypes, defaultTemplate) {
                 case 'footerNote':
                     props.lines = (Array.isArray(p.lines) ? p.lines : [])
                         .slice(0, 6).map(l => String(l ?? '').slice(0, 300));
+                    break;
+                case 'ticketReturn':
+                    props.text = String(p.text ?? DEFAULT_TICKET_RETURN_TEXT).slice(0, 500);
                     break;
                 default:
                     break; // intro / eventImage / changes / customFields / divider / waitlistPosition / waitlistStatusButton carry no props
@@ -1120,6 +1126,21 @@ function renderEmailBlock(block, ctx) {
             return `<table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f3f4f6;margin-top:8px;"><tr><td style="padding-top:20px;text-align:center;">
     ${lines.map((l, i) => `<p style="font-size:12px;color:#9ca3af;margin:0 0 ${i === lines.length - 1 ? '0' : '4px'};">${renderEmailInline(l, ctx.vars)}</p>`).join('')}
     </td></tr></table>`;
+        }
+
+        // The self-service ticket-return link. Renders nothing unless the
+        // organiser has both turned returns on for this event AND this
+        // registration actually has a return URL to point at (ctx.vars sets
+        // returnUrl only when ticketReturnWindow(event).enabled) — an event
+        // that never opted in sends the email it always did, block present
+        // or not, and an organiser who doesn't want the nudge can just
+        // remove the block like any other.
+        case 'ticketReturn': {
+            if (!ctx.vars.returnUrl) return '';
+            const text = p.text || DEFAULT_TICKET_RETURN_TEXT;
+            return `<div style="border-top:1px solid #e5e7eb;padding-top:16px;margin-top:4px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.6;">${renderEmailInline(text, ctx.vars)}</p>
+  </div>`;
         }
 
         default:
@@ -1279,6 +1300,15 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
             eventDate: dateStr ? dateStr.replace(/&ndash;/g, '–') : '',
             eventLocation: eventLocationLine(event),
             ticketCount: String(n),
+            // Set only while returns are actually reachable for this
+            // registration — the ticketReturn block checks this to decide
+            // whether it renders at all, the same way other blocks check
+            // for their own dynamic content (e.g. calendar links).
+            ...(tickets[0]?.registrationId && ticketReturnWindow(event).enabled ? {
+                returnUrl: `${BASE_URL}/manage-ticket.html?id=${tickets[0].registrationId}`,
+                ticketWord: n > 1 ? 'tickets' : 'ticket',
+                spotWord: n > 1 ? 'spots' : 'spot',
+            } : {}),
         },
     };
 
@@ -1303,26 +1333,6 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         }
     }
     flushBody();
-
-    // The self-service return link, appended outside the block template on
-    // purpose. It is a control the ticket-holder needs in order to use a
-    // feature the organiser has switched on — the same category of thing as
-    // an unsubscribe link, not decoration. Leaving it to a template block
-    // would mean an organiser who turns returns on but has a saved custom
-    // template without that block advertises nothing at all, and their
-    // attendees have no way to reach it. The organiser's on/off control is
-    // the setting itself. Rendered only while returns are enabled, so an
-    // event that never opted in sends a byte-identical email to before.
-    const returnRegistrationId = tickets[0]?.registrationId;
-    if (returnRegistrationId && ticketReturnWindow(event).enabled) {
-        rows.push(`<tr><td style="padding:0 32px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <div style="border-top:1px solid #e5e7eb;padding-top:16px;text-align:center;">
-    <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.6;">Can't make it?
-      <a href="${BASE_URL}/manage-ticket.html?id=${returnRegistrationId}" style="color:#4b5563;font-weight:600;">Return your ${n > 1 ? 'tickets' : 'ticket'}</a>
-      so someone else can take the ${n > 1 ? 'spots' : 'spot'}.</p>
-  </div>
-</td></tr>`);
-    }
 
     // Every color here (page/card background, block text, an organiser's
     // custom accent) is authored assuming light mode and never adapts —
