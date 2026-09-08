@@ -7515,14 +7515,18 @@ async function generatePassBuffer(ticket, event) {
         backgroundColor: passBackgroundColor,
         foregroundColor: passTextColor,
         labelColor: passTextColor,
-        // Reentry events: never void — keep QR so attendee can re-scan. Change
-        // color/text instead. Normal events: void when checked in, or when the
+        // Checking in never voids the pass — it flips to the greyed-out
+        // "CHECKED IN" style (via showCheckedInStyle above) but stays a live,
+        // barcode-less pass so Wallet doesn't slap a VOID banner on it the
+        // moment door staff scan it. The pass only actually voids when the
         // organiser's ticket-expiry cutoff has passed with the ticket never
-        // used. This must be set here, in the props passed to PKPass.from() —
-        // passkit-generator has no `voided` setter, so assigning pass.voided
-        // after construction (as this previously did) is a silent no-op that
-        // never reaches pass.json.
-        voided: isCheckedIn || isExpired,
+        // used (isExpired) — a genuinely no-show ticket. Everything else
+        // rides out to pass.expirationDate (event end + 24h, set below),
+        // which is when Wallet itself expires the pass. This must be set
+        // here, in the props passed to PKPass.from() — passkit-generator has
+        // no `voided` setter, so assigning pass.voided after construction (as
+        // this previously did) is a silent no-op that never reaches pass.json.
+        voided: isExpired,
     };
     // Enable push updates if APNs is configured (authenticationToken must be ≥16 chars)
     if (process.env.APNS_KEY_ID && process.env.APNS_KEY_PATH) {
