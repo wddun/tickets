@@ -5,16 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <!-- "Always light" has to be declared, not just styled — with no
-         color-scheme, Safari on a Mac in Dark Mode paints anything this
-         stylesheet doesn't explicitly cover (the <html> root, the paper
-         margins around the printed page) using its own dark default, i.e.
-         black, instead of leaving it to the page. Combined with printing
-         (-webkit-print-color-adjust: exact below forces exact colors to be
-         reproduced rather than skipped) that's what turns "print the door
-         list" into a print preview that goes blank after one page and a tab
-         that repaints black. This meta tag plus the matching CSS on <html>
-         is what actually enforces the comment above it — one page in a
-         many-page app failing to say so was enough to hit this. -->
+         color-scheme, a browser in system Dark Mode is free to paint
+         anything this stylesheet doesn't explicitly cover (the <html> root,
+         the paper margins around a printed page) using its own dark
+         default. Cheap defense-in-depth to keep even though it turned out
+         not to be the actual cause of the black-print-tab bug below (that
+         reproduced in Safari with the system in Light Mode) — see the print
+         rules further down for the real fix. -->
     <meta name="color-scheme" content="light">
     <title>Attendee Manifest | WTS Tickets</title>
     <style>
@@ -28,7 +25,6 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background: #f4f5f8; color: #111827; font-size: 13px; line-height: 1.45;
-            -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
         .sheet { max-width: 940px; margin: 0 auto; padding: 24px 20px 60px; }
 
@@ -93,6 +89,12 @@
             display: inline-block; font-size: 9.5px; font-weight: 700; text-transform: uppercase;
             letter-spacing: 0.4px; padding: 2px 6px; border-radius: 99px;
             border: 1px solid #d1d5db; color: #374151; background: #f3f4f6; white-space: nowrap;
+            /* Scoped to just the badge, not the whole page (see the print
+               rules below for why forcing this globally is the thing to
+               avoid) — the status colour is the one background on this
+               sheet that's actually worth spending exact-colour print
+               budget on. */
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
         .tag.in      { border-color: #6ee7b7; background: #ecfdf5; color: #065f46; }
         .tag.pending { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
@@ -109,10 +111,21 @@
             .sheet { max-width: none; margin: 0; padding: 0; }
             .page { border: none; border-radius: 0; padding: 0; }
             /* Repeat the column headings on every sheet of a long list, and
-               never split one attendee across a page break. */
+               never split one attendee across a page break. Scoped to
+               tbody rows only — putting break-inside: avoid on thead's own
+               (single) row too, combined with `display: table-header-group`
+               repeating it on every sheet, is a known Safari pagination
+               trigger: on a long list it stops laying out new pages
+               correctly partway through, which is what turned "print the
+               door list" into a preview that went blank after one page and
+               a tab that never repainted. Dropping the exact-colour zebra
+               stripe below (see .tag and body above) removes the other half
+               of that same failure mode — hundreds of exact-colour,
+               paginated row backgrounds is more than Safari's print
+               compositor reliably handles, regardless of light/dark mode.
+               */
             thead { display: table-header-group; }
-            tr { page-break-inside: avoid; break-inside: avoid; }
-            tbody tr:nth-child(even) { background: #f4f4f5; }
+            tbody tr { page-break-inside: avoid; break-inside: avoid; }
             @page { margin: 14mm 12mm; }
         }
     </style>
