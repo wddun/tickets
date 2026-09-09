@@ -247,6 +247,20 @@ function formatTimeForInput_(val) {
   return isNaN(d.getTime()) ? '' : Utilities.formatDate(d, Session.getScriptTimeZone(), 'HH:mm');
 }
 
+// Renders the Color <select>'s <option> tags server-side, from the same
+// COLOR_OPTIONS list the sheet used to use for its dropdown validation.
+// Built here (not populated by client-side JS after the dialog loads) so
+// the picker always has real, selectable options the instant the dialog
+// renders — it doesn't depend on the getWizardData() round-trip
+// succeeding. That round-trip only has to pick the right one afterward;
+// if it's slow or fails, the picker still shows every color, just not
+// yet the event's saved one.
+function buildColorOptionsHtml_() {
+  return COLOR_OPTIONS.map(function(c) {
+    return '<option>' + c.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</option>';
+  }).join('');
+}
+
 // The dialog's HTML — inline (rather than a separate .html file) to
 // match how the other dialogs in this script are built.
 function buildWizardHtml_() {
@@ -287,7 +301,7 @@ function buildWizardHtml_() {
 '  <input type="text" id="f_address" placeholder="123 Main St, City, State ZIP">' +
 '  <div class="hint">Used for the Apple Wallet lock-screen proximity alert.</div>' +
 '  <label>Color</label>' +
-'  <select id="f_color"></select>' +
+'  <select id="f_color">' + buildColorOptionsHtml_() + '</select>' +
 '  <input type="text" id="f_colorCustom" placeholder="rgb(99, 102, 241) or #6366f1" style="display:none;margin-top:6px;">' +
 '  <label>Image (Drive URL or file ID)</label>' +
 '  <input type="text" id="f_image" placeholder="Paste a Google Drive share link">' +
@@ -309,50 +323,76 @@ function buildWizardHtml_() {
 '</div>' +
 '<script>' +
 '  var wizardData = null;' +
-'  google.script.run.withSuccessHandler(function(data) {' +
-'    wizardData = data;' +
-'    document.getElementById("f_name").value = data.name || "";' +
-'    document.getElementById("f_date").value = data.date || "";' +
-'    document.getElementById("f_time").value = data.time || "";' +
-'    document.getElementById("f_location").value = data.location || "";' +
-'    document.getElementById("f_address").value = data.address || "";' +
-'    document.getElementById("f_image").value = data.image || "";' +
-'    var sel = document.getElementById("f_color");' +
-'    sel.innerHTML = data.colorOptions.map(function(c) { return "<option>" + c + "</option>"; }).join("");' +
-'    var current = data.color || data.colorOptions[0];' +
-'    if (data.colorOptions.indexOf(current) === -1) {' +
-'      sel.value = data.colorOptions[data.colorOptions.length - 1]; // Custom' +
+'  var colorSelect = document.getElementById("f_color");' +
+'' +
+'  function applySavedColor(colorOptions, current) {' +
+'    if (colorOptions.indexOf(current) === -1) {' +
+'      colorSelect.value = colorOptions[colorOptions.length - 1]; // Custom' +
 '      document.getElementById("f_colorCustom").style.display = "block";' +
 '      document.getElementById("f_colorCustom").value = current;' +
 '    } else {' +
-'      sel.value = current;' +
+'      colorSelect.value = current;' +
 '    }' +
-'    if (data.eventId) {' +
-'      document.getElementById("formTitle").textContent = "Edit Event Details";' +
-'      document.getElementById("submitBtn").textContent = "Save Changes";' +
-'    }' +
-'  }).getWizardData();' +
+'  }' +
 '' +
-'  document.getElementById("f_color").addEventListener("change", function() {' +
+'  google.script.run' +
+'    .withSuccessHandler(function(data) {' +
+'      wizardData = data;' +
+'      document.getElementById("f_name").value = data.name || "";' +
+'      document.getElementById("f_date").value = data.date || "";' +
+'      document.getElementById("f_time").value = data.time || "";' +
+'      document.getElementById("f_location").value = data.location || "";' +
+'      document.getElementById("f_address").value = data.address || "";' +
+'      document.getElementById("f_image").value = data.image || "";' +
+'      applySavedColor(data.colorOptions, data.color || data.colorOptions[0]);' +
+'      if (data.eventId) {' +
+'        document.getElementById("formTitle").textContent = "Edit Event Details";' +
+'        document.getElementById("submitBtn").textContent = "Save Changes";' +
+'      }' +
+'    })' +
+'    .withFailureHandler(function(err) {' +
+'      var errBox = document.getElementById("errBox");' +
+'      errBox.textContent = "LOAD_FAILED: Could not load the current event details — the form below is blank. (" + ((err && err.message) || "unknown error") + ")";' +
+'      errBox.style.display = "block";' +
+'    })' +
+'    .getWizardData();' +
+'' +
+'  colorSelect.addEventListener("change", function() {' +
 '    var isCustom = this.value.indexOf("Custom") === 0;' +
 '    document.getElementById("f_colorCustom").style.display = isCustom ? "block" : "none";' +
 '  });' +
+'' +
+'  // Clears the red outline + inline note a previous validation pass put' +
+'  // on a field, the moment the user starts fixing it.' +
+'  ["f_name", "f_date", "f_time"].forEach(function(id) {' +
+'    document.getElementById(id).addEventListener("input", function() { markFieldValid(id); });' +
+'  });' +
+'  function markFieldInvalid(id) { document.getElementById(id).style.borderColor = "#c4294a"; }' +
+'  function markFieldValid(id) { document.getElementById(id).style.borderColor = "#ccc"; }' +
 '' +
 '  function submitForm() {' +
 '    var name = document.getElementById("f_name").value.trim();' +
 '    var date = document.getElementById("f_date").value;' +
 '    var time = document.getElementById("f_time").value;' +
 '    var errBox = document.getElementById("errBox");' +
-'    if (!name || !date || !time) {' +
-'      errBox.textContent = "Event Name, Date, and Time are required.";' +
+'' +
+'    var missing = [];' +
+'    if (!name) missing.push("Event Name");' +
+'    if (!date) missing.push("Date");' +
+'    if (!time) missing.push("Time");' +
+'    ["f_name", "f_date", "f_time"].forEach(markFieldValid);' +
+'    if (missing.length) {' +
+'      errBox.textContent = "MISSING_REQUIRED_FIELD: " + missing.join(", ") + (missing.length > 1 ? " are" : " is") + " required.";' +
 '      errBox.style.display = "block";' +
+'      if (!name) markFieldInvalid("f_name");' +
+'      if (!date) markFieldInvalid("f_date");' +
+'      if (!time) markFieldInvalid("f_time");' +
 '      return;' +
 '    }' +
 '    errBox.style.display = "none";' +
-'    var colorSel = document.getElementById("f_color").value;' +
-'    var color = colorSel.indexOf("Custom") === 0' +
+'    var color = colorSelect.value.indexOf("Custom") === 0' +
 '      ? document.getElementById("f_colorCustom").value.trim()' +
-'      : colorSel;' +
+'      : colorSelect.value;' +
 '    var form = {' +
 '      name: name, date: date, time: time,' +
 '      location: document.getElementById("f_location").value.trim(),' +
@@ -367,7 +407,7 @@ function buildWizardHtml_() {
 '      .withFailureHandler(function(err) {' +
 '        document.getElementById("submitBtn").disabled = false;' +
 '        document.getElementById("statusText").textContent = "";' +
-'        errBox.textContent = (err && err.message) || "Something went wrong.";' +
+'        errBox.textContent = "SCRIPT_ERROR: " + ((err && err.message) || "Something went wrong.");' +
 '        errBox.style.display = "block";' +
 '      })' +
 '      .submitWizard(form);' +
@@ -378,7 +418,7 @@ function buildWizardHtml_() {
 '    document.getElementById("statusText").textContent = "";' +
 '    if (!result.success) {' +
 '      var errBox = document.getElementById("errBox");' +
-'      errBox.textContent = result.error || "Something went wrong.";' +
+'      errBox.textContent = "SERVER_ERROR: " + (result.error || "Something went wrong.");' +
 '      errBox.style.display = "block";' +
 '      return;' +
 '    }' +
