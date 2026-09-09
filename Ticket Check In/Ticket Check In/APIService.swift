@@ -441,7 +441,7 @@ class APIService: ObservableObject {
     }
     /// Register this scanner with the server monitor (called on launch + every 30 s).
     /// Fire-and-forget — errors are silently ignored.
-    func sendHeartbeat(pairToken: String, eventId: String? = nil) async {
+    func sendHeartbeat(pairToken: String, eventId: String? = nil, scanLinkToken: String? = nil) async {
         guard let url = URL(string: "\(baseURL)/api/scan/heartbeat") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -450,15 +450,21 @@ class APIService: ObservableObject {
         let device = UIDevice.current
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let pushEnabled = await NotificationManager.shared.isAuthorized()
+        // A custom name set in Settings > Scanner wins over the device's own
+        // iOS name — same override scanner.html offers on the web side, so
+        // "Front Door iPad" shows up on the monitor instead of "iPad".
+        let customName = UserDefaults.standard.string(forKey: "scannerDeviceName")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let deviceName = (customName?.isEmpty == false) ? customName! : device.name
         var body: [String: String] = [
             "pairToken":   pairToken,
             "platform":    "ios-app",
-            "deviceName":  device.name,
+            "deviceName":  deviceName,
             "osVersion":   "\(device.systemName) \(device.systemVersion)",
             "appVersion":  appVersion,
             "pushEnabled": pushEnabled ? "true" : "false",
         ]
         if let eid = eventId { body["eventId"] = eid }
+        if let scanLinkToken, !scanLinkToken.isEmpty { body["scanLinkToken"] = scanLinkToken }
         // Lets the server push a real notification to this exact device when
         // the app isn't open to receive the in-app banner over SSE.
         if let token = NotificationManager.shared.deviceToken { body["pushToken"] = token }
@@ -477,6 +483,36 @@ class APIService: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONEncoder().encode(["pairToken": pairToken, "text": text])
         _ = try? await session.data(for: request)
+    }
+
+    /// The room chat's history for whichever event `pairToken` is currently
+    /// working — see GET /api/scan/room-messages in server.js. Throws (rather
+    /// than silently returning []) on a real failure so the chat sheet can
+    /// tell "no messages yet" apart from "couldn't load".
+    func fetchRoomMessages(pairToken: String) async throws -> [RoomChatMessage] {
+        guard var components = URLComponents(string: "\(baseURL)/api/scan/room-messages") else { throw APIError.invalidURL }
+        components.queryItems = [URLQueryItem(name: "pairToken", value: pairToken)]
+        guard let url = components.url else { throw APIError.invalidURL }
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw apiError(from: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        guard let decoded = try? JSONDecoder().decode(RoomChatMessagesResponse.self, from: data) else { throw APIError.decodingError }
+        return decoded.messages
+    }
+
+    /// This scanner's half of the room chat (see POST /api/scan/room-message
+    /// in server.js) — no login, same trust model as sendHeartbeat above.
+    func sendRoomMessage(pairToken: String, text: String) async throws {
+        guard let url = URL(string: "\(baseURL)/api/scan/room-message") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["pairToken": pairToken, "text": text])
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw apiError(from: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
     }
 }
 

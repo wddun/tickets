@@ -130,6 +130,76 @@
             white-space: nowrap;
             flex-shrink: 0;
         }
+        .pill-btn-chat { position: relative; display: none; }
+        .pill-btn-chat.show { display: inline-block; }
+        .chat-btn-badge {
+            position: absolute; top: -4px; right: -4px;
+            background: #c4294a; color: #fff;
+            font-size: 10px; font-weight: 700; line-height: 1;
+            min-width: 16px; height: 16px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 3px;
+        }
+
+        /* ── Room chat (all scanners + monitor, per event) ── */
+        #roomChatPanel {
+            position: fixed;
+            inset: 0;
+            z-index: 110;
+            display: none;
+            flex-direction: column;
+            background: #0b0d14;
+        }
+        #roomChatPanel.show { display: flex; }
+        .rc-header {
+            flex-shrink: 0;
+            padding: calc(env(safe-area-inset-top, 0px) + 14px) 16px 12px;
+            display: flex; align-items: center; gap: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .rc-back {
+            background: rgba(255,255,255,0.08); border: none; color: #fff;
+            width: 30px; height: 30px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; cursor: pointer;
+        }
+        .rc-title { color: #fff; font-size: 16px; font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .rc-sub { color: rgba(255,255,255,0.4); font-size: 11px; }
+        .rc-messages {
+            flex: 1; min-height: 0; overflow-y: auto;
+            padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+        }
+        .rc-empty { color: rgba(255,255,255,0.35); font-size: 13px; text-align: center; margin-top: 40px; }
+        .rc-msg { max-width: 82%; display: flex; flex-direction: column; gap: 3px; }
+        .rc-msg.mine { align-self: flex-end; align-items: flex-end; }
+        .rc-msg-sender { font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.4); padding: 0 4px; }
+        .rc-msg.monitor .rc-msg-sender { color: #8b93ff; }
+        .rc-bubble {
+            background: #1c1c1e; color: #fff;
+            padding: 9px 13px; border-radius: 16px;
+            font-size: 14px; line-height: 1.4; word-break: break-word;
+        }
+        .rc-msg.mine .rc-bubble { background: #6366f1; }
+        .rc-msg.monitor .rc-bubble { background: #2a2350; }
+        .rc-msg-time { font-size: 10px; color: rgba(255,255,255,0.3); padding: 0 4px; }
+        .rc-input-row {
+            flex-shrink: 0;
+            display: flex; gap: 8px; align-items: center;
+            padding: 10px 16px calc(env(safe-area-inset-bottom, 0px) + 12px);
+            border-top: 1px solid rgba(255,255,255,0.08);
+        }
+        .rc-input {
+            flex: 1; background: #1c1c1e; border: 1px solid rgba(255,255,255,0.1);
+            color: #fff; border-radius: 20px; padding: 10px 16px; font-size: 15px; outline: none;
+        }
+        .rc-send {
+            background: #6366f1; color: #fff; border: none;
+            width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+        }
+        .rc-send:disabled { opacity: 0.4; }
+        .rc-disabled-note { color: rgba(255,255,255,0.35); font-size: 13px; text-align: center; padding: 16px; }
+
         /* ── Recent scans history strip ── */
         #recentScans {
             position: fixed;
@@ -812,7 +882,31 @@
 <!-- Top bar: anon shows sign-in, auth shows room picker + list btn -->
 <div class="top-bar" id="topBar">
     <a id="signInBtn" class="pill-btn" href="/login.html?next=/scanner.html" style="display:none;">Sign In</a>
+    <button id="roomChatBtn" class="pill-btn pill-btn-chat" onclick="openRoomChat()" aria-label="Room chat">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-2px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span id="roomChatBtnBadge" class="chat-btn-badge" style="display:none;"></span>
+    </button>
     <button id="torchBtn" class="pill-btn" onclick="toggleTorch()" style="display:none;" aria-label="Toggle flashlight">🔦</button>
+</div>
+
+<!-- Room chat: one shared thread per event for every scanner + the monitor -->
+<div id="roomChatPanel">
+    <div class="rc-header">
+        <button class="rc-back" onclick="closeRoomChat()" aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <div>
+            <div class="rc-title" id="rcTitle">Room Chat</div>
+            <div class="rc-sub" id="rcSub"></div>
+        </div>
+    </div>
+    <div class="rc-messages" id="rcMessages"></div>
+    <div class="rc-input-row" id="rcInputRow">
+        <input type="text" class="rc-input" id="rcInput" placeholder="Message the room…" maxlength="1000" onkeydown="if(event.key==='Enter'){event.preventDefault();sendRoomChatMessage();}">
+        <button class="rc-send" id="rcSendBtn" onclick="sendRoomChatMessage()" aria-label="Send">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+    </div>
 </div>
 
 <!-- Full-screen scan result overlay -->
@@ -926,6 +1020,21 @@
         <div class="settings-hint-row" id="resultDurationOverrideNote" style="display:none;margin-bottom:12px;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12.01" y2="16"/><path d="M12 8v4"/></svg>
             <span>Set by the organiser for this event — your own preference above is ignored while it's on.</span>
+        </div>
+        <div class="settings-card" style="margin-bottom:12px;">
+            <div class="settings-slider-row">
+                <span class="settings-card-label">Device Name</span>
+                <div style="display:flex;gap:8px;">
+                    <input type="text" id="deviceNameInput" placeholder="e.g. Front Door iPad" maxlength="60"
+                           style="flex:1;min-width:0;padding:9px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:15px;outline:none;"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();saveDeviceName();}">
+                    <button class="dp-copy-btn" onclick="saveDeviceName()">Save</button>
+                </div>
+            </div>
+        </div>
+        <div class="settings-hint-row" style="margin-bottom:12px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12.01" y2="16"/><path d="M12 8v4"/></svg>
+            <span>How this device shows up to the organiser on the monitor and in room chat. Leave blank to use an auto-detected name.</span>
         </div>
         <button class="settings-nav-row" id="settingsSwitchEventRow" onclick="openEventPicker()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
@@ -1108,6 +1217,7 @@ function lockToEvent(event) {
     currentEvent = {
         eventId: event.id, eventName: event.name, color: event.color,
         allowReentry: event.allowReentry, scanResultDurationMs: event.scanResultDurationMs ?? null,
+        roomChatEnabled: !!event.roomChatEnabled,
         source: 'selected',
     };
     localStorage.setItem('selectedEventId', event.id);
@@ -1118,6 +1228,7 @@ function lockToEvent(event) {
     ensureCameraRunning();
     initScannerChannel();
     requestNotificationPermission();
+    updateRoomChatButtonVisibility();
 }
 
 // ── Init ──────────────────────────────────────────────────
@@ -1338,7 +1449,7 @@ async function initScanLinkMode(scanToken, opts = {}) {
     // scanToken is kept on currentEvent (not just used to resolve the link)
     // so every subsequent /api/validate and /api/checkout call can prove
     // this device holds a real, still-valid scan-link token for this event.
-    currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, scanResultDurationMs: link.scanResultDurationMs ?? null, source: 'link', scanLinkToken: scanToken };
+    currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, scanResultDurationMs: link.scanResultDurationMs ?? null, roomChatEnabled: !!link.roomChatEnabled, linkLabel: link.linkLabel || '', source: 'link', scanLinkToken: scanToken };
     scanLinkCapabilities = link.capabilities || [];
     // Resolving the link also scoped the session to this event server-side, so
     // the check-in list and door display work here the same as when signed in.
@@ -1349,6 +1460,7 @@ async function initScanLinkMode(scanToken, opts = {}) {
     ensureCameraRunning();
     initScannerChannel();
     requestNotificationPermission();
+    updateRoomChatButtonVisibility();
     return true;
 }
 
@@ -1364,6 +1476,7 @@ function resumeScanLinkMode(scanLink) {
         color: scanLink.color,
         allowReentry: scanLink.allowReentry,
         scanResultDurationMs: scanLink.scanResultDurationMs ?? null,
+        roomChatEnabled: !!scanLink.roomChatEnabled,
         source: 'link',
     };
     scanLinkCapabilities = scanLink.capabilities || [];
@@ -1372,6 +1485,7 @@ function resumeScanLinkMode(scanLink) {
     playEnteringAnimation(currentEvent);
     ensureCameraRunning();
     initScannerChannel();
+    updateRoomChatButtonVisibility();
     if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
 }
 
@@ -1448,7 +1562,7 @@ function onSessionExpired() {
 }
 
 // ── Scanner channel (heartbeat + SSE) ─────────────────────
-function getScannerDeviceName() {
+function autoScannerDeviceName() {
     const ua = navigator.userAgent;
     if (/iPhone/.test(ua)) return 'iPhone (Web)';
     if (/iPad/.test(ua)) return 'iPad (Web)';
@@ -1456,6 +1570,15 @@ function getScannerDeviceName() {
     if (/Macintosh/.test(ua)) return 'Mac (Web)';
     if (/Windows/.test(ua)) return 'Windows (Web)';
     return 'Browser (Web)';
+}
+
+// This device's own name for the monitor and room chat — a custom name set
+// in Settings > Scanning wins; otherwise fall back to auto-detection from
+// the user agent. An organiser's admin-set label (scannerLabels in
+// db-sqlite.js) still wins over both once it exists — see upsertScanner.
+function getScannerDeviceName() {
+    const custom = (localStorage.getItem('scannerDeviceName') || '').trim();
+    return custom || autoScannerDeviceName();
 }
 
 function getSelectedEventId() {
@@ -1482,6 +1605,7 @@ function sendHeartbeat() {
             deviceName: getScannerDeviceName(),
             osVersion:  navigator.platform || 'Web',
             appVersion: '1.0',
+            scanLinkToken: getScanLinkToken(),
         })
     }).catch(() => {});
 }
@@ -1579,6 +1703,109 @@ function showChatBanner(text) {
     container.appendChild(el);
 }
 
+// ── Room chat (all scanners + monitor, shared per event) ───────────────────
+let roomChatMessages = [];
+let roomChatUnread = 0;
+let roomChatOpen = false;
+let roomChatLoaded = false;
+
+function updateRoomChatButtonVisibility() {
+    const btn = document.getElementById('roomChatBtn');
+    if (!btn) return;
+    const enabled = !!(currentEvent && currentEvent.roomChatEnabled);
+    btn.classList.toggle('show', enabled);
+    if (!enabled && roomChatOpen) closeRoomChat();
+}
+
+function updateRoomChatBadge() {
+    const badge = document.getElementById('roomChatBtnBadge');
+    if (!badge) return;
+    if (roomChatUnread > 0) {
+        badge.textContent = roomChatUnread > 9 ? '9+' : String(roomChatUnread);
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+async function openRoomChat() {
+    if (!currentEvent || !currentEvent.roomChatEnabled) return;
+    roomChatOpen = true;
+    roomChatUnread = 0;
+    updateRoomChatBadge();
+    document.getElementById('rcSub').textContent = currentEvent.eventName || '';
+    document.getElementById('roomChatPanel').classList.add('show');
+    if (!roomChatLoaded) await loadRoomChatHistory();
+    renderRoomChatMessages();
+    document.getElementById('rcInput').focus();
+}
+
+function closeRoomChat() {
+    roomChatOpen = false;
+    document.getElementById('roomChatPanel').classList.remove('show');
+}
+
+async function loadRoomChatHistory() {
+    try {
+        const r = await fetch(`/api/scan/room-messages?pairToken=${encodeURIComponent(SCANNER_PAIR_TOKEN)}`);
+        if (r.ok) {
+            const d = await r.json();
+            roomChatMessages = d.messages || [];
+            roomChatLoaded = true;
+        }
+    } catch (_) {}
+}
+
+function renderRoomChatMessages() {
+    const el = document.getElementById('rcMessages');
+    if (!el) return;
+    if (!roomChatMessages.length) {
+        el.innerHTML = `<div class="rc-empty">No messages yet — say hi to whoever else is working the door.</div>`;
+        return;
+    }
+    el.innerHTML = roomChatMessages.map(m => {
+        const mine = !!m.pairToken && m.pairToken === SCANNER_PAIR_TOKEN;
+        const cls = ['rc-msg', mine ? 'mine' : '', m.senderType === 'monitor' ? 'monitor' : ''].filter(Boolean).join(' ');
+        return `<div class="${cls}">
+            <div class="rc-msg-sender">${escHtml(m.senderName || (m.senderType === 'monitor' ? 'Organiser' : 'Scanner'))}</div>
+            <div class="rc-bubble">${escHtml(m.text)}</div>
+            <div class="rc-msg-time">${new Date(m.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+        </div>`;
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+}
+
+async function sendRoomChatMessage() {
+    const input = document.getElementById('rcInput');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    const sendBtn = document.getElementById('rcSendBtn');
+    sendBtn.disabled = true;
+    try {
+        await fetch('/api/scan/room-message', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pairToken: SCANNER_PAIR_TOKEN, text }),
+        });
+        // The sent message arrives back over SSE (room_chat) and renders from
+        // there, same as the monitor's own send — one source of order/truth.
+    } catch (_) {}
+    sendBtn.disabled = false;
+}
+
+function handleRoomChatIncoming(msg) {
+    if (!currentEvent || msg.eventId !== currentEvent.eventId) return;
+    roomChatMessages.push(msg);
+    if (roomChatMessages.length > 200) roomChatMessages = roomChatMessages.slice(-200);
+    roomChatLoaded = true;
+    if (roomChatOpen) {
+        renderRoomChatMessages();
+    } else if (!(msg.pairToken && msg.pairToken === SCANNER_PAIR_TOKEN)) {
+        roomChatUnread++;
+        updateRoomChatBadge();
+    }
+}
+
 // ── Scanner channel (heartbeat + SSE) ─────────────────────
 
 let scannerSSE = null;
@@ -1587,7 +1814,9 @@ let heartbeatIntervalStarted = false;
 function openScannerSSE() {
     if (scannerSSE) { try { scannerSSE.close(); } catch (_) {} }
     const eventId = getSelectedEventId() || '';
-    const url = `/api/scan/stream/${encodeURIComponent(SCANNER_PAIR_TOKEN)}?platform=web&eventId=${encodeURIComponent(eventId)}`;
+    const scanLinkToken = getScanLinkToken();
+    let url = `/api/scan/stream/${encodeURIComponent(SCANNER_PAIR_TOKEN)}?platform=web&eventId=${encodeURIComponent(eventId)}`;
+    if (scanLinkToken) url += `&scanLinkToken=${encodeURIComponent(scanLinkToken)}`;
     scannerSSE = new EventSource(url);
     scannerSSE.onmessage = (e) => {
         try {
@@ -1596,11 +1825,19 @@ function openScannerSSE() {
                 showInAppNotif(d.title || 'Message from Admin', d.message || '');
             } else if (d.type === 'chat_message' && d.direction === 'to_scanner') {
                 showChatBanner(d.text || '');
+            } else if (d.type === 'room_chat') {
+                handleRoomChatIncoming(d);
             } else if (d.type === 'settings_update' && currentEvent) {
                 // Pushed the moment the organiser changes it on the dashboard —
                 // no need to wait for the 30s refreshScanResultDuration poll.
-                currentEvent.scanResultDurationMs = d.scanResultDurationMs ?? null;
-                renderResultDurationControl();
+                if ('scanResultDurationMs' in d) {
+                    currentEvent.scanResultDurationMs = d.scanResultDurationMs ?? null;
+                    renderResultDurationControl();
+                }
+                if ('roomChatEnabled' in d) {
+                    currentEvent.roomChatEnabled = !!d.roomChatEnabled;
+                    updateRoomChatButtonVisibility();
+                }
             }
         } catch (_) {}
     };
@@ -1662,6 +1899,7 @@ async function refreshScanResultDuration() {
     if (!currentEvent) return;
     try {
         let ms = null;
+        let roomChat = false;
         if (currentEvent.source === 'link' && currentEvent.scanLinkToken) {
             // Re-resolving the link directly works regardless of session
             // state — unlike /api/auth/me below, which reports this browser's
@@ -1672,22 +1910,29 @@ async function refreshScanResultDuration() {
             if (r.ok) {
                 const d = await r.json();
                 ms = d.scanResultDurationMs ?? null;
+                roomChat = !!d.roomChatEnabled;
             }
         } else if (currentEvent.source === 'link') {
             const r = await fetch('/api/auth/me');
             if (r.ok) {
                 const d = await r.json();
-                if (d.scanLink && d.scanLink.eventId === currentEvent.eventId) ms = d.scanLink.scanResultDurationMs ?? null;
+                if (d.scanLink && d.scanLink.eventId === currentEvent.eventId) {
+                    ms = d.scanLink.scanResultDurationMs ?? null;
+                    roomChat = !!d.scanLink.roomChatEnabled;
+                }
             }
         } else if (currentEvent.eventId) {
             const r = await fetch(`/api/event/${currentEvent.eventId}`);
             if (r.ok) {
                 const d = await r.json();
                 ms = d.scanResultDurationMs ?? null;
+                roomChat = !!d.roomChatEnabled;
             }
         }
         currentEvent.scanResultDurationMs = ms;
+        currentEvent.roomChatEnabled = roomChat;
         renderResultDurationControl();
+        updateRoomChatButtonVisibility();
     } catch (_) {}
 }
 
@@ -2380,7 +2625,21 @@ function switchTab(tab) {
         closeAccountSettings();
         loadDisplayQR();
         renderResultDurationControl();
+        const nameInput = document.getElementById('deviceNameInput');
+        if (nameInput) nameInput.value = localStorage.getItem('scannerDeviceName') || '';
     }
+}
+
+// Re-sends a heartbeat immediately so the new name reaches the monitor
+// without waiting on the 30s cadence — same as toggling result duration.
+function saveDeviceName() {
+    const input = document.getElementById('deviceNameInput');
+    if (!input) return;
+    const name = input.value.trim().slice(0, 60);
+    if (name) localStorage.setItem('scannerDeviceName', name);
+    else localStorage.removeItem('scannerDeviceName');
+    input.blur();
+    sendHeartbeat();
 }
 
 // ── Account sub-view ──────────────────────────────────────

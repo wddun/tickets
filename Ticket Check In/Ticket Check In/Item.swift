@@ -25,6 +25,10 @@ struct Event: Codable, Identifiable, Hashable {
     // message arrives, so a running scanner doesn't need to re-fetch the
     // whole event to pick up a live change.
     var scanResultDurationMs: Int?
+    // One shared chat thread for every scanner working this event plus
+    // whoever has the monitor open — off by default, toggled by an
+    // organiser. var for the same live-patch reason as scanResultDurationMs.
+    var roomChatEnabled: Bool?
     // Owner, admin, or a 'full' sheetAccess grant — computed server-side per
     // caller in GET /api/events. View-only collaborators can check people in
     // but can't undo it.
@@ -128,9 +132,30 @@ struct ScannerLinkInfo: Codable {
     let allowReentry: Bool?
     // var, not let — see the matching note on Event.scanResultDurationMs.
     var scanResultDurationMs: Int?
+    var roomChatEnabled: Bool?
+    // This link's own organiser-set label (scannerLinks.label) — lets the
+    // monitor tell apart otherwise-anonymous scan-link devices, e.g. "Front
+    // Gate" vs "VIP Entrance".
+    let linkLabel: String?
     // Not part of the server response — set locally (see resolveScannerLink)
     // to the token this info was resolved from, then persisted alongside the
     // rest so every later validate/checkout call can prove this device holds
     // a real scan-link token for this event.
     var token: String? = nil
+}
+
+// One message in the shared per-event room chat (see roomMessages in
+// db-sqlite.js) — every scanner working the event plus the monitor.
+struct RoomChatMessage: Codable, Identifiable {
+    let id: String
+    let eventId: String
+    let pairToken: String?
+    let senderType: String   // "scanner" | "monitor"
+    let senderName: String
+    let text: String
+    let createdAt: String
+}
+
+struct RoomChatMessagesResponse: Codable {
+    let messages: [RoomChatMessage]
 }

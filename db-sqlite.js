@@ -633,6 +633,28 @@ try {
     `);
 } catch {}
 
+// One shared thread per event/room — every scanner (web or iOS) working it
+// plus whoever has the monitor open, rather than the admin<->scanner 1:1
+// DMs in scannerMessages above. Off by default (`roomChatEnabled`) like the
+// other per-event opt-ins, so an existing event's door staff don't suddenly
+// see a new chat surface nobody asked for.
+try { db.exec(`ALTER TABLE events ADD COLUMN roomChatEnabled INTEGER DEFAULT 0`); } catch {}
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS roomMessages (
+            id TEXT PRIMARY KEY,
+            eventId TEXT NOT NULL,
+            pairToken TEXT,           -- sending scanner; NULL when senderType='monitor'
+            senderType TEXT NOT NULL, -- 'scanner' | 'monitor'
+            senderName TEXT NOT NULL, -- snapshot at send time (device/admin label can change later)
+            byUserId TEXT,            -- set when senderType='monitor'
+            text TEXT NOT NULL,
+            createdAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_roomMessages_eventId ON roomMessages(eventId, createdAt);
+    `);
+} catch {}
+
 // ── One-time migration from db.json ──────────────────────────────────────────
 
 const migrationFlag = path.join(__dirname, 'db-migrated.flag');
@@ -786,6 +808,7 @@ export function rowToEvent(row) {
         ticketExpiryLimit: row.ticketExpiryLimit ?? null,
         ticketExpiryOrder: row.ticketExpiryOrder === 'newest' ? 'newest' : 'oldest',
         ticketReturnsEnabled: !!row.ticketReturnsEnabled,
+        roomChatEnabled: !!row.roomChatEnabled,
         // Anything that isn't the explicit opt-in reads as 'none', so a NULL
         // from before the column existed can never mean "refund automatically".
         ticketReturnRefund: row.ticketReturnRefund === 'auto' ? 'auto' : 'none',
@@ -853,6 +876,7 @@ export const DUPLICABLE_EVENT_COLUMNS = [
     'waitlistMessage', 'waitlistEmailTemplate', 'waitlistClaimEmailTemplate',
     'scanResultDurationMs', 'reminderEnabled', 'reminderMessage', 'reminderHoursBefore',
     'ticketReturnsEnabled', 'ticketReturnRefund', 'ticketReturnCutoffMinutes', 'ticketReturnCutoffUnit',
+    'roomChatEnabled',
 ];
 
 // ── Prepared statements ────────────────────────────────────────────────────────
@@ -887,6 +911,7 @@ export const stmt = {
         setWaitlistClaimHours: db.prepare(`UPDATE events SET waitlistClaimHours=? WHERE id=?`),
         setScanResultDuration: db.prepare(`UPDATE events SET scanResultDurationMs=? WHERE id=?`),
         setTicketReturns: db.prepare(`UPDATE events SET ticketReturnsEnabled=?, ticketReturnRefund=?, ticketReturnCutoffMinutes=?, ticketReturnCutoffUnit=? WHERE id=?`),
+        setRoomChatEnabled: db.prepare(`UPDATE events SET roomChatEnabled=? WHERE id=?`),
         setTicketExpiryScope: db.prepare(`UPDATE events SET ticketExpiryLimit=?, ticketExpiryOrder=? WHERE id=?`),
         setTicketExpiryPromotesWaitlist: db.prepare(`UPDATE events SET ticketExpiryPromotesWaitlist=? WHERE id=?`),
         setReminderSentAt: db.prepare(`UPDATE events SET reminderSentAt=? WHERE id=?`),
@@ -985,6 +1010,11 @@ export const stmt = {
         insert: db.prepare(`INSERT INTO scannerMessages (id, pairToken, eventId, direction, text, byUserId, createdAt) VALUES (?,?,?,?,?,?,?)`),
         byPairToken: db.prepare(`SELECT * FROM scannerMessages WHERE pairToken=? ORDER BY createdAt DESC LIMIT ?`),
         eventIdsByPairToken: db.prepare(`SELECT DISTINCT eventId FROM scannerMessages WHERE pairToken=? AND eventId IS NOT NULL`),
+    },
+    roomMessages: {
+        insert: db.prepare(`INSERT INTO roomMessages (id, eventId, pairToken, senderType, senderName, byUserId, text, createdAt) VALUES (?,?,?,?,?,?,?,?)`),
+        byEventId: db.prepare(`SELECT * FROM roomMessages WHERE eventId=? ORDER BY createdAt DESC LIMIT ?`),
+        trim: db.prepare(`DELETE FROM roomMessages WHERE eventId=? AND id NOT IN (SELECT id FROM roomMessages WHERE eventId=? ORDER BY createdAt DESC LIMIT 500)`),
     },
     walletDevices: {
         byDeviceAndSerial: db.prepare(`SELECT * FROM walletDevices WHERE deviceId=? AND serialNumber=?`),

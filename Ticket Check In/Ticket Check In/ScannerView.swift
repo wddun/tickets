@@ -66,6 +66,8 @@ struct ScannerView: View {
     @State private var showNotifBanner  = false
     @State private var notifBannerIsChat = false
     @State private var notifDismissTask: Task<Void, Never>?
+    @State private var showRoomChat = false
+    @ObservedObject private var roomChat = RoomChatStore.shared
     private let scanDebounceInterval: TimeInterval = 5.0
 
     var body: some View {
@@ -105,6 +107,9 @@ struct ScannerView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(200)
             }
+            // Room chat button (top-trailing) — every scanner + the monitor,
+            // shown only once an organiser has turned it on for this event
+            roomChatButton
             // Persistent pill naming the locked event (scan-link mode only)
             scanLinkBanner
             // One-second full-screen "entering" animation, scan-link mode only
@@ -157,6 +162,50 @@ struct ScannerView: View {
                 onSelectEvent: { event in switchToOwnEvent(event) },
                 onScanLink: { info in applyScanLink(info) }
             )
+        }
+        .sheet(isPresented: $showRoomChat) {
+            RoomChatView(pairToken: scannerPairToken, eventName: currentEventInfo?.name ?? "")
+        }
+    }
+
+    private var roomChatEnabledForCurrentEvent: Bool {
+        (scanLinkEvent?.roomChatEnabled ?? selectedOwnEvent?.roomChatEnabled) ?? false
+    }
+
+    @ViewBuilder private var roomChatButton: some View {
+        if roomChatEnabledForCurrentEvent {
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        showRoomChat = true
+                        roomChat.unreadCount = 0
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "bubble.left.and.bubble.right.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(10)
+                                .background(Color.black.opacity(0.55))
+                                .clipShape(Circle())
+                            if roomChat.unreadCount > 0 {
+                                Text(roomChat.unreadCount > 9 ? "9+" : "\(roomChat.unreadCount)")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(4)
+                                    .frame(minWidth: 16, minHeight: 16)
+                                    .background(Color(red: 0.77, green: 0.16, blue: 0.29))
+                                    .clipShape(Circle())
+                                    .offset(x: 5, y: -5)
+                            }
+                        }
+                    }
+                    .padding(.trailing, 14)
+                    .padding(.top, 8)
+                }
+                Spacer()
+            }
+            .zIndex(60)
         }
     }
 
@@ -593,6 +642,18 @@ struct ScannerView: View {
         }
     }
 
+    // Same live-patch pattern as applyLiveScanResultDuration above, for the
+    // room chat toggle (PUT /api/event/:id/room-chat).
+    private func applyLiveRoomChatEnabled(_ enabled: Bool) {
+        if var link = scanLinkEvent {
+            link.roomChatEnabled = enabled
+            if let data = try? JSONEncoder().encode(link) { scanLinkEventData = data }
+        } else if var event = selectedOwnEvent {
+            event.roomChatEnabled = enabled
+            if let data = try? JSONEncoder().encode(event) { lastSelectedEventData = data }
+        }
+    }
+
     // Whatever event this scanner is currently locked to — a no-login scan
     // link (revocable via the banner's X) or the signed-in user's own choice
     // (only changed via the banner's Switch Event affordance).
@@ -810,7 +871,8 @@ struct ScannerView: View {
         if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
         heartbeatTask = Task { @MainActor in
             while !Task.isCancelled {
-                await api.sendHeartbeat(pairToken: scannerPairToken, eventId: selectedEventId())
+                roomChat.reset(for: selectedEventId())
+                await api.sendHeartbeat(pairToken: scannerPairToken, eventId: selectedEventId(), scanLinkToken: scanLinkEvent?.token)
                 // Same cadence covers refreshing the selected event's own
                 // data (see verifyEventAccess) — a scanner left open at the
                 // door then picks up an organiser's dashboard change on its
@@ -855,10 +917,12 @@ struct ScannerView: View {
         notifTask?.cancel()
         if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
         let eventId = selectedEventId()
+        let scanLinkToken = scanLinkEvent?.token
         notifTask = Task.detached(priority: .background) { [pairToken = scannerPairToken, baseURL] in
             while !Task.isCancelled {
                 var urlStr = "\(baseURL)/api/scan/stream/\(pairToken)?platform=ios-app"
                 if let eid = eventId { urlStr += "&eventId=\(eid)" }
+                if let scanLinkToken, !scanLinkToken.isEmpty { urlStr += "&scanLinkToken=\(scanLinkToken)" }
                 guard let url = URL(string: urlStr) else { return }
                 let request = URLRequest(url: url, timeoutInterval: .infinity)
                 if let (bytes, _) = try? await URLSession.shared.bytes(for: request) {
@@ -886,9 +950,32 @@ struct ScannerView: View {
                                             self.showChatBannerWith(message: text)
                                         }
                                     } else if type == "settings_update" {
+                                        // Only patch a field this particular
+                                        // update actually carries — e.g. the
+                                        // room-chat toggle broadcasts with no
+                                        // scanResultDurationMs key at all, and
+                                        // treating its absence as `nil` would
+                                        // wipe out an organiser's real override.
+                                        let hasResultDuration = json.keys.contains("scanResultDurationMs")
                                         let ms = json["scanResultDurationMs"] as? Int
+                                        let roomChatEnabled = json["roomChatEnabled"] as? Bool
                                         await MainActor.run {
-                                            self.applyLiveScanResultDuration(ms)
+                                            if hasResultDuration { self.applyLiveScanResultDuration(ms) }
+                                            if let roomChatEnabled { self.applyLiveRoomChatEnabled(roomChatEnabled) }
+                                        }
+                                    } else if type == "room_chat",
+                                              let id = json["id"] as? String,
+                                              let msgEventId = json["eventId"] as? String,
+                                              let senderType = json["senderType"] as? String,
+                                              let senderName = json["senderName"] as? String,
+                                              let text = json["text"] as? String,
+                                              let createdAt = json["createdAt"] as? String {
+                                        let msg = RoomChatMessage(
+                                            id: id, eventId: msgEventId, pairToken: json["pairToken"] as? String,
+                                            senderType: senderType, senderName: senderName, text: text, createdAt: createdAt
+                                        )
+                                        await MainActor.run {
+                                            RoomChatStore.shared.ingest(msg, mySenderPairToken: pairToken)
                                         }
                                     } else if type == "scan", let status = json["status"] as? String {
                                         if status == "checked_out",

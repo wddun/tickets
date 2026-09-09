@@ -2362,6 +2362,7 @@ app.get('/api/auth/me', (req, res) => {
                     color: event ? event.color : null,
                     allowReentry: event ? event.allowReentry : false,
                     scanResultDurationMs: event ? event.scanResultDurationMs : null,
+                    roomChatEnabled: event ? event.roomChatEnabled : false,
                     capabilities: SCAN_LINK_CAPABILITIES.slice(),
                 },
             });
@@ -3907,6 +3908,23 @@ app.put('/api/event/:id/scan-result-duration', requireAuth, (req, res) => {
     // they used to only see this on their next 30s poll.
     broadcastToEventScanners(event.id, { type: 'settings_update', scanResultDurationMs: ms });
     res.json({ success: true, scanResultDurationMs: ms });
+});
+
+// One shared thread for every scanner (web or iOS) working this event plus
+// whoever has the monitor open — see roomMessages in db-sqlite.js. Off by
+// default; toggled here rather than folded into the generic event update so
+// flipping it can push live to every open scanner immediately, the same way
+// scan-result-duration above does.
+app.put('/api/event/:id/room-chat', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
+    const enabled = !!req.body.enabled;
+    stmt.events.setRoomChatEnabled.run(enabled ? 1 : 0, event.id);
+    logAudit(req, { eventId: event.id, action: 'roomChat.toggled', details: { enabled } });
+    broadcastToEventScanners(event.id, { type: 'settings_update', roomChatEnabled: enabled });
+    broadcastToMonitors(event.id, { type: 'room_chat_toggled', eventId: event.id, enabled });
+    res.json({ success: true, roomChatEnabled: enabled });
 });
 
 
@@ -7239,6 +7257,8 @@ app.get('/api/scanner-links/:token', (req, res) => {
         color: event.color,
         allowReentry: event.allowReentry,
         scanResultDurationMs: event.scanResultDurationMs,
+        roomChatEnabled: event.roomChatEnabled,
+        linkLabel: link.label || '',
         capabilities: req.session.userId
             ? userEventCapabilities(req.session.userId, event.id)
             : SCAN_LINK_CAPABILITIES.slice(),
@@ -9522,6 +9542,17 @@ function getClientIP(req) {
     return (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
 }
 
+// A scan-link scanner is otherwise anonymous — this is what lets the monitor
+// tell "Front Gate" and "VIP Entrance" apart even though both are just
+// SCAN_LINK_CAPABILITIES sessions with no account behind them. Looked up by
+// the same token already carried on every validate/checkout/heartbeat call
+// from a link-mode scanner (see getScanLinkToken() in scanner.html).
+function resolveLinkTag(scanLinkToken) {
+    if (!scanLinkToken) return null;
+    const link = stmt.scannerLinks.byToken.get(scanLinkToken);
+    return link ? { linkId: link.id, linkLabel: link.label || '' } : null;
+}
+
 // Persists one row to scannerActivity and trims that scanner's history back
 // to the most recent 500 rows — never allowed to break the caller (a scan or
 // a heartbeat must still succeed even if this write fails for some reason).
@@ -9803,7 +9834,7 @@ app.get('/api/monitor/scanners', requireAuth, async (req, res) => {
 // Called by iOS app/web scanner on launch and every 30 s to stay visible in
 // the monitor even before any scan has happened.
 app.post('/api/scan/heartbeat', async (req, res) => {
-    const { pairToken, eventId, platform, deviceName, appVersion, osVersion, pushEnabled, pushToken } = req.body;
+    const { pairToken, eventId, platform, deviceName, appVersion, osVersion, pushEnabled, pushToken, scanLinkToken } = req.body;
     if (!pairToken) return res.status(400).json({ error: 'pairToken required' });
 
     const ev = eventId ? rowToEvent(stmt.events.byId.get(eventId)) : null;
@@ -9831,6 +9862,13 @@ app.post('/api/scan/heartbeat', async (req, res) => {
     // doesn't report it yet (or a momentary gap before APNs registration
     // finishes) shouldn't wipe out a previously-known good token.
     if (pushToken) patch.pushToken = pushToken;
+    // Only set when this heartbeat is from a scan-link scanner — a
+    // signed-in scanner's heartbeat carries no scanLinkToken and must not
+    // wipe out a tag it never had.
+    if (scanLinkToken) {
+        const tag = resolveLinkTag(scanLinkToken);
+        if (tag) { patch.linkId = tag.linkId; patch.linkLabel = tag.linkLabel; }
+    }
     upsertScanner(pairToken, patch);
 
     res.json({ ok: true });
@@ -9855,12 +9893,59 @@ app.post('/api/scan/message', validateLimiter, (req, res) => {
     res.json({ success: true });
 });
 
+// Whatever a scanner or the monitor should call this device by in the room
+// chat: an admin-set label (scannerLabels) wins, same precedence as the
+// monitor's own card, otherwise the device's own name (self-chosen in
+// Settings, or auto-detected) is at least better than a bare pairToken.
+function scannerDisplayName(pairToken) {
+    const s = scannerRegistry.get(pairToken);
+    return (s?.label || s?.deviceName || 'Scanner').trim() || 'Scanner';
+}
+
+// ── Room chat: one shared thread per event, not the 1:1 admin<->scanner DM
+// above. Toggled per event via PUT /api/event/:id/room-chat; every route
+// below refuses to work while it's off, so a disabled thread can't be read
+// or posted to just by knowing a pairToken.
+app.get('/api/scan/room-messages', (req, res) => {
+    const pairToken = req.query.pairToken;
+    if (!pairToken) return res.status(400).json({ error: 'pairToken required' });
+    const eventId = scannerRegistry.get(pairToken)?.eventId || null;
+    if (!eventId) return res.status(400).json({ error: 'Scanner is not currently working an event' });
+    const event = rowToEvent(stmt.events.byId.get(eventId));
+    if (!event?.roomChatEnabled) return res.status(403).json({ error: 'Room chat is not enabled for this event' });
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 100));
+    res.json({ messages: stmt.roomMessages.byEventId.all(eventId, limit).reverse() });
+});
+
+app.post('/api/scan/room-message', validateLimiter, (req, res) => {
+    const { pairToken } = req.body;
+    if (!pairToken) return res.status(400).json({ error: 'pairToken required' });
+    const text = String(req.body?.text || '').trim().slice(0, 1000);
+    if (!text) return res.status(400).json({ error: 'text is required' });
+
+    const eventId = scannerRegistry.get(pairToken)?.eventId || null;
+    if (!eventId) return res.status(400).json({ error: 'Scanner is not currently working an event' });
+    const event = rowToEvent(stmt.events.byId.get(eventId));
+    if (!event?.roomChatEnabled) return res.status(403).json({ error: 'Room chat is not enabled for this event' });
+
+    const id = nanoid();
+    const at = new Date().toISOString();
+    const senderName = scannerDisplayName(pairToken);
+    stmt.roomMessages.insert.run(id, eventId, pairToken, 'scanner', senderName, null, text, at);
+    stmt.roomMessages.trim.run(eventId, eventId);
+
+    const payload = { type: 'room_chat', id, eventId, pairToken, senderType: 'scanner', senderName, text, createdAt: at };
+    broadcastToMonitors(eventId, payload);
+    broadcastToEventScanners(eventId, payload);
+    res.json({ success: true });
+});
+
 // ── Scanner SSE Channel ───────────────────────────────────────────────────────
 // Scanner opens this on launch to receive admin notifications and appear as
 // "online" immediately — no scan required.
 app.get('/api/scan/stream/:pairToken', async (req, res) => {
     const { pairToken } = req.params;
-    const { eventId, platform, deviceName, appVersion, osVersion } = req.query;
+    const { eventId, platform, deviceName, appVersion, osVersion, scanLinkToken } = req.query;
     if (!pairToken) return res.status(400).send('pairToken required');
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -9872,7 +9957,7 @@ app.get('/api/scan/stream/:pairToken', async (req, res) => {
 
     const ev = eventId ? rowToEvent(stmt.events.byId.get(eventId)) : null;
 
-    upsertScanner(pairToken, {
+    const streamPatch = {
         ip: getClientIP(req),
         platform: platform || 'unknown',
         deviceName: deviceName || 'Unknown device',
@@ -9883,7 +9968,12 @@ app.get('/api/scan/stream/:pairToken', async (req, res) => {
         online: true,
         eventId: eventId || (scannerRegistry.get(pairToken)?.eventId) || null,
         eventName: ev ? ev.name : (scannerRegistry.get(pairToken)?.eventName) || null,
-    });
+    };
+    if (scanLinkToken) {
+        const tag = resolveLinkTag(scanLinkToken);
+        if (tag) { streamPatch.linkId = tag.linkId; streamPatch.linkLabel = tag.linkLabel; }
+    }
+    upsertScanner(pairToken, streamPatch);
 
     // Close any previous channel for this token
     const prev = scannerChannels.get(pairToken);
@@ -10018,6 +10108,39 @@ app.post('/api/monitor/scanners/:pairToken/message', requireAuth, (req, res) => 
     if (eventId) broadcastToMonitors(eventId, { type: 'scanner_chat', pairToken, direction: 'to_scanner', text, at, id });
     if (eventId) logAudit(req, { eventId, action: 'scanner.messageSent', details: { pairToken, delivered } });
     res.json({ success: true, delivered });
+});
+
+// The monitor's half of the room chat (see /api/scan/room-message above for
+// the scanner's half). Anyone who can see this event on the monitor can read
+// and post — same bar as the monitor page itself, not manage_event, since a
+// check-in-only collaborator working the door is exactly who this is for.
+app.get('/api/event/:id/room-messages', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Not authorized' });
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 100));
+    res.json({ messages: stmt.roomMessages.byEventId.all(event.id, limit).reverse(), roomChatEnabled: !!event.roomChatEnabled });
+});
+
+app.post('/api/event/:id/room-message', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventAccess(req.session.userId, event.id)) return res.status(403).json({ error: 'Not authorized' });
+    if (!event.roomChatEnabled) return res.status(403).json({ error: 'Room chat is not enabled for this event' });
+    const text = String(req.body?.text || '').trim().slice(0, 1000);
+    if (!text) return res.status(400).json({ error: 'text is required' });
+
+    const user = rowToUser(stmt.users.byId.get(req.session.userId));
+    const senderName = user?.email || 'Organiser';
+    const id = nanoid();
+    const at = new Date().toISOString();
+    stmt.roomMessages.insert.run(id, event.id, null, 'monitor', senderName, req.session.userId, text, at);
+    stmt.roomMessages.trim.run(event.id, event.id);
+
+    const payload = { type: 'room_chat', id, eventId: event.id, pairToken: null, senderType: 'monitor', senderName, text, createdAt: at };
+    broadcastToMonitors(event.id, payload);
+    broadcastToEventScanners(event.id, payload);
+    res.json({ success: true });
 });
 
 // ── Per-Event Metrics ────────────────────────────────────────────────────────

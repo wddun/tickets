@@ -19,6 +19,11 @@ struct SettingsView: View {
     // How long the full-screen scan result stays up — a per-device
     // preference read directly by ScannerView via the same AppStorage key.
     @AppStorage("resultDisplayDuration") private var resultDisplayDuration: Double = 1.2
+    // How this device shows up to the organiser on the monitor and in room
+    // chat — read directly by APIService.sendHeartbeat via UserDefaults
+    // (same key), so no separate plumbing is needed to apply it live; it
+    // just goes out on the next 30s heartbeat.
+    @AppStorage("scannerDeviceName") private var scannerDeviceName: String = ""
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
@@ -160,6 +165,16 @@ struct SettingsView: View {
                     Slider(value: $resultDisplayDuration, in: 0.3...3.0, step: 0.1)
 
                     Text("How long a scan result stays full-screen on this device. An organiser can override this for everyone scanning a specific event from their dashboard, which then takes priority over this setting.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Label("Device Name", systemImage: "iphone")
+                        TextField("Auto-detected", text: $scannerDeviceName)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled()
+                    }
+                    Text("How this device shows up to the organiser on the monitor and in room chat. Leave blank to use this iPhone's own name.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
