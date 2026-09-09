@@ -8,11 +8,16 @@
 //
 //  HOW TO SET UP (once per new room):
 //  1. Open the sheet — the Event/Attendees tabs build themselves and
-//     the Event Setup Wizard opens automatically.
+//     a welcome alert points you at the menu. Nothing else happens
+//     automatically: every fresh copy needs its own one-time approval
+//     from Google, and that prompt can only appear after an explicit
+//     menu click, never automatically — so the wizard does NOT open
+//     itself here even though it's tempting to skip this step.
+//  2. Run: Ticket System > Event Setup Wizard
 //     Google will ask you to approve this script the first time —
 //     that one-time permission prompt is required by Google for any
 //     script that talks to a server, it isn't something we can skip.
-//  2. Fill in the wizard (name, date, time, venue…) and submit. It
+//  3. Fill in the wizard (name, date, time, venue…) and submit. It
 //     creates the event, turns on auto-send, and gives you a link to
 //     connect the room to your account — you're done.
 //
@@ -118,9 +123,25 @@ function onOpen() {
       .addItem('Fix: Remove Duplicate Triggers', 'setupTriggers'))
     .addToUi();
 
-  // A brand-new copy jumps straight into the wizard — no menu hunting,
-  // no cells to find and fill in first.
-  if (isFreshCopy) openWizard();
+  // Deliberately NOT auto-opening the wizard here, even on a fresh copy.
+  // Every duplicated spreadsheet gets a brand-new bound script project,
+  // so it needs its own one-time authorization — and that approval
+  // prompt can only be triggered by an explicit menu click, never by a
+  // dialog opened automatically from onOpen (a "simple trigger", which
+  // runs with restricted permissions). Auto-opening the wizard here
+  // meant the FIRST thing that needed authorization (the network call
+  // when you hit Create Event) fired from inside that auto-opened
+  // dialog, where Apps Script has no way to show the approval prompt —
+  // so the click just silently did nothing. The alert below is what
+  // gets the user to make that first click themselves.
+  if (isFreshCopy) {
+    ui.alert(
+      'Welcome',
+      'Run Ticket System > Event Setup Wizard to get started.\n\n' +
+      'The first time, Google will ask you to approve this script — that\'s expected, and only appears after you click the menu item yourself.',
+      ui.ButtonSet.OK
+    );
+  }
 }
 
 // Kept as a stable, separately-named entry point: it's what a Drawing
