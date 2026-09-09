@@ -31,8 +31,14 @@ struct Event: Codable, Identifiable, Hashable {
     var roomChatEnabled: Bool?
     // Owner, admin, or a 'full' sheetAccess grant — computed server-side per
     // caller in GET /api/events. View-only collaborators can check people in
-    // but can't undo it.
+    // but can't undo it. Kept for older cached copies; prefer `capabilities`.
     let fullAccess: Bool?
+    // What this caller may actually do to the event — the same capability
+    // keys as CAPABILITIES in server.js, always present on a freshly-fetched
+    // event (including a scan-link's synthetic one, which is `[checkin,
+    // undo_checkin]` — see SCAN_LINK_CAPABILITIES). nil only for a copy
+    // decoded before this field existed.
+    var capabilities: [String]? = nil
 
     struct EventLocation: Codable, Hashable {
         let name: String?

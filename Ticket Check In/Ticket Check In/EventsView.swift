@@ -44,9 +44,41 @@ struct ManualCheckInView: View {
         return try? JSONDecoder().decode(Event.self, from: lastSelectedEventData)
     }
 
+    // No-login door staff on a scan link — same source ScannerView reads,
+    // so scanning a link once locks every tab to that event, not just Scanner.
+    private var scanLinkEvent: ScannerLinkInfo? {
+        guard !scanLinkEventData.isEmpty else { return nil }
+        return try? JSONDecoder().decode(ScannerLinkInfo.self, from: scanLinkEventData)
+    }
+
+    // A scan link needs no account and grants exactly SCAN_LINK_CAPABILITIES
+    // (checkin, undo_checkin) server-side — see requestEventCapabilities() in
+    // server.js. At-door sales require requireAuth there, so this is
+    // deliberately false rather than carried over from anywhere.
+    private func syntheticEvent(from link: ScannerLinkInfo) -> Event {
+        Event(
+            id: link.eventId, name: link.eventName, time: nil, color: link.color,
+            scannerPin: nil, location: nil, allowReentry: link.allowReentry,
+            atDoorEnabled: false, ticketPrice: nil, userId: nil,
+            scanResultDurationMs: link.scanResultDurationMs, roomChatEnabled: link.roomChatEnabled,
+            fullAccess: false, capabilities: ["checkin", "undo_checkin"]
+        )
+    }
+
     var body: some View {
         Group {
-            if !api.isAuthenticated {
+            // Scan-link mode always wins, exactly like ScannerView's
+            // currentEventInfo — it needs no account and can't go stale the
+            // way an own-account selection can, so it skips accessIssue
+            // entirely rather than sitting behind the sign-in screen below.
+            if let link = scanLinkEvent {
+                let event = syntheticEvent(from: link)
+                if #available(iOS 16, *) {
+                    NavigationStack { AttendeesView(event: event, switchEvent: { showEventPicker = true }) }
+                } else {
+                    NavigationView { AttendeesView(event: event, switchEvent: { showEventPicker = true }) }
+                }
+            } else if !api.isAuthenticated {
                 LoginView(switchToScanner: switchToScanner)
             } else if let event = currentEvent {
                 if let issue = accessIssue {
@@ -69,14 +101,15 @@ struct ManualCheckInView: View {
                     accessIssue = nil
                 },
                 onScanLink: { info in
+                    lastSelectedEventData = Data() // leaving own-event mode, if any
                     scanLinkEventData = (try? JSONEncoder().encode(info)) ?? Data()
-                    switchToScanner()
                 }
             )
         }
     }
 
     private func verifyAccess() async {
+        guard scanLinkEvent == nil else { accessIssue = nil; return }
         await api.checkAuth()
         guard api.isAuthenticated, let event = currentEvent else {
             accessIssue = nil
@@ -534,10 +567,14 @@ struct AttendeesView: View {
 
     enum AttendeesTab: Hashable { case attendees, atDoor }
 
-    // Owner, global admin, or a 'full' sheetAccess grant (computed
-    // server-side, see event.fullAccess in GET /api/events). View-only
-    // collaborators can check people in but can't undo it.
-    private var canUndo: Bool { event.fullAccess == true || api.currentUser?.isAdmin == true }
+    // The actual capability, not "has every capability" — event.fullAccess
+    // used to gate this and required *all* of CAPABILITY_KEYS, so a
+    // collaborator (or scan-link door staff) granted just checkin +
+    // undo_checkin could check people in here but never undo it, despite
+    // being allowed to on the web. event.capabilities is the same array
+    // requestEventCapabilities() computes server-side for that caller —
+    // checking it directly matches what the server will actually accept.
+    private var canUndo: Bool { event.capabilities?.contains("undo_checkin") == true }
     private var atDoorEnabled: Bool { event.atDoorEnabled == true }
 
     var groups: [AttendeeGroup] {
@@ -601,12 +638,20 @@ struct AttendeesView: View {
                 .accessibilityLabel("Switch Event")
             }
             ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showNotifSettings = true
-                } label: {
-                    Image(systemName: pushEnabled ? "bell.fill" : "bell")
+                // Push settings belong to an account (requireAuth
+                // server-side) — no-login scan-link door staff have nothing
+                // to toggle here, so don't show a bell that can only ever
+                // fail for them. `if` here (not around the ToolbarItem
+                // itself) since conditional ToolbarContent needs iOS 16+ and
+                // this app supports 15.6.
+                if api.isAuthenticated {
+                    Button {
+                        showNotifSettings = true
+                    } label: {
+                        Image(systemName: pushEnabled ? "bell.fill" : "bell")
+                    }
+                    .accessibilityLabel("Notification Settings")
                 }
-                .accessibilityLabel("Notification Settings")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 let checked = tickets.filter(\.isCheckedIn).count
@@ -709,6 +754,7 @@ struct AttendeesView: View {
     }
 
     private func loadPushSetting() async {
+        guard api.isAuthenticated else { pushLoading = false; return }
         pushLoading = true
         pushError = nil
         do {
