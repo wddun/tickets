@@ -485,7 +485,7 @@ struct ScannerView: View {
         case "reentry_exit":
             pendingCheckoutToken = token
             result = ScanResult(from: response, status: .reentryExitPrompt, title: "Confirm Check-Out")
-            CheckInFeedback.shared.alreadyUsed()
+            CheckInFeedback.shared.checkout()
             withAnimation { scanResult = result }
             sendToDisplay(response: response, status: "reentry_exit")
             startExitOverlayAutoDismiss()
@@ -554,7 +554,11 @@ struct ScannerView: View {
                     try await APIService.shared.confirmCheckout(token: token, pairToken: scannerPairToken, scanLinkToken: scanLinkEvent?.token)
                 }
                 await MainActor.run {
-                    CheckInFeedback.shared.success()
+                    // No tone here — checkout() already played when the exit
+                    // prompt appeared, matching the website, which is also
+                    // silent on the actual /api/checkout confirm. Just a
+                    // light tap so confirming still feels responsive.
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     let ble = BLEScanResult(
                         status: "checked_out",
                         name: captured?.name ?? "Guest",
@@ -1004,7 +1008,8 @@ struct ScannerView: View {
                                            let regId = json["registrationId"] as? String {
                                             await MainActor.run {
                                                 if regId == self.lastRegistrationId, self.scanResult?.status == .reentryExitPrompt {
-                                                    CheckInFeedback.shared.success()
+                                                    // Same as handleConfirmCheckout — checkout() already
+                                                    // played when this prompt appeared; just dismiss.
                                                     self.dismissExitOverlay()
                                                 }
                                             }
@@ -1905,6 +1910,20 @@ class CheckInFeedback {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 180_000_000)
             self.scheduleNote(frequency: 180, duration: 0.28, volume: 0.5, square: true)
+        }
+    }
+
+    /// Soft haptic tap + descending sine tones C5→G4 (matches website
+    /// 'checkout' sound) — plays when the reentry-exit prompt appears, not
+    /// on confirm, same as the website. Distinct from alreadyUsed()'s harsh
+    /// square-wave alert: this is an expected, neutral prompt asking a
+    /// question, not a rejection.
+    func checkout() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        scheduleNote(frequency: 523.25, duration: 0.18, volume: 0.35)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 160_000_000)
+            self.scheduleNote(frequency: 392, duration: 0.26, volume: 0.35)
         }
     }
 

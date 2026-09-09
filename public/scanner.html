@@ -1123,8 +1123,23 @@ function stopAllSounds() {
     soundTimers.forEach(id => clearTimeout(id));
     soundTimers = [];
     const t = audioCtx.currentTime;
+    const FADE = 0.012; // long enough to avoid a click, short enough that back-to-back scans still feel instant
     activeNodes.forEach(({ g, o }) => {
-        try { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(0, t); o.stop(t + 0.01); } catch (_) {}
+        try {
+            g.gain.cancelScheduledValues(t);
+            // Jumping straight to 0 via setValueAtTime cuts off mid-ramp at
+            // whatever value the previous exponentialRampToValueAtTime had
+            // reached — a value discontinuity, which is an audible click.
+            // Two scans close together (a real double-tap, or one ticket
+            // going through while another is still mid-tone) each cut the
+            // last one off this way, and the pops from every clipped ramp
+            // landing right on top of the next tone's attack is what read as
+            // "jumbled" rather than two clean back-to-back tones. Ramping
+            // from the gain's actual current value removes the discontinuity.
+            g.gain.setValueAtTime(g.gain.value, t);
+            g.gain.linearRampToValueAtTime(0, t + FADE);
+            o.stop(t + FADE + 0.005);
+        } catch (_) {}
     });
     activeNodes = [];
 }
@@ -2568,8 +2583,16 @@ async function startCamera() {
         const stream = await navigator.mediaDevices.getUserMedia({
             video: {
                 facingMode: { ideal: 'environment' },
-                width:  { ideal: 1920 },
-                height: { ideal: 1080 },
+                // 720p, not 1080p: the jsQR path immediately downsamples
+                // every frame to at most 640px anyway (see scanLoop below),
+                // and BarcodeDetector reads a QR just as reliably at this
+                // size at normal door-scanning distance. Asking the camera
+                // to decode ~2.25x the pixels it needs, continuously, for no
+                // scanning benefit is exactly the kind of thing that costs
+                // battery on an older phone over a multi-hour door shift.
+                width:  { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30, max: 30 },
             }
         });
 
