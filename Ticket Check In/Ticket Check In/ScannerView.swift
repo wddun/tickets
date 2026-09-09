@@ -572,6 +572,21 @@ struct ScannerView: View {
         return try? JSONDecoder().decode(Event.self, from: lastSelectedEventData)
     }
 
+    // Patches scanResultDurationMs into whichever event this scanner is
+    // currently locked to and writes it straight back to the @AppStorage
+    // blob it was decoded from — same effect as re-fetching the event, but
+    // instant, driven by the settings_update SSE message from the dashboard's
+    // scan-result-duration control instead of the 30s refresh poll.
+    private func applyLiveScanResultDuration(_ ms: Int?) {
+        if var link = scanLinkEvent {
+            link.scanResultDurationMs = ms
+            if let data = try? JSONEncoder().encode(link) { scanLinkEventData = data }
+        } else if var event = selectedOwnEvent {
+            event.scanResultDurationMs = ms
+            if let data = try? JSONEncoder().encode(event) { lastSelectedEventData = data }
+        }
+    }
+
     // Whatever event this scanner is currently locked to — a no-login scan
     // link (revocable via the banner's X) or the signed-in user's own choice
     // (only changed via the banner's Switch Event affordance).
@@ -846,6 +861,11 @@ struct ScannerView: View {
                                         let title = json["title"] as? String ?? "Message from Admin"
                                         await MainActor.run {
                                             self.showNotifBannerWith(title: title, message: message)
+                                        }
+                                    } else if type == "settings_update" {
+                                        let ms = json["scanResultDurationMs"] as? Int
+                                        await MainActor.run {
+                                            self.applyLiveScanResultDuration(ms)
                                         }
                                     } else if type == "scan", let status = json["status"] as? String {
                                         if status == "checked_out",

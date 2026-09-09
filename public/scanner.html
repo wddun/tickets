@@ -1524,6 +1524,11 @@ function openScannerSSE() {
             const d = JSON.parse(e.data);
             if (d.type === 'notification') {
                 showInAppNotif(d.title || 'Message from Admin', d.message || '');
+            } else if (d.type === 'settings_update' && currentEvent) {
+                // Pushed the moment the organiser changes it on the dashboard —
+                // no need to wait for the 30s refreshScanResultDuration poll.
+                currentEvent.scanResultDurationMs = d.scanResultDurationMs ?? null;
+                renderResultDurationControl();
             }
         } catch (_) {}
     };

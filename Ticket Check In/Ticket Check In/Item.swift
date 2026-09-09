@@ -20,8 +20,11 @@ struct Event: Codable, Identifiable, Hashable {
     let userId: String?     // owner's user id
     // Organiser-set override for how long a scan result stays full-screen —
     // wins over every scanner's own local preference when present. See
-    // scanResultDurationMs in db-sqlite.js. nil means no override.
-    let scanResultDurationMs: Int?
+    // scanResultDurationMs in db-sqlite.js. nil means no override. var, not
+    // let: ScannerView patches this in place when a settings_update SSE
+    // message arrives, so a running scanner doesn't need to re-fetch the
+    // whole event to pick up a live change.
+    var scanResultDurationMs: Int?
     // Owner, admin, or a 'full' sheetAccess grant — computed server-side per
     // caller in GET /api/events. View-only collaborators can check people in
     // but can't undo it.
@@ -123,7 +126,8 @@ struct ScannerLinkInfo: Codable {
     let eventName: String
     let color: String?
     let allowReentry: Bool?
-    let scanResultDurationMs: Int?
+    // var, not let — see the matching note on Event.scanResultDurationMs.
+    var scanResultDurationMs: Int?
     // Not part of the server response — set locally (see resolveScannerLink)
     // to the token this info was resolved from, then persisted alongside the
     // rest so every later validate/checkout call can prove this device holds

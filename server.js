@@ -2911,9 +2911,7 @@ app.post('/api/event/:id/push-send', requireAuth, async (req, res) => {
     // the real APNs push below it doesn't depend on notification permission
     // at all. APNs is still needed to reach devices where the app isn't open.
     const bannerPayload = { type: 'notification', title, message: body, sentAt: new Date().toISOString() };
-    for (const [pairToken, data] of scannerRegistry) {
-        if (data.eventId === eventId) broadcastToPair(pairToken, bannerPayload);
-    }
+    broadcastToEventScanners(eventId, bannerPayload);
 
     if (target === 'devices') {
         const tokens = Array.isArray(req.body?.tokens) ? req.body.tokens.filter(Boolean) : [];
@@ -3905,6 +3903,9 @@ app.put('/api/event/:id/scan-result-duration', requireAuth, (req, res) => {
     const ms = raw === null || raw === undefined || raw === '' ? null : Math.max(300, Math.min(5000, parseInt(raw) || 1200));
     stmt.events.setScanResultDuration.run(ms, req.params.id);
     logAudit(req, { eventId: event.id, action: 'scanner.resultDurationChanged', details: { ms } });
+    // Pushed live so every open scanner (web or iOS) picks it up immediately —
+    // they used to only see this on their next 30s poll.
+    broadcastToEventScanners(event.id, { type: 'settings_update', scanResultDurationMs: ms });
     res.json({ success: true, scanResultDurationMs: ms });
 });
 
@@ -9554,6 +9555,14 @@ function broadcastToPair(pairToken, payload) {
     } catch {
         scannerChannels.delete(pairToken);
         return false;
+    }
+}
+
+// Push to every scanner (web or iOS) currently working a given event —
+// same registry lookup already used by the manual-notify broadcast above.
+function broadcastToEventScanners(eventId, payload) {
+    for (const [pairToken, data] of scannerRegistry) {
+        if (data.eventId === eventId) broadcastToPair(pairToken, payload);
     }
 }
 
