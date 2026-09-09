@@ -1037,9 +1037,6 @@
                     <span id="resultDurationValue" style="color:#fff;font-size:14px;font-weight:600;">1.2s</span>
                 </div>
                 <input type="range" id="resultDurationSlider" min="300" max="3000" step="100" value="1200" oninput="onResultDurationInput(this.value)">
-                <div style="display:flex;justify-content:flex-end;">
-                    <button class="dp-copy-btn" id="resultDurationSaveBtn" onclick="saveResultDuration()">Save</button>
-                </div>
             </div>
         </div>
         <div class="settings-hint-row" id="resultDurationOverrideNote" style="display:none;margin-bottom:12px;">
@@ -1053,7 +1050,7 @@
                     <input type="text" id="deviceNameInput" placeholder="e.g. Front Door iPad" maxlength="60"
                            style="flex:1;min-width:0;padding:9px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:#fff;font-size:15px;outline:none;"
                            onkeydown="if(event.key==='Enter'){event.preventDefault();saveDeviceName();}">
-                    <button class="dp-copy-btn" id="deviceNameSaveBtn" onclick="saveDeviceName()">Save</button>
+                    <button class="dp-copy-btn" onclick="saveDeviceName()">Save</button>
                 </div>
             </div>
         </div>
@@ -1938,31 +1935,6 @@ function onResultDurationInput(value) {
     document.getElementById('resultDurationValue').textContent = (ms / 1000).toFixed(1) + 's';
 }
 
-// Dragging the slider already saves on every input (see onResultDurationInput)
-// — this button doesn't do anything the drag hasn't already done. It exists
-// because a slider with no Save button gave no confirmation it had actually
-// been applied, unlike Device Name's explicit Save; clicking it re-applies
-// the current position and flashes the same "Saved" confirmation.
-function saveResultDuration() {
-    const slider = document.getElementById('resultDurationSlider');
-    if (!slider || slider.disabled) return;
-    onResultDurationInput(slider.value);
-    flashSaved('resultDurationSaveBtn');
-}
-
-// Briefly swaps a Save button's label to confirm a value actually persisted
-// — every settings control that saves something should use this, not just
-// silently write to localStorage/the server and hope it was noticed.
-function flashSaved(btnId) {
-    const btn = document.getElementById(btnId);
-    if (!btn) return;
-    if (btn._savedTimeout) clearTimeout(btn._savedTimeout);
-    const original = btn.dataset.label || btn.textContent;
-    btn.dataset.label = original;
-    btn.textContent = 'Saved';
-    btn._savedTimeout = setTimeout(() => { btn.textContent = original; }, 1400);
-}
-
 function renderResultDurationControl() {
     const slider = document.getElementById('resultDurationSlider');
     if (!slider) return;
@@ -1972,8 +1944,6 @@ function renderResultDurationControl() {
     slider.disabled = !!override;
     document.getElementById('resultDurationValue').textContent = (shown / 1000).toFixed(1) + 's';
     document.getElementById('resultDurationOverrideNote').style.display = override ? 'flex' : 'none';
-    const saveBtn = document.getElementById('resultDurationSaveBtn');
-    if (saveBtn) saveBtn.disabled = !!override;
 }
 
 // Picks up an organiser's dashboard change on its own — same 30s cadence as
@@ -2732,7 +2702,6 @@ function saveDeviceName() {
     else localStorage.removeItem('scannerDeviceName');
     input.blur();
     sendHeartbeat();
-    flashSaved('deviceNameSaveBtn');
 }
 
 // ── Account sub-view ──────────────────────────────────────
