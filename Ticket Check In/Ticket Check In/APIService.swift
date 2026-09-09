@@ -450,11 +450,15 @@ class APIService: ObservableObject {
         let device = UIDevice.current
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let pushEnabled = await NotificationManager.shared.isAuthorized()
-        // A custom name set in Settings > Scanner wins over the device's own
-        // iOS name — same override scanner.html offers on the web side, so
-        // "Front Door iPad" shows up on the monitor instead of "iPad".
+        // A custom name set in Settings > Scanner wins over the auto-detected
+        // one — same override scanner.html offers on the web side, so "Front
+        // Door iPad" shows up on the monitor instead of a generic default.
+        // The default itself is the marketing model name ("iPhone 15 Pro"),
+        // not device.name — since iOS 16, device.name reports back a plain
+        // "iPhone" to apps without the (Apple-gated) Access Wi-Fi Information
+        // entitlement, so it's useless for telling devices apart.
         let customName = UserDefaults.standard.string(forKey: "scannerDeviceName")?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let deviceName = (customName?.isEmpty == false) ? customName! : device.name
+        let deviceName = (customName?.isEmpty == false) ? customName! : UIDevice.marketingModelName
         var body: [String: String] = [
             "pairToken":   pairToken,
             "platform":    "ios-app",

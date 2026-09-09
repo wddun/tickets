@@ -209,11 +209,16 @@ struct SettingsView: View {
 
                     HStack {
                         Label("Device Name", systemImage: "iphone")
-                        TextField("Auto-detected", text: $scannerDeviceName)
+                        // The placeholder is the actual value that goes out
+                        // on the next heartbeat when this field is empty —
+                        // UIDevice.marketingModelName, not a vague "Auto-
+                        // detected" label — so what's shown here is exactly
+                        // what the organiser will see on the monitor.
+                        TextField(UIDevice.marketingModelName, text: $scannerDeviceName)
                             .multilineTextAlignment(.trailing)
                             .autocorrectionDisabled()
                     }
-                    Text("How this device shows up to the organiser on the monitor and in room chat. Leave blank to use this iPhone's own name.")
+                    Text("How this device shows up to the organiser on the monitor and in room chat. Leave blank to use \"\(UIDevice.marketingModelName)\".")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

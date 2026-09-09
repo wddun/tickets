@@ -1056,7 +1056,7 @@
         </div>
         <div class="settings-hint-row" style="margin-bottom:12px;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12.01" y2="16"/><path d="M12 8v4"/></svg>
-            <span>How this device shows up to the organiser on the monitor and in room chat. Leave blank to use an auto-detected name.</span>
+            <span id="deviceNameHint">How this device shows up to the organiser on the monitor and in room chat. Leave blank to use an auto-detected name.</span>
         </div>
         <button class="settings-nav-row" id="settingsSwitchEventRow" onclick="openEventPicker()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
@@ -1584,7 +1584,39 @@ function onSessionExpired() {
 }
 
 // ── Scanner channel (heartbeat + SSE) ─────────────────────
+// Best-effort real device model, filled in asynchronously — used the moment
+// it resolves, but nothing waits on it (see autoScannerDeviceName below).
+// iOS Safari and desktop browsers expose no model info at all (deliberately,
+// for fingerprinting resistance), so this only ever has a shot on Android:
+//
+//  - Chromium's Client Hints API (`userAgentData.getHighEntropyValues`) is
+//    the modern, deliberate replacement for what the User-Agent string used
+//    to leak — it's what still returns "Pixel 8" on a current Chrome build
+//    whose *UA string* was reduced to a generic placeholder.
+//  - Older Chrome / Firefox / Samsung Internet on Android still just put the
+//    model in the UA string directly, so that's tried too as a fallback.
+let _detectedDeviceLabel = null;
+
+async function detectDeviceLabel() {
+    try {
+        if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+            const info = await navigator.userAgentData.getHighEntropyValues(['model']);
+            if (info && info.model) { _detectedDeviceLabel = `${info.model} (Web)`; return; }
+        }
+    } catch (_) {}
+    const m = navigator.userAgent.match(/Android\s*[\d.]*;\s*([^;)]+)\)/);
+    // A pre-reduction UA has "Build/<id>" trailing the model ("SM-G960F
+    // Build/QP1A...") — strip it back to just the model name.
+    let model = m && m[1] ? m[1].trim() : '';
+    model = model.split(/\s+Build\//)[0].trim();
+    // Chrome's UA reduction leaves a single-letter placeholder ("K") on
+    // Android where the model used to be — not a real name, skip it.
+    if (model.length > 1) _detectedDeviceLabel = `${model} (Web)`;
+}
+detectDeviceLabel();
+
 function autoScannerDeviceName() {
+    if (_detectedDeviceLabel) return _detectedDeviceLabel;
     const ua = navigator.userAgent;
     if (/iPhone/.test(ua)) return 'iPhone (Web)';
     if (/iPad/.test(ua)) return 'iPad (Web)';
@@ -2648,7 +2680,15 @@ function switchTab(tab) {
         loadDisplayQR();
         renderResultDurationControl();
         const nameInput = document.getElementById('deviceNameInput');
-        if (nameInput) nameInput.value = localStorage.getItem('scannerDeviceName') || '';
+        if (nameInput) {
+            nameInput.value = localStorage.getItem('scannerDeviceName') || '';
+            // The placeholder is the literal value that goes out on the next
+            // heartbeat when this field is empty, not a generic hint — so
+            // what's shown here is exactly what the organiser will see.
+            nameInput.placeholder = autoScannerDeviceName();
+        }
+        const hint = document.getElementById('deviceNameHint');
+        if (hint) hint.textContent = `How this device shows up to the organiser on the monitor and in room chat. Leave blank to use "${autoScannerDeviceName()}".`;
     }
 }
 
