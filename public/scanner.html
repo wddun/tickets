@@ -109,11 +109,23 @@
             position: fixed;
             top: 0; left: 0; right: 0;
             padding: calc(env(safe-area-inset-top, 0px) + 12px) 14px 12px;
-            z-index: 20;
+            z-index: 25;
             display: flex;
             justify-content: space-between;
             align-items: center;
             gap: 8px;
+            pointer-events: none;
+        }
+        /* Fixed left/right groups (not a bare space-between over the whole
+           bar) so a button's position never jumps sideways when a sibling
+           button toggles hidden/shown — signInBtn is the only left-side
+           occupant, roomChatBtn/torchBtn share the right regardless of
+           which of them happen to be visible right now. */
+        .top-bar-left, .top-bar-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            pointer-events: auto;
         }
         .pill-btn {
             background: rgba(0,0,0,0.55);
@@ -266,7 +278,12 @@
             position: fixed;
             top: 0; left: 0; right: 0;
             z-index: 20;
-            padding: calc(env(safe-area-inset-top, 0px) + 12px) 14px 12px;
+            /* Left/right padding reserves the same corners .top-bar-left/
+               .top-bar-right occupy (signInBtn on the left; roomChatBtn and
+               torchBtn, possibly both at once, on the right) so a long event
+               name truncates against these edges instead of growing behind
+               — and visually on top of — whichever button is showing. */
+            padding: calc(env(safe-area-inset-top, 0px) + 12px) 108px 12px;
             display: none;
             align-items: center;
             justify-content: center;
@@ -280,9 +297,10 @@
             border-radius: 20px;
             padding: 7px 16px 7px 12px;
             max-width: 100%;
+            min-width: 0;
         }
         .slb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .slb-name { font-size: 13px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .slb-name { font-size: 13px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
         /* ── Full-screen event picker (logged-in users) ── */
         #eventPicker {
             position: fixed;
@@ -881,12 +899,16 @@
 
 <!-- Top bar: anon shows sign-in, auth shows room picker + list btn -->
 <div class="top-bar" id="topBar">
-    <a id="signInBtn" class="pill-btn" href="/login.html?next=/scanner.html" style="display:none;">Sign In</a>
-    <button id="roomChatBtn" class="pill-btn pill-btn-chat" onclick="openRoomChat()" aria-label="Room chat">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-2px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        <span id="roomChatBtnBadge" class="chat-btn-badge" style="display:none;"></span>
-    </button>
-    <button id="torchBtn" class="pill-btn" onclick="toggleTorch()" style="display:none;" aria-label="Toggle flashlight">🔦</button>
+    <div class="top-bar-left">
+        <a id="signInBtn" class="pill-btn" href="/login.html?next=/scanner.html" style="display:none;">Sign In</a>
+    </div>
+    <div class="top-bar-right">
+        <button id="roomChatBtn" class="pill-btn pill-btn-chat" onclick="openRoomChat()" aria-label="Room chat">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-2px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span id="roomChatBtnBadge" class="chat-btn-badge" style="display:none;"></span>
+        </button>
+        <button id="torchBtn" class="pill-btn" onclick="toggleTorch()" style="display:none;" aria-label="Toggle flashlight">🔦</button>
+    </div>
 </div>
 
 <!-- Room chat: one shared thread per event for every scanner + the monitor -->

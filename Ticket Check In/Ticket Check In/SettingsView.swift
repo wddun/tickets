@@ -24,9 +24,36 @@ struct SettingsView: View {
     // (same key), so no separate plumbing is needed to apply it live; it
     // just goes out on the next 30s heartbeat.
     @AppStorage("scannerDeviceName") private var scannerDeviceName: String = ""
+    // Same two blobs ScannerView locks the scanner to (see its scanLinkEvent/
+    // selectedOwnEvent) — read here too, under the same @AppStorage keys, so
+    // this tab can show what's actually forcing the slider rather than just
+    // warning that *something* might. ScannerView's live settings_update
+    // handler (applyLiveScanResultDuration) writes to these same keys, and
+    // @AppStorage re-renders on any UserDefaults change to its key, so this
+    // updates the moment an organiser flips the dashboard control — no polling.
+    @AppStorage("lastSelectedEventData") private var lastSelectedEventData: Data = Data()
+    @AppStorage("scanLinkEventData") private var scanLinkEventData: Data = Data()
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+    }
+
+    // Mirrors ScannerView's own precedence: a no-login scan link, else the
+    // signed-in user's own selected event.
+    private var organiserOverrideMs: Int? {
+        if !scanLinkEventData.isEmpty,
+           let link = try? JSONDecoder().decode(ScannerLinkInfo.self, from: scanLinkEventData) {
+            return link.scanResultDurationMs
+        }
+        if !lastSelectedEventData.isEmpty,
+           let event = try? JSONDecoder().decode(Event.self, from: lastSelectedEventData) {
+            return event.scanResultDurationMs
+        }
+        return nil
+    }
+
+    private var effectiveDisplayMs: Int {
+        organiserOverrideMs ?? Int(resultDisplayDuration * 1000)
     }
 
     var body: some View {
@@ -158,15 +185,27 @@ struct SettingsView: View {
                     HStack {
                         Label("Result display time", systemImage: "timer")
                         Spacer()
-                        Text(String(format: "%.1fs", resultDisplayDuration))
+                        Text(String(format: "%.1fs", Double(effectiveDisplayMs) / 1000))
                             .foregroundStyle(.secondary)
                             .font(.subheadline)
                     }
-                    Slider(value: $resultDisplayDuration, in: 0.3...3.0, step: 0.1)
+                    Slider(
+                        value: organiserOverrideMs != nil
+                            ? .constant(Double(effectiveDisplayMs) / 1000)
+                            : $resultDisplayDuration,
+                        in: 0.3...3.0, step: 0.1
+                    )
+                    .disabled(organiserOverrideMs != nil)
 
-                    Text("How long a scan result stays full-screen on this device. An organiser can override this for everyone scanning a specific event from their dashboard, which then takes priority over this setting.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let overrideMs = organiserOverrideMs {
+                        Text("Forced to \(String(format: "%.1fs", Double(overrideMs) / 1000)) by the organiser for the event you're scanning. Your own preference below is saved and takes effect again once they turn this off.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("How long a scan result stays full-screen on this device. An organiser can override this for everyone scanning a specific event from their dashboard, which then takes priority over this setting.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
                     HStack {
                         Label("Device Name", systemImage: "iphone")
