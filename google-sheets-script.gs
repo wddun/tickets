@@ -80,7 +80,7 @@ var COLOR_OPTIONS = [
   'Rose     — rgb(244, 63, 94)',
   'Orange   — rgb(249, 115, 22)',
   'Black    — rgb(17, 24, 39)',
-  'Custom   — enter rgb() or hex in B10'
+  'Custom   — enter a color in the wizard'
 ];
 
 // ============================================================
@@ -1177,7 +1177,6 @@ function getColumnMap(sheet) {
     statusCol:    statusColIdx,
     sentAtCol:    statusColIdx + 1,
     tokensCol:    statusColIdx + 2,
-    scannedCol:   statusColIdx,   // merged into Status
     customFields: {}  // { "T-Shirt Size": colIndex (1-based), ... }
   };
 
