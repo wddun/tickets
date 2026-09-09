@@ -143,6 +143,10 @@ struct ScannerLinkInfo: Codable {
     // monitor tell apart otherwise-anonymous scan-link devices, e.g. "Front
     // Gate" vs "VIP Entrance".
     let linkLabel: String?
+    // checkin + undo_checkin always; also checkout when the event has
+    // allowReentry on — see scanLinkCapabilities() in server.js. nil only for
+    // a copy decoded before this field existed.
+    var capabilities: [String]? = nil
     // Not part of the server response — set locally (see resolveScannerLink)
     // to the token this info was resolved from, then persisted alongside the
     // rest so every later validate/checkout call can prove this device holds

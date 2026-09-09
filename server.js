@@ -2363,7 +2363,7 @@ app.get('/api/auth/me', (req, res) => {
                     allowReentry: event ? event.allowReentry : false,
                     scanResultDurationMs: event ? event.scanResultDurationMs : null,
                     roomChatEnabled: event ? event.roomChatEnabled : false,
-                    capabilities: SCAN_LINK_CAPABILITIES.slice(),
+                    capabilities: scanLinkCapabilities(event),
                 },
             });
         }
@@ -2782,6 +2782,18 @@ function userHasEventCapability(userId, eventId, capability) {
 // emailing attendees, no exports, no access management.
 const SCAN_LINK_CAPABILITIES = ['checkin', 'undo_checkin'];
 
+// A scan link's checkout ability isn't a separate grant — /api/validate only
+// ever returns reentry_exit (the prompt that leads to /api/checkout) when the
+// organiser has reentry turned on for the event, so there's nothing to gate
+// beyond that. Exposed as a capability anyway (rather than left for the
+// client to re-derive from allowReentry itself) so "what can this scan link
+// do" has one answer wherever it's asked, same as every other capability.
+function scanLinkCapabilities(event) {
+    const caps = SCAN_LINK_CAPABILITIES.slice();
+    if (event?.allowReentry) caps.push('checkout');
+    return caps;
+}
+
 // The session's scan link, re-validated on every use so revoking the link (or
 // deleting the event) takes effect immediately rather than at session expiry.
 function sessionScanLink(req) {
@@ -2799,7 +2811,7 @@ function sessionScanLink(req) {
 function requestEventCapabilities(req, eventId) {
     if (req.session?.userId) return userEventCapabilities(req.session.userId, eventId);
     const scoped = sessionScanLink(req);
-    if (scoped && scoped.eventId === eventId) return SCAN_LINK_CAPABILITIES.slice();
+    if (scoped && scoped.eventId === eventId) return scanLinkCapabilities(rowToEvent(stmt.events.byId.get(eventId)));
     return [];
 }
 
@@ -4737,7 +4749,7 @@ app.get('/api/events', requireAuthOrScanLink, (req, res) => {
         if (!event) return res.json([]);
         return res.json([{
             ...event,
-            capabilities: SCAN_LINK_CAPABILITIES.slice(),
+            capabilities: scanLinkCapabilities(event),
             fullAccess: false,
             isOwner: false,
         }]);
@@ -7261,7 +7273,7 @@ app.get('/api/scanner-links/:token', (req, res) => {
         linkLabel: link.label || '',
         capabilities: req.session.userId
             ? userEventCapabilities(req.session.userId, event.id)
-            : SCAN_LINK_CAPABILITIES.slice(),
+            : scanLinkCapabilities(event),
     });
 });
 

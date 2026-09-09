@@ -51,17 +51,19 @@ struct ManualCheckInView: View {
         return try? JSONDecoder().decode(ScannerLinkInfo.self, from: scanLinkEventData)
     }
 
-    // A scan link needs no account and grants exactly SCAN_LINK_CAPABILITIES
-    // (checkin, undo_checkin) server-side — see requestEventCapabilities() in
-    // server.js. At-door sales require requireAuth there, so this is
-    // deliberately false rather than carried over from anywhere.
+    // A scan link needs no account and grants whatever the server decided in
+    // scanLinkCapabilities() — checkin + undo_checkin always, plus checkout
+    // when the event has reentry on. Falls back to the always-true minimum
+    // only for a link resolved by an older server build that didn't send
+    // capabilities yet. At-door sales require requireAuth server-side, so
+    // that's deliberately false rather than carried over from anywhere.
     private func syntheticEvent(from link: ScannerLinkInfo) -> Event {
         Event(
             id: link.eventId, name: link.eventName, time: nil, color: link.color,
             scannerPin: nil, location: nil, allowReentry: link.allowReentry,
             atDoorEnabled: false, ticketPrice: nil, userId: nil,
             scanResultDurationMs: link.scanResultDurationMs, roomChatEnabled: link.roomChatEnabled,
-            fullAccess: false, capabilities: ["checkin", "undo_checkin"]
+            fullAccess: false, capabilities: link.capabilities ?? ["checkin", "undo_checkin"]
         )
     }
 

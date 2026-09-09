@@ -5,7 +5,7 @@ import test, { before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer } from './helpers/server.js';
 import { createClient } from './helpers/client.js';
-import { newUser, createEvent, addTicket, listTickets, scanLinkClient, share, setTicketExpiresAt } from './helpers/factories.js';
+import { newUser, createEvent, updateEvent, addTicket, listTickets, scanLinkClient, share, setTicketExpiresAt } from './helpers/factories.js';
 
 let server, owner;
 before(async () => {
@@ -473,6 +473,21 @@ describe('scan links', () => {
 
         const seen = (await stranger.client.get('/api/events')).body.find(e => e.id === ev.id);
         assert.deepEqual(seen.capabilities, ['checkin'], 'a scan link confers check-in and nothing more');
+    });
+
+    test('a scan link can check out only when the event has reentry on', async () => {
+        const plain = await createEvent(owner.client, { name: 'No Reentry' });
+        const plainLink = (await owner.client.post(`/api/event/${plain.id}/scanner-links`, {})).body.link;
+        const plainResolved = await anon().get(`/api/scanner-links/${plainLink.token}`);
+        assert.ok(!plainResolved.body.capabilities.includes('checkout'));
+
+        let reentry = await createEvent(owner.client, { name: 'With Reentry' });
+        await updateEvent(owner.client, reentry, { allowReentry: true });
+        const reentryLink = (await owner.client.post(`/api/event/${reentry.id}/scanner-links`, {})).body.link;
+        const reentryResolved = await anon().get(`/api/scanner-links/${reentryLink.token}`);
+        assert.ok(reentryResolved.body.capabilities.includes('checkout'));
+        assert.ok(reentryResolved.body.capabilities.includes('checkin'));
+        assert.ok(reentryResolved.body.capabilities.includes('undo_checkin'));
     });
 });
 
