@@ -205,7 +205,12 @@ struct ScannerView: View {
                 }
                 Spacer()
             }
-            .zIndex(60)
+            // Must beat scanLinkBanner's .zIndex(150) below — SwiftUI's
+            // ZStack layers by explicit zIndex first, ZStack source order
+            // only as the tiebreak, so this button sat behind the pill
+            // (unclickable wherever they overlapped) despite coming later
+            // in the ZStack until this was raised above it.
+            .zIndex(160)
         }
     }
 
@@ -857,7 +862,14 @@ struct ScannerView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(.ultraThinMaterial, in: Capsule())
-                .padding(.horizontal, 16)
+                .padding(.leading, 16)
+                // Reserve the corner the room-chat button sits in (see
+                // roomChatButton's .padding(.trailing, 14) on a ~44pt
+                // circle) so a long event name truncates against this edge
+                // instead of growing underneath it — zIndex alone keeps the
+                // button clickable either way, but a pill running right up
+                // to/behind it still looked broken.
+                .padding(.trailing, roomChatEnabledForCurrentEvent ? 60 : 16)
                 .padding(.top, 8)
                 Spacer()
             }
