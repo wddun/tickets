@@ -4526,7 +4526,7 @@
                     </div>
                 </div>
                 <div
-                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;">
+                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;" data-no-dirty>
                     <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
                         <input type="checkbox" id="editEventShuttleLink" ${ev.shuttleLinkEnabled ? 'checked' : ''}
                             onchange="setShuttleLinkEnabled('${eventId}', this.checked)"
@@ -4545,7 +4545,7 @@
                     </div>
                 </div>
                 <div
-                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;">
+                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;" data-no-dirty>
                     <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
                         <input type="checkbox" id="editEventWalletLockScreen" ${ev.walletLockScreenEnabled !== false ? 'checked' : ''}
                             onchange="setWalletLockScreenEnabled('${eventId}', this.checked)"
@@ -7530,6 +7530,7 @@
                 if (!r.ok) throw new Error();
                 const ev = events.find(e => e.id === eventId);
                 if (ev) ev.shuttleLinkEnabled = enabled;
+                showToast(enabled ? 'Shuttle linking turned on.' : 'Shuttle linking turned off.');
             } catch {
                 showToast('Failed to update shuttle linking.');
             }
@@ -7552,6 +7553,7 @@
                 const d = await r.json();
                 const ev = events.find(e => e.id === eventId);
                 if (ev) ev.scanResultDurationMs = d.scanResultDurationMs;
+                showToast(d.scanResultDurationMs ? 'Scan result display time updated.' : 'Scan result display time override turned off.');
             } catch {
                 showToast('Failed to update scan result display time.');
             }
@@ -7567,6 +7569,7 @@
                 if (!r.ok) throw new Error();
                 const ev = events.find(e => e.id === eventId);
                 if (ev) ev.walletLockScreenEnabled = enabled;
+                showToast(enabled ? 'Lock screen reminders turned on.' : 'Lock screen reminders turned off.');
             } catch {
                 showToast('Failed to update lock screen setting.');
             }
