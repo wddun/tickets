@@ -206,6 +206,67 @@
             }
         }
 
+        /* ── System health bar ── */
+        .health-bar {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
+        .health-stat {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 18px;
+        }
+
+        .health-num {
+            font-size: 26px;
+            font-weight: 800;
+            color: var(--text);
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+
+        .health-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        .health-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .health-checked .health-num {
+            color: #059669;
+        }
+
+        .health-bar-track {
+            background: var(--border);
+            border-radius: 99px;
+            height: 6px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+
+        .health-bar-fill {
+            height: 100%;
+            background: #10b981;
+            border-radius: 99px;
+            transition: width 0.4s;
+        }
+
+        @media (max-width: 700px) {
+            .health-bar {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
         /* ── Buttons ── */
         .btn {
             padding: 9px 18px;
@@ -799,6 +860,30 @@
             </div>
         </div>
 
+        <!-- System health: totals for the currently selected room -->
+        <div class="health-bar" id="healthBar">
+            <div class="health-stat">
+                <div class="health-num" id="healthTotal">0</div>
+                <div class="health-label">Total Tickets</div>
+            </div>
+            <div class="health-stat health-checked">
+                <div class="health-num" id="healthScanned">0</div>
+                <div class="health-label">Checked In</div>
+                <div class="health-bar-track">
+                    <div class="health-bar-fill" id="healthBarFill" style="width:0%"></div>
+                </div>
+            </div>
+            <div class="health-stat">
+                <div class="health-num" id="healthRemaining">0</div>
+                <div class="health-label">Not Yet In</div>
+            </div>
+            <div class="health-stat">
+                <div class="health-num" id="healthScannerCount">0</div>
+                <div class="health-label">Scanners</div>
+                <div class="health-sub" id="healthScannerBreakdown">—</div>
+            </div>
+        </div>
+
         <!-- Event filter tabs -->
         <div class="event-tabs" id="eventTabs">
             <div class="event-tab active" data-event-id="all" onclick="filterByEvent('all', this)">All Events</div>
@@ -863,6 +948,7 @@
         // ── State ──────────────────────────────────────────────────────────
         let scanners = new Map();   // pairToken → scanner object
         let events = new Map();   // eventId → event object
+        let eventCounts = new Map();   // eventId → {total, scanned, waiting}
         let activeEventFilter = 'all';
         let monitorStream = null;
 
@@ -877,7 +963,10 @@
         }
 
         async function refreshScanners() {
-            const r = await fetch('/api/monitor/scanners');
+            const [r, cr] = await Promise.all([
+                fetch('/api/monitor/scanners'),
+                fetch('/api/events/counts'),
+            ]);
             if (r.status === 401) { location.href = '/login.html'; return; }
             const data = await r.json();
 
@@ -892,7 +981,15 @@
                 scanners.set(s.pairToken, s);
             }
 
+            // Seed ticket totals for the health bar — same scoping as the events
+            // list above, so every tab this admin can select has counts ready.
+            if (cr.ok) {
+                const counts = await cr.json();
+                for (const [id, c] of Object.entries(counts)) eventCounts.set(id, c);
+            }
+
             renderGrid();
+            renderHealthBar();
             document.getElementById('notifyAllBtn').style.display = scanners.size > 0 ? '' : 'none';
         }
 
@@ -905,6 +1002,16 @@
                 try { msg = JSON.parse(e.data); } catch { return; }
 
                 if (msg.type === 'ticket_scan') {
+                    // Keep the health bar's totals current for the event this scan
+                    // belongs to, whether or not it's the tab currently in view.
+                    if (msg.eventId && msg.total !== undefined) {
+                        const c = eventCounts.get(msg.eventId) || {};
+                        c.total = msg.total;
+                        c.scanned = msg.scanned;
+                        eventCounts.set(msg.eventId, c);
+                        renderHealthBar();
+                    }
+
                     const card = document.getElementById(`card-${msg.pairToken}`);
                     if (card) {
                         // Update name + pill immediately without waiting for scanner_update
@@ -947,12 +1054,25 @@
                         // New scanner appeared — full rebuild
                         renderGrid();
                     }
+                    renderHealthBar();
 
                     // Flash on new scan result
                     if (msg.scanner.lastResult && (!prev || JSON.stringify(prev.lastResult) !== JSON.stringify(msg.scanner.lastResult))) {
                         const card = document.getElementById(`card-${msg.scanner.pairToken}`);
                         if (card && !card._flashing) flashCard(card, msg.scanner.lastResult.status);
                     }
+                }
+
+                if (msg.type === 'counts_update') {
+                    // Fired by mutations that don't go through a scan (expire/
+                    // unexpire, waitlist changes, registration delete) — keeps the
+                    // health bar honest even when nothing was scanned.
+                    const c = eventCounts.get(msg.eventId) || {};
+                    c.total = msg.total;
+                    c.scanned = msg.scanned;
+                    c.waiting = msg.waiting;
+                    eventCounts.set(msg.eventId, c);
+                    renderHealthBar();
                 }
 
                 if (msg.type === 'scanner_chat') {
@@ -1067,14 +1187,52 @@
             document.querySelectorAll('.event-tab').forEach(t => t.classList.remove('active'));
             el.classList.add('active');
             renderGrid();
+            renderHealthBar();
         }
 
         // ── Render ─────────────────────────────────────────────────────────
-        function renderGrid() {
-            const grid = document.getElementById('scannerGrid');
-            const filtered = [...scanners.values()].filter(s =>
+        function filteredScanners() {
+            return [...scanners.values()].filter(s =>
                 activeEventFilter === 'all' || s.eventId === activeEventFilter
             );
+        }
+
+        // Ticket totals + scanner status for whichever room (or "All Events") is
+        // currently selected — the system-health summary above the scanner grid.
+        function renderHealthBar() {
+            const bar = document.getElementById('healthBar');
+            if (!bar) return;
+
+            let total = 0, scanned = 0;
+            if (activeEventFilter === 'all') {
+                for (const ev of events.values()) {
+                    const c = eventCounts.get(ev.id);
+                    if (c) { total += c.total || 0; scanned += c.scanned || 0; }
+                }
+            } else {
+                const c = eventCounts.get(activeEventFilter);
+                if (c) { total = c.total || 0; scanned = c.scanned || 0; }
+            }
+            const remaining = Math.max(0, total - scanned);
+            const pct = total ? Math.round(scanned / total * 100) : 0;
+
+            document.getElementById('healthTotal').textContent = total;
+            document.getElementById('healthScanned').textContent = scanned;
+            document.getElementById('healthRemaining').textContent = remaining;
+            document.getElementById('healthBarFill').style.width = `${pct}%`;
+
+            const roomScanners = filteredScanners();
+            const statusCounts = { online: 0, idle: 0, offline: 0 };
+            roomScanners.forEach(s => statusCounts[onlineStatus(s)]++);
+            document.getElementById('healthScannerCount').textContent = roomScanners.length;
+            document.getElementById('healthScannerBreakdown').textContent = roomScanners.length
+                ? `${statusCounts.online} online · ${statusCounts.idle} idle · ${statusCounts.offline} offline`
+                : 'None connected';
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('scannerGrid');
+            const filtered = filteredScanners();
 
             if (filtered.length === 0) {
                 grid.innerHTML = `<div class="empty-state">
@@ -1476,6 +1634,7 @@
                 const dot = card.querySelector('.scanner-status-dot');
                 if (dot) dot.className = `scanner-status-dot dot-${newStatus}`;
             }
+            renderHealthBar();
         }, 5000);
 
         init();
