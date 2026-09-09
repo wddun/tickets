@@ -1210,6 +1210,46 @@
             position: absolute; inset: 0; width: 100%; height: 100%;
             opacity: 0; cursor: pointer; border: none; padding: 0;
         }
+
+        /* New Event modal: manual-vs-sheet starting point */
+        .new-event-mode-toggle {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .mode-toggle-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 10px;
+            border: 1.5px solid var(--border);
+            border-radius: 9px;
+            background: var(--card);
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: border-color 0.15s, background 0.15s, color 0.15s;
+        }
+        .mode-toggle-btn:hover { border-color: #b0bcd0; }
+        .mode-toggle-btn.active {
+            border-color: var(--navy);
+            background: #f0f1f7;
+            color: var(--navy);
+        }
+        [data-theme="dark"] .mode-toggle-btn.active {
+            background: var(--navy-mid);
+            color: #fff;
+        }
+        .new-event-mode-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            line-height: 1.45;
+            margin-bottom: 4px;
+        }
         /* Address autocomplete */
         .addr-wrap { position: relative; }
         .ac-dropdown {
@@ -2565,6 +2605,22 @@
                 <button class="modal-close" onclick="closeNewEventModal()">&times;</button>
             </div>
             <div class="form-group" style="margin-bottom:14px;">
+                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">How do you want to start?</label>
+                <div class="new-event-mode-toggle" id="newEventModeToggle">
+                    <button type="button" class="mode-toggle-btn active" data-mode="manual" onclick="setNewEventMode('manual')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                        From Dashboard
+                    </button>
+                    <button type="button" class="mode-toggle-btn" data-mode="sheet" onclick="setNewEventMode('sheet')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+                        From Google Sheet / Form
+                    </button>
+                </div>
+                <div class="new-event-mode-hint" id="newEventModeHint">
+                    Fill in the details below and create the event manually. You can connect a Google Form or spreadsheet to auto-issue tickets anytime later, from Settings → API Access.
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
                 <label for="newEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name <span style="color:var(--red-text)">*</span></label>
                 <input type="text" id="newEventName" placeholder="e.g. Summer Gala 2026"
                     style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;"
@@ -3390,6 +3446,13 @@
 
             const event = events.find(e => e.id === id);
             document.getElementById('emptyState').style.display = 'none';
+            // Normally already 'none' — the only way in here from Settings is
+            // showOverviewView/backToEventList, which both hide it first. But
+            // selectEvent() can now also fire straight from event creation
+            // (see submitNewEvent), which skips that path entirely, so a
+            // still-open Settings view from an earlier event wouldn't
+            // otherwise get cleared and would render stacked underneath.
+            document.getElementById('settingsView').style.display = 'none';
             document.getElementById('eventDetail').style.display = 'block';
             document.getElementById('eventDetail').innerHTML = `
                 <div class="event-transition">
@@ -4745,6 +4808,15 @@
         }
 
         async function showSettingsView(id, initialTab) {
+            // Every existing caller only ever fires from a view that already
+            // selected this event (so emptyState/event-selected were already
+            // set by selectEvent()) — jumping here straight from event
+            // creation, with nothing ever selected yet, exposed that this
+            // function never set that state itself.
+            selectedId = id;
+            renderSidebar();
+            document.body.classList.add('event-selected');
+            document.getElementById('emptyState').style.display = 'none';
             const event = events.find(e => e.id === id);
             document.getElementById('eventDetail').style.display = 'none';
             const view = document.getElementById('settingsView');
@@ -5414,8 +5486,23 @@
 
         // ── New Event ─────────────────────────────────────────
         let selectedColor = 'rgb(99,102,241)';
+        let newEventMode = 'manual'; // 'manual' | 'sheet' — only changes what happens right after creation, see submitNewEvent()
+
+        const NEW_EVENT_MODE_HINTS = {
+            manual: 'Fill in the details below and create the event manually. You can connect a Google Form or spreadsheet to auto-issue tickets anytime later, from Settings → API Access.',
+            sheet: "Create the event now — we'll take you straight to Sheet Watcher setup so you can paste your Google Form's response-sheet link. The details below are optional; you can fill them in now, later, or let the sheet's own fields drive ticket details instead.",
+        };
+
+        function setNewEventMode(mode) {
+            newEventMode = mode;
+            document.querySelectorAll('#newEventModeToggle .mode-toggle-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.mode === mode);
+            });
+            document.getElementById('newEventModeHint').textContent = NEW_EVENT_MODE_HINTS[mode];
+        }
 
         function openNewEventModal() {
+            setNewEventMode('manual');
             document.getElementById('newEventName').value = '';
             document.getElementById('newEventTime').value = '';
             document.getElementById('newEventEndTime').value = '';
@@ -5501,7 +5588,11 @@
                 if (data.success) {
                     closeNewEventModal();
                     await loadEvents();
-                    selectEvent(data.eventId);
+                    if (newEventMode === 'sheet') {
+                        showSettingsView(data.eventId, 'tab-api');
+                    } else {
+                        selectEvent(data.eventId);
+                    }
                 } else {
                     errEl.textContent = data.error || 'Failed to create event.';
                     errEl.style.display = 'block';
