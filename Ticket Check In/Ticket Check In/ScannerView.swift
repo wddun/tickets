@@ -362,9 +362,6 @@ struct ScannerView: View {
         // Don't interrupt a pending checkout confirmation
         if scanResult != nil { return }
 
-        // Locked event isn't reachable on this account — resolve that first
-        if eventAccessIssue != nil { return }
-
         // 5-second same-token debounce — prevents accidental double-scan
         let now = Date()
         if let lastToken = lastScannedToken, let lastTime = lastScanTime,
@@ -375,8 +372,12 @@ struct ScannerView: View {
         lastScanTime = now
         // Camera keeps running — no isScanning = false
 
-        // Scan-link QR — grant access to that event immediately, whether
-        // this device is signed into its own account or not.
+        // Scan-link QR — grant access to that event immediately, whether this
+        // device is signed into its own account or not, and even if the
+        // previously-selected own-account event is currently unreachable
+        // (eventAccessIssue is showing). Scanning a link is the way out of
+        // that state, so it must be checked before the bail-out below, not
+        // after — otherwise the overlay blocks the one scan that fixes it.
         if let scanToken = extractScanLinkToken(from: token) {
             Task {
                 do {
@@ -391,6 +392,9 @@ struct ScannerView: View {
             }
             return
         }
+
+        // Locked event isn't reachable on this account — resolve that first
+        if eventAccessIssue != nil { return }
 
         beginPending(for: token)
         Task {
@@ -730,6 +734,12 @@ struct ScannerView: View {
 
     private func applyScanLink(_ info: ScannerLinkInfo) {
         scanLinkEventData = (try? JSONEncoder().encode(info)) ?? Data()
+        // The link was just validated by the server, so any stale access
+        // issue from a previous own-account event selection no longer
+        // applies — clear it now rather than leaving that overlay (it
+        // outranks the entering animation's z-index) on screen until the
+        // next 30s heartbeat happens to call verifyEventAccess() again.
+        eventAccessIssue = nil
         showEnteringAnimation()
     }
 
