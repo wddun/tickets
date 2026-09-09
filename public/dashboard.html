@@ -927,6 +927,53 @@
             color: #b45309;
         }
 
+        .status-pill.expired {
+            background: #e5e7eb;
+            color: #4b5563;
+        }
+
+        .status-pill svg { display: block; }
+
+        /* Per-ticket card in the edit modal (QR + status + wallet + actions) */
+        .ticket-edit-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 16px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+
+        .wallet-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .wallet-pill.on {
+            background: #e0e7ff;
+            color: #4338ca;
+        }
+
+        .wallet-pill.off {
+            background: var(--bg);
+            color: var(--text-muted);
+        }
+
+        .ticket-edit-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
         .winner-badge {
             display: inline-flex; align-items: center; gap: 3px;
             font-size: 10px; font-weight: 700;
@@ -9096,10 +9143,17 @@
             const preview = document.getElementById('editTicketPreview');
             const createdStr = t.created_at ? new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
 
+            const ICON_CLOCK = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>`;
+            const ICON_CHECK = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+            const ICON_BAN = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="6.5" y1="6.5" x2="17.5" y2="17.5"/></svg>`;
+            const ICON_ARROW_UP = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="6 11 12 5 18 11"/></svg>`;
+            const ICON_ARROW_DOWN = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="18 13 12 19 6 13"/></svg>`;
+            const ICON_WALLET = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16v-6"/><path d="M3 7V5a2 2 0 0 1 2-2h13v4"/><circle cx="17.5" cy="14.5" r="1"/></svg>`;
+
             const renderTicketCard = (tk, i, showLarge) => {
                 const checkedIn = !!tk.used_at;
                 const reentryEvent = events.find(e => e.id === tk.eventId);
-                let statusBadge;
+                let statusPill;
                 if (!checkedIn && tk.expiredAt) {
                     // A returned ticket is an expired one the attendee gave
                     // back themselves (see expireTicket's returnedByAttendee).
@@ -9107,39 +9161,36 @@
                     // doesn't need the audit log to answer.
                     const gaveBack = !!tk.returnedAt;
                     const when = new Date(tk.returnedAt || tk.expiredAt).toLocaleString();
-                    statusBadge = `<span style="background:#e5e7eb;color:#4b5563;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;" title="${gaveBack ? 'Returned by the attendee' : 'Expired'} ${when}">${gaveBack ? 'Returned' : 'Expired'}</span>`;
+                    statusPill = `<span class="status-pill expired" title="${gaveBack ? 'Returned by the attendee' : 'Expired'} ${when}">${ICON_BAN}${gaveBack ? 'Returned' : 'Expired'}</span>`;
                 } else if (!checkedIn) {
-                    statusBadge = `<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">Not checked in</span>`;
+                    statusPill = `<span class="status-pill pending">${ICON_CLOCK}Not checked in</span>`;
                 } else if (reentryEvent?.allowReentry) {
                     const rs = tk.reentry_status || 'inside';
-                    if (rs === 'outside') {
-                        statusBadge = `<span style="background:#fef3c7;color:#b45309;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">↓ Outside · checked in ${new Date(tk.used_at).toLocaleString()}</span>`;
-                    } else {
-                        statusBadge = `<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">↑ Inside · checked in ${new Date(tk.used_at).toLocaleString()}</span>`;
-                    }
+                    statusPill = rs === 'outside'
+                        ? `<span class="status-pill outside" title="Checked in ${new Date(tk.used_at).toLocaleString()}">${ICON_ARROW_DOWN}Outside</span>`
+                        : `<span class="status-pill inside" title="Checked in ${new Date(tk.used_at).toLocaleString()}">${ICON_ARROW_UP}Inside</span>`;
                 } else {
-                    statusBadge = `<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;">✓ Checked in ${new Date(tk.used_at).toLocaleString()}</span>`;
+                    statusPill = `<span class="status-pill scanned" title="Checked in ${new Date(tk.used_at).toLocaleString()}">${ICON_CHECK}Checked in</span>`;
                 }
-                const walletBadge = tk.wallet_downloaded_at
-                    ? `<div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-top:3px;" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">Downloaded to Wallet</div>`
-                    : `<div style="font-size:10px;color:#d1d5db;margin-top:3px;">No wallet download</div>`;
+                const walletPill = tk.wallet_downloaded_at
+                    ? `<span class="wallet-pill on" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">${ICON_WALLET}In Wallet</span>`
+                    : `<span class="wallet-pill off">${ICON_WALLET}No wallet download</span>`;
                 const toggleBtn = checkedIn
-                    ? (reentryEvent?.fullAccess ? `<button onclick="toggleTicketInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Undo Check-in</button>` : '')
-                    : `<button onclick="toggleTicketInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;padding:3px 10px;font-size:11px;background:#d1fae5;color:#065f46;border:none;border-radius:6px;cursor:pointer;">Mark Checked In</button>`;
+                    ? (reentryEvent?.fullAccess ? `<button class="btn btn-secondary btn-sm" onclick="toggleTicketInModal('${tk.id}', false, '${regId}')">Undo Check-in</button>` : '')
+                    : `<button class="btn btn-secondary btn-sm" onclick="toggleTicketInModal('${tk.id}', true, '${regId}')">Mark Checked In</button>`;
                 // Only meaningful before check-in — a used ticket already did
                 // its job and can't be expired (see isTicketExpired()).
                 const expireBtn = checkedIn || !reentryEvent?.fullAccess ? '' : tk.expiredAt
-                    ? `<button onclick="setTicketExpiredInModal('${tk.id}', false, '${regId}')" style="margin-top:6px;margin-left:6px;padding:3px 10px;font-size:11px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;">${tk.returnedAt ? 'Reinstate Ticket' : 'Restore Ticket'}</button>`
-                    : `<button onclick="setTicketExpiredInModal('${tk.id}', true, '${regId}')" style="margin-top:6px;margin-left:6px;padding:3px 10px;font-size:11px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;">Expire Ticket</button>`;
+                    ? `<button class="btn btn-secondary btn-sm" onclick="setTicketExpiredInModal('${tk.id}', false, '${regId}')">${tk.returnedAt ? 'Reinstate Ticket' : 'Restore Ticket'}</button>`
+                    : `<button class="btn btn-danger btn-sm" onclick="setTicketExpiredInModal('${tk.id}', true, '${regId}')">Expire Ticket</button>`;
                 const size = showLarge ? 120 : 80;
-                const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Ticket ${i + 1}</div>` : '';
-                return `<div style="text-align:center;">
+                const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:var(--text-muted);">Ticket ${i + 1}</div>` : '';
+                return `<div class="ticket-edit-card">
                     ${label}
-                    <img src="/qr/${tk.token}" style="width:${size}px;height:${size}px;display:block;margin:0 auto 6px;" />
-                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">${tk.token}</div>
-                    ${statusBadge}
-                    ${walletBadge}
-                    <div>${toggleBtn}${expireBtn}</div>
+                    <img src="/qr/${tk.token}" style="width:${size}px;height:${size}px;display:block;" />
+                    <div style="font-size:10px;color:var(--text-muted);font-family:monospace;">${tk.token}</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">${statusPill}${walletPill}</div>
+                    <div class="ticket-edit-actions">${toggleBtn}${expireBtn}</div>
                 </div>`;
             };
 
