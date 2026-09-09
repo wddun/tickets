@@ -388,6 +388,45 @@ try { db.exec(`ALTER TABLE events ADD COLUMN waitlistClaimHours INTEGER DEFAULT 
 // giveawayRoomState in server.js.
 try { db.exec(`ALTER TABLE events ADD COLUMN giveawayToken TEXT`); } catch {}
 
+// Persistent scanner history/labels/chat — scannerRegistry in server.js is
+// in-memory only (lost on restart, and only ever holds the single latest
+// scan result), so none of this could outlive a server restart or answer
+// "what has this scanner been doing." Keyed by pairToken, which is a
+// per-device value stored client-side (@AppStorage / localStorage) that
+// outlives app/server restarts on the same physical device, not any DB row.
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS scannerActivity (
+            id TEXT PRIMARY KEY,
+            pairToken TEXT NOT NULL,
+            eventId TEXT,
+            type TEXT NOT NULL,      -- 'scan' | 'online' | 'offline'
+            status TEXT,             -- scan result status, when type='scan'
+            name TEXT,               -- attendee name, when type='scan'
+            registrationId TEXT,
+            createdAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_scannerActivity_pairToken ON scannerActivity(pairToken, createdAt);
+
+        CREATE TABLE IF NOT EXISTS scannerLabels (
+            pairToken TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS scannerMessages (
+            id TEXT PRIMARY KEY,
+            pairToken TEXT NOT NULL,
+            eventId TEXT,
+            direction TEXT NOT NULL, -- 'to_scanner' | 'from_scanner'
+            text TEXT NOT NULL,
+            byUserId TEXT,           -- set on 'to_scanner' messages
+            createdAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_scannerMessages_pairToken ON scannerMessages(pairToken, createdAt);
+    `);
+} catch {}
+
 // A hard cutoff after which any not-yet-checked-in ticket for this event
 // stops working — the scanner refuses it, and the Apple Wallet pass is
 // voided (QR removed, shown as expired) the same way a deleted ticket's
@@ -927,6 +966,25 @@ export const stmt = {
         lastByTicket: db.prepare(`SELECT * FROM ticketScans WHERE ticketId=? ORDER BY scannedAt DESC LIMIT 1`),
         byEventId: db.prepare(`SELECT * FROM ticketScans WHERE eventId=? ORDER BY scannedAt DESC`),
         lastPerTicketByEventId: db.prepare(`SELECT ticketId, MAX(scannedAt) as lastSeenAt FROM ticketScans WHERE eventId=? GROUP BY ticketId`),
+    },
+    scannerActivity: {
+        insert: db.prepare(`INSERT INTO scannerActivity (id, pairToken, eventId, type, status, name, registrationId, createdAt) VALUES (?,?,?,?,?,?,?,?)`),
+        byPairToken: db.prepare(`SELECT * FROM scannerActivity WHERE pairToken=? ORDER BY createdAt DESC LIMIT ?`),
+        eventIdsByPairToken: db.prepare(`SELECT DISTINCT eventId FROM scannerActivity WHERE pairToken=? AND eventId IS NOT NULL`),
+        // Keeps the table from growing unboundedly over a long-running scanner —
+        // called after every insert; cheap relative to the insert itself, and
+        // simpler than a separate cron sweep.
+        trim: db.prepare(`DELETE FROM scannerActivity WHERE pairToken=? AND id NOT IN (SELECT id FROM scannerActivity WHERE pairToken=? ORDER BY createdAt DESC LIMIT 500)`),
+    },
+    scannerLabels: {
+        byPairToken: db.prepare(`SELECT * FROM scannerLabels WHERE pairToken=?`),
+        upsert: db.prepare(`INSERT INTO scannerLabels (pairToken, label, updatedAt) VALUES (?,?,?) ON CONFLICT(pairToken) DO UPDATE SET label=excluded.label, updatedAt=excluded.updatedAt`),
+        delete: db.prepare(`DELETE FROM scannerLabels WHERE pairToken=?`),
+    },
+    scannerMessages: {
+        insert: db.prepare(`INSERT INTO scannerMessages (id, pairToken, eventId, direction, text, byUserId, createdAt) VALUES (?,?,?,?,?,?,?)`),
+        byPairToken: db.prepare(`SELECT * FROM scannerMessages WHERE pairToken=? ORDER BY createdAt DESC LIMIT ?`),
+        eventIdsByPairToken: db.prepare(`SELECT DISTINCT eventId FROM scannerMessages WHERE pairToken=? AND eventId IS NOT NULL`),
     },
     walletDevices: {
         byDeviceAndSerial: db.prepare(`SELECT * FROM walletDevices WHERE deviceId=? AND serialNumber=?`),

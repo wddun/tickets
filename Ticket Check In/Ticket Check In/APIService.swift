@@ -465,6 +465,19 @@ class APIService: ObservableObject {
         request.httpBody = try? JSONEncoder().encode(body)
         _ = try? await session.data(for: request)
     }
+
+    /// A scanner's half of the admin chat (see /api/scan/message in
+    /// server.js) — no login, same trust model as sendHeartbeat above.
+    /// Fire-and-forget; the banner's own "Reply sent" confirmation doesn't
+    /// wait on this succeeding.
+    func sendScanMessage(pairToken: String, text: String) async {
+        guard let url = URL(string: "\(baseURL)/api/scan/message") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["pairToken": pairToken, "text": text])
+        _ = try? await session.data(for: request)
+    }
 }
 
 private struct DisplayTokenResponse: Codable {

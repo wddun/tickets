@@ -9499,9 +9499,38 @@ function getClientIP(req) {
     return (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
 }
 
+// Persists one row to scannerActivity and trims that scanner's history back
+// to the most recent 500 rows — never allowed to break the caller (a scan or
+// a heartbeat must still succeed even if this write fails for some reason).
+function logScannerActivity(pairToken, eventId, type, extra = {}) {
+    try {
+        stmt.scannerActivity.insert.run(nanoid(), pairToken, eventId || null, type, extra.status || null, extra.name || null, extra.registrationId || null, new Date().toISOString());
+        stmt.scannerActivity.trim.run(pairToken, pairToken);
+    } catch {}
+}
+
 function upsertScanner(pairToken, patch) {
     const existing = scannerRegistry.get(pairToken) || {};
     const updated = { ...existing, ...patch, pairToken };
+    // A custom label (see PUT /api/monitor/scanners/:pairToken/label) is the
+    // one piece of scanner state that outlives a server restart — hydrate it
+    // once per scanner rather than on every heartbeat.
+    if (updated.label === undefined) {
+        const row = stmt.scannerLabels.byPairToken.get(pairToken);
+        updated.label = row ? row.label : null;
+    }
+    // Only a real online/offline transition is worth a history row — a
+    // heartbeat re-asserting the same state every 30s would otherwise flood
+    // scannerActivity with nothing to show for it. Compared against `true`/
+    // `=== true` rather than plain inequality so a brand-new scanner's very
+    // first heartbeat (which can legitimately report online:false, since it
+    // fires before the SSE channel is even open) doesn't log a nonsensical
+    // "went offline" for a scanner that was never online in the first place.
+    if (patch.online === true && existing.online !== true) {
+        logScannerActivity(pairToken, updated.eventId, 'online');
+    } else if (patch.online === false && existing.online === true) {
+        logScannerActivity(pairToken, updated.eventId, 'offline');
+    }
     scannerRegistry.set(pairToken, updated);
     // If scanner switched events, notify the old event's monitors so they can remove the stale card
     if (existing.eventId && existing.eventId !== updated.eventId) {
@@ -9533,6 +9562,7 @@ function recordScan(pairToken, event, status, ticket, allTickets) {
     }
 
     if (!pairToken || !event) return;
+    logScannerActivity(pairToken, event.id, 'scan', { status, name: ticket.name, registrationId: ticket.registrationId });
     upsertScanner(pairToken, {
         eventId: event.id, eventName: event.name, lastSeen: new Date().toISOString(),
         lastResult: { status, name: ticket.name || '', registrationId: ticket.registrationId, total: allTickets.length, scanned }
@@ -9564,6 +9594,30 @@ function broadcastToEventScanners(eventId, payload) {
     for (const [pairToken, data] of scannerRegistry) {
         if (data.eventId === eventId) broadcastToPair(pairToken, payload);
     }
+}
+
+// Every event this pairToken has ever been seen working, from the live
+// registry plus its persisted history — a scanner that's currently offline
+// (or whose process restarted) still has to resolve to *some* event so an
+// owner can look up its history/chat after the fact.
+function scannerEventIdsKnown(pairToken) {
+    const ids = new Set();
+    const live = scannerRegistry.get(pairToken);
+    if (live?.eventId) ids.add(live.eventId);
+    for (const r of stmt.scannerActivity.eventIdsByPairToken.all(pairToken)) ids.add(r.eventId);
+    for (const r of stmt.scannerMessages.eventIdsByPairToken.all(pairToken)) ids.add(r.eventId);
+    return ids;
+}
+
+// Same "does this user have any personal claim on this event" check the
+// scanner list itself is filtered by (GET /api/monitor/scanners) — applied
+// per-scanner for its history/label/chat routes.
+function userCanAccessScanner(userId, pairToken) {
+    const scannerEventIds = scannerEventIdsKnown(pairToken);
+    if (!scannerEventIds.size) return false;
+    const userEventIds = personalEventIdsForUser(userId);
+    for (const id of scannerEventIds) if (userEventIds.has(id)) return true;
+    return false;
 }
 
 // Send to all display screens connected for a given event (by displayToken)
@@ -9759,6 +9813,25 @@ app.post('/api/scan/heartbeat', async (req, res) => {
     res.json({ ok: true });
 });
 
+// A scanner's half of the chat — no login, same trust model as the
+// heartbeat above (pairToken is the device's bearer credential). Only
+// works while the scanner is actively working an event, same as recordScan.
+app.post('/api/scan/message', validateLimiter, (req, res) => {
+    const { pairToken } = req.body;
+    if (!pairToken) return res.status(400).json({ error: 'pairToken required' });
+    const text = String(req.body?.text || '').trim().slice(0, 1000);
+    if (!text) return res.status(400).json({ error: 'text is required' });
+
+    const scannerData = scannerRegistry.get(pairToken);
+    const eventId = scannerData?.eventId || null;
+    if (!eventId) return res.status(400).json({ error: 'Scanner is not currently working an event' });
+
+    const at = new Date().toISOString();
+    stmt.scannerMessages.insert.run(nanoid(), pairToken, eventId, 'from_scanner', text, null, at);
+    broadcastToMonitors(eventId, { type: 'scanner_chat', pairToken, direction: 'from_scanner', text, at });
+    res.json({ success: true });
+});
+
 // ── Scanner SSE Channel ───────────────────────────────────────────────────────
 // Scanner opens this on launch to receive admin notifications and appear as
 // "online" immediately — no scan required.
@@ -9806,11 +9879,14 @@ app.get('/api/scan/stream/:pairToken', async (req, res) => {
 
     req.on('close', () => {
         clearInterval(keepAlive);
-        if (scannerChannels.get(pairToken) === res) scannerChannels.delete(pairToken);
-        const s = scannerRegistry.get(pairToken);
-        if (s) {
-            s.online = false;
-            if (s.eventId) broadcastToMonitors(s.eventId, { type: 'scanner_update', scanner: { ...s, online: false } });
+        // Only the close of the currently active channel counts — an old
+        // connection's close firing after a reconnect already replaced it
+        // must not flip a now-online scanner back to offline, and must not
+        // log a bogus 'offline' transition into its history.
+        const isCurrentChannel = scannerChannels.get(pairToken) === res;
+        if (isCurrentChannel) scannerChannels.delete(pairToken);
+        if (isCurrentChannel && scannerRegistry.has(pairToken)) {
+            upsertScanner(pairToken, { online: false });
         }
     });
 });
@@ -9858,6 +9934,62 @@ app.post('/api/monitor/notify', requireAuth, async (req, res) => {
 
     log('monitor-notify', `[notify] SSE ${delivered}/${notified}, push fallback ${pushed} — by: ${userId}  msg: ${message.slice(0, 60)}`);
     res.json({ ok: true, notified, delivered, pushed });
+});
+
+// ── Scanner History / Labels / Chat ────────────────────────────────────────
+// Everything here is scoped by pairToken and gated by userCanAccessScanner,
+// which resolves to "any event this device has ever worked" so it still
+// answers after the scanner goes offline or the server restarts — the whole
+// point of persisting this instead of relying on scannerRegistry alone.
+
+app.get('/api/monitor/scanners/:pairToken/history', requireAuth, (req, res) => {
+    const { pairToken } = req.params;
+    if (!userCanAccessScanner(req.session.userId, pairToken)) return res.status(403).json({ error: 'Not authorized' });
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+    res.json({ activity: stmt.scannerActivity.byPairToken.all(pairToken, limit) });
+});
+
+app.put('/api/monitor/scanners/:pairToken/label', requireAuth, (req, res) => {
+    const { pairToken } = req.params;
+    if (!userCanAccessScanner(req.session.userId, pairToken)) return res.status(403).json({ error: 'Not authorized' });
+    const label = String(req.body?.label || '').trim().slice(0, 60);
+    if (label) stmt.scannerLabels.upsert.run(pairToken, label, new Date().toISOString());
+    else stmt.scannerLabels.delete.run(pairToken);
+
+    const existing = scannerRegistry.get(pairToken);
+    if (existing) {
+        existing.label = label || null;
+        scannerRegistry.set(pairToken, existing);
+        if (existing.eventId) broadcastToMonitors(existing.eventId, { type: 'scanner_update', scanner: existing });
+    }
+    res.json({ success: true, label: label || null });
+});
+
+app.get('/api/monitor/scanners/:pairToken/messages', requireAuth, (req, res) => {
+    const { pairToken } = req.params;
+    if (!userCanAccessScanner(req.session.userId, pairToken)) return res.status(403).json({ error: 'Not authorized' });
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+    // Stored newest-first (for the trim-friendly LIMIT), reversed here so the
+    // panel can just append in reading order.
+    res.json({ messages: stmt.scannerMessages.byPairToken.all(pairToken, limit).reverse() });
+});
+
+app.post('/api/monitor/scanners/:pairToken/message', requireAuth, (req, res) => {
+    const { pairToken } = req.params;
+    if (!userCanAccessScanner(req.session.userId, pairToken)) return res.status(403).json({ error: 'Not authorized' });
+    const text = String(req.body?.text || '').trim().slice(0, 1000);
+    if (!text) return res.status(400).json({ error: 'text is required' });
+
+    const scannerData = scannerRegistry.get(pairToken);
+    const eventId = scannerData?.eventId || [...scannerEventIdsKnown(pairToken)][0] || null;
+    const at = new Date().toISOString();
+    const id = nanoid();
+    stmt.scannerMessages.insert.run(id, pairToken, eventId, 'to_scanner', text, req.session.userId, at);
+
+    const delivered = broadcastToPair(pairToken, { type: 'chat_message', direction: 'to_scanner', text, at, id });
+    if (eventId) broadcastToMonitors(eventId, { type: 'scanner_chat', pairToken, direction: 'to_scanner', text, at, id });
+    if (eventId) logAudit(req, { eventId, action: 'scanner.messageSent', details: { pairToken, delivered } });
+    res.json({ success: true, delivered });
 });
 
 // ── Per-Event Metrics ────────────────────────────────────────────────────────

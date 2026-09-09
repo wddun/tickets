@@ -64,6 +64,7 @@ struct ScannerView: View {
     @State private var notifBannerTitle = ""
     @State private var notifBannerMsg   = ""
     @State private var showNotifBanner  = false
+    @State private var notifBannerIsChat = false
     @State private var notifDismissTask: Task<Void, Never>?
     private let scanDebounceInterval: TimeInterval = 5.0
 
@@ -94,7 +95,12 @@ struct ScannerView: View {
                 NotificationBanner(
                     title: notifBannerTitle,
                     message: notifBannerMsg,
-                    onDismiss: dismissNotifBanner
+                    onDismiss: dismissNotifBanner,
+                    showsReply: notifBannerIsChat,
+                    onSendReply: { reply in
+                        let token = scannerPairToken
+                        Task { await APIService.shared.sendScanMessage(pairToken: token, text: reply) }
+                    }
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(200)
@@ -824,6 +830,7 @@ struct ScannerView: View {
     private func showNotifBannerWith(title: String, message: String) {
         notifBannerTitle = title
         notifBannerMsg   = message
+        notifBannerIsChat = false
         withAnimation { showNotifBanner = true }
         notifDismissTask?.cancel()
         notifDismissTask = Task { @MainActor in
@@ -831,6 +838,17 @@ struct ScannerView: View {
             guard !Task.isCancelled else { return }
             withAnimation { showNotifBanner = false }
         }
+    }
+
+    // Same banner, but for an admin chat message — adds a reply field (see
+    // NotificationBanner's showsReply), so no auto-dismiss timer: staff
+    // should have time to type before it disappears on its own.
+    private func showChatBannerWith(message: String) {
+        notifBannerTitle = "Message from Admin"
+        notifBannerMsg   = message
+        notifBannerIsChat = true
+        notifDismissTask?.cancel()
+        withAnimation { showNotifBanner = true }
     }
 
     private func startNotifListener() {
@@ -861,6 +879,11 @@ struct ScannerView: View {
                                         let title = json["title"] as? String ?? "Message from Admin"
                                         await MainActor.run {
                                             self.showNotifBannerWith(title: title, message: message)
+                                        }
+                                    } else if type == "chat_message", let text = json["text"] as? String,
+                                              (json["direction"] as? String) == "to_scanner" {
+                                        await MainActor.run {
+                                            self.showChatBannerWith(message: text)
                                         }
                                     } else if type == "settings_update" {
                                         let ms = json["scanResultDurationMs"] as? Int
@@ -1377,51 +1400,101 @@ struct NotificationBanner: View {
     let title: String
     let message: String
     let onDismiss: () -> Void
+    var showsReply: Bool = false
+    var onSendReply: ((String) -> Void)? = nil
+
+    @State private var replyText = ""
+    @State private var replySent = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Button(action: onDismiss) {
-                HStack(alignment: .top, spacing: 12) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(LinearGradient(colors: [Color(red: 0.39, green: 0.40, blue: 0.95), Color(red: 0.51, green: 0.55, blue: 0.97)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 36, height: 36)
-                        .overlay(
-                            Image(systemName: "bell.fill")
-                                .font(.system(size: 16, weight: .semibold))
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: onDismiss) {
+                    HStack(alignment: .top, spacing: 12) {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(LinearGradient(colors: [Color(red: 0.39, green: 0.40, blue: 0.95), Color(red: 0.51, green: 0.55, blue: 0.97)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                Image(systemName: "bell.fill")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(.white)
+                            )
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text("WTS TICKETS")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.45))
+                                Spacer()
+                                Text("tap to dismiss")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.white.opacity(0.25))
+                            }
+                            Text(title)
+                                .font(.system(size: 14, weight: .bold))
                                 .foregroundStyle(.white)
-                        )
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text("WTS TICKETS")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.45))
-                            Spacer()
-                            Text("tap to dismiss")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.25))
+                            Text(message)
+                                .font(.system(size: 14))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        Text(title)
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text(message)
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(14)
-                .background(.ultraThinMaterial)
-                .background(Color.black.opacity(0.6))
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.12), lineWidth: 1))
-                .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
+                .buttonStyle(.plain)
+
+                // Kept outside the Button above so typing/tapping Send here
+                // doesn't also trigger the banner's dismiss action.
+                if showsReply {
+                    if replySent {
+                        Text("Reply sent")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.green.opacity(0.85))
+                            .padding(.top, 10)
+                    } else {
+                        HStack(spacing: 8) {
+                            TextField("Reply…", text: $replyText)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 14))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 8)
+                                .background(Color.white.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 9))
+                                .submitLabel(.send)
+                                .onSubmit(sendReply)
+                            Button(action: sendReply) {
+                                Text("Send")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(Color(red: 0.39, green: 0.40, blue: 0.95))
+                                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        .padding(.top, 10)
+                    }
+                }
             }
-            .buttonStyle(.plain)
+            .padding(14)
+            .background(.ultraThinMaterial)
+            .background(Color.black.opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.12), lineWidth: 1))
+            .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
             .padding(.horizontal, 12)
             .padding(.top, 8)
             Spacer()
         }
+    }
+
+    private func sendReply() {
+        let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        onSendReply?(text)
+        withAnimation { replySent = true }
     }
 }
 

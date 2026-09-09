@@ -549,6 +549,136 @@
             border-color: #6366f1;
         }
 
+        /* ── History list (inside details drawer) ── */
+        .history-list {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        .history-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 5px 0;
+            font-size: 12px;
+        }
+
+        .history-label {
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .history-time {
+            color: var(--text-muted);
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+
+        .rename-btn {
+            background: none;
+            border: none;
+            padding: 2px;
+            cursor: pointer;
+            color: var(--text-muted);
+            display: inline-flex;
+            vertical-align: middle;
+            margin-left: 4px;
+        }
+
+        .rename-btn:hover {
+            color: var(--text);
+        }
+
+        .scanner-name-input {
+            font-size: inherit;
+            font-weight: inherit;
+            font-family: inherit;
+            border: 1px solid #6366f1;
+            border-radius: 5px;
+            padding: 1px 5px;
+            background: var(--card);
+            color: var(--text);
+            width: 100%;
+        }
+
+        /* ── Chat drawer ── */
+        .chat-drawer {
+            display: none;
+            flex-direction: column;
+            padding: 14px 18px;
+            border-top: 1px solid var(--border);
+            background: var(--card);
+            gap: 8px;
+        }
+
+        .chat-drawer.open {
+            display: flex;
+        }
+
+        .chat-messages {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 220px;
+            overflow-y: auto;
+            padding: 4px 2px;
+        }
+
+        .chat-empty {
+            color: var(--text-muted);
+            font-size: 12px;
+            text-align: center;
+            padding: 10px 0;
+        }
+
+        .chat-bubble {
+            max-width: 80%;
+            padding: 6px 11px;
+            border-radius: 14px;
+            font-size: 13px;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+
+        .chat-bubble.to-scanner {
+            align-self: flex-end;
+            background: #6366f1;
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+
+        .chat-bubble.from-scanner {
+            align-self: flex-start;
+            background: var(--row-bg);
+            color: var(--text);
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-bubble-time {
+            display: block;
+            font-size: 10px;
+            opacity: 0.7;
+            margin-top: 2px;
+        }
+
+        .chat-badge {
+            display: inline-block;
+            background: #ef4444;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            border-radius: 8px;
+            padding: 0px 5px;
+            margin-left: 5px;
+            vertical-align: middle;
+        }
+
         /* ── Empty state ── */
         .empty-state {
             text-align: center;
@@ -825,6 +955,10 @@
                     }
                 }
 
+                if (msg.type === 'scanner_chat') {
+                    handleScannerChat(msg);
+                }
+
                 if (msg.type === 'restarting') {
                     // A read-only live view holds nothing worth preserving
                     // beyond the event filter dropdown — a fresh deploy just
@@ -910,6 +1044,11 @@
             // Event meta
             const metaEl = card.querySelector('.scanner-meta');
             if (metaEl) metaEl.textContent = s.eventName || (s.eventId ? 'Unknown event' : 'No event');
+
+            // Name (label wins over deviceName) — skip while mid-rename so a
+            // live update from another admin doesn't clobber the open input.
+            const nameTextEl = card.querySelector('.scanner-name-text');
+            if (nameTextEl) nameTextEl.textContent = s.label || s.deviceName || 'Unknown Device';
         }
 
         // ── Event tabs ─────────────────────────────────────────────────────
@@ -1001,11 +1140,20 @@
             const lastSeenLabel = s.online ? 'Connected' : (s.lastSeen ? timeAgo(s.lastSeen, false) : 'Never');
             const eventName = s.eventName || (s.eventId ? 'Unknown event' : 'No event');
 
+            const chatState = scannerChatState.get(s.pairToken);
+            const unread = chatState?.unread || 0;
+            const chatBadge = unread > 0 ? `<span class="chat-badge">${unread}</span>` : '';
+
             return `<div class="scanner-card status-${status}" id="card-${s.pairToken}">
         <div class="scanner-header">
             <div class="scanner-status-dot ${dotClass}"></div>
             <div class="scanner-info">
-                <div class="scanner-name">${esc(s.deviceName || 'Unknown Device')}</div>
+                <div class="scanner-name" id="name-${s.pairToken}">
+                    <span class="scanner-name-text">${esc(s.label || s.deviceName || 'Unknown Device')}</span>
+                    <button class="rename-btn" onclick="startRename('${s.pairToken}')" title="Rename this scanner">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                    </button>
+                </div>
                 <div class="scanner-meta">${esc(eventName)}</div>
             </div>
             <span class="platform-badge ${badgeClass}">${badgeLabel}</span>
@@ -1024,11 +1172,19 @@
             <div class="scanner-footer">
                 <span class="last-seen">Last seen ${lastSeenLabel}</span>
                 <button class="btn btn-secondary btn-sm" onclick="toggleDetails('${s.pairToken}')">Details</button>
+                <button class="btn btn-secondary btn-sm" id="chatbtn-${s.pairToken}" onclick="toggleChat('${s.pairToken}')">Chat${chatBadge}</button>
                 <button class="btn btn-primary btn-sm" onclick="toggleNotify('${s.pairToken}')">💬 Notify</button>
             </div>
         </div>
         <div class="details-drawer" id="details-${s.pairToken}">
             ${detailsHTML(s)}
+        </div>
+        <div class="chat-drawer" id="chat-${s.pairToken}">
+            <div class="chat-messages" id="chat-messages-${s.pairToken}"><div class="chat-empty">Loading…</div></div>
+            <div style="display:flex;gap:8px;">
+                <input type="text" class="notify-input" style="height:auto;" placeholder="Message this scanner…" id="chat-input-${s.pairToken}" onkeydown="if(event.key==='Enter'){event.preventDefault();sendChatMessage('${s.pairToken}');}">
+                <button class="btn btn-primary btn-sm" onclick="sendChatMessage('${s.pairToken}')">Send</button>
+            </div>
         </div>
         <div class="notify-form" id="notify-${s.pairToken}">
             <input type="text" class="notify-input" placeholder="Title (optional)" id="ntitle-${s.pairToken}" style="height:auto;">
@@ -1057,16 +1213,167 @@
             ];
             return rows.map(([l, v]) =>
                 `<div class="details-row"><span class="details-label">${l}</span><span class="details-value">${esc(String(v))}</span></div>`
-            ).join('');
+            ).join('') + `<div class="history-list" id="history-${s.pairToken}"><div class="chat-empty">Loading history…</div></div>`;
+        }
+
+        // Icon + label for one scannerActivity row — kept in one place so the
+        // history list and any future summary read the same vocabulary.
+        function historyRowLabel(row) {
+            if (row.type === 'online') return 'Came online';
+            if (row.type === 'offline') return 'Went offline';
+            if (row.type === 'scan') {
+                const statusLabels = {
+                    valid: 'Checked in', used: 'Duplicate scan', invalid: 'Invalid scan',
+                    reentry_enter: 'Re-entered', reentry_exit: 'Checked out', checked_out: 'Checked out',
+                };
+                const label = statusLabels[row.status] || row.status || 'Scan';
+                return row.name ? `${label} — ${row.name}` : label;
+            }
+            return row.type;
+        }
+
+        async function loadScannerHistory(pairToken) {
+            const el = document.getElementById(`history-${pairToken}`);
+            if (!el) return;
+            try {
+                const r = await fetch(`/api/monitor/scanners/${encodeURIComponent(pairToken)}/history?limit=50`);
+                if (!r.ok) throw new Error();
+                const { activity } = await r.json();
+                el.innerHTML = activity.length
+                    ? activity.map(row => `<div class="history-row"><span class="history-label">${esc(historyRowLabel(row))}</span><span class="history-time">${timeAgo(row.createdAt, false)}</span></div>`).join('')
+                    : `<div class="chat-empty">No history yet</div>`;
+            } catch {
+                el.innerHTML = `<div class="chat-empty">Couldn't load history</div>`;
+            }
         }
 
         // ── Interactions ──────────────────────────────────────────────────
         function toggleDetails(pairToken) {
             const el = document.getElementById(`details-${pairToken}`);
+            const opening = !el.classList.contains('open');
             el.classList.toggle('open');
             // Refresh content in case scanner updated
             const s = scanners.get(pairToken);
             if (s) el.innerHTML = detailsHTML(s);
+            if (opening) loadScannerHistory(pairToken);
+        }
+
+        // ── Rename ────────────────────────────────────────────────────────
+        function startRename(pairToken) {
+            const s = scanners.get(pairToken);
+            const nameEl = document.getElementById(`name-${pairToken}`);
+            if (!s || !nameEl) return;
+            const current = s.label || s.deviceName || '';
+            nameEl.innerHTML = `<input type="text" class="scanner-name-input" id="rename-input-${pairToken}" value="${esc(current)}" maxlength="60"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();commitRename('${pairToken}');}if(event.key==='Escape'){event.preventDefault();renderGrid();}"
+                onblur="commitRename('${pairToken}')">`;
+            const input = document.getElementById(`rename-input-${pairToken}`);
+            input.focus();
+            input.select();
+        }
+
+        async function commitRename(pairToken) {
+            const input = document.getElementById(`rename-input-${pairToken}`);
+            if (!input) return;
+            const label = input.value.trim();
+            try {
+                await fetch(`/api/monitor/scanners/${encodeURIComponent(pairToken)}/label`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ label }),
+                });
+            } catch {}
+            // The label change also arrives over SSE (scanner_update) and patches
+            // `scanners`, but re-render immediately rather than waiting on it.
+            const s = scanners.get(pairToken);
+            if (s) s.label = label || null;
+            renderGrid();
+        }
+
+        // ── Chat ──────────────────────────────────────────────────────────
+        // pairToken -> { messages: [{direction, text, at}], unread, loaded }
+        const scannerChatState = new Map();
+
+        function chatBubbleHTML(m) {
+            const cls = m.direction === 'to_scanner' ? 'to-scanner' : 'from-scanner';
+            return `<div class="chat-bubble ${cls}">${esc(m.text)}<span class="chat-bubble-time">${new Date(m.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></div>`;
+        }
+
+        function renderChatMessages(pairToken) {
+            const el = document.getElementById(`chat-messages-${pairToken}`);
+            if (!el) return;
+            const state = scannerChatState.get(pairToken);
+            const messages = state?.messages || [];
+            el.innerHTML = messages.length ? messages.map(chatBubbleHTML).join('') : `<div class="chat-empty">No messages yet</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        async function toggleChat(pairToken) {
+            const el = document.getElementById(`chat-${pairToken}`);
+            if (!el) return;
+            const opening = !el.classList.contains('open');
+            el.classList.toggle('open');
+            if (!opening) return;
+
+            let state = scannerChatState.get(pairToken);
+            if (!state) { state = { messages: [], unread: 0, loaded: false }; scannerChatState.set(pairToken, state); }
+            state.unread = 0;
+            updateChatBadge(pairToken);
+
+            if (!state.loaded) {
+                try {
+                    const r = await fetch(`/api/monitor/scanners/${encodeURIComponent(pairToken)}/messages?limit=50`);
+                    if (r.ok) {
+                        const { messages } = await r.json();
+                        state.messages = messages;
+                        state.loaded = true;
+                    }
+                } catch {}
+            }
+            renderChatMessages(pairToken);
+            document.getElementById(`chat-input-${pairToken}`)?.focus();
+        }
+
+        function updateChatBadge(pairToken) {
+            const btn = document.getElementById(`chatbtn-${pairToken}`);
+            if (!btn) return;
+            const unread = scannerChatState.get(pairToken)?.unread || 0;
+            btn.innerHTML = `Chat${unread > 0 ? `<span class="chat-badge">${unread}</span>` : ''}`;
+        }
+
+        async function sendChatMessage(pairToken) {
+            const input = document.getElementById(`chat-input-${pairToken}`);
+            if (!input) return;
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = '';
+            input.disabled = true;
+            try {
+                await fetch(`/api/monitor/scanners/${encodeURIComponent(pairToken)}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text }),
+                });
+            } catch {}
+            input.disabled = false;
+            input.focus();
+            // The sent message arrives back over SSE (scanner_chat) and renders
+            // itself — no optimistic append needed on a same-server round trip.
+        }
+
+        // Called from the SSE handler for both directions.
+        function handleScannerChat(msg) {
+            let state = scannerChatState.get(msg.pairToken);
+            if (!state) { state = { messages: [], unread: 0, loaded: false }; scannerChatState.set(msg.pairToken, state); }
+            state.messages.push({ direction: msg.direction, text: msg.text, at: msg.at });
+
+            const drawer = document.getElementById(`chat-${msg.pairToken}`);
+            if (drawer && drawer.classList.contains('open')) {
+                renderChatMessages(msg.pairToken);
+            } else if (msg.direction === 'from_scanner') {
+                state.unread++;
+                updateChatBadge(msg.pairToken);
+            }
         }
 
         function toggleNotify(pairToken) {
