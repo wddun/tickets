@@ -1211,14 +1211,15 @@
             opacity: 0; cursor: pointer; border: none; padding: 0;
         }
 
-        /* New Event modal: manual-vs-sheet starting point */
+        /* New Event modal: manual-vs-sheet-vs-template starting point */
         .new-event-mode-toggle {
             display: flex;
+            flex-wrap: wrap;
             gap: 8px;
             margin-bottom: 8px;
         }
         .mode-toggle-btn {
-            flex: 1;
+            flex: 1 1 120px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1244,6 +1245,11 @@
             background: var(--navy-mid);
             color: #fff;
         }
+        .mode-toggle-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .mode-toggle-btn:disabled:hover { border-color: var(--border); }
         .new-event-mode-hint {
             font-size: 12px;
             color: var(--text-muted);
@@ -2615,10 +2621,29 @@
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
                         From Google Sheet / Form
                     </button>
+                    <button type="button" class="mode-toggle-btn" data-mode="template" onclick="setNewEventMode('template')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+                        From Template
+                    </button>
                 </div>
                 <div class="new-event-mode-hint" id="newEventModeHint">
                     Fill in the details below and create the event manually. You can connect a Google Form or spreadsheet to auto-issue tickets anytime later, from Settings → API Access.
                 </div>
+            </div>
+            <div class="form-group" id="newEventTemplateGroup" style="display:none;margin-bottom:14px;">
+                <label for="newEventTemplateSelect" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Copy setup from <span style="color:var(--red-text)">*</span></label>
+                <select id="newEventTemplateSelect" onchange="onTemplateSelectChange()"
+                    style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;background:var(--card);color:var(--text);">
+                    <option value="">Choose an event…</option>
+                </select>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Custom fields, theme, email template and policy, signup limits, waitlist and return settings all carry over. Nobody's tickets, waitlist entries, orders or history come with it.</div>
+                <label class="settings-toggle" style="margin-top:10px;">
+                    <input type="checkbox" id="newEventTemplateAccess">
+                    <div>
+                        <div class="settings-toggle-title">Also copy who has access</div>
+                        <div class="settings-toggle-desc">Gives everyone currently sharing the template event the same permissions on the new one. They are not emailed about it.</div>
+                    </div>
+                </label>
             </div>
             <div class="form-group" style="margin-bottom:14px;">
                 <label for="newEventName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Event Name <span style="color:var(--red-text)">*</span></label>
@@ -2626,24 +2651,24 @@
                     style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;"
                     onkeydown="if(event.key==='Enter')document.getElementById('newEventTime').focus()">
             </div>
-            <div class="dt-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+            <div class="dt-grid" id="newEventDtGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
                 <div class="form-group">
                     <label for="newEventTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Date & Time <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
                     <input type="datetime-local" id="newEventTime"
                         style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="newEventEndTimeGroup">
                     <label for="newEventEndTime" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">End Time <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
                     <input type="datetime-local" id="newEventEndTime"
                         style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;">
                 </div>
             </div>
-            <div class="form-group" style="margin-bottom:10px;">
+            <div class="form-group" id="newEventVenueGroup" style="margin-bottom:10px;">
                 <label for="newEventLocName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Venue Name <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
                 <input type="text" id="newEventLocName" placeholder="e.g. The Grand Ballroom"
                     style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
             </div>
-            <div class="form-group" style="margin-bottom:14px;">
+            <div class="form-group" id="newEventAddressGroup" style="margin-bottom:14px;">
                 <label for="newEventAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
                 <div class="addr-wrap">
                     <input type="text" id="newEventAddress" placeholder="Start typing an address…"
@@ -2654,7 +2679,7 @@
                 <input type="hidden" id="newEventLat">
                 <input type="hidden" id="newEventLng">
             </div>
-            <div class="form-group" style="margin-bottom:20px;">
+            <div class="form-group" id="newEventColorGroup" style="margin-bottom:20px;">
                 <label style="display:block;margin-bottom:8px;font-size:13px;font-weight:600;">Color</label>
                 <div id="colorSwatches" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                     <div class="color-swatch selected" data-color="rgb(99,102,241)"  style="background:rgb(99,102,241)"></div>
@@ -5486,11 +5511,13 @@
 
         // ── New Event ─────────────────────────────────────────
         let selectedColor = 'rgb(99,102,241)';
-        let newEventMode = 'manual'; // 'manual' | 'sheet' — only changes what happens right after creation, see submitNewEvent()
+        let newEventMode = 'manual'; // 'manual' | 'sheet' | 'template' — only changes what happens right after creation, see submitNewEvent()
+        let _newEventAutoName = ''; // last name we auto-filled from a template pick, so a user's own typed name is never overwritten
 
         const NEW_EVENT_MODE_HINTS = {
             manual: 'Fill in the details below and create the event manually. You can connect a Google Form or spreadsheet to auto-issue tickets anytime later, from Settings → API Access.',
             sheet: "Create the event now — we'll take you straight to Sheet Watcher setup so you can paste your Google Form's response-sheet link. The details below are optional; you can fill them in now, later, or let the sheet's own fields drive ticket details instead.",
+            template: "Pick one of your existing events below to copy its setup — custom fields, theme, email template, signup limits, waitlist and return settings. No tickets or history come with it, and the copy gets its own date.",
         };
 
         function setNewEventMode(mode) {
@@ -5499,9 +5526,51 @@
                 b.classList.toggle('active', b.dataset.mode === mode);
             });
             document.getElementById('newEventModeHint').textContent = NEW_EVENT_MODE_HINTS[mode];
+
+            const isTemplate = mode === 'template';
+            document.getElementById('newEventTemplateGroup').style.display = isTemplate ? 'block' : 'none';
+            document.getElementById('newEventEndTimeGroup').style.display = isTemplate ? 'none' : 'block';
+            document.getElementById('newEventVenueGroup').style.display = isTemplate ? 'none' : 'block';
+            document.getElementById('newEventAddressGroup').style.display = isTemplate ? 'none' : 'block';
+            document.getElementById('newEventColorGroup').style.display = isTemplate ? 'none' : 'block';
+            document.getElementById('newEventDtGrid').style.gridTemplateColumns = isTemplate ? '1fr' : '1fr 1fr';
+        }
+
+        // Prefills the name from whichever event is picked as the template,
+        // but only while the name field still holds an earlier auto-fill (or
+        // is empty) — once someone types their own name, picking a different
+        // template must not clobber it.
+        function onTemplateSelectChange() {
+            const sel = document.getElementById('newEventTemplateSelect');
+            const nameInput = document.getElementById('newEventName');
+            if (!sel.value) return;
+            const opt = sel.options[sel.selectedIndex];
+            const auto = `${opt.textContent} (Copy)`;
+            if (!nameInput.value.trim() || nameInput.value === _newEventAutoName) {
+                nameInput.value = auto;
+            }
+            _newEventAutoName = auto;
+        }
+
+        function populateTemplateOptions() {
+            const sel = document.getElementById('newEventTemplateSelect');
+            const options = [...events]
+                .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                .map(e => `<option value="${e.id}">${esc(e.name || 'Untitled event')}</option>`)
+                .join('');
+            sel.innerHTML = '<option value="">Choose an event…</option>' + options;
+
+            const templateBtn = document.querySelector('#newEventModeToggle .mode-toggle-btn[data-mode="template"]');
+            const hasEvents = events.length > 0;
+            templateBtn.disabled = !hasEvents;
+            templateBtn.title = hasEvents ? '' : 'Create an event first to use as a template';
         }
 
         function openNewEventModal() {
+            populateTemplateOptions();
+            document.getElementById('newEventTemplateSelect').value = '';
+            document.getElementById('newEventTemplateAccess').checked = false;
+            _newEventAutoName = '';
             setNewEventMode('manual');
             document.getElementById('newEventName').value = '';
             document.getElementById('newEventTime').value = '';
@@ -5565,6 +5634,43 @@
             const btn         = document.getElementById('newEventSubmitBtn');
 
             if (!name) { errEl.textContent = 'Event name is required.'; errEl.style.display = 'block'; return; }
+
+            if (newEventMode === 'template') {
+                const templateId = document.getElementById('newEventTemplateSelect').value;
+                if (!templateId) { errEl.textContent = 'Choose an event to copy from.'; errEl.style.display = 'block'; return; }
+                errEl.style.display = 'none';
+                btn.disabled = true; btn.textContent = 'Creating…';
+                try {
+                    const r = await fetch(`/api/event/${templateId}/duplicate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name,
+                            // Same "blank means no date yet, not the source's" rule
+                            // as openDuplicateEventModal — see POST .../duplicate.
+                            time: timeVal ? new Date(timeVal).toISOString() : '',
+                            endTime: '',
+                            includeAccess: document.getElementById('newEventTemplateAccess').checked,
+                        }),
+                    });
+                    const data = await r.json();
+                    if (data.success) {
+                        closeNewEventModal();
+                        await loadEvents();
+                        selectEvent(data.eventId);
+                        showToast(`Created "${name}" from template.${data.copiedAccess ? ` ${data.copiedAccess} collaborator${data.copiedAccess === 1 ? '' : 's'} carried over.` : ''}`);
+                    } else {
+                        errEl.textContent = data.error || 'Failed to create event from template.';
+                        errEl.style.display = 'block';
+                    }
+                } catch (_) {
+                    errEl.textContent = 'Connection error.';
+                    errEl.style.display = 'block';
+                }
+                btn.disabled = false; btn.textContent = 'Create Event';
+                return;
+            }
+
             errEl.style.display = 'none';
 
             btn.disabled = true; btn.textContent = 'Creating…';
