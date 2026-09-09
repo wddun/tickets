@@ -1203,16 +1203,17 @@
             const bar = document.getElementById('healthBar');
             if (!bar) return;
 
-            let total = 0, scanned = 0;
+            // With no single room selected, ticket totals span unrelated events and
+            // aren't meaningful — hide the health bar entirely and just list scanners.
             if (activeEventFilter === 'all') {
-                for (const ev of events.values()) {
-                    const c = eventCounts.get(ev.id);
-                    if (c) { total += c.total || 0; scanned += c.scanned || 0; }
-                }
-            } else {
-                const c = eventCounts.get(activeEventFilter);
-                if (c) { total = c.total || 0; scanned = c.scanned || 0; }
+                bar.style.display = 'none';
+                return;
             }
+            bar.style.display = '';
+
+            const c = eventCounts.get(activeEventFilter);
+            const total = c ? (c.total || 0) : 0;
+            const scanned = c ? (c.scanned || 0) : 0;
             const remaining = Math.max(0, total - scanned);
             const pct = total ? Math.round(scanned / total * 100) : 0;
 
