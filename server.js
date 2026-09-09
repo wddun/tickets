@@ -9894,8 +9894,13 @@ app.get('/api/scan/stream/:pairToken', async (req, res) => {
 // ── Monitor Notifications ────────────────────────────────────────────────────
 // Send a message to one or all scanners (SSE → app shows alert/notification)
 app.post('/api/monitor/notify', requireAuth, async (req, res) => {
-    const { pairToken, title = 'Admin Message', message } = req.body;
-    if (!message) return res.status(400).json({ error: 'message is required' });
+    const { pairToken } = req.body;
+    const rawTitle = String(req.body.title || '').trim();
+    const message = String(req.body.message || '').trim();
+    // Either field alone is enough to send — a quick "Break time" needs only
+    // a title, and a longer note doesn't need a title restating it.
+    if (!rawTitle && !message) return res.status(400).json({ error: 'Title or message is required' });
+    const title = rawTitle || 'Admin Message';
 
     const userId = req.session.userId;
     const userEventIds = personalEventIdsForUser(userId);
