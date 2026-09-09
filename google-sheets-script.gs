@@ -285,177 +285,178 @@ function buildColorOptionsHtml_() {
 // The dialog's HTML — inline (rather than a separate .html file) to
 // match how the other dialogs in this script are built.
 function buildWizardHtml_() {
-  return '' +
-'<style>' +
-'  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 18px 20px; color: #1e293b; }' +
-'  h2 { font-size: 16px; margin: 0 0 14px; }' +
-'  label { display: block; font-size: 12px; font-weight: 600; color: #555; margin: 12px 0 4px; }' +
-'  input[type=text], input[type=date], input[type=time], select {' +
-'    width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 14px;' +
-'    border: 1px solid #ccc; border-radius: 6px; font-family: inherit;' +
-'  }' +
-'  .row { display: flex; gap: 10px; }' +
-'  .row > div { flex: 1; }' +
-'  .hint { font-size: 11px; color: #888; margin-top: 3px; }' +
-'  .actions { margin-top: 20px; display: flex; gap: 8px; align-items: center; }' +
-'  button { padding: 10px 16px; font-size: 14px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; font-family: inherit; }' +
-'  #submitBtn { background: #1a1f3c; color: #fff; flex: 1; }' +
-'  #submitBtn:disabled { opacity: 0.5; cursor: default; }' +
-'  #cancelBtn { background: #f1f2f5; color: #1a1a2e; }' +
-'  .err { color: #c4294a; font-size: 13px; margin-top: 10px; display: none; }' +
-'  #successView { display: none; text-align: center; padding: 20px 0; }' +
-'  #successView a { display: block; margin: 16px auto 0; padding: 10px; background: #1a1f3c; color: #fff; ' +
-'    border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; max-width: 260px; }' +
-'  .status { font-size: 13px; color: #666; }' +
-'</style>' +
-'<div id="formView">' +
-'  <h2 id="formTitle">Event Setup</h2>' +
-'  <label>Event Name *</label>' +
-'  <input type="text" id="f_name" placeholder="My Awesome Event">' +
-'  <div class="row">' +
-'    <div><label>Date *</label><input type="date" id="f_date"></div>' +
-'    <div><label>Time *</label><input type="time" id="f_time"></div>' +
-'  </div>' +
-'  <label>Venue Name</label>' +
-'  <input type="text" id="f_location" placeholder="The Grand Ballroom">' +
-'  <label>Full Address</label>' +
-'  <input type="text" id="f_address" placeholder="123 Main St, City, State ZIP">' +
-'  <div class="hint">Used for the Apple Wallet lock-screen proximity alert.</div>' +
-'  <label>Color</label>' +
-'  <select id="f_color">' + buildColorOptionsHtml_() + '</select>' +
-'  <input type="text" id="f_colorCustom" placeholder="rgb(99, 102, 241) or #6366f1" style="display:none;margin-top:6px;">' +
-'  <label>Image (Drive URL or file ID)</label>' +
-'  <input type="text" id="f_image" placeholder="Paste a Google Drive share link">' +
-'  <div class="hint">File must be shared "Anyone with the link".</div>' +
-'  <div class="err" id="errBox"></div>' +
-'  <div class="actions">' +
-'    <button id="submitBtn" onclick="submitForm()">Create Event</button>' +
-'    <button id="cancelBtn" onclick="google.script.host.close()">Cancel</button>' +
-'    <span class="status" id="statusText"></span>' +
-'  </div>' +
-'</div>' +
-'<div id="successView">' +
-'  <h2 id="successTitle">Saved!</h2>' +
-'  <p id="successMsg" class="status"></p>' +
-'  <a id="claimLink" href="#" target="_blank" style="display:none;">Open Claim Link</a>' +
-'  <div class="actions" style="justify-content:center;">' +
-'    <button id="doneBtn" onclick="google.script.host.close()">Done</button>' +
-'  </div>' +
-'</div>' +
-'<script>' +
-'  var wizardData = null;' +
-'  var colorSelect = document.getElementById("f_color");' +
-'' +
-'  function applySavedColor(colorOptions, current) {' +
-'    if (colorOptions.indexOf(current) === -1) {' +
-'      colorSelect.value = colorOptions[colorOptions.length - 1]; // Custom' +
-'      document.getElementById("f_colorCustom").style.display = "block";' +
-'      document.getElementById("f_colorCustom").value = current;' +
-'    } else {' +
-'      colorSelect.value = current;' +
-'    }' +
-'  }' +
-'' +
-'  google.script.run' +
-'    .withSuccessHandler(function(data) {' +
-'      wizardData = data;' +
-'      document.getElementById("f_name").value = data.name || "";' +
-'      document.getElementById("f_date").value = data.date || "";' +
-'      document.getElementById("f_time").value = data.time || "";' +
-'      document.getElementById("f_location").value = data.location || "";' +
-'      document.getElementById("f_address").value = data.address || "";' +
-'      document.getElementById("f_image").value = data.image || "";' +
-'      applySavedColor(data.colorOptions, data.color || data.colorOptions[0]);' +
-'      if (data.eventId) {' +
-'        document.getElementById("formTitle").textContent = "Edit Event Details";' +
-'        document.getElementById("submitBtn").textContent = "Save Changes";' +
-'      }' +
-'    })' +
-'    .withFailureHandler(function(err) {' +
-'      var errBox = document.getElementById("errBox");' +
-'      errBox.textContent = "LOAD_FAILED: Could not load the current event details — the form below is blank. (" + ((err && err.message) || "unknown error") + ")";' +
-'      errBox.style.display = "block";' +
-'    })' +
-'    .getWizardData();' +
-'' +
-'  colorSelect.addEventListener("change", function() {' +
-'    var isCustom = this.value.indexOf("Custom") === 0;' +
-'    document.getElementById("f_colorCustom").style.display = isCustom ? "block" : "none";' +
-'  });' +
-'' +
-'  // Clears the red outline + inline note a previous validation pass put' +
-'  // on a field, the moment the user starts fixing it.' +
-'  ["f_name", "f_date", "f_time"].forEach(function(id) {' +
-'    document.getElementById(id).addEventListener("input", function() { markFieldValid(id); });' +
-'  });' +
-'  function markFieldInvalid(id) { document.getElementById(id).style.borderColor = "#c4294a"; }' +
-'  function markFieldValid(id) { document.getElementById(id).style.borderColor = "#ccc"; }' +
-'' +
-'  function submitForm() {' +
-'    var name = document.getElementById("f_name").value.trim();' +
-'    var date = document.getElementById("f_date").value;' +
-'    var time = document.getElementById("f_time").value;' +
-'    var errBox = document.getElementById("errBox");' +
-'' +
-'    var missing = [];' +
-'    if (!name) missing.push("Event Name");' +
-'    if (!date) missing.push("Date");' +
-'    if (!time) missing.push("Time");' +
-'    ["f_name", "f_date", "f_time"].forEach(markFieldValid);' +
-'    if (missing.length) {' +
-'      errBox.textContent = "MISSING_REQUIRED_FIELD: " + missing.join(", ") + (missing.length > 1 ? " are" : " is") + " required.";' +
-'      errBox.style.display = "block";' +
-'      if (!name) markFieldInvalid("f_name");' +
-'      if (!date) markFieldInvalid("f_date");' +
-'      if (!time) markFieldInvalid("f_time");' +
-'      return;' +
-'    }' +
-'    errBox.style.display = "none";' +
-'    var color = colorSelect.value.indexOf("Custom") === 0' +
-'      ? document.getElementById("f_colorCustom").value.trim()' +
-'      : colorSelect.value;' +
-'    var form = {' +
-'      name: name, date: date, time: time,' +
-'      location: document.getElementById("f_location").value.trim(),' +
-'      address: document.getElementById("f_address").value.trim(),' +
-'      color: color,' +
-'      image: document.getElementById("f_image").value.trim()' +
-'    };' +
-'    document.getElementById("submitBtn").disabled = true;' +
-'    document.getElementById("statusText").textContent = (wizardData && wizardData.eventId) ? "Saving…" : "Creating event…";' +
-'    google.script.run' +
-'      .withSuccessHandler(onSubmitResult)' +
-'      .withFailureHandler(function(err) {' +
-'        document.getElementById("submitBtn").disabled = false;' +
-'        document.getElementById("statusText").textContent = "";' +
-'        errBox.textContent = "SCRIPT_ERROR: " + ((err && err.message) || "Something went wrong.");' +
-'        errBox.style.display = "block";' +
-'      })' +
-'      .submitWizard(form);' +
-'  }' +
-'' +
-'  function onSubmitResult(result) {' +
-'    document.getElementById("submitBtn").disabled = false;' +
-'    document.getElementById("statusText").textContent = "";' +
-'    if (!result.success) {' +
-'      var errBox = document.getElementById("errBox");' +
-'      errBox.textContent = "SERVER_ERROR: " + (result.error || "Something went wrong.");' +
-'      errBox.style.display = "block";' +
-'      return;' +
-'    }' +
-'    document.getElementById("formView").style.display = "none";' +
-'    document.getElementById("successView").style.display = "block";' +
-'    if (result.linkUrl) {' +
-'      document.getElementById("successMsg").textContent =' +
-'        "Your event is live and auto-send is on. Open this link to connect the room to your account:";' +
-'      var link = document.getElementById("claimLink");' +
-'      link.href = result.linkUrl;' +
-'      link.style.display = "block";' +
-'    } else {' +
-'      document.getElementById("successMsg").textContent = "Your changes have been saved.";' +
-'    }' +
-'  }' +
-'</script>';
+  return [
+    '<style>',
+    '  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 18px 20px; color: #1e293b; }',
+    '  h2 { font-size: 16px; margin: 0 0 14px; }',
+    '  label { display: block; font-size: 12px; font-weight: 600; color: #555; margin: 12px 0 4px; }',
+    '  input[type=text], input[type=date], input[type=time], select {',
+    '    width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 14px;',
+    '    border: 1px solid #ccc; border-radius: 6px; font-family: inherit;',
+    '  }',
+    '  .row { display: flex; gap: 10px; }',
+    '  .row > div { flex: 1; }',
+    '  .hint { font-size: 11px; color: #888; margin-top: 3px; }',
+    '  .actions { margin-top: 20px; display: flex; gap: 8px; align-items: center; }',
+    '  button { padding: 10px 16px; font-size: 14px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; font-family: inherit; }',
+    '  #submitBtn { background: #1a1f3c; color: #fff; flex: 1; }',
+    '  #submitBtn:disabled { opacity: 0.5; cursor: default; }',
+    '  #cancelBtn { background: #f1f2f5; color: #1a1a2e; }',
+    '  .err { color: #c4294a; font-size: 13px; margin-top: 10px; display: none; }',
+    '  #successView { display: none; text-align: center; padding: 20px 0; }',
+    '  #successView a { display: block; margin: 16px auto 0; padding: 10px; background: #1a1f3c; color: #fff; ',
+    '    border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; max-width: 260px; }',
+    '  .status { font-size: 13px; color: #666; }',
+    '</style>',
+    '<div id="formView">',
+    '  <h2 id="formTitle">Event Setup</h2>',
+    '  <label>Event Name *</label>',
+    '  <input type="text" id="f_name" placeholder="My Awesome Event">',
+    '  <div class="row">',
+    '    <div><label>Date *</label><input type="date" id="f_date"></div>',
+    '    <div><label>Time *</label><input type="time" id="f_time"></div>',
+    '  </div>',
+    '  <label>Venue Name</label>',
+    '  <input type="text" id="f_location" placeholder="The Grand Ballroom">',
+    '  <label>Full Address</label>',
+    '  <input type="text" id="f_address" placeholder="123 Main St, City, State ZIP">',
+    '  <div class="hint">Used for the Apple Wallet lock-screen proximity alert.</div>',
+    '  <label>Color</label>',
+    '  <select id="f_color">' + buildColorOptionsHtml_() + '</select>',
+    '  <input type="text" id="f_colorCustom" placeholder="rgb(99, 102, 241) or #6366f1" style="display:none;margin-top:6px;">',
+    '  <label>Image (Drive URL or file ID)</label>',
+    '  <input type="text" id="f_image" placeholder="Paste a Google Drive share link">',
+    '  <div class="hint">File must be shared "Anyone with the link".</div>',
+    '  <div class="err" id="errBox"></div>',
+    '  <div class="actions">',
+    '    <button id="submitBtn" onclick="submitForm()">Create Event</button>',
+    '    <button id="cancelBtn" onclick="google.script.host.close()">Cancel</button>',
+    '    <span class="status" id="statusText"></span>',
+    '  </div>',
+    '</div>',
+    '<div id="successView">',
+    '  <h2 id="successTitle">Saved!</h2>',
+    '  <p id="successMsg" class="status"></p>',
+    '  <a id="claimLink" href="#" target="_blank" style="display:none;">Open Claim Link</a>',
+    '  <div class="actions" style="justify-content:center;">',
+    '    <button id="doneBtn" onclick="google.script.host.close()">Done</button>',
+    '  </div>',
+    '</div>',
+    '<script>',
+    '  var wizardData = null;',
+    '  var colorSelect = document.getElementById("f_color");',
+    '',
+    '  function applySavedColor(colorOptions, current) {',
+    '    if (colorOptions.indexOf(current) === -1) {',
+    '      colorSelect.value = colorOptions[colorOptions.length - 1]; // Custom',
+    '      document.getElementById("f_colorCustom").style.display = "block";',
+    '      document.getElementById("f_colorCustom").value = current;',
+    '    } else {',
+    '      colorSelect.value = current;',
+    '    }',
+    '  }',
+    '',
+    '  google.script.run',
+    '    .withSuccessHandler(function(data) {',
+    '      wizardData = data;',
+    '      document.getElementById("f_name").value = data.name || "";',
+    '      document.getElementById("f_date").value = data.date || "";',
+    '      document.getElementById("f_time").value = data.time || "";',
+    '      document.getElementById("f_location").value = data.location || "";',
+    '      document.getElementById("f_address").value = data.address || "";',
+    '      document.getElementById("f_image").value = data.image || "";',
+    '      applySavedColor(data.colorOptions, data.color || data.colorOptions[0]);',
+    '      if (data.eventId) {',
+    '        document.getElementById("formTitle").textContent = "Edit Event Details";',
+    '        document.getElementById("submitBtn").textContent = "Save Changes";',
+    '      }',
+    '    })',
+    '    .withFailureHandler(function(err) {',
+    '      var errBox = document.getElementById("errBox");',
+    '      errBox.textContent = "LOAD_FAILED: Could not load the current event details — the form below is blank. (" + ((err && err.message) || "unknown error") + ")";',
+    '      errBox.style.display = "block";',
+    '    })',
+    '    .getWizardData();',
+    '',
+    '  colorSelect.addEventListener("change", function() {',
+    '    var isCustom = this.value.indexOf("Custom") === 0;',
+    '    document.getElementById("f_colorCustom").style.display = isCustom ? "block" : "none";',
+    '  });',
+    '',
+    '  // Clears the red outline + inline note a previous validation pass put',
+    '  // on a field, the moment the user starts fixing it.',
+    '  ["f_name", "f_date", "f_time"].forEach(function(id) {',
+    '    document.getElementById(id).addEventListener("input", function() { markFieldValid(id); });',
+    '  });',
+    '  function markFieldInvalid(id) { document.getElementById(id).style.borderColor = "#c4294a"; }',
+    '  function markFieldValid(id) { document.getElementById(id).style.borderColor = "#ccc"; }',
+    '',
+    '  function submitForm() {',
+    '    var name = document.getElementById("f_name").value.trim();',
+    '    var date = document.getElementById("f_date").value;',
+    '    var time = document.getElementById("f_time").value;',
+    '    var errBox = document.getElementById("errBox");',
+    '',
+    '    var missing = [];',
+    '    if (!name) missing.push("Event Name");',
+    '    if (!date) missing.push("Date");',
+    '    if (!time) missing.push("Time");',
+    '    ["f_name", "f_date", "f_time"].forEach(markFieldValid);',
+    '    if (missing.length) {',
+    '      errBox.textContent = "MISSING_REQUIRED_FIELD: " + missing.join(", ") + (missing.length > 1 ? " are" : " is") + " required.";',
+    '      errBox.style.display = "block";',
+    '      if (!name) markFieldInvalid("f_name");',
+    '      if (!date) markFieldInvalid("f_date");',
+    '      if (!time) markFieldInvalid("f_time");',
+    '      return;',
+    '    }',
+    '    errBox.style.display = "none";',
+    '    var color = colorSelect.value.indexOf("Custom") === 0',
+    '      ? document.getElementById("f_colorCustom").value.trim()',
+    '      : colorSelect.value;',
+    '    var form = {',
+    '      name: name, date: date, time: time,',
+    '      location: document.getElementById("f_location").value.trim(),',
+    '      address: document.getElementById("f_address").value.trim(),',
+    '      color: color,',
+    '      image: document.getElementById("f_image").value.trim()',
+    '    };',
+    '    document.getElementById("submitBtn").disabled = true;',
+    '    document.getElementById("statusText").textContent = (wizardData && wizardData.eventId) ? "Saving…" : "Creating event…";',
+    '    google.script.run',
+    '      .withSuccessHandler(onSubmitResult)',
+    '      .withFailureHandler(function(err) {',
+    '        document.getElementById("submitBtn").disabled = false;',
+    '        document.getElementById("statusText").textContent = "";',
+    '        errBox.textContent = "SCRIPT_ERROR: " + ((err && err.message) || "Something went wrong.");',
+    '        errBox.style.display = "block";',
+    '      })',
+    '      .submitWizard(form);',
+    '  }',
+    '',
+    '  function onSubmitResult(result) {',
+    '    document.getElementById("submitBtn").disabled = false;',
+    '    document.getElementById("statusText").textContent = "";',
+    '    if (!result.success) {',
+    '      var errBox = document.getElementById("errBox");',
+    '      errBox.textContent = "SERVER_ERROR: " + (result.error || "Something went wrong.");',
+    '      errBox.style.display = "block";',
+    '      return;',
+    '    }',
+    '    document.getElementById("formView").style.display = "none";',
+    '    document.getElementById("successView").style.display = "block";',
+    '    if (result.linkUrl) {',
+    '      document.getElementById("successMsg").textContent =',
+    '        "Your event is live and auto-send is on. Open this link to connect the room to your account:";',
+    '      var link = document.getElementById("claimLink");',
+    '      link.href = result.linkUrl;',
+    '      link.style.display = "block";',
+    '    } else {',
+    '      document.getElementById("successMsg").textContent = "Your changes have been saved.";',
+    '    }',
+    '  }',
+    '</script>'
+  ].join('\n');
 }
 
 // ============================================================
