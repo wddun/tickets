@@ -8,14 +8,19 @@
 //
 //  HOW TO SET UP (once per new room):
 //  1. Open the sheet — the Event/Attendees tabs build themselves and
-//     a "Ticket System" menu appears. Nothing to click yet.
-//  2. Fill in the yellow Event Details cells (rows 5–11) on the Event tab.
-//  3. Run: Ticket System > Get Started
+//     the Event Setup Wizard opens automatically.
 //     Google will ask you to approve this script the first time —
 //     that one-time permission prompt is required by Google for any
 //     script that talks to a server, it isn't something we can skip.
-//     After that, Get Started creates the event, links the sheet to
-//     your account, and turns on auto-send — you're done.
+//  2. Fill in the wizard (name, date, time, venue…) and submit. It
+//     creates the event, turns on auto-send, and gives you a link to
+//     connect the room to your account — you're done.
+//
+//  The Event Details rows (5–11) on the Event tab are a read-only
+//  display of what the wizard last saved — there is no trigger reading
+//  hand-edits there anymore, so typing into them directly does nothing
+//  and won't be reflected on the server. Reopen the wizard any time
+//  (Ticket System > Event Setup Wizard) to change something.
 //
 //  Everything else (custom fields, resending a row, duplicating this
 //  sheet as a new room) lives in the menu; one-off setup helpers are
@@ -87,7 +92,8 @@ var COLOR_OPTIONS = [
 //  the event, linking the sheet) calls our server, and Google always
 //  requires an explicit one-time permission prompt before a script's
 //  first outside network call — that step can't be skipped or
-//  automated away, so "Get Started" is the one real click left.
+//  automated away, so opening the wizard is the one real click left,
+//  and even that we do for them automatically on a fresh copy.
 // ============================================================
 function onOpen() {
   var ss = SpreadsheetApp.getActive();
@@ -96,7 +102,7 @@ function onOpen() {
 
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Ticket System')
-    .addItem('Get Started', 'getStarted')
+    .addItem('Event Setup Wizard', 'openWizard')
     .addSeparator()
     .addItem('Send Pending Emails', 'sendPendingEmails')
     .addItem('Resend Selected Row', 'resendSelectedRow')
@@ -105,7 +111,6 @@ function onOpen() {
     .addItem('Duplicate as New Room…', 'duplicateAsNewRoom')
     .addSeparator()
     .addSubMenu(ui.createMenu('Advanced')
-      .addItem('Create Event from Event tab', 'createEventFromSheet')
       .addItem('Link Sheet to Account', 'linkSheetToAccount')
       .addItem('Test Connection', 'testConnection')
       .addSeparator()
@@ -113,54 +118,17 @@ function onOpen() {
       .addItem('Fix: Remove Duplicate Triggers', 'setupTriggers'))
     .addToUi();
 
-  if (isFreshCopy) {
-    ui.alert(
-      'Welcome',
-      'Your Event and Attendees tabs are already set up.\n\n' +
-      'Fill in the yellow Event Details cells (rows 5–11) on the Event tab, then run Ticket System > Get Started.',
-      ui.ButtonSet.OK
-    );
-  }
+  // A brand-new copy jumps straight into the wizard — no menu hunting,
+  // no cells to find and fill in first.
+  if (isFreshCopy) openWizard();
 }
 
-// ============================================================
-//  GET STARTED — one guided flow through the whole setup, for
-//  organizers who don't want to hunt through the menu in order.
-// ============================================================
+// Kept as a stable, separately-named entry point: it's what a Drawing
+// button assigned once in the master template (Insert > Drawing, then
+// right-click > Assign script > getStarted) keeps pointing at even after
+// the wizard replaced the old multi-step flow underneath it.
 function getStarted() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActive();
-
-  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
-  if (!evSheet || !ss.getSheetByName(ATTENDEES_SHEET_NAME)) {
-    initializeSheet(true /* skipAlert */);
-    evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
-  }
-
-  var already = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
-  if (!already) {
-    var name = evSheet.getRange(EV_NAME).getValue().toString().trim();
-    if (!name || name === 'My Awesome Event') {
-      ui.alert(
-        'Almost there',
-        'Fill in the yellow Event Details cells (rows 5–11) on the Event tab, then run Ticket System > Get Started again.',
-        ui.ButtonSet.OK
-      );
-      return;
-    }
-    createEventFromSheet(true /* calledFromWizard */);
-    already = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
-    if (!already) return; // create-event already showed its own error
-  }
-
-  setupTriggers(true /* skipAlert */);
-  linkSheetToAccount();
-
-  ui.alert(
-    'All set',
-    'Your event is created and triggers are running. If you haven\'t already, click the link that just opened to connect this room to your account — then switch to the Attendees tab and start entering registrations.',
-    ui.ButtonSet.OK
-  );
+  openWizard();
 }
 
 // ============================================================
@@ -180,6 +148,253 @@ function setApiKey(key) {
 function getServerUrl(evSheet) {
   var override = evSheet.getRange(EV_SERVER_URL).getValue().toString().trim();
   return (override || DEFAULT_SERVER_URL).replace(/\/$/, '');
+}
+
+// ============================================================
+//  EVENT SETUP WIZARD — the only supported way to create or edit
+//  an event's details. A dialog with real form fields, in place of
+//  filling in the Event tab's cells by hand: those cells are now a
+//  read-only display (see protectEventDetailCells_), because there
+//  is no longer any trigger that reads a hand-edit there and pushes
+//  it to the server (see the removed onEventTabEdit) — a hand-edit
+//  used to silently do nothing, which is the actual problem this
+//  and the locked cells are fixing.
+// ============================================================
+function openWizard() {
+  var ss = SpreadsheetApp.getActive();
+  if (!ss.getSheetByName(EVENT_SHEET_NAME) || !ss.getSheetByName(ATTENDEES_SHEET_NAME)) {
+    initializeSheet(true /* skipAlert */);
+  }
+  var html = HtmlService.createHtmlOutput(buildWizardHtml_())
+    .setWidth(480)
+    .setHeight(620);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Event Setup');
+}
+
+// Called by the dialog on load to pre-fill fields — blank on a fresh
+// sheet, current values when reopening the wizard to change something.
+function getWizardData() {
+  var ss      = SpreadsheetApp.getActive();
+  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
+  return {
+    name:         evSheet.getRange(EV_NAME).getValue().toString(),
+    date:         formatDateForInput_(evSheet.getRange(EV_DATE).getValue()),
+    time:         formatTimeForInput_(evSheet.getRange(EV_TIME).getValue()),
+    location:     evSheet.getRange(EV_LOCATION).getValue().toString(),
+    address:      evSheet.getRange(EV_ADDRESS).getValue().toString(),
+    color:        evSheet.getRange(EV_COLOR).getValue().toString() || COLOR_OPTIONS[0],
+    image:        evSheet.getRange(EV_IMAGE).getValue().toString(),
+    eventId:      evSheet.getRange(EV_EVENT_ID).getValue().toString().trim(),
+    colorOptions: COLOR_OPTIONS
+  };
+}
+
+// Called by the dialog on submit. Writes the submitted values into the
+// Event Details cells (a script's own writes are unaffected by the
+// warning-only protection on them either way), then creates or updates
+// the event on the server. First-time creation also turns on the
+// triggers and fetches a claim link, both folded into the same result so
+// the dialog can show a single follow-up screen instead of chaining a
+// second modal. Returns {success, error?, eventId?, created?, linkUrl?}.
+function submitWizard(form) {
+  var ss      = SpreadsheetApp.getActive();
+  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
+
+  var dt = parseWizardDateTime_(form.date, form.time);
+  evSheet.getRange(EV_NAME).setValue(form.name || '');
+  evSheet.getRange(EV_DATE).setValue(dt.dateObj || '');
+  evSheet.getRange(EV_TIME).setValue(dt.timeObj || '');
+  evSheet.getRange(EV_LOCATION).setValue(form.location || '');
+  evSheet.getRange(EV_ADDRESS).setValue(form.address || '');
+  evSheet.getRange(EV_COLOR).setValue(form.color || COLOR_OPTIONS[0]);
+  evSheet.getRange(EV_IMAGE).setValue(form.image || '');
+  SpreadsheetApp.flush();
+
+  var result = syncEventToServer_();
+  if (!result.success) return result;
+
+  if (result.created) {
+    setupTriggers(true /* skipAlert */);
+    var linkResult = fetchClaimLink_();
+    result.linkUrl = linkResult.success ? linkResult.linkUrl : null;
+  }
+  return result;
+}
+
+// "2026-09-20" + "19:30" (native <input type="date">/<input type="time">
+// values) → Date objects for the Date/Time cells. Guards against a blank
+// time (defaults to midnight) since the wizard's own required-field
+// validation runs client-side before this is ever called.
+function parseWizardDateTime_(dateStr, timeStr) {
+  if (!dateStr) return { dateObj: null, timeObj: null };
+  var d = dateStr.split('-').map(Number);
+  var t = (timeStr || '00:00').split(':').map(Number);
+  return {
+    dateObj: new Date(d[0], d[1] - 1, d[2]),
+    timeObj: new Date(1899, 11, 30, t[0], t[1] || 0)
+  };
+}
+
+function formatDateForInput_(val) {
+  if (!val) return '';
+  var d = new Date(val);
+  return isNaN(d.getTime()) ? '' : Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function formatTimeForInput_(val) {
+  if (!val) return '';
+  var d = new Date(val);
+  return isNaN(d.getTime()) ? '' : Utilities.formatDate(d, Session.getScriptTimeZone(), 'HH:mm');
+}
+
+// The dialog's HTML — inline (rather than a separate .html file) to
+// match how the other dialogs in this script are built.
+function buildWizardHtml_() {
+  return '' +
+'<style>' +
+'  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 18px 20px; color: #1e293b; }' +
+'  h2 { font-size: 16px; margin: 0 0 14px; }' +
+'  label { display: block; font-size: 12px; font-weight: 600; color: #555; margin: 12px 0 4px; }' +
+'  input[type=text], input[type=date], input[type=time], select {' +
+'    width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 14px;' +
+'    border: 1px solid #ccc; border-radius: 6px; font-family: inherit;' +
+'  }' +
+'  .row { display: flex; gap: 10px; }' +
+'  .row > div { flex: 1; }' +
+'  .hint { font-size: 11px; color: #888; margin-top: 3px; }' +
+'  .actions { margin-top: 20px; display: flex; gap: 8px; align-items: center; }' +
+'  button { padding: 10px 16px; font-size: 14px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; font-family: inherit; }' +
+'  #submitBtn { background: #1a1f3c; color: #fff; flex: 1; }' +
+'  #submitBtn:disabled { opacity: 0.5; cursor: default; }' +
+'  #cancelBtn { background: #f1f2f5; color: #1a1a2e; }' +
+'  .err { color: #c4294a; font-size: 13px; margin-top: 10px; display: none; }' +
+'  #successView { display: none; text-align: center; padding: 20px 0; }' +
+'  #successView a { display: block; margin: 16px auto 0; padding: 10px; background: #1a1f3c; color: #fff; ' +
+'    border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; max-width: 260px; }' +
+'  .status { font-size: 13px; color: #666; }' +
+'</style>' +
+'<div id="formView">' +
+'  <h2 id="formTitle">Event Setup</h2>' +
+'  <label>Event Name *</label>' +
+'  <input type="text" id="f_name" placeholder="My Awesome Event">' +
+'  <div class="row">' +
+'    <div><label>Date *</label><input type="date" id="f_date"></div>' +
+'    <div><label>Time *</label><input type="time" id="f_time"></div>' +
+'  </div>' +
+'  <label>Venue Name</label>' +
+'  <input type="text" id="f_location" placeholder="The Grand Ballroom">' +
+'  <label>Full Address</label>' +
+'  <input type="text" id="f_address" placeholder="123 Main St, City, State ZIP">' +
+'  <div class="hint">Used for the Apple Wallet lock-screen proximity alert.</div>' +
+'  <label>Color</label>' +
+'  <select id="f_color"></select>' +
+'  <input type="text" id="f_colorCustom" placeholder="rgb(99, 102, 241) or #6366f1" style="display:none;margin-top:6px;">' +
+'  <label>Image (Drive URL or file ID)</label>' +
+'  <input type="text" id="f_image" placeholder="Paste a Google Drive share link">' +
+'  <div class="hint">File must be shared "Anyone with the link".</div>' +
+'  <div class="err" id="errBox"></div>' +
+'  <div class="actions">' +
+'    <button id="submitBtn" onclick="submitForm()">Create Event</button>' +
+'    <button id="cancelBtn" onclick="google.script.host.close()">Cancel</button>' +
+'    <span class="status" id="statusText"></span>' +
+'  </div>' +
+'</div>' +
+'<div id="successView">' +
+'  <h2 id="successTitle">Saved!</h2>' +
+'  <p id="successMsg" class="status"></p>' +
+'  <a id="claimLink" href="#" target="_blank" style="display:none;">Open Claim Link</a>' +
+'  <div class="actions" style="justify-content:center;">' +
+'    <button id="doneBtn" onclick="google.script.host.close()">Done</button>' +
+'  </div>' +
+'</div>' +
+'<script>' +
+'  var wizardData = null;' +
+'  google.script.run.withSuccessHandler(function(data) {' +
+'    wizardData = data;' +
+'    document.getElementById("f_name").value = data.name || "";' +
+'    document.getElementById("f_date").value = data.date || "";' +
+'    document.getElementById("f_time").value = data.time || "";' +
+'    document.getElementById("f_location").value = data.location || "";' +
+'    document.getElementById("f_address").value = data.address || "";' +
+'    document.getElementById("f_image").value = data.image || "";' +
+'    var sel = document.getElementById("f_color");' +
+'    sel.innerHTML = data.colorOptions.map(function(c) { return "<option>" + c + "</option>"; }).join("");' +
+'    var current = data.color || data.colorOptions[0];' +
+'    if (data.colorOptions.indexOf(current) === -1) {' +
+'      sel.value = data.colorOptions[data.colorOptions.length - 1]; // Custom' +
+'      document.getElementById("f_colorCustom").style.display = "block";' +
+'      document.getElementById("f_colorCustom").value = current;' +
+'    } else {' +
+'      sel.value = current;' +
+'    }' +
+'    if (data.eventId) {' +
+'      document.getElementById("formTitle").textContent = "Edit Event Details";' +
+'      document.getElementById("submitBtn").textContent = "Save Changes";' +
+'    }' +
+'  }).getWizardData();' +
+'' +
+'  document.getElementById("f_color").addEventListener("change", function() {' +
+'    var isCustom = this.value.indexOf("Custom") === 0;' +
+'    document.getElementById("f_colorCustom").style.display = isCustom ? "block" : "none";' +
+'  });' +
+'' +
+'  function submitForm() {' +
+'    var name = document.getElementById("f_name").value.trim();' +
+'    var date = document.getElementById("f_date").value;' +
+'    var time = document.getElementById("f_time").value;' +
+'    var errBox = document.getElementById("errBox");' +
+'    if (!name || !date || !time) {' +
+'      errBox.textContent = "Event Name, Date, and Time are required.";' +
+'      errBox.style.display = "block";' +
+'      return;' +
+'    }' +
+'    errBox.style.display = "none";' +
+'    var colorSel = document.getElementById("f_color").value;' +
+'    var color = colorSel.indexOf("Custom") === 0' +
+'      ? document.getElementById("f_colorCustom").value.trim()' +
+'      : colorSel;' +
+'    var form = {' +
+'      name: name, date: date, time: time,' +
+'      location: document.getElementById("f_location").value.trim(),' +
+'      address: document.getElementById("f_address").value.trim(),' +
+'      color: color,' +
+'      image: document.getElementById("f_image").value.trim()' +
+'    };' +
+'    document.getElementById("submitBtn").disabled = true;' +
+'    document.getElementById("statusText").textContent = (wizardData && wizardData.eventId) ? "Saving…" : "Creating event…";' +
+'    google.script.run' +
+'      .withSuccessHandler(onSubmitResult)' +
+'      .withFailureHandler(function(err) {' +
+'        document.getElementById("submitBtn").disabled = false;' +
+'        document.getElementById("statusText").textContent = "";' +
+'        errBox.textContent = (err && err.message) || "Something went wrong.";' +
+'        errBox.style.display = "block";' +
+'      })' +
+'      .submitWizard(form);' +
+'  }' +
+'' +
+'  function onSubmitResult(result) {' +
+'    document.getElementById("submitBtn").disabled = false;' +
+'    document.getElementById("statusText").textContent = "";' +
+'    if (!result.success) {' +
+'      var errBox = document.getElementById("errBox");' +
+'      errBox.textContent = result.error || "Something went wrong.";' +
+'      errBox.style.display = "block";' +
+'      return;' +
+'    }' +
+'    document.getElementById("formView").style.display = "none";' +
+'    document.getElementById("successView").style.display = "block";' +
+'    if (result.linkUrl) {' +
+'      document.getElementById("successMsg").textContent =' +
+'        "Your event is live and auto-send is on. Open this link to connect the room to your account:";' +
+'      var link = document.getElementById("claimLink");' +
+'      link.href = result.linkUrl;' +
+'      link.style.display = "block";' +
+'    } else {' +
+'      document.getElementById("successMsg").textContent = "Your changes have been saved.";' +
+'    }' +
+'  }' +
+'</script>';
 }
 
 // ============================================================
@@ -211,34 +426,38 @@ function initializeSheet(skipAlert) {
   evSheet.getRange('A4').setValue('EVENT DETAILS').setFontWeight('bold').setFontColor('#4a4a8a').setFontSize(11);
   evSheet.getRange('A4:D4').merge();
 
-  // Fields
+  // Fields — display-only (see styleReadOnly): set exclusively by the
+  // wizard, never by hand. No trigger reads a hand-edit here anymore, so
+  // typing into them would silently do nothing, which is the actual
+  // problem the wizard + this styling/protection fixes.
+  var wizardNote = 'Set via Ticket System > Event Setup Wizard.\nEdits typed directly into this cell will not be saved.';
   styleLabel(evSheet.getRange('A5'), 'Event Name');
-  styleInput(evSheet.getRange('B5'), 'My Awesome Event');
+  styleReadOnly(evSheet.getRange('B5'), '').setNote(wizardNote);
 
   styleLabel(evSheet.getRange('A6'), 'Date');
-  styleInput(evSheet.getRange('B6'), '').setNumberFormat('M/d/yyyy').setNote('Pick a date or type it (M/D/YYYY)');
+  styleReadOnly(evSheet.getRange('B6'), '').setNumberFormat('M/d/yyyy').setNote(wizardNote);
 
   styleLabel(evSheet.getRange('A7'), 'Time');
-  styleInput(evSheet.getRange('B7'), '').setNumberFormat('h:mm am/pm').setNote('Type the start time, e.g. 7:00 PM');
+  styleReadOnly(evSheet.getRange('B7'), '').setNumberFormat('h:mm am/pm').setNote(wizardNote);
 
   styleLabel(evSheet.getRange('A8'), 'Venue Name');
-  styleInput(evSheet.getRange('B8'), 'The Grand Ballroom');
+  styleReadOnly(evSheet.getRange('B8'), '').setNote(wizardNote);
 
   styleLabel(evSheet.getRange('A9'), 'Full Address');
-  styleInput(evSheet.getRange('B9'), '123 Main St, City, State ZIP').setNote('Used for Apple Wallet lock screen proximity alert');
+  styleReadOnly(evSheet.getRange('B9'), '').setNote(wizardNote + '\n(Used for Apple Wallet lock screen proximity alert)');
 
   styleLabel(evSheet.getRange('A10'), 'Color');
-  var colorCell = evSheet.getRange('B10');
-  styleInput(colorCell, COLOR_OPTIONS[0]);
-  var colorRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(COLOR_OPTIONS, true)
-    .setAllowInvalid(true)
-    .build();
-  colorCell.setDataValidation(colorRule);
-  colorCell.setNote('Choose from list or type a custom rgb() or #hex value');
+  styleReadOnly(evSheet.getRange('B10'), COLOR_OPTIONS[0]).setNote(wizardNote);
 
   styleLabel(evSheet.getRange('A11'), 'Image (Drive URL/ID)');
-  styleInput(evSheet.getRange('B11'), '').setNote('Paste a Google Drive file URL or file ID.\nFile must be shared "Anyone with the link".');
+  styleReadOnly(evSheet.getRange('B11'), '').setNote(wizardNote);
+
+  // Warning-only: nudges anyone who tries to type directly into B5:B11
+  // without blocking them (or risking locking the sheet's own owner out —
+  // Sheets protections can't do that anyway, they only restrict other
+  // collaborators). A script's own writes (see submitWizard_) are never
+  // affected by a warning-only protection either way.
+  protectEventDetailCells_(evSheet);
 
   // Divider
   evSheet.getRange('A12:D12').merge().setBackground('#e8e8e8');
@@ -299,28 +518,39 @@ function initializeSheet(skipAlert) {
   if (!skipAlert) {
     SpreadsheetApp.getUi().alert(
       'Sheet initialized!\n\n' +
-      'Next steps:\n' +
-      '1. Fill in Event Details (rows 5–11) — Server URL can stay blank\n' +
-      '2. Run Ticket System > Get Started\n\n' +
+      'Run Ticket System > Event Setup Wizard to fill in your event details.\n\n' +
       'TIP: The green "T-Shirt Size" column is an example custom field.\n' +
       'Rename it, delete it, or add more columns between "# of Tickets" and "Status".'
     );
   }
 }
 
-// ============================================================
-//  CREATE EVENT — reads Event tab, geocodes, uploads image,
-//  calls /api/sheet/create-event, writes back the Event ID + apiKey
-// ============================================================
-function createEventFromSheet(calledFromWizard) {
-  var ss        = SpreadsheetApp.getActive();
-  var evSheet   = ss.getSheetByName(EVENT_SHEET_NAME);
-  var ui        = SpreadsheetApp.getUi();
+// Warning-only protection on the Event Details display cells — see the
+// note above where this is called from initializeSheet(). Re-applying is
+// safe/idempotent: any existing protection on this exact range is removed
+// first so re-running Reset Sheet Tabs doesn't stack duplicates.
+function protectEventDetailCells_(evSheet) {
+  var range = evSheet.getRange('B5:B11');
+  evSheet.getProtections(SpreadsheetApp.ProtectionType.RANGE)
+    .filter(function(p) { return p.getRange().getA1Notation() === range.getA1Notation(); })
+    .forEach(function(p) { p.remove(); });
+  range.protect()
+    .setDescription('Event details — edit via Ticket System > Event Setup Wizard')
+    .setWarningOnly(true);
+}
 
-  if (!evSheet) {
-    ui.alert('Event tab not found. Run Initialize Sheet first.');
-    return;
-  }
+// ============================================================
+//  SYNC EVENT TO SERVER — reads the Event tab, geocodes the address,
+//  and either creates the event (first time) or updates it (every
+//  time after). Single source of truth for both cases so the wizard's
+//  create and edit paths can't drift apart. Never touches the UI
+//  directly (no ui.alert) — callers decide how to surface the result,
+//  which is what lets this run from inside a dialog's submit handler.
+// ============================================================
+function syncEventToServer_() {
+  var ss      = SpreadsheetApp.getActive();
+  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
+  if (!evSheet) return { success: false, error: 'Event tab not found. Run Reset Sheet Tabs first.' };
 
   var serverUrl = getServerUrl(evSheet);
   var name      = evSheet.getRange(EV_NAME).getValue().toString().trim();
@@ -330,9 +560,11 @@ function createEventFromSheet(calledFromWizard) {
   var address   = evSheet.getRange(EV_ADDRESS).getValue().toString().trim();
   var colorRaw  = evSheet.getRange(EV_COLOR).getValue().toString().trim();
   var imageRef  = evSheet.getRange(EV_IMAGE).getValue().toString().trim();
+  var eventId   = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
+  var apiKey    = getApiKey();
 
-  if (!name) { ui.alert('Event Name (B5) is required.'); return; }
-  if (!dateVal || !timeVal) { ui.alert('Date (B6) and Time (B7) are required.'); return; }
+  if (!name) return { success: false, error: 'Event Name is required.' };
+  if (!dateVal || !timeVal) return { success: false, error: 'Date and Time are required.' };
 
   // Build ISO datetime from date + time cells
   var dateObj = new Date(dateVal);
@@ -340,7 +572,7 @@ function createEventFromSheet(calledFromWizard) {
   dateObj.setHours(timeObj.getHours(), timeObj.getMinutes(), 0, 0);
   var isoTime = dateObj.toISOString();
 
-  // Extract color value (strip the label prefix if they picked from dropdown)
+  // Extract color value (strip the label prefix if it's one of the presets)
   var color = colorRaw.replace(/^.*—\s*/, '').trim();
   if (!color.startsWith('rgb') && !color.startsWith('#')) {
     color = 'rgb(99, 102, 241)'; // fallback indigo
@@ -363,27 +595,39 @@ function createEventFromSheet(calledFromWizard) {
   // Just extract the Drive file ID — the server fetches the image directly
   var driveFileId = imageRef ? parseDriveFileId(imageRef) : null;
 
-  // Mark as in-progress
-  evSheet.getRange(EV_STATUS).setValue('Creating event...');
+  var isCreate = !eventId;
+  evSheet.getRange(EV_STATUS).setValue(isCreate ? 'Creating event...' : 'Saving changes...');
   SpreadsheetApp.flush();
 
-  // Build payload — spreadsheetId is what lets the server mint this room's
-  // private apiKey and tie it to this specific sheet.
-  var payload = {
-    name:          name,
-    time:          isoTime,
-    color:         color,
-    locationName:  location || address,
-    address:       address,
-    lat:           lat,
-    lng:           lng,
-    spreadsheetId: ss.getId(),
-    sheetName:     name
-  };
+  var payload = isCreate
+    ? {
+        name:          name,
+        time:          isoTime,
+        color:         color,
+        locationName:  location || address,
+        address:       address,
+        lat:           lat,
+        lng:           lng,
+        // spreadsheetId is what lets the server mint this room's private
+        // apiKey and tie it to this specific sheet.
+        spreadsheetId: ss.getId(),
+        sheetName:     name
+      }
+    : {
+        eventId:      eventId,
+        apiKey:       apiKey,
+        name:         name,
+        time:         isoTime,
+        color:        color,
+        locationName: location,
+        address:      address,
+        lat:          lat,
+        lng:          lng
+      };
   if (driveFileId) payload.driveFileId = driveFileId;
 
   try {
-    var response = UrlFetchApp.fetch(serverUrl + '/api/sheet/create-event', {
+    var response = UrlFetchApp.fetch(serverUrl + (isCreate ? '/api/sheet/create-event' : '/api/sheet/update-event'), {
       method:           'post',
       contentType:      'application/json',
       payload:          JSON.stringify(payload),
@@ -393,24 +637,19 @@ function createEventFromSheet(calledFromWizard) {
     var result = safeParseJSON(response);
 
     if (result.success) {
-      evSheet.getRange(EV_EVENT_ID).setValue(result.eventId);
-      evSheet.getRange(EV_STATUS).setValue('Event created! Event ID is in B14.');
-      if (result.apiKey) setApiKey(result.apiKey);
-
-      if (!calledFromWizard) {
-        ui.alert(
-          'Event created!\n\n' +
-          'Event ID: ' + result.eventId + '\n\n' +
-          'Run Ticket System > Link Sheet to Account next, then switch to the Attendees tab and start entering registrations.'
-        );
+      if (isCreate) {
+        evSheet.getRange(EV_EVENT_ID).setValue(result.eventId);
+        if (result.apiKey) setApiKey(result.apiKey);
       }
+      evSheet.getRange(EV_STATUS).setValue(isCreate ? 'Event created! Event ID is in B14.' : 'OK: Synced');
+      return { success: true, eventId: isCreate ? result.eventId : eventId, created: isCreate };
     } else {
       evSheet.getRange(EV_STATUS).setValue('Error: ' + result.error);
-      ui.alert('Failed to create event:\n' + result.error);
+      return { success: false, error: result.error };
     }
   } catch (err) {
     evSheet.getRange(EV_STATUS).setValue('Error: ' + err.message);
-    ui.alert('Request failed:\n' + err.message);
+    return { success: false, error: err.message };
   }
 }
 
@@ -423,14 +662,14 @@ function testConnection() {
   var ui      = SpreadsheetApp.getUi();
   var ss      = SpreadsheetApp.getActive();
   var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
-  if (!evSheet) { ui.alert('Event tab not found. Run Initialize Sheet first.'); return; }
+  if (!evSheet) { ui.alert('Event tab not found. Run Reset Sheet Tabs first.'); return; }
 
   var serverUrl = getServerUrl(evSheet);
   var apiKey    = getApiKey();
   var eventId   = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
 
-  if (!eventId) { ui.alert('Create the event first (Ticket System > Create Event from Event tab).'); return; }
-  if (!apiKey)  { ui.alert('No API key stored yet — run "Link Sheet to Account" or re-run "Create Event from Event tab".'); return; }
+  if (!eventId) { ui.alert('Create the event first (Ticket System > Event Setup Wizard).'); return; }
+  if (!apiKey)  { ui.alert('No API key stored yet — run the Event Setup Wizard or Link Sheet to Account.'); return; }
 
   try {
     var response = UrlFetchApp.fetch(serverUrl + '/api/ticket-status', {
@@ -482,7 +721,7 @@ function duplicateAsNewRoom() {
 
   var html = HtmlService.createHtmlOutput(
     '<div style="font-family: sans-serif; padding: 10px;">' +
-    '<p style="font-size: 14px; margin-bottom: 12px;">New room created. Open it and run <strong>Ticket System &gt; Get Started</strong> there — this copy\'s Event ID and attendee rows have already been cleared for you.</p>' +
+    '<p style="font-size: 14px; margin-bottom: 12px;">New room created. Open it and run <strong>Ticket System &gt; Event Setup Wizard</strong> there — this copy\'s Event ID and attendee rows have already been cleared for you.</p>' +
     '<a href="' + copyFile.getUrl() + '" target="_blank" style="font-size:14px;">' + copyFile.getUrl() + '</a>' +
     '</div>'
   ).setWidth(480).setHeight(160);
@@ -490,10 +729,13 @@ function duplicateAsNewRoom() {
 }
 
 // ============================================================
-//  SETUP TRIGGERS — installs installable onEdit trigger
+//  SETUP TRIGGERS — installs installable onEdit/time-based triggers
 // ============================================================
 function setupTriggers(skipAlert) {
-  // Remove all old managed triggers
+  // Remove all old managed triggers — onEventTabEdit is gone (see the
+  // wizard's syncEventToServer_ above), but still listed here so a room
+  // that installed it before this change gets it cleanly removed rather
+  // than left behind as a dangling trigger with no function to call.
   ScriptApp.getProjectTriggers().forEach(function(t) {
     var fn = t.getHandlerFunction();
     if (fn === 'onRowComplete' || fn === 'onEventTabEdit' || fn === 'refreshScanStatus') {
@@ -503,12 +745,6 @@ function setupTriggers(skipAlert) {
 
   // Auto-send emails when attendee rows are filled in
   ScriptApp.newTrigger('onRowComplete')
-    .forSpreadsheet(SpreadsheetApp.getActive())
-    .onEdit()
-    .create();
-
-  // Auto-sync event details when Event tab is edited
-  ScriptApp.newTrigger('onEventTabEdit')
     .forSpreadsheet(SpreadsheetApp.getActive())
     .onEdit()
     .create();
@@ -523,94 +759,9 @@ function setupTriggers(skipAlert) {
     SpreadsheetApp.getUi().alert(
       'Triggers installed!\n\n' +
       '• Emails send automatically when attendee rows are filled in\n' +
-      '• Event details sync to server when you edit the Event tab\n' +
-      '• Scan status refreshes every 10 minutes (skips rows already checked in)'
+      '• Scan status refreshes every 10 minutes (skips rows already checked in)\n\n' +
+      'Event details are set through the Event Setup Wizard, not the Event tab.'
     );
-  }
-}
-
-// ============================================================
-//  EVENT TAB SYNC — auto-pushes changes to server when you
-//  edit event details (name, date, time, venue, address, color, image)
-// ============================================================
-function onEventTabEdit(e) {
-  var sheet = e.source.getActiveSheet();
-  if (sheet.getName() !== EVENT_SHEET_NAME) return;
-
-  // Only react to edits in the data cells (rows 5-11)
-  var row = e.range.getRow();
-  if (row < 5 || row > 11) return;
-
-  var eventId = sheet.getRange(EV_EVENT_ID).getValue().toString().trim();
-  if (!eventId) return; // event not created yet — nothing to sync
-
-  var apiKey = getApiKey();
-  if (!apiKey) return; // no key yet — nothing safe to sync
-
-  var serverUrl = getServerUrl(sheet);
-
-  // Debounce: store a flag and let a short sleep absorb rapid edits
-  Utilities.sleep(800);
-
-  // Re-read all fields fresh after the pause
-  var name      = sheet.getRange(EV_NAME).getValue().toString().trim();
-  var dateVal   = sheet.getRange(EV_DATE).getValue();
-  var timeVal   = sheet.getRange(EV_TIME).getValue();
-  var location  = sheet.getRange(EV_LOCATION).getValue().toString().trim();
-  var address   = sheet.getRange(EV_ADDRESS).getValue().toString().trim();
-  var colorRaw  = sheet.getRange(EV_COLOR).getValue().toString().trim();
-  var imageRef  = sheet.getRange(EV_IMAGE).getValue().toString().trim();
-
-  var color = colorRaw.replace(/^.*—\s*/, '').trim();
-  if (!color.startsWith('rgb') && !color.startsWith('#')) color = '';
-
-  // Build ISO datetime only if both date and time are set
-  var isoTime = '';
-  if (dateVal && timeVal) {
-    try {
-      var dateObj = new Date(dateVal);
-      var timeObj = new Date(timeVal);
-      dateObj.setHours(timeObj.getHours(), timeObj.getMinutes(), 0, 0);
-      isoTime = dateObj.toISOString();
-    } catch(e) {}
-  }
-
-  // Geocode address if it was the edited row
-  var lat = '', lng = '';
-  if (row === 9 && address) { // row 9 = address
-    try {
-      var geo = Maps.newGeocoder().geocode(address);
-      if (geo.status === 'OK' && geo.results.length > 0) {
-        lat = geo.results[0].geometry.location.lat;
-        lng = geo.results[0].geometry.location.lng;
-      }
-    } catch(geoErr) {}
-  }
-
-  // Just extract the Drive file ID if the image cell was edited — server fetches it directly
-  var driveFileId = (row === 11 && imageRef) ? parseDriveFileId(imageRef) : null;
-
-  var payload = { eventId: eventId, apiKey: apiKey };
-  if (name)         payload.name = name;
-  if (isoTime)      payload.time = isoTime;
-  if (color)        payload.color = color;
-  if (location)     payload.locationName = location;
-  if (address)      payload.address = address;
-  if (lat !== '')   payload.lat = lat;
-  if (lng !== '')   payload.lng = lng;
-  if (driveFileId)  payload.driveFileId = driveFileId;
-
-  try {
-    var response = UrlFetchApp.fetch(serverUrl + '/api/sheet/update-event', {
-      method:           'post',
-      contentType:      'application/json',
-      payload:          JSON.stringify(payload),
-      muteHttpExceptions: true
-    });
-    var result = safeParseJSON(response);
-    sheet.getRange(EV_STATUS).setValue(result.success ? 'OK: Synced' : 'Error: Sync failed - ' + result.error);
-  } catch (err) {
-    sheet.getRange(EV_STATUS).setValue('Error: Sync failed - ' + err.message.substring(0, 60));
   }
 }
 
@@ -693,7 +844,7 @@ function onRowComplete(e) {
     }
 
     if (!eventId || !serverUrl || !apiKey) {
-      sheet.getRange(row, colMap.statusCol).setValue('Skipped: create the event first (Event tab)');
+      sheet.getRange(row, colMap.statusCol).setValue('Skipped: create the event first (wizard)');
       continue;
     }
 
@@ -803,7 +954,7 @@ function sendPendingEmails() {
   var apiKey    = getApiKey();
 
   if (!eventId || !serverUrl || !apiKey) {
-    SpreadsheetApp.getUi().alert('Please create the event first on the Event tab.');
+    SpreadsheetApp.getUi().alert('Please create the event first (Ticket System > Event Setup Wizard).');
     return;
   }
 
@@ -917,7 +1068,7 @@ function refreshScanStatus() {
   var serverUrl = evSheet ? getServerUrl(evSheet) : '';
   var apiKey    = getApiKey();
   if (!serverUrl || !apiKey) {
-    try { SpreadsheetApp.getUi().alert('Create the event first (Event tab) — no API key stored yet.'); } catch (e) {}
+    try { SpreadsheetApp.getUi().alert('Create the event first (Ticket System > Event Setup Wizard) — no API key stored yet.'); } catch (e) {}
     return;
   }
 
@@ -1100,62 +1251,82 @@ function styleLabel(range, text) {
 //  ownership (not just view access) — see /api/sheet/claim.
 // ============================================================
 function linkSheetToAccount() {
-  var ss      = SpreadsheetApp.getActive();
-  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
-  var ui      = SpreadsheetApp.getUi();
+  var ui = SpreadsheetApp.getUi();
+  var result = fetchClaimLink_();
 
-  if (!evSheet) {
-    ui.alert('Event tab not found. Run Initialize Sheet first.');
+  if (!result.success) {
+    ui.alert(result.error === 'no-event-tab' ? 'Event tab not found. Run Reset Sheet Tabs first.' : 'Failed to generate link:\n' + result.error);
     return;
   }
+
+  var linkUrl = result.linkUrl;
+  var htmlOutput = HtmlService.createHtmlOutput(
+    '<div style="font-family: sans-serif; padding: 10px;">' +
+    '<p style="font-size: 14px; margin-bottom: 12px;">Open this link and log in (or sign up) to connect this room to your account. If nobody has claimed it yet, this makes it fully yours — your own dashboard, your own settings.</p>' +
+    '<a href="' + linkUrl + '" target="_blank" style="display:block;text-align:center;padding:10px;background:#1a1f3c;color:#fff;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;margin-bottom:12px;">Open Claim Link</a>' +
+    '<input type="text" value="' + linkUrl + '" ' +
+    'style="width: 100%; padding: 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 8px;" ' +
+    'onclick="this.select()" readonly>' +
+    '</div>'
+  )
+  .setWidth(450)
+  .setHeight(220);
+  ui.showModalDialog(htmlOutput, 'Link This Room');
+}
+
+// Network-call portion of "link this room to an account" — pulled out so
+// the wizard's own success screen can show the claim link inline instead
+// of chaining a second modal dialog after the first one closes. Never
+// touches the UI (no ui.alert/showModalDialog); linkSheetToAccount() above
+// is the thin UI wrapper for the Advanced menu.
+function fetchClaimLink_() {
+  var ss      = SpreadsheetApp.getActive();
+  var evSheet = ss.getSheetByName(EVENT_SHEET_NAME);
+  if (!evSheet) return { success: false, error: 'no-event-tab' };
 
   var serverUrl = getServerUrl(evSheet);
   var eventId   = evSheet.getRange(EV_EVENT_ID).getValue().toString().trim();
   var eventName = evSheet.getRange(EV_NAME).getValue().toString().trim();
-  var spreadsheetId = ss.getId();
-  var apiKey = getApiKey();
+  var apiKey    = getApiKey();
 
   try {
     var response = UrlFetchApp.fetch(serverUrl + '/api/sheet/generate-link', {
       method:           'post',
       contentType:      'application/json',
       payload:          JSON.stringify({
-        spreadsheetId: spreadsheetId,
+        spreadsheetId: ss.getId(),
         sheetName:     eventName || ss.getName(),
         eventId:       eventId || null,
         apiKey:        apiKey
       }),
       muteHttpExceptions: true
     });
-
     var result = safeParseJSON(response);
-
     if (result.success) {
       if (result.apiKey) setApiKey(result.apiKey);
-      var linkUrl = result.linkUrl;
-      var htmlOutput = HtmlService.createHtmlOutput(
-        '<div style="font-family: sans-serif; padding: 10px;">' +
-        '<p style="font-size: 14px; margin-bottom: 12px;">Open this link and log in (or sign up) to connect this room to your account. If nobody has claimed it yet, this makes it fully yours — your own dashboard, your own settings.</p>' +
-        '<a href="' + linkUrl + '" target="_blank" style="display:block;text-align:center;padding:10px;background:#1a1f3c;color:#fff;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;margin-bottom:12px;">Open Claim Link</a>' +
-        '<input type="text" value="' + linkUrl + '" ' +
-        'style="width: 100%; padding: 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 8px;" ' +
-        'onclick="this.select()" readonly>' +
-        '</div>'
-      )
-      .setWidth(450)
-      .setHeight(220);
-      ui.showModalDialog(htmlOutput, 'Link This Room');
-    } else {
-      ui.alert('Failed to generate link:\n' + result.error);
+      return { success: true, linkUrl: result.linkUrl };
     }
+    return { success: false, error: result.error };
   } catch (err) {
-    ui.alert('Request failed:\n' + err.message);
+    return { success: false, error: err.message };
   }
 }
 
-// Helper: style an input cell (yellow background)
+// Helper: style an input cell (yellow background) — still used for the
+// Server URL override (B2), the one Event-tab cell still meant to be
+// hand-edited.
 function styleInput(range, defaultVal) {
   if (defaultVal !== undefined) range.setValue(defaultVal);
   range.setBackground('#fff9c4');
+  return range;
+}
+
+// Helper: style a display-only cell (gray, not yellow) — the Event
+// Details fields, set exclusively by the wizard. Same gray as the
+// Attendees tab's auto-filled columns, for one consistent "don't type
+// here" visual language across both tabs.
+function styleReadOnly(range, defaultVal) {
+  if (defaultVal !== undefined) range.setValue(defaultVal);
+  range.setBackground('#f5f5f5');
   return range;
 }
