@@ -1171,6 +1171,7 @@ export const stmt = {
         countByEventId: db.prepare('SELECT COUNT(*) as cnt FROM sheetWatcherSeen WHERE eventId=?'),
         insert: db.prepare(`INSERT OR IGNORE INTO sheetWatcherSeen (eventId, seenKey, processedAt) VALUES (?,?,?)`),
         deleteByEventId: db.prepare(`DELETE FROM sheetWatcherSeen WHERE eventId=?`),
+        deleteByKey: db.prepare(`DELETE FROM sheetWatcherSeen WHERE eventId=? AND seenKey=?`),
     },
     giveawayWinners: {
         byId: db.prepare('SELECT * FROM giveawayWinners WHERE id=?'),

@@ -364,6 +364,66 @@ describe('oneTicketPerEmail and the skip-existing sweep together', () => {
         const tickets2 = await owner.client.get(`/api/event/${ev.id}/tickets`);
         assert.equal(tickets2.body.length, 1, 'still exactly one ticket for this email');
     });
+
+    // sheetWatcherSeen deliberately outlives the ticket it caused, so a
+    // re-polled *unchanged* row can never loop and re-issue itself forever.
+    // But an organiser deleting that ticket clearly means to let the address
+    // register again — and without clearing the bare-email key, a genuinely
+    // new future row from that address would stay blocked forever too, with
+    // no ticket anywhere to show why. Deleting the ticket must lift that
+    // specific block.
+    test('deleting the issued ticket lets a later new row for that address issue again', async () => {
+        // Connects on an empty sheet, deliberately — writing the target row
+        // before connect would sweep it into "seen" as pre-connect history
+        // (like the test above) rather than issuing it for real, which is
+        // the case this test needs: an address that has actually received
+        // and then lost a ticket, not one that was merely swept.
+        const header = 'Timestamp,First Name,Last Name,Email,Interested';
+        fs.writeFileSync(path.join(fixturesDir, 'oneticket-deleted.csv'), header);
+
+        const ev = await createEvent(owner.client);
+        const connect = await owner.client.post(`/api/event/${ev.id}/sheet-watch`, {
+            url: 'test-fixture:oneticket-deleted.csv',
+            conditionGroup: { match: 'all', children: [{ column: 'Interested', operator: 'equals', value: 'Yes' }] },
+            firstNameColumn: 'First Name',
+            lastNameColumn: 'Last Name',
+            emailColumn: 'Email',
+            oneTicketPerEmail: true,
+            includeExisting: false,
+            sendEmail: false,
+            intervalMinutes: 15,
+        });
+        assert.equal(connect.status, 200, connect.text);
+
+        const lines = [header];
+        lines.push(['2026-09-08T22:00:00', 'Repeat', 'Deleted', 'deleted@sheetfixture.test.local', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'oneticket-deleted.csv'), lines.join('\n'));
+
+        const pollFirst = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(pollFirst.body.summary.issued, 1);
+
+        const issued = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(issued.body.length, 1);
+
+        const del = await owner.client.del('/api/registrations/bulk', { registrationIds: [issued.body[0].registrationId] });
+        assert.equal(del.status, 200, del.text);
+
+        const afterDelete = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(afterDelete.body.length, 0);
+
+        // A brand-new row for the same address, submitted after the delete —
+        // not the same one that already issued.
+        lines.push(['2026-09-09T15:05:00', 'Repeat', 'Deleted', 'deleted@sheetfixture.test.local', 'Yes'].join(','));
+        fs.writeFileSync(path.join(fixturesDir, 'oneticket-deleted.csv'), lines.join('\n'));
+
+        const pollSecond = await owner.client.post(`/api/event/${ev.id}/sheet-watch/poll`, {});
+        assert.equal(pollSecond.status, 200, pollSecond.text);
+        assert.equal(pollSecond.body.summary.issued, 1, 'a new row must issue again once the earlier ticket for that address was deleted');
+
+        const reissued = await owner.client.get(`/api/event/${ev.id}/tickets`);
+        assert.equal(reissued.body.length, 1);
+        assert.equal(reissued.body[0].email, 'deleted@sheetfixture.test.local');
+    });
 });
 
 // register-bulk's own duplicate-email guard (see api-access.test.js for the

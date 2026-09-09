@@ -4183,6 +4183,7 @@ app.post('/api/event/:id/no-show-release', requireAuth, async (req, res) => {
     const del = db.transaction(() => { for (const t of toRelease) stmt.tickets.deleteById.run(t.id); });
     del();
     voidWalletTickets(toRelease, [event]);
+    for (const t of toRelease) clearSheetWatcherEmailBlock(event.id, t.email);
     logAudit(req, { eventId: event.id, action: 'waitlist.noShowReleased', details: { count: toRelease.length } });
     broadcastEventCounts(event.id);
 
@@ -5685,6 +5686,7 @@ app.delete('/api/registrations/bulk', requireAuth, async (req, res) => {
     });
     bulkDel();
     voidWalletTickets(deletedTickets, [...eventsById.values()]);
+    for (const t of deletedTickets) clearSheetWatcherEmailBlock(t.eventId, t.email);
     for (const eventId of deletedEventIds) {
         logAudit(req, { eventId, action: 'registrations.deleted', details: { count: allowedRegistrationIds.size } });
         broadcastEventCounts(eventId);
@@ -8573,6 +8575,27 @@ function watcherRowKey(row, rowIndex, tsIdx, email, cfg) {
     return watcherRowPositionKey(row, rowIndex, tsIdx, email);
 }
 
+// sheetWatcherSeen deliberately outlives the ticket it caused (see
+// watcherRowKey above) — that's what stops a re-fetched row from looping
+// forever. But it means deleting someone's ticket on an event with
+// oneTicketPerEmail left their address permanently unable to receive
+// another one through the sheet, even though the ticket that "used up"
+// their one shot is gone. Deleting the ticket now also clears the bare-email
+// key, so a *future, different* row for that address can issue again. It
+// deliberately does NOT touch the row's own position key (watcherRowPositionKey)
+// — the literal row that already issued stays marked seen, so re-polling an
+// unchanged sheet can't resurrect the exact same submission over and over.
+function clearSheetWatcherEmailBlock(eventId, email) {
+    if (!email) return;
+    const watcher = stmt.sheetWatchers.byEventId.get(eventId);
+    if (!watcher) return;
+    try {
+        if (watcherConfig(watcher).oneTicketPerEmail) {
+            stmt.sheetWatcherSeen.deleteByKey.run(eventId, email.toLowerCase());
+        }
+    } catch {}
+}
+
 // A poll processes rows one at a time, each through a real internal HTTP
 // round-trip (see below) — on a large sheet that easily runs past the
 // scheduler's own 1-second tick, and lastPolledAt isn't written until the
@@ -10473,6 +10496,7 @@ app.delete('/api/v1/registrations/:id', ...apiRoute('manage_tickets'), async (re
 
     db.transaction(() => { for (const t of tickets) stmt.tickets.deleteById.run(t.id); })();
     voidWalletTickets(tickets, req.apiEvent);
+    for (const t of tickets) clearSheetWatcherEmailBlock(req.apiEvent.id, t.email);
     ticketStatusCache.clear();
     logApiAudit(req, 'api.registration_deleted', { registrationId: req.params.id, name: tickets[0].name });
     broadcastEventCounts(req.apiEvent.id);
