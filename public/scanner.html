@@ -118,9 +118,9 @@
         }
         /* Fixed left/right groups (not a bare space-between over the whole
            bar) so a button's position never jumps sideways when a sibling
-           button toggles hidden/shown — signInBtn is the only left-side
-           occupant, roomChatBtn/torchBtn share the right regardless of
-           which of them happen to be visible right now. */
+           button toggles hidden/shown — signInBtn and roomChatBtn share the
+           left, torchBtn (opposite side, since it's a physical flash on the
+           back camera) has the right to itself. */
         .top-bar-left, .top-bar-right {
             display: flex;
             align-items: center;
@@ -279,10 +279,11 @@
             top: 0; left: 0; right: 0;
             z-index: 20;
             /* Left/right padding reserves the same corners .top-bar-left/
-               .top-bar-right occupy (signInBtn on the left; roomChatBtn and
-               torchBtn, possibly both at once, on the right) so a long event
-               name truncates against these edges instead of growing behind
-               — and visually on top of — whichever button is showing. */
+               .top-bar-right occupy (signInBtn and roomChatBtn, possibly
+               both at once, on the left; torchBtn on the right) so a long
+               event name truncates against these edges instead of growing
+               behind — and visually on top of — whichever button is
+               showing. */
             padding: calc(env(safe-area-inset-top, 0px) + 12px) 108px 12px;
             display: none;
             align-items: center;
@@ -901,12 +902,12 @@
 <div class="top-bar" id="topBar">
     <div class="top-bar-left">
         <a id="signInBtn" class="pill-btn" href="/login.html?next=/scanner.html" style="display:none;">Sign In</a>
-    </div>
-    <div class="top-bar-right">
         <button id="roomChatBtn" class="pill-btn pill-btn-chat" onclick="openRoomChat()" aria-label="Room chat">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-2px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <span id="roomChatBtnBadge" class="chat-btn-badge" style="display:none;"></span>
         </button>
+    </div>
+    <div class="top-bar-right">
         <button id="torchBtn" class="pill-btn" onclick="toggleTorch()" style="display:none;" aria-label="Toggle flashlight">🔦</button>
     </div>
 </div>
@@ -1253,6 +1254,20 @@ function lockToEvent(event) {
     updateRoomChatButtonVisibility();
 }
 
+// checkin.html's Settings tab button links here as /scanner.html?tab=settings
+// (checkin.html has no settings panel of its own). Strip the param the moment
+// it's acted on, via replaceState rather than leaving it in the address bar —
+// otherwise refreshing this exact URL reopens Settings forever instead of
+// landing back on the Scanner tab like every other reload does.
+function consumeSettingsTabParam() {
+    const params = new URLSearchParams(location.search);
+    if (params.get('tab') !== 'settings') return false;
+    params.delete('tab');
+    const qs = params.toString();
+    history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+    return true;
+}
+
 // ── Init ──────────────────────────────────────────────────
 (async () => {
     const scanToken = new URLSearchParams(location.search).get('scanToken');
@@ -1295,7 +1310,7 @@ function lockToEvent(event) {
             await openEventPicker();
         }
         startSessionWatcher();
-        if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
+        if (consumeSettingsTabParam()) switchTab('settings');
         maybeShowWalkthrough();
     } else {
         // Not logged in and no scan-link token in the URL — don't start the
