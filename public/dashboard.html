@@ -714,6 +714,68 @@
             color: var(--text-muted);
         }
 
+        .recent-checkins-badge {
+            display: inline-block;
+            background: #10b981;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            border-radius: 8px;
+            padding: 1px 6px;
+            margin-left: 5px;
+            vertical-align: middle;
+        }
+
+        .recent-checkins-panel {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            z-index: 50;
+            width: 300px;
+            max-height: 360px;
+            overflow-y: auto;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+            padding: 6px;
+        }
+
+        .recent-checkin-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .recent-checkin-item:hover {
+            background: var(--bg);
+        }
+
+        .recent-checkin-item .rc-name {
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .recent-checkin-item .rc-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .recent-checkins-empty {
+            padding: 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
         .search-box {
             width: 100%;
             padding: 10px 14px;
@@ -2671,6 +2733,7 @@
         let checkedEventIds = new Set();
         let selectingEvents = false;
         let checkedRegIds = new Set();
+        let recentCheckins = []; // {eventId, registrationId, name, status, time} — most recent first, across all events
         let activeStatFilter = 'all'; // 'all' | 'checked' | 'pending'
         let sortState = { field: null, dir: 'asc' }; // field: null|'firstname'|'lastname'|'tickets'
         let _editOriginal = {}; // snapshot of values when edit modal opens
@@ -3057,6 +3120,14 @@
                 renderSidebar();
             }
 
+            // Track recent check-ins (not check-outs/dupes) so staff can see who just
+            // arrived without hunting for the row — independent of search/scroll state.
+            if (status === 'valid' || status === 'reentry_enter') {
+                recentCheckins.unshift({ eventId, registrationId, name: msg.name || '', status, time: Date.now() });
+                recentCheckins = recentCheckins.slice(0, 30);
+                renderRecentCheckinsPanel();
+            }
+
             // Detail-view updates only apply when this event is open
             if (!selectedId || eventId !== selectedId) return;
 
@@ -3169,6 +3240,7 @@
             const pctEl      = document.getElementById('liveStatPct');
             const barEl      = document.getElementById('liveProgressBar');
             const waitingEl  = document.getElementById('liveStatWaiting');
+            const waitingBox = document.getElementById('waitingStatBox');
             const expiredEl  = document.getElementById('liveStatExpired');
             const expiredBox = document.getElementById('expiredStatBox');
             if (totalEl) totalEl.textContent = total;
@@ -3178,6 +3250,7 @@
             if (pctEl) pctEl.textContent = `${pct}% checked in`;
             if (barEl) barEl.style.width = `${pct}%`;
             if (waitingEl) waitingEl.textContent = waiting;
+            if (waitingBox) waitingBox.style.display = (evEntry?.waitlistEnabled && waiting > 0) ? '' : 'none';
             if (expiredEl) expiredEl.textContent = expired;
             if (expiredBox) expiredBox.style.display = expired > 0 ? '' : 'none';
         }
@@ -3460,11 +3533,10 @@
                 <div class="stat-label">Not Yet In</div>
                 <div style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="liveStatPct">${pct}% checked in</div>
             </div>
-            ${event.waitlistEnabled ? `
-            <div class="stat-box" id="waitingStatBox" onclick="showSettingsView('${event.id}', 'tab-waitlist')">
+            <div class="stat-box" id="waitingStatBox" onclick="showSettingsView('${event.id}', 'tab-waitlist')" style="${event.waitlistEnabled && (event._counts?.waiting ?? 0) > 0 ? '' : 'display:none;'}">
                 <div class="stat-num" style="color:#6366f1;" id="liveStatWaiting">${event._counts?.waiting ?? 0}</div>
                 <div class="stat-label">Waiting</div>
-            </div>` : ''}
+            </div>
             <div class="stat-box${activeStatFilter === 'expired' ? ' stat-active' : ''}" data-filter="expired" id="expiredStatBox" style="${expiredCount > 0 ? '' : 'display:none;'}" onclick="setStatFilter('expired')">
                 <div class="stat-num" style="color:#b45309;" id="liveStatExpired">${expiredCount}</div>
                 <div class="stat-label">Expired</div>
@@ -3475,6 +3547,13 @@
             <div style="display:flex;align-items:center;gap:12px;">
                 <span class="section-title">Attendees</span>${helpIcon('attendees.printList')}
                 <button class="btn btn-primary btn-sm" onclick="openBulkImportModal()">➕ Add Tickets</button>
+                <div style="position:relative;display:inline-block;">
+                    <button class="btn-settings" id="recentCheckinsBtn" onclick="toggleRecentCheckins(event)" title="See who just checked in">
+                        <svg style="display:inline;vertical-align:text-top;margin-right:3px;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+                        Recent Check-ins<span id="recentCheckinsBadge" class="recent-checkins-badge" style="display:none;"></span>
+                    </button>
+                    <div id="recentCheckinsPanel" class="recent-checkins-panel" style="display:none;"></div>
+                </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
                 <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
@@ -3507,6 +3586,8 @@
                 scanCardSlot.replaceWith(freshScanCard);
                 if (!scanAccessCache[event.id]) loadScanAccessCard(event.id);
             }
+            updateTicketBulkBar();
+            renderRecentCheckinsPanel();
         }
 
         function groupTickets(tickets) {
@@ -3726,6 +3807,82 @@
                 selectAll.checked = allRows.length > 0 && checkedRegIds.size === allRows.length;
                 selectAll.indeterminate = checkedRegIds.size > 0 && checkedRegIds.size < allRows.length;
             }
+        }
+
+        let recentCheckinsSeenAt = 0;
+
+        function fmtCheckinAge(ts) {
+            const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+            if (s < 60) return `${s}s ago`;
+            const m = Math.round(s / 60);
+            if (m < 60) return `${m}m ago`;
+            const h = Math.round(m / 60);
+            return `${h}h ago`;
+        }
+
+        // Keeps the panel's content current even while closed, so the badge count
+        // is accurate and the list is ready the instant it's opened.
+        function renderRecentCheckinsPanel() {
+            const panel = document.getElementById('recentCheckinsPanel');
+            const badge = document.getElementById('recentCheckinsBadge');
+            if (!panel) return;
+
+            const mine = recentCheckins.filter(c => c.eventId === selectedId);
+
+            if (badge) {
+                const unseen = mine.filter(c => c.time > recentCheckinsSeenAt).length;
+                badge.textContent = unseen;
+                badge.style.display = unseen > 0 ? '' : 'none';
+            }
+
+            panel.innerHTML = mine.length
+                ? mine.map(c => `
+                    <div class="recent-checkin-item" onclick="jumpToAttendee('${c.registrationId}')">
+                        <span class="rc-name">${esc(c.name || 'Unknown')}</span>
+                        <span class="rc-time">${fmtCheckinAge(c.time)}</span>
+                    </div>`).join('')
+                : `<div class="recent-checkins-empty">No check-ins yet</div>`;
+        }
+
+        function toggleRecentCheckins(evt) {
+            evt.stopPropagation();
+            const panel = document.getElementById('recentCheckinsPanel');
+            if (!panel) return;
+            const opening = panel.style.display === 'none';
+            panel.style.display = opening ? 'block' : 'none';
+            if (opening) {
+                recentCheckinsSeenAt = Date.now();
+                renderRecentCheckinsPanel();
+            }
+        }
+
+        document.addEventListener('click', (evt) => {
+            const panel = document.getElementById('recentCheckinsPanel');
+            const btn = document.getElementById('recentCheckinsBtn');
+            if (!panel || panel.style.display === 'none') return;
+            if (panel.contains(evt.target) || btn?.contains(evt.target)) return;
+            panel.style.display = 'none';
+        });
+
+        // Jumps straight to an attendee from the Recent Check-ins panel, clearing
+        // whatever search/stat filter would otherwise hide their row.
+        function jumpToAttendee(registrationId) {
+            document.getElementById('recentCheckinsPanel')?.style.setProperty('display', 'none');
+            const searchBox = document.getElementById('searchBox');
+            if (searchBox) searchBox.value = '';
+            activeStatFilter = 'all';
+            document.querySelectorAll('.stat-box[data-filter]').forEach(box => {
+                box.classList.toggle('stat-active', box.dataset.filter === 'all');
+            });
+            rerenderTable();
+
+            const row = document.querySelector(`.attendee-row[data-regid="${CSS.escape(registrationId)}"]`);
+            if (!row) return;
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            row.classList.remove('row-flash-in', 'row-flash-out', 'row-flash-dup', 'row-flash-bad');
+            void row.offsetWidth;
+            row.classList.add('row-flash-in');
+            row.addEventListener('animationend', () => row.classList.remove('row-flash-in'), { once: true });
         }
 
         function printSelectedTickets() {
