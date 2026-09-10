@@ -8265,6 +8265,7 @@
         // ── Admin Overview ─────────────────────────────────────────────────────
 
         async function openAdminOverview() {
+            clearInterval(refreshTimer);
             selectedId = null;
             setUrlState({ view: 'admin-overview' });
             document.getElementById('emptyState').style.display = 'none';
