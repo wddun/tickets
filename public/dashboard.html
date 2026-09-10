@@ -8166,8 +8166,34 @@
                     </div>
                     ${renderAdminRoomsByOwner(roomData)}
                     ${renderAdminUsers(roomData)}
+
+                    <div class="metrics-section-title" style="margin-top:28px;">Maintenance</div>
+                    <div class="settings-hint" style="margin-bottom:10px;">
+                        Every open scanner PWA — web or installed, any event — reloads immediately and picks up
+                        whatever was just deployed, instead of waiting for its own periodic update check. A scan
+                        or checkout already in progress on a device finishes first.
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="forceUpdateScanners(this)">Force Update All Scanners</button>
                 </div>
             `;
+        }
+
+        async function forceUpdateScanners(btn) {
+            if (!await confirmDialog('Reload every open scanner right now? Anyone mid-scan finishes first, but their screen will refresh shortly after.', { confirmText: 'Force Update', danger: false })) return;
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = 'Sending…';
+            try {
+                const r = await fetch('/api/admin/scanners/force-update', { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.error || 'Failed');
+                showToast(d.sent ? `Update sent to ${d.sent} scanner${d.sent === 1 ? '' : 's'}.` : 'No scanners are currently open.');
+            } catch (_) {
+                showToast('Could not reach the server. Try again.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
         }
 
         // Every room on the instance, grouped by the account that owns it.

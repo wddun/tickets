@@ -1524,6 +1524,11 @@ async function initScanLinkMode(scanToken, opts = {}) {
     initScannerChannel();
     requestNotificationPermission();
     updateRoomChatButtonVisibility();
+    // Scan-link door staff never pass through the signed-in branch below,
+    // so this is the only place they'd ever see the walkthrough — without
+    // it, opening a scan link for the first time skipped it entirely.
+    // Delayed past the entering-event overlay's own fade so they don't stack.
+    setTimeout(maybeShowWalkthrough, 1500);
     return true;
 }
 
@@ -1549,7 +1554,12 @@ function resumeScanLinkMode(scanLink) {
     ensureCameraRunning();
     initScannerChannel();
     updateRoomChatButtonVisibility();
-    if (new URLSearchParams(location.search).get('tab') === 'settings') switchTab('settings');
+    // consumeSettingsTabParam() strips ?tab=settings from the address bar as
+    // it acts on it, the same as the signed-in path does — otherwise a scan-
+    // link device that opened Settings once would reopen Settings (the Door
+    // Display view) on every refresh from then on, instead of landing back
+    // on the Scanner tab like a plain reload should.
+    if (consumeSettingsTabParam()) switchTab('settings');
 }
 
 // The bottom tab bar (Scanner / Check-In / Settings). Scan-link door staff get
@@ -1934,6 +1944,8 @@ function openScannerSSE() {
                     currentEvent.roomChatEnabled = !!d.roomChatEnabled;
                     updateRoomChatButtonVisibility();
                 }
+            } else if (d.type === 'force-update') {
+                forceUpdateReload();
             }
         } catch (_) {}
     };
@@ -1941,6 +1953,22 @@ function openScannerSSE() {
         scannerSSE.close();
         setTimeout(openScannerSSE, 5000);
     };
+}
+
+// Admin-triggered "Force Update" (dashboard → Admin Overview) lands here.
+// Documents are served network-first (see sw.js / CLAUDE.md), so a reload is
+// all it takes to pick up whatever was just shipped — no cache to purge.
+// Deferred, same as a real service-worker update, so it doesn't yank the
+// screen out from under a scan result or a checkout in progress.
+let forceUpdatePending = false;
+function forceUpdateReload() {
+    if (forceUpdatePending) return;
+    forceUpdatePending = true;
+    const tryReload = () => {
+        if (window.__swHoldReload) { setTimeout(tryReload, 500); return; }
+        window.location.reload();
+    };
+    tryReload();
 }
 
 // Safe to call again on a Switch Event — re-sends a heartbeat and reopens

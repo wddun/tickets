@@ -2688,6 +2688,19 @@ app.get('/api/admin/audit-log', requireAdmin, (req, res) => {
     res.json({ entries, total });
 });
 
+// Tells every open scanner PWA session, across every event, to reload right
+// now instead of waiting for its own 15-minute update check or its next time
+// in the foreground. Documents are served network-first (see sw.js), so the
+// reload alone is enough to pick up a just-shipped change — there's nothing
+// to purge. A scan or checkout in progress on the receiving device still
+// finishes first: the client defers via the same __swHoldReload flag a real
+// service-worker update uses.
+app.post('/api/admin/scanners/force-update', requireAdmin, (req, res) => {
+    const sent = broadcastToAllScanners({ type: 'force-update' });
+    log('admin', `[note] Force-update pushed to ${sent} scanner(s) — by: ${req.session.userId}`);
+    res.json({ success: true, sent });
+});
+
 // ── Granular per-collaborator permissions ──────────────────────────────────
 //
 // A share used to be one of two things: 'view' (can check people in) or
@@ -9660,6 +9673,19 @@ function broadcastToEventScanners(eventId, payload) {
     for (const [pairToken, data] of scannerRegistry) {
         if (data.eventId === eventId) broadcastToPair(pairToken, payload);
     }
+}
+
+// Push to literally every open scanner PWA session, regardless of event —
+// scannerChannels holds one entry per connected device, not per event, so
+// this is the only broadcast that can reach a device before it's picked an
+// event (or one working an event the admin doesn't otherwise have access
+// to). Used for "Force Update" — see the force-update route below.
+function broadcastToAllScanners(payload) {
+    let sent = 0;
+    for (const pairToken of [...scannerChannels.keys()]) {
+        if (broadcastToPair(pairToken, payload)) sent++;
+    }
+    return sent;
 }
 
 // Every event this pairToken has ever been seen working, from the live
