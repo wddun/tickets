@@ -962,6 +962,7 @@ function normalizeEmailTemplateWith(raw, allowedTypes, defaultTemplate) {
                     props.size = EMAIL_TEXT_SIZES[p.size] ? p.size : 'sm';
                     props.align = EMAIL_ALIGNMENTS.has(p.align) ? p.align : 'left';
                     props.color = safeEmailColor(p.color, '#555555');
+                    props.bold = p.bold === true;
                     break;
                 case 'eventDetails':
                     props.showMaps = p.showMaps !== false;
@@ -978,17 +979,38 @@ function normalizeEmailTemplateWith(raw, allowedTypes, defaultTemplate) {
                     props.label = String(p.label ?? 'View details').slice(0, 80);
                     props.url = safeEmailUrl(p.url) || '';
                     props.align = EMAIL_ALIGNMENTS.has(p.align) ? p.align : 'center';
+                    // 'auto' (the default) means "match the template's own accent
+                    // colour", same convention as settings.accent — resolved at
+                    // render time in renderEmailBlock, not here, since the accent
+                    // itself can be event-derived.
+                    props.color = p.color === 'auto' || !p.color ? 'auto' : safeEmailColor(p.color, 'auto');
                     break;
                 }
-                case 'spacer':
-                    props.height = Math.min(80, Math.max(4, parseInt(p.height, 10) || 16));
+                case 'spacer': {
+                    // parseInt(...) || 16 would silently turn an explicit 0 (a
+                    // deliberately tight/no-gap spacer) into 16, since 0 is falsy
+                    // — clamped below to 4 (the real minimum) instead, same as
+                    // any other in-range value.
+                    const h = parseInt(p.height, 10);
+                    props.height = Math.min(80, Math.max(4, Number.isFinite(h) ? h : 16));
                     break;
-                case 'image':
+                }
+                case 'divider':
+                    props.color = safeEmailColor(p.color, '#e5e7eb');
+                    props.thickness = (() => {
+                        const t = parseInt(p.thickness, 10);
+                        return Math.min(6, Math.max(1, Number.isFinite(t) ? t : 1));
+                    })();
+                    break;
+                case 'image': {
                     props.url = safeEmailImageUrl(p.url) || '';
                     props.href = safeEmailUrl(p.href) || '';
-                    props.width = Math.min(560, Math.max(40, parseInt(p.width, 10) || 320));
+                    const w = parseInt(p.width, 10);
+                    props.width = Math.min(560, Math.max(40, Number.isFinite(w) ? w : 320));
                     props.align = EMAIL_ALIGNMENTS.has(p.align) ? p.align : 'center';
+                    props.alt = String(p.alt ?? '').slice(0, 200);
                     break;
+                }
                 case 'footerNote':
                     props.lines = (Array.isArray(p.lines) ? p.lines : [])
                         .slice(0, 6).map(l => String(l ?? '').slice(0, 300));
@@ -997,7 +1019,7 @@ function normalizeEmailTemplateWith(raw, allowedTypes, defaultTemplate) {
                     props.text = String(p.text ?? DEFAULT_TICKET_RETURN_TEXT).slice(0, 500);
                     break;
                 default:
-                    break; // intro / eventImage / changes / customFields / divider / waitlistPosition / waitlistStatusButton carry no props
+                    break; // intro / eventImage / changes / customFields / waitlistPosition / waitlistStatusButton carry no props
             }
             return { id: typeof b.id === 'string' && b.id ? b.id.slice(0, 40) : `b-${i}`, type: b.type, props };
         });
@@ -1040,7 +1062,7 @@ function renderEmailBlock(block, ctx) {
 
         case 'text':
             if (!String(p.text || '').trim()) return '';
-            return `<p style="font-size:${EMAIL_TEXT_SIZES[p.size] || 15}px;color:${p.color};margin:0 0 24px;line-height:1.6;text-align:${p.align};">${renderEmailInline(p.text, ctx.vars)}</p>`;
+            return `<p style="font-size:${EMAIL_TEXT_SIZES[p.size] || 15}px;font-weight:${p.bold ? 700 : 400};color:${p.color};margin:0 0 24px;line-height:1.6;text-align:${p.align};">${renderEmailInline(p.text, ctx.vars)}</p>`;
 
         // The event's own photo, full-bleed above the header so nothing —
         // header text included — ever sits on top of it. Sized like the
@@ -1098,13 +1120,14 @@ function renderEmailBlock(block, ctx) {
         case 'button': {
             const url = safeEmailUrl(applyEmailVars(p.url, ctx.vars));
             if (!url || !p.label) return '';
+            const bg = p.color && p.color !== 'auto' ? p.color : ctx.accentHex;
             return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="${p.align}">
-    <a href="${url}" style="display:inline-block;padding:13px 26px;background:${ctx.accentHex};color:#ffffff;font-size:15px;font-weight:700;border-radius:10px;text-decoration:none;">${renderEmailInline(p.label, ctx.vars)}</a>
+    <a href="${url}" style="display:inline-block;padding:13px 26px;background:${bg};color:#ffffff;font-size:15px;font-weight:700;border-radius:10px;text-decoration:none;">${renderEmailInline(p.label, ctx.vars)}</a>
     </td></tr></table>`;
         }
 
         case 'divider':
-            return `<table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;"><tr><td style="border-top:1px solid #e5e7eb;font-size:0;line-height:0;">&nbsp;</td></tr></table>`;
+            return `<table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;"><tr><td style="border-top:${p.thickness || 1}px solid ${p.color || '#e5e7eb'};font-size:0;line-height:0;">&nbsp;</td></tr></table>`;
 
         case 'spacer':
             return `<div style="height:${p.height}px;line-height:${p.height}px;font-size:0;">&nbsp;</div>`;
@@ -1121,7 +1144,7 @@ function renderEmailBlock(block, ctx) {
             // square logo is capped by height instead of rendering as tall as
             // its width would otherwise force, and either way the whole image
             // shows: nothing here crops, only scales down to fit.
-            const img = `<img src="${p.url}" alt="" style="max-width:min(${p.width}px,100%);max-height:220px;width:auto;height:auto;display:block;border:0;border-radius:8px;">`;
+            const img = `<img src="${p.url}" alt="${escEmailText(p.alt || '')}" style="max-width:min(${p.width}px,100%);max-height:220px;width:auto;height:auto;display:block;border:0;border-radius:8px;">`;
             return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr><td align="${p.align}">${p.href ? `<a href="${p.href}" style="text-decoration:none;">${img}</a>` : img}</td></tr></table>`;
         }
 

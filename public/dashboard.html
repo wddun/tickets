@@ -1540,6 +1540,18 @@
         [data-theme="dark"] .btn-settings:hover {
             background: #333c72;
         }
+        .btn-settings.boost-active {
+            background: #fffbeb;
+            border-color: #fcd34d;
+            color: #92400e;
+        }
+        .btn-settings.boost-active:hover { background: #fef3c7; }
+        [data-theme="dark"] .btn-settings.boost-active {
+            background: #451a03;
+            border-color: #b45309;
+            color: #fcd34d;
+        }
+        [data-theme="dark"] .btn-settings.boost-active:hover { background: #5c2408; }
 
         .btn-settings.has-dropdown::after { content: ' ▾'; font-size: 11px; }
 
@@ -2602,6 +2614,19 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="boostModal" style="display:none;z-index:200;"
+        onclick="if(event.target===this)closeBoostModal()">
+        <div class="modal" style="max-width:420px;background: var(--card);border-radius:14px;">
+            <div class="modal-header">
+                <h2>Boost Sync</h2>
+                <button class="modal-close" onclick="closeBoostModal()">&times;</button>
+            </div>
+            <div id="boostModalBody" style="min-height:80px;">
+                <div style="text-align:center;padding:32px;color:var(--text-muted);">Loading…</div>
+            </div>
+        </div>
+    </div>
+
     <!-- New Event Modal -->
     <div class="modal-overlay" id="newEventModal" style="display:none;z-index:200;"
         onclick="if(event.target===this)closeNewEventModal()">
@@ -3062,8 +3087,12 @@
             return true;
         }
 
+        function hasUnsavedEmailTemplateChanges() {
+            return !!(ebState && Object.values(ebState.variants).some(v => v.dirty));
+        }
+
         window.addEventListener('beforeunload', (e) => {
-            if (hasUnsavedSettingsChanges()) {
+            if (hasUnsavedSettingsChanges() || hasUnsavedEmailTemplateChanges()) {
                 e.preventDefault();
                 e.returnValue = '';
             }
@@ -3095,6 +3124,8 @@
             ['editTicketModal', 'closeEditTicketModal'],
             ['accountSettingsModal', 'closeAccountSettingsModal'],
             ['imageCropModal', 'closeImageCropModal'],
+            ['ebOverlay', 'closeEmailEditor'],
+            ['boostModal', 'closeBoostModal'],
         ];
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape') return;
@@ -3502,11 +3533,21 @@
         }
 
         async function fetchAndRender(event, silent = false) {
-            const r = await fetch(`/api/event/${event.id}/tickets`);
+            // Sheet-watch state rides along with the same 15s refresh cycle
+            // as everything else here, rather than its own polling loop — the
+            // Boost button's remaining-time display just falls out of that
+            // for free. A stranger with view-only access gets a 403 on this
+            // (sheet-watch is manage_event-gated); swallow it silently rather
+            // than losing the ticket list over a button they wouldn't see anyway.
+            const [r, swr] = await Promise.all([
+                fetch(`/api/event/${event.id}/tickets`),
+                fetch(`/api/event/${event.id}/sheet-watch`).catch(() => null),
+            ]);
             if (!r.ok) return;
             const tickets = await r.json();
             allTickets = tickets;
             event._tickets = tickets;
+            event._sheetWatch = (swr && swr.ok) ? (await swr.json()).watcher : null;
             // Preserve fields loadEvents() attaches to _counts (e.g. waiting)
             // that this per-ticket fetch doesn't know about.
             event._counts = { ...event._counts, total: tickets.length, scanned: tickets.filter(t => t.used_at).length };
@@ -3570,6 +3611,11 @@
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/><circle cx="12" cy="12" r="2.5"/></svg>
                         Giveaway
                     </a>
+                    ${event._sheetWatch?.enabled ? `
+                    <button class="btn-settings${event._sheetWatch.boostActive ? ' boost-active' : ''}" onclick="openBoostModal('${event.id}')" title="Sheet watcher boost sync">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 11 14 11 22 21 10 13 10 13 2"/></svg>
+                        ${event._sheetWatch.boostActive ? `Boost &middot; ${Math.max(1, Math.ceil((event._sheetWatch.boostSecondsLeft || 0) / 60))}m left` : 'Boost'}
+                    </button>` : ''}
                     <button class="btn-settings" onclick="showSettingsView('${event.id}')">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                         Settings
@@ -6796,6 +6842,92 @@
             if (res.ok) { const r = await res.json(); showToast(`Found ${r.summary.matched}, issued ${r.summary.issued}, already seen ${r.summary.alreadySeen}.`); loadAccessData(eventId); } else { showToast('Poll failed.'); }
         }
 
+        // ── Boost Sync modal (the main dashboard button, next to Settings) ──
+        // Same underlying route as swBoost below (the Settings-panel version
+        // of this same control) — this one adds a duration picker instead of
+        // a fixed 15 minutes, and lives where an operator running the door is
+        // actually looking during a live event instead of buried in Settings.
+        const BOOST_DURATION_OPTIONS = [5, 10, 15, 30, 60, 90]; // minutes — 90 is BOOST_MAX_MINUTES server-side
+
+        function openBoostModal(eventId) {
+            document.getElementById('boostModal').style.display = 'flex';
+            renderBoostModalBody(eventId);
+        }
+
+        function closeBoostModal() {
+            document.getElementById('boostModal').style.display = 'none';
+        }
+
+        function renderBoostModalBody(eventId) {
+            const event = events.find(e => e.id === eventId);
+            const w = event?._sheetWatch;
+            const body = document.getElementById('boostModalBody');
+            if (!w) {
+                body.innerHTML = '<div class="settings-empty">No sheet watcher connected for this event.</div>';
+                return;
+            }
+            if (w.boostActive) {
+                const minsLeft = Math.max(1, Math.ceil((w.boostSecondsLeft || 0) / 60));
+                body.innerHTML = `
+                    <div style="font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:16px;background:#fffbeb;border:1px solid #fcd34d;color:#78350f;">
+                        <strong>Boost sync is on</strong> — checking every ${w.boostSeconds || 5}s, ${minsLeft} min left.
+                    </div>
+                    <button class="btn btn-danger" style="width:100%;" onclick="stopBoostFromModal('${eventId}', this)">Stop Boost</button>`;
+            } else {
+                body.innerHTML = `
+                    <div class="settings-hint" style="margin-bottom:12px;">
+                        Checks the sheet every few seconds instead of every ${w.intervalMinutes || 2} min — for a burst when a room full of people are submitting the form at once. Stops on its own when the timer runs out.
+                    </div>
+                    <div class="eb-field" style="margin-bottom:14px;">
+                        <label>For how long?</label>
+                        <select id="boostDurationSelect">
+                            ${BOOST_DURATION_OPTIONS.map(m => `<option value="${m}" ${m === 15 ? 'selected' : ''}>${m} minutes</option>`).join('')}
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" style="width:100%;" onclick="startBoostFromModal('${eventId}', this)">Start Boost</button>`;
+            }
+        }
+
+        async function startBoostFromModal(eventId, btn) {
+            const minutes = parseInt(document.getElementById('boostDurationSelect').value, 10) || 15;
+            btn.disabled = true;
+            btn.textContent = 'Starting…';
+            const res = await fetch(`/api/event/${eventId}/sheet-watch/boost`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ minutes, seconds: 5 }),
+            });
+            if (res.ok) {
+                const r = await res.json();
+                showToast(`Boost sync on for ${minutes} min${r.summary ? ` — issued ${r.summary.issued} just now.` : '.'}`);
+                await fetchAndRender(events.find(e => e.id === eventId), true);
+                renderBoostModalBody(eventId);
+            } else {
+                showToast((await res.json().catch(() => ({}))).error || 'Boost failed.');
+                btn.disabled = false;
+                btn.textContent = 'Start Boost';
+            }
+        }
+
+        async function stopBoostFromModal(eventId, btn) {
+            btn.disabled = true;
+            btn.textContent = 'Stopping…';
+            const res = await fetch(`/api/event/${eventId}/sheet-watch/boost`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ minutes: 0 }),
+            });
+            if (res.ok) {
+                showToast('Boost sync stopped.');
+                await fetchAndRender(events.find(e => e.id === eventId), true);
+                renderBoostModalBody(eventId);
+            } else {
+                showToast((await res.json().catch(() => ({}))).error || 'Could not stop boost.');
+                btn.disabled = false;
+                btn.textContent = 'Stop Boost';
+            }
+        }
+
         // Boost sync: a short window of near-continuous polling. The server
         // expires it on its own, so an operator who walks away can't leave it
         // hammering Google — the button is for turning it off early.
@@ -9678,7 +9810,7 @@
 
         const EB_DEFAULT_PROPS = {
             header: { eyebrow: 'Your Registration Confirmation', title: '{{eventName}}' },
-            text: { text: 'Write something here.', size: 'sm', align: 'left', color: '#555555' },
+            text: { text: 'Write something here.', size: 'sm', align: 'left', color: '#555555', bold: false },
             intro: {},
             eventImage: {},
             eventDetails: { showMaps: true },
@@ -9689,9 +9821,9 @@
             waitlistPosition: {},
             waitlistStatusButton: {},
             waitlistClaimButton: {},
-            button: { label: 'View details', url: 'https://', align: 'center' },
-            image: { url: '', href: '', width: 320, align: 'center' },
-            divider: {},
+            button: { label: 'View details', url: 'https://', align: 'center', color: 'auto' },
+            image: { url: '', href: '', width: 320, align: 'center', alt: '' },
+            divider: { color: '#e5e7eb', thickness: 1 },
             spacer: { height: 16 },
             footerNote: { lines: ["Retain this email as your entry ticket."] },
             ticketReturn: { text: "Can't make it? [Return your {{ticketWord}}]({{returnUrl}}) so someone else can take the {{spotWord}}." },
@@ -10048,7 +10180,8 @@
                                 ${['left', 'center', 'right'].map(v => `<option value="${v}" ${p.align === v ? 'selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
                             </select></div>
                             <div><label>Colour</label><input type="color" value="${esc(p.color || '#555555')}" oninput="${set('color')}" style="padding:2px;height:32px;"></div>
-                        </div></div>`;
+                        </div></div>
+                        <label class="eb-check"><input type="checkbox" ${p.bold ? 'checked' : ''} onchange="${setChk('bold')}"> Bold</label>`;
                 case 'button':
                     return `
                         <div class="eb-field"><label>Label</label><input type="text" value="${esc(p.label || '')}" oninput="${set('label')}"></div>
@@ -10056,11 +10189,24 @@
                         <div class="eb-field"><label>Align</label><select onchange="${set('align')}">
                             ${['left', 'center', 'right'].map(v => `<option value="${v}" ${p.align === v ? 'selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
                         </select></div>
+                        <div class="eb-field">
+                            <label>Colour</label>
+                            <div class="eb-row">
+                                <select onchange="ebSetButtonColorMode('${id}', this.value)">
+                                    <option value="auto" ${p.color === 'auto' || !p.color ? 'selected' : ''}>Match accent colour</option>
+                                    <option value="custom" ${p.color && p.color !== 'auto' ? 'selected' : ''}>Custom</option>
+                                </select>
+                                <input type="color" value="${p.color && p.color !== 'auto' ? esc(p.color) : '#6366f1'}"
+                                    ${(!p.color || p.color === 'auto') ? 'disabled' : ''} id="ebBtnColor-${id}"
+                                    oninput="${set('color')}" style="padding:2px;height:32px;">
+                            </div>
+                        </div>
                         <div class="eb-note">Only https:// and mailto: links are allowed.</div>`;
                 case 'image':
                     return `
                         <div class="eb-field"><label>Image URL</label><input type="url" value="${esc(p.url || '')}" placeholder="https://…" oninput="${set('url')}"></div>
                         <div class="eb-field"><label>Links to (optional)</label><input type="url" value="${esc(p.href || '')}" placeholder="https://…" oninput="${set('href')}"></div>
+                        <div class="eb-field"><label>Alt text</label><input type="text" value="${esc(p.alt || '')}" placeholder="Describes the image for screen readers" oninput="${set('alt')}"></div>
                         <div class="eb-field"><div class="eb-row">
                             <div><label>Width (px)</label><input type="number" min="40" max="560" value="${p.width || 320}" oninput="${setNum('width')}"></div>
                             <div><label>Align</label><select onchange="${set('align')}">
@@ -10069,7 +10215,12 @@
                         </div></div>
                         <div class="eb-note">Must be a publicly reachable URL. Email clients cannot load images from behind a login.</div>`;
                 case 'spacer':
-                    return `<div class="eb-field"><label>Height (px)</label><input type="number" min="4" max="80" value="${p.height || 16}" oninput="${setNum('height')}"></div>`;
+                    return `<div class="eb-field"><label>Height (px)</label><input type="number" min="4" max="80" value="${p.height ?? 16}" oninput="${setNum('height')}"></div>`;
+                case 'divider':
+                    return `<div class="eb-field"><div class="eb-row">
+                            <div><label>Colour</label><input type="color" value="${esc(p.color || '#e5e7eb')}" oninput="${set('color')}" style="padding:2px;height:32px;"></div>
+                            <div><label>Thickness (px)</label><input type="number" min="1" max="6" value="${p.thickness ?? 1}" oninput="${setNum('thickness')}"></div>
+                        </div></div>`;
                 case 'footerNote':
                     return `<div class="eb-field"><label>Lines (one per line)</label><textarea oninput="ebSetProp('${id}','lines',this.value.split('\\n'))">${esc((p.lines || []).join('\n'))}</textarea></div>`;
                 case 'ticketReturn':
@@ -10097,6 +10248,17 @@
         function ebToggleBlock(id) {
             ebActive().selectedId = ebActive().selectedId === id ? null : id;
             ebRenderCanvas();
+        }
+
+        // Mirrors ebSetAccentMode's auto/custom pattern, but per-button-block
+        // rather than per-template, since each button can independently match
+        // the accent or override it.
+        function ebSetButtonColorMode(id, mode) {
+            const b = ebFindBlock(id);
+            if (!b) return;
+            b.props.color = mode === 'auto' ? 'auto' : (document.getElementById(`ebBtnColor-${id}`)?.value || '#6366f1');
+            ebRenderCanvas();
+            ebMarkDirty();
         }
 
         function ebSetProp(id, key, value) {
