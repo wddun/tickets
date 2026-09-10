@@ -348,3 +348,50 @@ describe('capacity is enforced on every path that issues a ticket', () => {
         assert.equal((await listTickets(owner.client, ev.id)).length, 1);
     });
 });
+
+// register-bulk used to check capacity before checking whether the email
+// already had a ticket, so a repeat sheet row for someone who'd already been
+// seated some other way (typically a manual add made before their own form
+// submission was imported) got waitlisted behind their own real ticket once
+// the event filled up, instead of being recognized as already registered.
+describe('an already-registered email is never sent to the waitlist behind its own ticket', () => {
+    test('a bulk import for an email with an existing ticket is recognized as already registered, not waitlisted', async () => {
+        const ev = await eventWithSeats(1, 0, { waitlist: true });
+        const apiKey = await eventApiKey(owner.client, ev.id);
+        const email = uniqueEmail('manual-then-import');
+
+        // Manually seated first (e.g. the organiser added them before the
+        // sheet watcher ever saw their form row) — this alone fills capacity.
+        const manual = await owner.client.post(`/api/event/${ev.id}/ticket`, { name: 'Manual First', email, noEmail: true });
+        assert.equal(manual.status, 200, manual.text);
+
+        // The same person's own form submission, imported after the event is
+        // already full because of the seat their manual ticket just took.
+        const imported = await visitor().post('/api/register-bulk', {
+            firstName: 'Manual', lastName: 'First', email,
+            eventId: ev.id, ticketCount: 1, apiKey, sendEmail: false,
+        });
+        assert.equal(imported.status, 200, imported.text);
+        assert.equal(imported.body.alreadyRegistered, true, 'must be recognized as already registered, not waitlisted');
+        assert.equal(imported.body.waitlisted, undefined);
+
+        assert.equal((await listTickets(owner.client, ev.id)).length, 1, 'still exactly the one manual ticket');
+        const waitlist = await owner.client.get(`/api/event/${ev.id}/waitlist`);
+        assert.equal(waitlist.body.length, 0, 'the already-ticketed address must not also appear on the waitlist');
+    });
+
+    test('a genuinely different email still waitlists normally once the event is full', async () => {
+        const ev = await eventWithSeats(1, 1, { waitlist: true });
+        const apiKey = await eventApiKey(owner.client, ev.id);
+
+        const imported = await visitor().post('/api/register-bulk', {
+            firstName: 'Someone', lastName: 'Else', email: uniqueEmail('different'),
+            eventId: ev.id, ticketCount: 1, apiKey, sendEmail: false,
+        });
+        assert.equal(imported.status, 200, imported.text);
+        assert.equal(imported.body.waitlisted, true, 'a real new signup at a full event should still waitlist');
+
+        const waitlist = await owner.client.get(`/api/event/${ev.id}/waitlist`);
+        assert.equal(waitlist.body.length, 1);
+    });
+});

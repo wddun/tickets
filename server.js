@@ -4361,6 +4361,18 @@ app.post('/api/register-bulk', async (req, res) => {
         return res.status(400).json({ error: 'ticketCount must be a number between 1 and 500' });
     }
 
+    // Checked before capacity, deliberately: an email that already holds a
+    // ticket for this event must be recognized as already-registered even
+    // when the event happens to be full at the moment their row is processed
+    // (a manual add or an earlier row already took the last seat) — not sent
+    // to the waitlist a second time behind their own real ticket. force:true
+    // (oneTicketPerEmail off) still bypasses this, same as it always has
+    // further down for the same email, so a caller that really does want a
+    // repeat ticket for that address isn't blocked by this earlier check.
+    if (!isResend && !force && emailAlreadyRegistered(eventId, email)) {
+        return res.json({ success: true, alreadyRegistered: true, tokens: [], tickets: [] });
+    }
+
     // Capacity check — only enforced for new registrations, not resends.
     // Sheet rows are processed one at a time (Apps Script/the sheet-watch
     // poller are both synchronous per row), so re-querying `registered` on
@@ -4473,14 +4485,13 @@ app.post('/api/register-bulk', async (req, res) => {
                 bulkUpdate();
             }
         } else {
-            // New row (or resend with no existing tickets) — but a "new"
-            // row can still correspond to someone who already has a ticket
-            // for this event (a sheet-watcher reconnect that reset its own
-            // bookkeeping, two overlapping imports, a retried request).
-            // This is the one place — independent of whatever the caller
-            // believes it already knows — that refuses to hand out a
-            // second ticket to the same email, unless the caller explicitly
-            // asked for one anyway (force — see above).
+            // New row, or a resend request that named tokens which matched no
+            // existing ticket — treated as a new row rather than failing outright,
+            // since a resend for a ticket that no longer exists still ought to
+            // register the person. The plain !isResend case for a duplicate email
+            // was already refused above, before capacity was even checked; this
+            // catches the resend-with-nothing-found case, which reaches here with
+            // isResend still true and so skips that earlier check.
             if (!force && emailAlreadyRegistered(eventId, email)) {
                 return res.json({ success: true, alreadyRegistered: true, tokens: [], tickets: [] });
             }
