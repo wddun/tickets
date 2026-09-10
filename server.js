@@ -7595,7 +7595,7 @@ async function generateVoidedPassBuffer(tombstone) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 16;
+const PASS_TEMPLATE_VERSION = 17;
 // A ticket the organiser expired — manually, or via the sweep watching
 // events.ticketExpiresAt (see expireTicket() and the sweep below). Once
 // used_at is set the ticket already did its job, so expiry never applies
@@ -7681,6 +7681,10 @@ async function generatePassBuffer(ticket, event) {
         passTypeIdentifier: process.env.PASS_TYPE_ID,
         teamIdentifier: process.env.TEAM_ID,
         description: event.name,
+        // organizationName is what iOS shows on the Lock Screen suggestion
+        // widget for a relevant pass — left at the template's default ("WTS
+        // Tickets") it named the app instead of the event on every ticket.
+        organizationName: event.name,
         logoText: showCheckedInStyle ? "✓ CHECKED IN" : isExpired ? "EXPIRED" : event.name,
         backgroundColor: passBackgroundColor,
         foregroundColor: passTextColor,
