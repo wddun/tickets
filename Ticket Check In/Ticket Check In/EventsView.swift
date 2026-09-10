@@ -541,7 +541,7 @@ struct ScanLinkEntrySheet: View {
                 isLoading = false
                 onResolved()
             } catch {
-                errorMessage = "Invalid or revoked scan link."
+                errorMessage = error.localizedDescription
                 isLoading = false
             }
         }

@@ -272,7 +272,7 @@ class APIService: ObservableObject {
         guard let url = URL(string: "\(baseURL)/api/scanner-links/\(token)") else { throw APIError.invalidURL }
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
-        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+        guard http.statusCode == 200 else { throw apiError(from: data, status: http.statusCode) }
         guard var info = try? JSONDecoder().decode(ScannerLinkInfo.self, from: data) else { throw APIError.decodingError }
         info.token = token
         return info

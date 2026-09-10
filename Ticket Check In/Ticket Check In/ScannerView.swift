@@ -385,7 +385,7 @@ struct ScannerView: View {
                     await MainActor.run { applyScanLink(info) }
                 } catch {
                     await MainActor.run {
-                        showBanner(ScanResult(status: .error, title: "Invalid Scan Link", name: ""))
+                        showBanner(ScanResult(status: .error, title: "Invalid Scan Link", name: friendlyScanError(error)))
                         CheckInFeedback.shared.error()
                     }
                 }
@@ -1221,7 +1221,7 @@ struct EventPickerSheet: View {
             } catch {
                 await MainActor.run {
                     codeLoading = false
-                    codeError = "Invalid or revoked scan link."
+                    codeError = error.localizedDescription
                 }
             }
         }
