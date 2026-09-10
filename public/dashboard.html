@@ -1831,6 +1831,18 @@
             border-color: #6366f1;
             color: #fff;
         }
+        .sys-live-dot {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #94a3b8;
+            margin-left: 2px;
+        }
+        .sys-live-dot.live {
+            background: #10b981;
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+        }
 
         /* ── Live scan flash animation ── */
         @keyframes rowFlashGreen {
@@ -8324,6 +8336,35 @@
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalWalletDownloads}</div><div class="metrics-stat-label">Wallet DLs</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalEmailOpens}</div><div class="metrics-stat-label">Email Opens</div></div>
                     </div>
+
+                    <div class="metrics-section-title">System</div>
+                    <div id="sysMetricCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;"></div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;align-items:start;margin-bottom:28px;">
+                        <div>
+                            <div style="font-size:13px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                                Email Queue <span id="sysEmailQueueBadge" class="sys-badge">0 waiting</span>
+                            </div>
+                            <div id="sysEmailActivity" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;"></div>
+                        </div>
+                        <div>
+                            <div style="font-size:13px;font-weight:700;margin-bottom:8px;">Recent Activity <span style="font-weight:500;color:var(--text-muted);">(scans, Wallet downloads)</span></div>
+                            <div id="sysActivityFeed" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;"></div>
+                        </div>
+                        <div>
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                                <span style="font-size:13px;font-weight:700;margin-right:auto;">Live Logs <span id="sysLogLiveDot" class="sys-live-dot" title="Connecting…"></span></span>
+                                <div class="sys-log-filters" id="sysLogLevelFilters">
+                                    <button type="button" class="active" data-level="all" onclick="setSysLogFilter('all')">All</button>
+                                    <button type="button" data-level="error" onclick="setSysLogFilter('error')">Errors</button>
+                                    <button type="button" data-level="warn" onclick="setSysLogFilter('warn')">Warnings</button>
+                                    <button type="button" data-level="info" onclick="setSysLogFilter('info')">Info</button>
+                                </div>
+                                <input type="text" id="sysLogSearch" placeholder="Search…" oninput="renderSysLogs()" style="width:100px;padding:5px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
+                            </div>
+                            <div id="sysLogViewer" style="max-height:280px;overflow-y:auto;background:#0f172a;border-radius:10px;padding:8px 10px;font-family:monospace;"></div>
+                        </div>
+                    </div>
+
                     <div class="metrics-section-title">All Events</div>
                     <div style="overflow-x:auto;">
                         <table class="admin-events-table">
@@ -8343,40 +8384,17 @@
                         or checkout already in progress on a device finishes first.
                     </div>
                     <button class="btn btn-secondary btn-sm" onclick="forceUpdateScanners(this)">Force Update All Scanners</button>
-
-                    <div class="metrics-section-title" style="margin-top:28px;">System</div>
-                    <div id="sysMetricCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;"></div>
-                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start;">
-                        <div>
-                            <div style="font-size:13px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
-                                Email Queue <span id="sysEmailQueueBadge" class="sys-badge">0 waiting</span>
-                            </div>
-                            <div id="sysEmailActivity" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;"></div>
-                        </div>
-                        <div>
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-                                <span style="font-size:13px;font-weight:700;margin-right:auto;">Live Logs</span>
-                                <div class="sys-log-filters" id="sysLogLevelFilters">
-                                    <button type="button" class="active" data-level="all" onclick="setSysLogFilter('all')">All</button>
-                                    <button type="button" data-level="error" onclick="setSysLogFilter('error')">Errors</button>
-                                    <button type="button" data-level="warn" onclick="setSysLogFilter('warn')">Warnings</button>
-                                    <button type="button" data-level="info" onclick="setSysLogFilter('info')">Info</button>
-                                </div>
-                                <input type="text" id="sysLogSearch" placeholder="Search…" oninput="renderSysLogs()" style="width:120px;padding:5px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
-                            </div>
-                            <div id="sysLogViewer" style="max-height:280px;overflow-y:auto;background:#0f172a;border-radius:10px;padding:8px 10px;font-family:monospace;"></div>
-                        </div>
-                    </div>
                 </div>
             `;
             renderSystemPanel();
         }
 
         // ── System panel (Admin Overview → System) ──────────────────────────
-        // Polls the same two endpoints the footer's quick-glance log strip and
-        // this page's own event metrics already use the pattern for — a plain
-        // 5s interval, restarted (not stacked) each time the panel opens.
+        // Metrics/email/activity are a plain 5s poll (same pattern the footer's
+        // quick-glance log strip and this page's own event metrics already
+        // use) — logs push live over SSE instead, see openSysLogStream below.
         let sysPanelInterval = null;
+        let sysLogSource = null;
         let sysLastLogs = [];
         let sysLogLevelFilter = 'all';
 
@@ -8384,33 +8402,54 @@
             clearInterval(sysPanelInterval);
             refreshSystemPanel();
             sysPanelInterval = setInterval(refreshSystemPanel, 5000);
+            openSysLogStream();
         }
 
         async function refreshSystemPanel() {
             const cardsEl = document.getElementById('sysMetricCards');
             if (!cardsEl) { clearInterval(sysPanelInterval); return; } // navigated away
             try {
-                const [mr, lr] = await Promise.all([
-                    fetch('/api/admin/system-metrics'),
-                    fetch('/api/admin/logs'),
-                ]);
+                const mr = await fetch('/api/admin/system-metrics');
                 if (mr.ok) renderSysMetrics(await mr.json());
-                if (lr.ok) { sysLastLogs = await lr.json(); renderSysLogs(); }
             } catch (_) { /* next tick retries */ }
+        }
+
+        // Opens once per panel visit (closed and reopened, never stacked) and
+        // self-closes the moment the viewer element is gone — same "did I
+        // navigate away" check the 5s metrics poll uses, just triggered by an
+        // incoming message instead of a timer tick, since SSE has no natural
+        // polling point to hang the check on.
+        function openSysLogStream() {
+            if (sysLogSource) sysLogSource.close();
+            const dot = document.getElementById('sysLogLiveDot');
+            sysLogSource = new EventSource('/api/admin/logs/stream');
+            sysLogSource.onopen = () => { if (dot) { dot.classList.add('live'); dot.title = 'Live'; } };
+            sysLogSource.onerror = () => { if (dot) { dot.classList.remove('live'); dot.title = 'Reconnecting…'; } };
+            sysLogSource.onmessage = (e) => {
+                if (!document.getElementById('sysLogViewer')) { sysLogSource.close(); sysLogSource = null; return; }
+                try {
+                    const d = JSON.parse(e.data);
+                    if (d.type === 'initial') sysLastLogs = d.entries;
+                    else if (d.type === 'log') { sysLastLogs = [d.entry, ...sysLastLogs].slice(0, 1000); }
+                    else return;
+                    renderSysLogs();
+                } catch (_) {}
+            };
         }
 
         function renderSysMetrics(m) {
             const fmtLoad = (n) => n.toFixed(2);
+            const hostUsedMB = m.system.totalMemMB - m.system.freeMemMB;
             const memPct = Math.round((m.process.rssMB / m.system.totalMemMB) * 100);
             const fmtUptime = (sec) => {
                 const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), mnt = Math.floor((sec % 3600) / 60);
                 return d ? `${d}d ${h}h` : h ? `${h}h ${mnt}m` : `${mnt}m`;
             };
             document.getElementById('sysMetricCards').innerHTML = `
-                <div class="metrics-stat"><div class="metrics-stat-num">${m.process.rssMB}<span style="font-size:13px;font-weight:500;color:var(--text-muted);"> MB</span></div><div class="metrics-stat-label">This App's RAM${helpIcon('system.processRam')}</div></div>
+                <div class="metrics-stat"><div class="metrics-stat-num">${m.process.rssMB}<span style="font-size:13px;font-weight:500;color:var(--text-muted);"> MB</span></div><div class="metrics-stat-label">This App's RAM${helpIcon('system.processRam')} <span style="opacity:.6;">(${memPct}% of host)</span></div></div>
+                <div class="metrics-stat"><div class="metrics-stat-num">${hostUsedMB.toLocaleString()}<span style="font-size:13px;font-weight:500;color:var(--text-muted);">/${m.system.totalMemMB.toLocaleString()} MB</span></div><div class="metrics-stat-label">Total RAM Used${helpIcon('system.hostRam')}</div></div>
                 <div class="metrics-stat"><div class="metrics-stat-num">${m.process.heapUsedMB}<span style="font-size:13px;font-weight:500;color:var(--text-muted);">/${m.process.heapTotalMB} MB</span></div><div class="metrics-stat-label">Heap Used</div></div>
                 <div class="metrics-stat"><div class="metrics-stat-num">${fmtLoad(m.system.loadavg[0])}</div><div class="metrics-stat-label">Load Avg (1m)${helpIcon('system.loadAverage')}</div></div>
-                <div class="metrics-stat"><div class="metrics-stat-num">${m.system.freeMemMB.toLocaleString()}<span style="font-size:13px;font-weight:500;color:var(--text-muted);"> MB free</span></div><div class="metrics-stat-label">Host RAM${helpIcon('system.hostRam')} <span style="opacity:.6;">(this app: ${memPct}%)</span></div></div>
                 <div class="metrics-stat"><div class="metrics-stat-num">${fmtUptime(m.process.uptimeSec)}</div><div class="metrics-stat-label">Process Uptime</div></div>
                 <div class="metrics-stat"><div class="metrics-stat-num">${m.system.cpuCount}</div><div class="metrics-stat-label">CPU Cores</div></div>
             `;
@@ -8426,6 +8465,23 @@
                     <span style="color:${e.status === 'sent' ? '#10b981' : '#dc2626'};font-weight:600;flex-shrink:0;" title="${esc(e.error || '')}">${e.status === 'sent' ? 'Sent' : 'Failed'}</span>
                     <span style="color:var(--text-muted);flex-shrink:0;">${new Date(e.time).toLocaleTimeString()}</span>
                 </div>`).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No email activity yet.</div>';
+
+            const ACTIVITY_LABEL = {
+                scan: { valid: 'Checked in', used: 'Already used', expired: 'Expired', reentry_enter: 'Re-entered', reentry_exit: 'Exited' },
+                wallet: { _: 'Added to Wallet' },
+            };
+            const ACTIVITY_COLOR = { valid: '#10b981', reentry_enter: '#10b981', used: '#d97706', expired: '#d97706', reentry_exit: '#64748b', wallet: '#6366f1' };
+            const feedEl = document.getElementById('sysActivityFeed');
+            feedEl.innerHTML = m.activity.length ? m.activity.map(a => {
+                const label = a.type === 'wallet' ? ACTIVITY_LABEL.wallet._ : (ACTIVITY_LABEL.scan[a.status] || a.status);
+                const color = a.type === 'wallet' ? ACTIVITY_COLOR.wallet : (ACTIVITY_COLOR[a.status] || '#64748b');
+                return `
+                <div style="display:flex;justify-content:space-between;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;">
+                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;" title="${esc(a.eventName || '')}">${esc(a.name || 'Unknown')}</span>
+                    <span style="color:${color};font-weight:600;flex-shrink:0;">${esc(label)}</span>
+                    <span style="color:var(--text-muted);flex-shrink:0;">${new Date(a.time).toLocaleTimeString()}</span>
+                </div>`;
+            }).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No activity yet.</div>';
         }
 
         function setSysLogFilter(level) {

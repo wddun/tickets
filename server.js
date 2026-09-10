@@ -53,6 +53,13 @@ if (stripeSecretKey) {
 
 const logBuffer = [];
 const MAX_LOG_ENTRIES = 1000;
+// The System panel's live log viewer (see GET /api/admin/logs/stream below) —
+// a plain Set of open SSE responses, pushed to at the bottom of log() itself
+// so every single call site gets streaming for free, the same way they
+// already get buffering for free. Declared up here, ahead of anywhere an
+// admin SSE route could register a client, since log() can fire before the
+// rest of the app finishes setting up (e.g. during startup logging).
+const adminLogStreamClients = new Set();
 // Every call site already prefixes its own message with a bracketed tag —
 // [ERR]/[error], [warn], [OK]/[note] — that convention predates this and is
 // used verbatim rather than adding a level param to every one of the
@@ -68,6 +75,12 @@ function log(tag, msg) {
     console.log(`[${entry.time}] [${tag}] ${msg}`);
     logBuffer.unshift(entry);
     if (logBuffer.length > MAX_LOG_ENTRIES) logBuffer.pop();
+    if (adminLogStreamClients.size) {
+        const chunk = `data: ${JSON.stringify({ type: 'log', entry })}\n\n`;
+        for (const client of adminLogStreamClients) {
+            try { client.write(chunk); } catch { adminLogStreamClients.delete(client); }
+        }
+    }
 }
 function getIP(req) {
     return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
@@ -121,6 +134,17 @@ const MAX_EMAIL_ACTIVITY = 100;
 function recordEmailActivity(entry) {
     emailActivity.unshift({ time: new Date().toISOString(), ...entry });
     if (emailActivity.length > MAX_EMAIL_ACTIVITY) emailActivity.pop();
+}
+
+// Same idea, for door activity — scans (from recordScan, the one place
+// every /api/validate outcome already funnels through) and Wallet pass
+// downloads. Instance-wide, not per-event, since the System panel is a
+// super-admin surface looking across everything at once.
+const recentActivity = [];
+const MAX_RECENT_ACTIVITY = 150;
+function recordActivity(type, details) {
+    recentActivity.unshift({ time: new Date().toISOString(), type, ...details });
+    if (recentActivity.length > MAX_RECENT_ACTIVITY) recentActivity.pop();
 }
 
 // Gmail (and several other clients) strip `data:` URI images out of HTML
@@ -2687,6 +2711,34 @@ app.post('/api/account/password', requireAuth, async (req, res) => {
 
 app.get('/api/admin/logs', requireAdmin, (req, res) => {
     res.json(logBuffer);
+});
+
+// Live push companion to the route above, for the System panel's log
+// viewer — every log() call broadcasts here (see adminLogStreamClients),
+// so a new line shows up the instant it's written instead of waiting for
+// the next poll. Sends the current buffer once up front so a client that
+// just opened the panel isn't staring at a blank pane until something new
+// happens to log.
+app.get('/api/admin/logs/stream', requireAdmin, (req, res) => {
+    res.set({
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders();
+    res.write(`retry: 2000\n`);
+    res.write(`: ${' '.repeat(2048)}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'initial', entries: logBuffer })}\n\n`);
+
+    adminLogStreamClients.add(res);
+    const keepAlive = setInterval(() => {
+        try { res.write(': ping\n\n'); } catch (_) { clearInterval(keepAlive); }
+    }, 25000);
+    req.on('close', () => {
+        clearInterval(keepAlive);
+        adminLogStreamClients.delete(res);
+    });
 });
 
 // Persistent, per-event audit trail (view-level access — anyone who can see
@@ -7864,6 +7916,8 @@ app.get(['/api/pass/:token', '/api/pass/:token.pkpass'], async (req, res) => {
 
         if (!ticket.wallet_downloaded_at) {
             stmt.tickets.setWalletDownloaded.run(new Date().toISOString(), token);
+            log('wallet-download', `[OK] Downloaded — name: ${ticket.name}  event: ${event.name}  token: ${ticket.token}`);
+            recordActivity('wallet', { name: ticket.name, eventName: event.name });
         }
 
         res.set('Content-Type', 'application/vnd.apple.pkpass');
@@ -9710,6 +9764,8 @@ function recordScan(pairToken, event, status, ticket, allTickets) {
         });
     }
 
+    if (event) recordActivity('scan', { status, name: ticket.name, eventName: event.name });
+
     if (!pairToken || !event) return;
     logScannerActivity(pairToken, event.id, 'scan', { status, name: ticket.name, registrationId: ticket.registrationId });
     upsertScanner(pairToken, {
@@ -10409,6 +10465,7 @@ app.get('/api/admin/system-metrics', requireAdmin, (req, res) => {
             queueDepth: emailQueueDepth,
             recent: emailActivity.slice(0, 25),
         },
+        activity: recentActivity.slice(0, 30),
     });
 });
 

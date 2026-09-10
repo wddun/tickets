@@ -96,7 +96,7 @@ describe('admin-only routes', () => {
 });
 
 describe('system metrics', () => {
-    test('reports process memory, host load, and the email queue shape', async () => {
+    test('reports process memory, host load, the email queue, and activity shape', async () => {
         const r = await admin.client.get('/api/admin/system-metrics');
         assert.equal(r.status, 200, r.text);
         assert.equal(typeof r.body.process.pid, 'number');
@@ -105,8 +105,68 @@ describe('system metrics', () => {
         assert.equal(typeof r.body.process.uptimeSec, 'number');
         assert.ok(Array.isArray(r.body.system.loadavg) && r.body.system.loadavg.length === 3);
         assert.equal(typeof r.body.system.cpuCount, 'number');
+        assert.equal(typeof r.body.system.totalMemMB, 'number');
+        assert.equal(typeof r.body.system.freeMemMB, 'number');
         assert.equal(typeof r.body.email.queueDepth, 'number');
         assert.ok(Array.isArray(r.body.email.recent));
+        assert.ok(Array.isArray(r.body.activity));
+    });
+
+    test('a scan lands in the recent-activity feed', async () => {
+        const ev = await createEvent(owner.client, { name: 'Activity Feed Event' });
+        await addTicket(owner.client, ev.id, { name: 'Scanned For Activity' });
+        const [ticket] = await listTickets(owner.client, ev.id);
+        const r = await owner.client.post('/api/validate', { token: ticket.token, eventId: ev.id });
+        assert.equal(r.status, 200, r.text);
+
+        const m = await admin.client.get('/api/admin/system-metrics');
+        const hit = m.body.activity.find(a => a.type === 'scan' && a.eventName === 'Activity Feed Event' && a.name === 'Scanned For Activity');
+        assert.ok(hit, 'expected the scan to show up in the admin activity feed');
+        assert.equal(hit.status, 'valid');
+    });
+
+    describe('the live log stream', () => {
+        test('is 401 signed out and 403 for a normal user', async () => {
+            assert.equal((await anon().get('/api/admin/logs/stream')).status, 401);
+            assert.equal((await owner.client.get('/api/admin/logs/stream')).status, 403);
+        });
+
+        test('pushes the current buffer on connect, then a new line as it happens', async () => {
+            const marker = uniqueEmail('sse-marker');
+            await anon().post('/api/auth/signup', { email: '', password: '' }); // pre-existing line, should be in the initial buffer
+
+            const ac = new AbortController();
+            const res = await fetch(`${admin.client.base}/api/admin/logs/stream`, {
+                headers: { cookie: admin.client.cookies() },
+                signal: ac.signal,
+            });
+            assert.equal(res.status, 200);
+            assert.match(res.headers.get('content-type') || '', /text\/event-stream/);
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            const readUntil = async (needle, timeoutMs) => {
+                const deadline = Date.now() + timeoutMs;
+                while (!buf.includes(needle)) {
+                    if (Date.now() > deadline) throw new Error(`timed out waiting for ${needle}; saw: ${buf.slice(0, 500)}`);
+                    const { value, done } = await reader.read();
+                    if (done) throw new Error('stream closed early');
+                    buf += decoder.decode(value, { stream: true });
+                }
+            };
+
+            await readUntil('"type":"initial"', 3000);
+            assert.match(buf, /Missing fields/, 'the initial frame should carry the buffer, including the line logged before connecting');
+
+            // A line logged *after* connecting should arrive as its own push,
+            // not require a reconnect or a poll to see.
+            await anon().post('/api/auth/signup', { email: marker, password: 'longenoughpassword' });
+            await readUntil('"type":"log"', 3000);
+            assert.match(buf, new RegExp(marker), 'a post-connect log line should be pushed live');
+
+            ac.abort();
+        });
     });
 });
 
