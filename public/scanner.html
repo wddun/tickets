@@ -1080,6 +1080,17 @@
             Account Settings
             <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
         </button>
+        <!-- Scan-link door staff have no account — offer a way to sign in
+             instead of just disappearing the whole Account section on them. -->
+        <button class="settings-nav-row" id="settingsSignInRow" style="display:none;" onclick="goSignInFromSettings()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            Sign In
+            <svg class="settings-nav-chevron" width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 1 6 6 1 11"/></svg>
+        </button>
+        <div class="settings-hint-row" id="settingsSignInHint" style="display:none;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12.01" y2="16"/><path d="M12 8v4"/></svg>
+            <span>You're using a scan link, not an account. Sign in if you're the organizer and want access to your own events.</span>
+        </div>
     </div>
 
     <!-- Account sub-view -->
@@ -1549,8 +1560,9 @@ function showTabBar({ scanLink = false } = {}) {
     document.body.classList.add('has-tab-bar');
     if (scanLink) {
         document.getElementById('settingsSwitchEventRow').style.display = 'none';
-        document.getElementById('settingsAccountLabel').style.display = 'none';
         document.getElementById('settingsAccountRow').style.display = 'none';
+        document.getElementById('settingsSignInRow').style.display = 'flex';
+        document.getElementById('settingsSignInHint').style.display = 'flex';
         document.getElementById('settingsScanLinkLocked').style.display = 'flex';
         document.getElementById('settingsLockedEventName').textContent = currentEvent ? currentEvent.eventName : 'this event';
         // Undo lives on the check-in list; hide the tab if the link can't do it.
@@ -2767,6 +2779,12 @@ function closeAccountSettings() {
 async function signOutFromSettings() {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
     window.location.href = '/';
+}
+
+// Scan-link door staff have no session to log out of — this takes them to
+// the login page instead, returning to Settings on this device afterward.
+function goSignInFromSettings() {
+    window.location.href = `/login.html?next=${encodeURIComponent('/scanner.html?tab=settings')}`;
 }
 
 // ── Display QR code ───────────────────────────────────────
