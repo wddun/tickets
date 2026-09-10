@@ -32,7 +32,7 @@ async function auditEntry(client, eventId, pred, timeoutMs = 3000) {
 }
 
 describe('admin-only routes', () => {
-    const adminRoutes = ['/api/admin/logs', '/api/admin/audit-log', '/api/admin/metrics', '/api/admin/all-rooms'];
+    const adminRoutes = ['/api/admin/logs', '/api/admin/audit-log', '/api/admin/metrics', '/api/admin/all-rooms', '/api/admin/system-metrics'];
 
     for (const route of adminRoutes) {
         test(`${route} is 401 signed out, 403 for a normal user, 200 for the admin`, async () => {
@@ -50,6 +50,39 @@ describe('admin-only routes', () => {
         }
     });
 
+    // log() infers a level from the same [ERR]/[warn]/[OK] bracket convention
+    // every call site already used, rather than a level param nobody passes —
+    // these drive real requests down paths known to log each shape and check
+    // what actually landed in the buffer.
+    describe('inferred log levels', () => {
+        test('an [ERR]-tagged line is level: error', async () => {
+            await anon().post('/api/auth/signup', { email: '', password: '' });
+            const r = await admin.client.get('/api/admin/logs');
+            const hit = r.body.find(e => e.tag === 'signup' && /Missing fields/.test(e.msg));
+            assert.ok(hit, 'expected the missing-fields signup log line');
+            assert.equal(hit.level, 'error');
+        });
+
+        test('a [warn]-tagged line is level: warn', async () => {
+            const email = uniqueEmail('dupe-signup');
+            await anon().post('/api/auth/signup', { email, password: 'longenoughpassword' });
+            await anon().post('/api/auth/signup', { email, password: 'longenoughpassword' });
+            const r = await admin.client.get('/api/admin/logs');
+            const hit = r.body.find(e => e.tag === 'signup' && e.msg.includes(email) && /Already exists/.test(e.msg));
+            assert.ok(hit, 'expected the already-exists signup log line');
+            assert.equal(hit.level, 'warn');
+        });
+
+        test('an untagged / [OK] line is level: info', async () => {
+            const email = uniqueEmail('ok-signup');
+            await anon().post('/api/auth/signup', { email, password: 'longenoughpassword' });
+            const r = await admin.client.get('/api/admin/logs');
+            const hit = r.body.find(e => e.tag === 'signup' && e.msg.includes(email) && /Account created/.test(e.msg));
+            assert.ok(hit, 'expected the account-created signup log line');
+            assert.equal(hit.level, 'info');
+        });
+    });
+
     test('admin metrics cover every event on the instance', async () => {
         const ev = await createEvent(owner.client, { name: 'Counted By Admin' });
         await addTicket(owner.client, ev.id, { name: 'Counted Guest' });
@@ -59,6 +92,21 @@ describe('admin-only routes', () => {
         const seen = r.body.events.find(e => e.id === ev.id || e.eventId === ev.id);
         assert.ok(seen, 'admin metrics missed an event owned by someone else');
         assert.ok(r.body.totalTickets >= 1);
+    });
+});
+
+describe('system metrics', () => {
+    test('reports process memory, host load, and the email queue shape', async () => {
+        const r = await admin.client.get('/api/admin/system-metrics');
+        assert.equal(r.status, 200, r.text);
+        assert.equal(typeof r.body.process.pid, 'number');
+        assert.equal(typeof r.body.process.rssMB, 'number');
+        assert.ok(r.body.process.rssMB > 0);
+        assert.equal(typeof r.body.process.uptimeSec, 'number');
+        assert.ok(Array.isArray(r.body.system.loadavg) && r.body.system.loadavg.length === 3);
+        assert.equal(typeof r.body.system.cpuCount, 'number');
+        assert.equal(typeof r.body.email.queueDepth, 'number');
+        assert.ok(Array.isArray(r.body.email.recent));
     });
 });
 

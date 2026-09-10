@@ -797,4 +797,29 @@ window.HELP_CONTENT = {
             `Requires both event-editing and waitlist-management permissions, for the same two-actions-at-once reason as the no-show release above.`,
         ],
     },
+
+    // ── Admin Overview → System (admin only) ─────────────────────────────
+    'system.processRam': {
+        title: "This App's RAM",
+        summary: 'Resident memory (RSS) of this one Node process — the number that actually matters if something is leaking.',
+        details: [
+            `This box runs several other apps side by side (each its own pm2 process) — this figure is only this app's own share, not the whole server's.`,
+            `Polled every 5 seconds while this panel is open; not tracked or stored anywhere past that.`,
+        ],
+    },
+    'system.loadAverage': {
+        title: 'Load Average (1 min)',
+        summary: 'The host machine\'s average run-queue length over the last minute — a rough "how busy is the whole box" reading, standard on any Unix system.',
+        details: [
+            `Host-wide, not this app's own — every other app on the same VPS (and their traffic) contributes to this number too.`,
+            `A load average above the number of CPU cores means work is queuing, not just running — compare it against Host RAM's CPU core count.`,
+        ],
+    },
+    'system.hostRam': {
+        title: 'Host RAM (free)',
+        summary: 'How much memory is free on the whole machine right now, and what share of it this app itself is using.',
+        details: [
+            `Shared across every app on the box — another app's memory spike shows up here even though this app did nothing differently.`,
+        ],
+    },
 };

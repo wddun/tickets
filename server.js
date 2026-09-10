@@ -20,6 +20,7 @@ import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import http2 from 'http2';
+import os from 'os';
 const FileStore = FileStoreFactory(session);
 
 dotenv.config();
@@ -51,9 +52,19 @@ if (stripeSecretKey) {
 }
 
 const logBuffer = [];
-const MAX_LOG_ENTRIES = 500;
+const MAX_LOG_ENTRIES = 1000;
+// Every call site already prefixes its own message with a bracketed tag —
+// [ERR]/[error], [warn], [OK]/[note] — that convention predates this and is
+// used verbatim rather than adding a level param to every one of the
+// hundreds of existing log() calls across the file. A message with none of
+// these lands as 'info', same as it always implicitly was.
+function inferLogLevel(msg) {
+    if (/\[(ERR|ERROR|FATAL)\]/i.test(msg)) return 'error';
+    if (/\[warn(ing)?\]/i.test(msg)) return 'warn';
+    return 'info';
+}
 function log(tag, msg) {
-    const entry = { time: new Date().toISOString(), tag, msg };
+    const entry = { time: new Date().toISOString(), tag, msg, level: inferLogLevel(msg) };
     console.log(`[${entry.time}] [${tag}] ${msg}`);
     logBuffer.unshift(entry);
     if (logBuffer.length > MAX_LOG_ENTRIES) logBuffer.pop();
@@ -97,6 +108,20 @@ const ses = new SESClient({
 // SES default rate for new accounts is 1/sec; set SES_MIN_INTERVAL_MS in .env to tune.
 const SES_INTERVAL_MS = parseInt(process.env.SES_MIN_INTERVAL_MS || '100');
 let emailChain = Promise.resolve();
+
+// Visibility into the queue above, for the admin System panel — separate
+// from emailChain itself, which only ever needs to know "the last task",
+// not how many are waiting behind it. queueDepth counts every send() called
+// but not yet settled (queued + the one actively sending); recent is a
+// small ring buffer of outcomes so "is it stuck or just slow" has an answer
+// without grepping logs.
+let emailQueueDepth = 0;
+const emailActivity = [];
+const MAX_EMAIL_ACTIVITY = 100;
+function recordEmailActivity(entry) {
+    emailActivity.unshift({ time: new Date().toISOString(), ...entry });
+    if (emailActivity.length > MAX_EMAIL_ACTIVITY) emailActivity.pop();
+}
 
 // Gmail (and several other clients) strip `data:` URI images out of HTML
 // email bodies as a security measure — they only render images that are
@@ -247,6 +272,7 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
         });
         return { MessageId: 'sink-' + nanoid(8) };
     }
+    emailQueueDepth++;
     const task = emailChain.then(() => new Promise(r => setTimeout(r, SES_INTERVAL_MS))).then(async () => {
         // Append legitimacy footer to every email
         const footer = `<div style="text-align:center; margin-top:40px; padding-top:24px; border-top:1px solid #e5e7eb; font-size:12px; color:#6b7280;">
@@ -286,6 +312,16 @@ async function sendEmail({ to, subject, html, registrationId, fromName, replyTo,
     });
     // Keep the chain alive even if this send fails, so later sends still run
     emailChain = task.catch(() => { });
+    // Separate subscribers purely for the System panel's visibility — don't
+    // touch what `task` itself resolves/rejects with, callers await that
+    // directly and must see the real SES result (or error) unchanged.
+    task.then(() => {
+        emailQueueDepth--;
+        recordEmailActivity({ to, subject, status: 'sent' });
+    }).catch((err) => {
+        emailQueueDepth--;
+        recordEmailActivity({ to, subject, status: 'failed', error: err.message });
+    });
     return task;
 }
 
@@ -10340,6 +10376,39 @@ app.get('/api/admin/metrics', requireAdmin, (req, res) => {
         totalWalletDownloads: totalWallet,
         totalEmailOpens,
         events: eventStats
+    });
+});
+
+// System health for the admin System panel: this process's own memory (the
+// number that actually matters if something's leaking) alongside host-wide
+// load/memory for context — this box runs several other apps side by side,
+// so "the server is under load" and "this app is under load" are different
+// questions, and only the process numbers are this app's own to act on.
+// Polled every few seconds from the dashboard; cheap enough (a handful of
+// os.*/process.* calls, no disk or DB access) to not need caching.
+app.get('/api/admin/system-metrics', requireAdmin, (req, res) => {
+    const mem = process.memoryUsage();
+    const toMB = (bytes) => Math.round(bytes / 1048576);
+    res.json({
+        process: {
+            pid: process.pid,
+            nodeVersion: process.version,
+            uptimeSec: Math.round(process.uptime()),
+            rssMB: toMB(mem.rss),
+            heapUsedMB: toMB(mem.heapUsed),
+            heapTotalMB: toMB(mem.heapTotal),
+        },
+        system: {
+            loadavg: os.loadavg(),
+            cpuCount: os.cpus().length,
+            freeMemMB: toMB(os.freemem()),
+            totalMemMB: toMB(os.totalmem()),
+            uptimeSec: Math.round(os.uptime()),
+        },
+        email: {
+            queueDepth: emailQueueDepth,
+            recent: emailActivity.slice(0, 25),
+        },
     });
 });
 
