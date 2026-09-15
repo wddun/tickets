@@ -4800,7 +4800,7 @@
             return `
                 <div class="modal-section-title" style="color:#dc2626;">Danger Zone${helpIcon('dangerZone.deleteEvent')}</div>
                 <div class="settings-hint">Deleting an event permanently removes it and all its tickets. This cannot be undone.</div>
-                <button class="btn btn-danger" onclick="deleteEvent('${eventId}')">Delete Event</button>
+                <button class="btn btn-danger" onclick="deleteEvent('${eventId}', this)">Delete Event</button>
             `;
         }
 
@@ -4910,8 +4910,11 @@
             }
         }
 
-        async function deleteEvent(id) {
+        async function deleteEvent(id, btn) {
             if (!await confirmDialog('Delete this event and all its tickets? This cannot be undone.')) return;
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             const r = await fetch(`/api/event/${id}`, { method: 'DELETE' });
             if (r.ok) {
                 selectedId = null;
@@ -4924,6 +4927,8 @@
                 loadEvents();
             } else {
                 showToast('Could not delete event.');
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
@@ -5449,7 +5454,7 @@
                                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
                                             <input type="email" id="transferOwnerEmail" placeholder="New owner's email" autocomplete="email"
                                                    style="flex:1;min-width:170px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
-                                            <button class="btn btn-primary btn-sm" onclick="transferOwnership('${eventId}')">Transfer ownership</button>
+                                            <button class="btn btn-primary btn-sm" onclick="transferOwnership('${eventId}', this)">Transfer ownership</button>
                                             <button class="btn btn-sm" onclick="toggleTransferOwnership()">Cancel</button>
                                         </div>
                                     </div>
@@ -5475,7 +5480,7 @@
                             </div>
                             <div class="access-actions">
                                 <button class="access-edit-btn" onclick="toggleAccessEditor('${eventId}', '${a.id}')">Edit</button>${helpIcon('access.editPermissions')}
-                                <button class="revoke-btn" onclick="revokeAccess('${a.id}', '${eventId}')">Revoke</button>${helpIcon('access.revoke')}
+                                <button class="revoke-btn" onclick="revokeAccess('${a.id}', '${eventId}', this)">Revoke</button>${helpIcon('access.revoke')}
                             </div>
                         </div>
                         <div id="accessEditor-${a.id}" style="display:none;">
@@ -5487,7 +5492,7 @@
                                 </div>
                                 ${renderCapabilityGrid(eventId, 'edit-' + a.id, a.capabilities)}
                                 <div style="display:flex;gap:8px;">
-                                    <button class="btn btn-primary btn-sm" onclick="saveAccessPermissions('${eventId}', '${a.id}')">Save permissions</button>
+                                    <button class="btn btn-primary btn-sm" onclick="saveAccessPermissions('${eventId}', '${a.id}', this)">Save permissions</button>
                                     <button class="btn btn-sm" onclick="toggleAccessEditor('${eventId}', '${a.id}')">Cancel</button>
                                 </div>
                             </div>
@@ -5537,7 +5542,7 @@
             if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
         }
 
-        async function transferOwnership(eventId) {
+        async function transferOwnership(eventId, btn) {
             const email = document.getElementById('transferOwnerEmail').value.trim();
             if (!email) return;
             const ev = events.find(e => e.id === eventId);
@@ -5546,6 +5551,9 @@
                 `They will get full control, including the ability to remove your access.`
             );
             if (!confirmed) return;
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 const res = await fetch(`/api/event/${eventId}/transfer-ownership`, {
                     method: 'POST',
@@ -5562,15 +5570,21 @@
                 }
             } catch (err) {
                 showToast('Network error while transferring ownership.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
-        async function saveAccessPermissions(eventId, accessId) {
+        async function saveAccessPermissions(eventId, accessId, btn) {
             const capabilities = readCapabilityGrid('edit-' + accessId);
             if (!capabilities.length) {
                 showToast('Pick at least one permission, or revoke access instead.');
                 return;
             }
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 const res = await fetch(`/api/sheet/access/${accessId}`, {
                     method: 'PATCH',
@@ -5586,11 +5600,17 @@
                 }
             } catch (err) {
                 showToast('Network error while updating permissions.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
-        async function revokeAccess(accessId, eventId) {
+        async function revokeAccess(accessId, eventId, btn) {
             if (!await confirmDialog('Revoke access for this user?')) return;
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 const res = await fetch(`/api/sheet/access/${accessId}`, { method: 'DELETE' });
                 if (res.ok) {
@@ -5598,9 +5618,13 @@
                 } else {
                     const data = await res.json();
                     showToast(data.error || 'Failed to revoke access.');
+                    btn.disabled = false;
+                    btn.innerHTML = original;
                 }
             } catch (err) {
                 showToast('Network error while revoking access.');
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
@@ -6632,7 +6656,7 @@
                     <div style="margin-bottom:12px;">
                         <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-muted);">Step 1: Paste your form's response sheet link</label>
                         <input type="text" id="swUrl" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;box-sizing:border-box;margin-bottom:8px;">
-                        <button class="btn btn-primary btn-sm" onclick="swPreview('${eventId}')" style="margin-right:6px;">Preview Sheet</button>
+                        <button class="btn btn-primary btn-sm" onclick="swPreview('${eventId}', this)" style="margin-right:6px;">Preview Sheet</button>
                     </div>
                     <div id="swPreviewArea"></div>
                 </div>
@@ -6675,10 +6699,10 @@
                         </div>` : ''}
                         ${watcher.lastError ? `<div style="font-size:11px;color:#991b1b;background:#fef2f2;padding:6px 8px;border-radius:4px;margin-bottom:8px;">Last error: ${esc(watcher.lastError)}</div>` : ''}
                         <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                            <button class="btn btn-secondary btn-sm" onclick="swPoll('${eventId}')">Check Now</button>
-                            <button class="btn btn-secondary btn-sm" onclick="swBoost('${eventId}', ${watcher.boostActive ? 'false' : 'true'})">${watcher.boostActive ? 'Stop Boost' : 'Boost Sync'}</button>
-                            <button class="btn btn-secondary btn-sm" onclick="swEdit('${eventId}')">Edit</button>
-                            <button class="btn btn-danger btn-sm" onclick="swDisconnect('${eventId}')">Disconnect</button>
+                            <button class="btn btn-secondary btn-sm" onclick="swPoll('${eventId}', this)">Check Now</button>
+                            <button class="btn btn-secondary btn-sm" onclick="swBoost('${eventId}', ${watcher.boostActive ? 'false' : 'true'}, this)">${watcher.boostActive ? 'Stop Boost' : 'Boost Sync'}</button>
+                            <button class="btn btn-secondary btn-sm" onclick="swEdit('${eventId}', this)">Edit</button>
+                            <button class="btn btn-danger btn-sm" onclick="swDisconnect('${eventId}', this)">Disconnect</button>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
                             Boost sync checks the sheet every few seconds for 15 minutes — for the few minutes when a whole room is filling the form in at once. It stops on its own.
@@ -6824,7 +6848,7 @@
                         </select>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Change the event-wide default under Settings &rarr; Registration &rarr; Confirmation Emails.</div>
                     </div>
-                    <button class="btn btn-primary btn-sm" onclick="swConnect('${eventId}')">${isEdit ? 'Save Changes' : 'Connect Sheet Watcher'}</button>
+                    <button class="btn btn-primary btn-sm" onclick="swConnect('${eventId}', this)">${isEdit ? 'Save Changes' : 'Connect Sheet Watcher'}</button>
                 </div>
             `;
             swRenderConditionsUI();
@@ -6837,20 +6861,26 @@
             return res.json();
         }
 
-        async function swPreview(eventId) {
+        async function swPreview(eventId, btn) {
             const url = document.getElementById('swUrl').value;
             if (!url.trim()) { showToast('Paste the sheet link first.'); return; }
             const area = document.getElementById('swPreviewArea');
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             area.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">Fetching sheet…</div>';
             try {
                 const data = await swFetchPreview(eventId, url);
                 swRenderConnectForm(eventId, data);
             } catch (err) {
                 area.innerHTML = `<div style="font-size:12px;color:#991b1b;">${esc(err.message)}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
             }
         }
 
-        async function swConnect(eventId) {
+        async function swConnect(eventId, btn) {
             const first = document.getElementById('swFirst').value;
             const last = document.getElementById('swLast').value;
             const email = document.getElementById('swEmail').value;
@@ -6868,27 +6898,43 @@
             const sendEmail = swEmailChoice === 'always' ? true : swEmailChoice === 'never' ? false : undefined;
             if (!first || !email || !swGroupReady(window.__swGroup)) { showToast('Fill in every condition first.'); return; }
             if (ticketMode === 'column' && !ticketCountColumn) { showToast('Pick the column that holds the ticket count.'); return; }
-            const res = await fetch(`/api/event/${eventId}/sheet-watch`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
-                url: document.getElementById('swUrl').value,
-                conditionGroup: window.__swGroup,
-                firstNameColumn: first,
-                lastNameColumn: last,
-                emailColumn: email,
-                extraColumns: window.__swExtraColumns,
-                extraColumnLabels: window.__swExtraLabels,
-                ticketCountColumn,
-                ticketCount,
-                intervalMinutes,
-                includeExisting,
-                oneTicketPerEmail,
-                sendEmail,
-            }) });
-            if (res.ok) { showToast('Sheet watcher connected!'); loadAccessData(eventId); } else { showToast((await res.json()).error); }
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const res = await fetch(`/api/event/${eventId}/sheet-watch`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
+                    url: document.getElementById('swUrl').value,
+                    conditionGroup: window.__swGroup,
+                    firstNameColumn: first,
+                    lastNameColumn: last,
+                    emailColumn: email,
+                    extraColumns: window.__swExtraColumns,
+                    extraColumnLabels: window.__swExtraLabels,
+                    ticketCountColumn,
+                    ticketCount,
+                    intervalMinutes,
+                    includeExisting,
+                    oneTicketPerEmail,
+                    sendEmail,
+                }) });
+                if (res.ok) { showToast('Sheet watcher connected!'); loadAccessData(eventId); } else { showToast((await res.json()).error); }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
+            }
         }
 
-        async function swPoll(eventId) {
-            const res = await fetch(`/api/event/${eventId}/sheet-watch/poll`, {method: 'POST'});
-            if (res.ok) { const r = await res.json(); showToast(`Found ${r.summary.matched}, issued ${r.summary.issued}, already seen ${r.summary.alreadySeen}.`); loadAccessData(eventId); } else { showToast('Poll failed.'); }
+        async function swPoll(eventId, btn) {
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const res = await fetch(`/api/event/${eventId}/sheet-watch/poll`, {method: 'POST'});
+                if (res.ok) { const r = await res.json(); showToast(`Found ${r.summary.matched}, issued ${r.summary.issued}, already seen ${r.summary.alreadySeen}.`); loadAccessData(eventId); } else { showToast('Poll failed.'); }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
+            }
         }
 
         // ── Boost Sync modal (the main dashboard button, next to Settings) ──
@@ -6980,20 +7026,28 @@
         // Boost sync: a short window of near-continuous polling. The server
         // expires it on its own, so an operator who walks away can't leave it
         // hammering Google — the button is for turning it off early.
-        async function swBoost(eventId, on) {
-            const res = await fetch(`/api/event/${eventId}/sheet-watch/boost`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(on ? {minutes: 15, seconds: 5} : {minutes: 0}),
-            });
-            if (res.ok) {
-                const r = await res.json();
-                showToast(on
-                    ? `Boost sync on for 15 min${r.summary ? ` — issued ${r.summary.issued} just now.` : '.'}`
-                    : 'Boost sync stopped.');
-                loadAccessData(eventId);
-            } else {
-                showToast((await res.json().catch(() => ({}))).error || 'Boost failed.');
+        async function swBoost(eventId, on, btn) {
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const res = await fetch(`/api/event/${eventId}/sheet-watch/boost`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(on ? {minutes: 15, seconds: 5} : {minutes: 0}),
+                });
+                if (res.ok) {
+                    const r = await res.json();
+                    showToast(on
+                        ? `Boost sync on for 15 min${r.summary ? ` — issued ${r.summary.issued} just now.` : '.'}`
+                        : 'Boost sync stopped.');
+                    loadAccessData(eventId);
+                } else {
+                    showToast((await res.json().catch(() => ({}))).error || 'Boost failed.');
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
             }
         }
 
@@ -7017,10 +7071,18 @@
             }
         }
 
-        async function swDisconnect(eventId) {
-            if (!confirm('Disconnect this sheet watcher?')) return;
-            const res = await fetch(`/api/event/${eventId}/sheet-watch`, {method: 'DELETE'});
-            if (res.ok) { showToast('Sheet watcher disconnected.'); loadAccessData(eventId); } else { showToast('Failed to disconnect.'); }
+        async function swDisconnect(eventId, btn) {
+            if (!await confirmDialog('Disconnect this sheet watcher? It will stop importing new rows from the sheet.', { title: 'Disconnect sheet watcher?', confirmText: 'Disconnect', danger: true })) return;
+            const label = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
+            try {
+                const res = await fetch(`/api/event/${eventId}/sheet-watch`, {method: 'DELETE'});
+                if (res.ok) { showToast('Sheet watcher disconnected.'); loadAccessData(eventId); } else { showToast('Failed to disconnect.'); }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = label;
+            }
         }
 
         async function renderApiSection(eventId) {
@@ -7128,7 +7190,7 @@
                                 ? `<br><span style="color:#b45309;">Narrowed to: ${k.effectiveScopes.map(s => esc(s)).join(', ') || 'nothing'} — the account that made this key no longer holds the rest.</span>`
                                 : ''}</td>
                         <td style="font-size:11px;color:var(--text-muted);">${k.lastUsedAt ? fmtDate(k.lastUsedAt) : 'Never'}</td>
-                        <td style="text-align:right;"><button class="btn btn-danger btn-sm" onclick="revokeApiKey('${esc(k.id)}')">Revoke</button></td>
+                        <td style="text-align:right;"><button class="btn btn-danger btn-sm" onclick="revokeApiKey('${esc(k.id)}', this)">Revoke</button></td>
                     </tr>`).join('') + '</tbody></table>'
                 : '<div class="settings-empty">No API keys yet.</div>';
 
@@ -7146,17 +7208,20 @@
                                 <span><code style="font-size:11px;">${key}</code><br><span style="color:var(--text-muted);">${label}</span></span>
                             </label>`).join('')}
                     </div>
-                    <button class="btn btn-primary btn-sm" onclick="createApiKey()">Create key</button>${helpIcon('api.createKey')}
+                    <button class="btn btn-primary btn-sm" onclick="createApiKey(this)">Create key</button>${helpIcon('api.createKey')}
                 </div>
             `;
         }
 
-        async function createApiKey() {
+        async function createApiKey(btn) {
             const eventId = window.__apiKeyEventId;
             const name = document.getElementById('newApiKeyName').value.trim();
             const scopes = [...document.querySelectorAll('.api-scope-cb')].filter(c => c.checked).map(c => c.value);
             if (!scopes.length) return showToast('Pick at least one thing this key may do.');
 
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 const r = await fetch(`/api/event/${eventId}/api-keys`, {
                     method: 'POST',
@@ -7172,6 +7237,9 @@
                 await refreshApiKeys(eventId);
             } catch {
                 showToast('Network error while creating the key.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
@@ -7199,14 +7267,19 @@
             overlay.querySelector('#doneNewApiKey').onclick = () => overlay.remove();
         }
 
-        async function revokeApiKey(keyId) {
+        async function revokeApiKey(keyId, btn) {
             if (!await confirmDialog('Revoke this key? Anything using it stops working immediately.')) return;
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 const r = await fetch(`/api/api-keys/${keyId}`, { method: 'DELETE' });
-                if (!r.ok) return showToast('Could not revoke the key.');
+                if (!r.ok) { showToast('Could not revoke the key.'); btn.disabled = false; btn.innerHTML = original; return; }
                 await refreshApiKeys(window.__apiKeyEventId);
             } catch {
                 showToast('Network error while revoking the key.');
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
@@ -7450,7 +7523,7 @@
                         <td>${fmtDate(w.createdAt)}</td>
                         <td style="text-align:right;white-space:nowrap;">
                             ${w.status === 'waiting' ? `<button class="btn btn-primary btn-sm" onclick="promoteWaitlistEntry('${w.id}','${eventId}',this)">Promote</button>` : ''}
-                            <button class="btn btn-danger btn-sm" onclick="removeWaitlistEntry('${w.id}','${eventId}')">Remove</button>
+                            <button class="btn btn-danger btn-sm" onclick="removeWaitlistEntry('${w.id}','${eventId}',this)">Remove</button>
                         </td>
                     </tr>`).join('') + '</tbody></table>';
         }
@@ -7791,7 +7864,7 @@
                     <div id="scanAccessManage" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
                         <div style="display:flex;gap:8px;margin-bottom:12px;">
                             <input type="text" id="newScanLinkLabel" placeholder="Label (e.g. Front gate iPad)" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">
-                            <button class="btn btn-secondary btn-sm" onclick="generateScannerLink('${eventId}')">+ New Link</button>
+                            <button class="btn btn-secondary btn-sm" onclick="generateScannerLink('${eventId}', this)">+ New Link</button>
                         </div>
                         ${links.map(l => `
                             <div class="link-box" style="margin-bottom:8px;">
@@ -7799,7 +7872,7 @@
                                 <div style="display:flex;gap:8px;">
                                     <input type="text" value="${esc(l.url)}" readonly onclick="this.select()">
                                     <button class="btn btn-secondary btn-sm" onclick="copySettingsLink('${esc(l.url)}')">Copy</button>
-                                    <button class="btn btn-danger btn-sm" onclick="revokeScannerLink('${l.id}','${eventId}')">Revoke</button>
+                                    <button class="btn btn-danger btn-sm" onclick="revokeScannerLink('${l.id}','${eventId}', this)">Revoke</button>
                                 </div>
                             </div>
                         `).join('')}
@@ -7813,9 +7886,12 @@
             if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
         }
 
-        async function generateScannerLink(eventId) {
+        async function generateScannerLink(eventId, btn) {
             const input = document.getElementById('newScanLinkLabel');
             const label = input ? input.value.trim() : '';
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 const r = await fetch(`/api/event/${eventId}/scanner-links`, {
                     method: 'POST',
@@ -7829,11 +7905,16 @@
                 if (manage) manage.style.display = 'block'; // keep it open after adding
             } catch {
                 showToast('Failed to generate scan link.');
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
-        async function revokeScannerLink(linkId, eventId) {
+        async function revokeScannerLink(linkId, eventId, btn) {
             if (!await confirmDialog('Revoke this scan link? Anyone using it will lose scanner access immediately.')) return;
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 await fetch(`/api/scanner-links/${linkId}`, { method: 'DELETE' });
                 delete scanAccessCache[eventId];
@@ -7842,27 +7923,35 @@
                 if (manage) manage.style.display = 'block';
             } catch {
                 showToast('Failed to revoke scan link.');
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
         async function promoteWaitlistEntry(entryId, eventId, btn) {
+            const original = btn.innerHTML;
             btn.disabled = true;
             btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 const r = await fetch(`/api/waitlist/${entryId}/promote`, { method: 'POST' });
                 const d = await r.json();
-                if (!r.ok) { showToast(d.error || 'Failed to promote from waitlist.'); return; }
+                if (!r.ok) { showToast(d.error || 'Failed to promote from waitlist.'); btn.disabled = false; btn.innerHTML = original; return; }
                 showToast(d.notified ? 'Notified. A claim link has been sent to complete checkout.' : 'Ticket issued from waitlist.');
                 const section = document.getElementById('tab-waitlist');
                 if (section) section.innerHTML = await renderWaitlistSection(eventId);
                 loadEvents();
             } catch {
                 showToast('Failed to promote from waitlist.');
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
-        async function removeWaitlistEntry(entryId, eventId) {
+        async function removeWaitlistEntry(entryId, eventId, btn) {
             if (!await confirmDialog('Remove this person from the waitlist?')) return;
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 await fetch(`/api/waitlist/${entryId}`, { method: 'DELETE' });
                 const section = document.getElementById('tab-waitlist');
@@ -7870,6 +7959,8 @@
                 loadEvents();
             } catch {
                 showToast('Failed to remove waitlist entry.');
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
@@ -7889,8 +7980,8 @@
                                     <td>${c.usedCount}${c.maxUses != null ? ' / ' + c.maxUses : ''}</td>
                                     <td><span class="badge badge-${c.active ? 'active' : 'inactive'}">${c.active ? 'Active' : 'Inactive'}</span></td>
                                     <td style="text-align:right;white-space:nowrap;">
-                                        <button class="btn btn-secondary btn-sm" onclick="toggleDiscountCodeActive('${c.id}','${eventId}',${!c.active})">${c.active ? 'Deactivate' : 'Activate'}</button>
-                                        <button class="btn btn-danger btn-sm" onclick="deleteDiscountCode('${c.id}','${eventId}')">Delete</button>
+                                        <button class="btn btn-secondary btn-sm" onclick="toggleDiscountCodeActive('${c.id}','${eventId}',${!c.active},this)">${c.active ? 'Deactivate' : 'Activate'}</button>
+                                        <button class="btn btn-danger btn-sm" onclick="deleteDiscountCode('${c.id}','${eventId}',this)">Delete</button>
                                     </td>
                                 </tr>`).join('') + '</tbody></table>';
                     }
@@ -7909,13 +8000,13 @@
                     </select>${helpIcon('discounts.type')}
                     <input type="number" id="newCodeValue" placeholder="Value" min="0.01" step="0.01" inputmode="decimal" style="width:80px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">${helpIcon('discounts.value')}
                     <input type="number" id="newCodeMaxUses" placeholder="Max uses (optional)" min="1" inputmode="numeric" style="width:150px;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;font-size:13px;">${helpIcon('discounts.maxUses')}
-                    <button class="btn btn-primary btn-sm" onclick="createDiscountCode('${eventId}')">Add Code</button>
+                    <button class="btn btn-primary btn-sm" onclick="createDiscountCode('${eventId}', this)">Add Code</button>
                 </div>
                 <div id="discountRows">${rows}</div>
             `;
         }
 
-        async function createDiscountCode(eventId) {
+        async function createDiscountCode(eventId, btn) {
             const code = document.getElementById('newCodeText').value.trim();
             const type = document.getElementById('newCodeType').value;
             // Fixed-amount codes are stored in cents (matching ticketPrice), same
@@ -7927,6 +8018,9 @@
                 : parseInt(rawValue, 10);
             const maxUsesRaw = document.getElementById('newCodeMaxUses').value.trim();
             if (!code || !value) { showToast('Code and value are required.'); return; }
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 const r = await fetch(`/api/event/${eventId}/discount-codes`, {
                     method: 'POST',
@@ -7940,10 +8034,16 @@
                 if (section) section.innerHTML = await renderDiscountsSection(eventId);
             } catch {
                 showToast('Failed to create discount code.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
-        async function toggleDiscountCodeActive(codeId, eventId, active) {
+        async function toggleDiscountCodeActive(codeId, eventId, active, btn) {
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 await fetch(`/api/discount-codes/${codeId}`, {
                     method: 'PATCH',
@@ -7954,17 +8054,24 @@
                 if (section) section.innerHTML = await renderDiscountsSection(eventId);
             } catch {
                 showToast('Failed to update discount code.');
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
-        async function deleteDiscountCode(codeId, eventId) {
+        async function deleteDiscountCode(codeId, eventId, btn) {
             if (!await confirmDialog('Delete this discount code? This cannot be undone.')) return;
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span>';
             try {
                 await fetch(`/api/discount-codes/${codeId}`, { method: 'DELETE' });
                 const section = document.getElementById('tab-discounts');
                 if (section) section.innerHTML = await renderDiscountsSection(eventId);
             } catch {
                 showToast('Failed to delete discount code.');
+                btn.disabled = false;
+                btn.innerHTML = original;
             }
         }
 
