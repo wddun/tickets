@@ -8165,7 +8165,7 @@
                     <tr>
                         <td>${esc(e.userEmail || 'system')}</td>
                         <td>${esc(e.action.replace(/[._]/g, ' '))}</td>
-                        <td style="color:var(--text-muted);font-size:11px;">${fmtDate(e.createdAt)}</td>
+                        <td style="color:var(--text-muted);font-size:11px;" title="${esc(e.createdAt || '')}">${fmtExact(e.createdAt) || fmtDate(e.createdAt)}</td>
                     </tr>`).join('');
                 return `
                     <hr class="settings-divider">
@@ -8590,7 +8590,7 @@
                 <div style="display:flex;justify-content:space-between;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;">
                     <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;" title="${esc(e.subject || '')}">${esc(e.to)}</span>
                     <span style="color:${e.status === 'sent' ? '#10b981' : '#dc2626'};font-weight:600;flex-shrink:0;" title="${esc(e.error || '')}">${e.status === 'sent' ? 'Sent' : 'Failed'}</span>
-                    <span style="color:var(--text-muted);flex-shrink:0;">${new Date(e.time).toLocaleTimeString()}</span>
+                    <span style="color:var(--text-muted);flex-shrink:0;" title="${esc(e.time)}">${fmtExact(e.time)}</span>
                 </div>`).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No email activity yet.</div>';
 
             const ACTIVITY_LABEL = {
@@ -8606,7 +8606,7 @@
                 <div style="display:flex;justify-content:space-between;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;">
                     <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;" title="${esc(a.eventName || '')}">${esc(a.name || 'Unknown')}</span>
                     <span style="color:${color};font-weight:600;flex-shrink:0;">${esc(label)}</span>
-                    <span style="color:var(--text-muted);flex-shrink:0;">${new Date(a.time).toLocaleTimeString()}</span>
+                    <span style="color:var(--text-muted);flex-shrink:0;" title="${esc(a.time)}">${fmtExact(a.time)}</span>
                 </div>`;
             }).join('') : '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;">No activity yet.</div>';
         }
@@ -9016,6 +9016,13 @@
         function fmtDate(t) {
             if (!t) return 'Date TBD';
             return new Date(t).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+        }
+        // Full precision (down to the second) for logs and "when exactly did
+        // this happen" displays, where fmtDate's minute-level rounding isn't
+        // enough to tell two nearby events apart.
+        function fmtExact(t) {
+            if (!t) return null;
+            return new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
         }
         function fmtDateRange(startISO, endISO) {
             if (!startISO) return 'Date TBD';
@@ -9700,8 +9707,11 @@
                     statusPill = `<span class="status-pill scanned" title="Checked in ${new Date(tk.used_at).toLocaleString()}">${ICON_CHECK}Checked in</span>`;
                 }
                 const walletPill = tk.wallet_downloaded_at
-                    ? `<span class="wallet-pill on" title="Downloaded ${new Date(tk.wallet_downloaded_at).toLocaleString()}">${ICON_WALLET}In Wallet</span>`
+                    ? `<span class="wallet-pill on" title="Downloaded ${esc(tk.wallet_downloaded_at)}">${ICON_WALLET}In Wallet</span>`
                     : `<span class="wallet-pill off">${ICON_WALLET}No wallet download</span>`;
+                const walletExact = tk.wallet_downloaded_at
+                    ? `<div style="font-size:9px;color:var(--text-muted);">Downloaded ${fmtExact(tk.wallet_downloaded_at)}</div>`
+                    : '';
                 const toggleBtn = checkedIn
                     ? (reentryEvent?.fullAccess ? `<button class="btn btn-secondary btn-sm" onclick="toggleTicketInModal('${tk.id}', false, '${regId}')">Undo Check-in</button>` : '')
                     : `<button class="btn btn-secondary btn-sm" onclick="toggleTicketInModal('${tk.id}', true, '${regId}')">Mark Checked In</button>`;
@@ -9717,25 +9727,27 @@
                     <img src="/qr/${tk.token}" style="width:${size}px;height:${size}px;display:block;" />
                     <div style="font-size:10px;color:var(--text-muted);font-family:monospace;">${tk.token}</div>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">${statusPill}${walletPill}</div>
+                    ${walletExact}
                     <div class="ticket-edit-actions">${toggleBtn}${expireBtn}</div>
                 </div>`;
             };
 
             const qrItems = tickets.map((tk, i) => renderTicketCard(tk, i, tickets.length === 1)).join('');
-            const emailOpenedAt = t.email_opened_at ? new Date(t.email_opened_at).toLocaleString() : null;
-            const emailBadge = emailOpenedAt
-                ? `<span style="background:#d1fae5;color:#065f46;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;" title="Opened ${emailOpenedAt}">Opened</span>`
+            const emailOpenedExact = t.email_opened_at ? fmtExact(t.email_opened_at) : null;
+            const emailBadge = emailOpenedExact
+                ? `<span style="background:#d1fae5;color:#065f46;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;" title="Opened ${esc(t.email_opened_at)}">Opened</span>`
                 : t.confirmation_sent_at
                     ? `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Sent</span>`
                     : `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Not sent</span>`;
 
-            const infoBar = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px;font-size:12px;color:var(--text-muted);">
+            const infoBar = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:2px;font-size:12px;color:var(--text-muted);">
                 <span>${createdStr ? `Registered ${createdStr}` : ''}</span>
                 <div style="display:flex;gap:6px;align-items:center;">
                     ${emailBadge}
                     <button class="copy-email-btn" onclick="copyToClipboard('${esc(t.email || '')}', this)" title="Copy email">Copy</button>
                 </div>
-            </div>`;
+            </div>
+            ${emailOpenedExact ? `<div style="text-align:right;font-size:10px;color:var(--text-muted);margin-bottom:6px;">Email opened ${emailOpenedExact}</div>` : ''}`;
 
             preview.innerHTML = `
                 ${infoBar}
