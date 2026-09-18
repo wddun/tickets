@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import { startServer } from './helpers/server.js';
 import {
     newUser, createEvent, addTicket, listTickets, uniqueEmail,
-    setTicketExpiresAt, setTicketExpiryScope,
+    setTicketExpiresAt, setTicketExpiryScope, setTicketExpiryMode,
 } from './helpers/factories.js';
 import { createClient } from './helpers/client.js';
 
@@ -496,5 +496,103 @@ describe('bulk expire (dashboard multi-select)', () => {
         assert.equal(r.status, 200, r.text); // silently skips what the caller can't touch
         assert.equal(r.body.expired, 0);
         assert.equal((await listTickets(owner.client, ev.id))[0].expired, false);
+    });
+});
+
+// events.ticketExpiryMode picks which of three gates ticketsEligibleForExpiry()
+// applies before anything is touched — see the doc comment on that function.
+// Every test above implicitly exercises the default, 'freeSeatsOnly'; these
+// cover the other two and the default's own "nobody's waiting" no-op case,
+// which is easy to mistake for a bug (a saved cutoff that silently does
+// nothing) rather than the intended behavior.
+describe('ticketExpiryMode', () => {
+    test('defaults to freeSeatsOnly: a cutoff expires nothing when nobody is on the waitlist', async () => {
+        const ev = await createEvent(owner.client, { capacity: 5, waitlist: true });
+        assert.equal(ev.ticketExpiryMode, 'freeSeatsOnly');
+        const email = uniqueEmail('mode-default-noop');
+        await addTicket(owner.client, ev.id, { name: 'A', email });
+        // Sold out is also required, but with nobody waiting it should
+        // never even get that far.
+
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+
+        assert.equal((await ticketFor(owner.client, ev.id, email)).expiredAt, null);
+    });
+
+    test("'ifWaitlistEnabled' expires everyone once the cutoff hits, even with nobody waiting and seats free", async () => {
+        const ev = await createEvent(owner.client, { capacity: 5, waitlist: true, ticketExpiryMode: 'ifWaitlistEnabled' });
+        const emails = [uniqueEmail('mode-wl-a'), uniqueEmail('mode-wl-b')];
+        await addTicket(owner.client, ev.id, { name: 'A', email: emails[0] });
+        await addTicket(owner.client, ev.id, { name: 'B', email: emails[1] });
+        // Deliberately no waiter and capacity well above the ticket count —
+        // this mode doesn't check either.
+
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+
+        assert.ok((await ticketFor(owner.client, ev.id, emails[0])).expiredAt);
+        assert.ok((await ticketFor(owner.client, ev.id, emails[1])).expiredAt);
+    });
+
+    test("'ifWaitlistEnabled' still expires nothing if the waitlist itself is off", async () => {
+        const ev = await createEvent(owner.client, { capacity: 5, ticketExpiryMode: 'ifWaitlistEnabled' });
+        const email = uniqueEmail('mode-wl-off');
+        await addTicket(owner.client, ev.id, { name: 'A', email });
+
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+
+        assert.equal((await ticketFor(owner.client, ev.id, email)).expiredAt, null);
+    });
+
+    test("'always' hard-expires everyone at the cutoff, waitlist off and seats free", async () => {
+        const ev = await createEvent(owner.client, { capacity: 5, ticketExpiryMode: 'always' });
+        const emails = [uniqueEmail('mode-always-a'), uniqueEmail('mode-always-b')];
+        await addTicket(owner.client, ev.id, { name: 'A', email: emails[0] });
+        await addTicket(owner.client, ev.id, { name: 'B', email: emails[1] });
+
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+
+        assert.ok((await ticketFor(owner.client, ev.id, emails[0])).expiredAt);
+        assert.ok((await ticketFor(owner.client, ev.id, emails[1])).expiredAt);
+    });
+
+    test("'always' still respects ticketExpiryLimit/Order on top of the hard cutoff", async () => {
+        const ev = await createEvent(owner.client, { capacity: 5, ticketExpiryMode: 'always' });
+        const firstEmail = uniqueEmail('mode-always-limit-1');
+        const secondEmail = uniqueEmail('mode-always-limit-2');
+        await addSpacedRegistration(owner.client, ev.id, { name: 'First', email: firstEmail });
+        await addSpacedRegistration(owner.client, ev.id, { name: 'Second', email: secondEmail });
+
+        await setTicketExpiryScope(owner.client, ev.id, { limit: 1, order: 'oldest' });
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+
+        assert.ok((await ticketFor(owner.client, ev.id, firstEmail)).expiredAt);
+        assert.equal((await ticketFor(owner.client, ev.id, secondEmail)).expiredAt, null);
+    });
+
+    test("'always' still promotes the waitlist for a ticket it expires, same as freeSeatsOnly", async () => {
+        const ev = await createEvent(owner.client, { capacity: 5, waitlist: true, ticketExpiryMode: 'always' });
+        const email = uniqueEmail('mode-always-promote');
+        await addTicket(owner.client, ev.id, { name: 'A', email });
+        const waiterEmail = await addWaiter(ev.id, 'mode-always-waiter');
+
+        await setTicketExpiresAt(owner.client, ev.id, new Date(Date.now() - 1000).toISOString());
+
+        assert.ok((await ticketFor(owner.client, ev.id, email)).expiredAt);
+        const waitlist = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body;
+        assert.equal(waitlist.find(w => w.email === waiterEmail).status, 'converted');
+    });
+
+    test('an unrecognized mode value falls back to freeSeatsOnly', async () => {
+        const ev = await createEvent(owner.client, {});
+        const r = await setTicketExpiryMode(owner.client, ev.id, 'nonsense');
+        assert.equal(r.status, 200, r.text);
+        assert.equal((await owner.client.get(`/api/event/${ev.id}`)).body.ticketExpiryMode, 'freeSeatsOnly');
+    });
+
+    test('changing the mode needs manage_event', async () => {
+        const ev = await createEvent(owner.client, {});
+        const stranger = await newUser(server);
+        const r = await setTicketExpiryMode(stranger.client, ev.id, 'always');
+        assert.equal(r.status, 403);
     });
 });

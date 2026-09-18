@@ -445,6 +445,22 @@ try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiresAt TEXT`); } catch {}
 try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiryLimit INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiryOrder TEXT DEFAULT 'oldest'`); } catch {}
 
+// Governs which not-yet-used tickets ticketsEligibleForExpiry() (server.js)
+// treats as fair game once the cutoff above is reached:
+//   'freeSeatsOnly'     (default) — only expires tickets when doing so would
+//                        hand a freed seat to someone: waitlist enabled, at
+//                        least one person actually waiting, event sold out.
+//                        The original, narrow behavior every event predating
+//                        this column keeps.
+//   'ifWaitlistEnabled' — expires every not-yet-checked-in ticket at the
+//                        cutoff as soon as the waitlist feature is turned on
+//                        for this event, whether or not anyone is currently
+//                        waiting or the event is full.
+//   'always'            — hard cutoff: expires every not-yet-checked-in
+//                        ticket the moment it's reached, waitlist or not.
+// ticketExpiryLimit/Order still apply on top of whichever set gets selected.
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketExpiryMode TEXT DEFAULT 'freeSeatsOnly'`); } catch {}
+
 // Whether an expiring ticket (cutoff sweep, or a manual/bulk expire) hands its
 // freed seat to the next waitlist entry — see expireTicket() in server.js.
 // Defaults to 1 (the original behavior, the whole reason the cutoff exists)
@@ -807,6 +823,7 @@ export function rowToEvent(row) {
         scanResultDurationMs: row.scanResultDurationMs ?? null,
         ticketExpiryLimit: row.ticketExpiryLimit ?? null,
         ticketExpiryOrder: row.ticketExpiryOrder === 'newest' ? 'newest' : 'oldest',
+        ticketExpiryMode: ['freeSeatsOnly', 'ifWaitlistEnabled', 'always'].includes(row.ticketExpiryMode) ? row.ticketExpiryMode : 'freeSeatsOnly',
         ticketReturnsEnabled: !!row.ticketReturnsEnabled,
         roomChatEnabled: !!row.roomChatEnabled,
         // Anything that isn't the explicit opt-in reads as 'none', so a NULL
@@ -872,7 +889,7 @@ export const DUPLICABLE_EVENT_COLUMNS = [
     'allowMultipleRegistrations', 'oneRegistrationPerDevice', 'blockDuplicateEmails',
     'shuttleLinkEnabled', 'walletLockScreenEnabled', 'emailTemplate', 'winnerEmailTemplate',
     'skipConfirmationEmails', 'emailPolicy', 'waitlistClaimHours',
-    'ticketExpiryLimit', 'ticketExpiryOrder', 'ticketExpiryPromotesWaitlist',
+    'ticketExpiryLimit', 'ticketExpiryOrder', 'ticketExpiryPromotesWaitlist', 'ticketExpiryMode',
     'waitlistMessage', 'waitlistEmailTemplate', 'waitlistClaimEmailTemplate',
     'scanResultDurationMs', 'reminderEnabled', 'reminderMessage', 'reminderHoursBefore',
     'ticketReturnsEnabled', 'ticketReturnRefund', 'ticketReturnCutoffMinutes', 'ticketReturnCutoffUnit',
@@ -913,6 +930,7 @@ export const stmt = {
         setTicketReturns: db.prepare(`UPDATE events SET ticketReturnsEnabled=?, ticketReturnRefund=?, ticketReturnCutoffMinutes=?, ticketReturnCutoffUnit=? WHERE id=?`),
         setRoomChatEnabled: db.prepare(`UPDATE events SET roomChatEnabled=? WHERE id=?`),
         setTicketExpiryScope: db.prepare(`UPDATE events SET ticketExpiryLimit=?, ticketExpiryOrder=? WHERE id=?`),
+        setTicketExpiryMode: db.prepare(`UPDATE events SET ticketExpiryMode=? WHERE id=?`),
         setTicketExpiryPromotesWaitlist: db.prepare(`UPDATE events SET ticketExpiryPromotesWaitlist=? WHERE id=?`),
         setReminderSentAt: db.prepare(`UPDATE events SET reminderSentAt=? WHERE id=?`),
         setReminder: db.prepare(`UPDATE events SET reminderEnabled=?, reminderMessage=?, reminderHoursBefore=?, reminderSentAt=? WHERE id=?`),

@@ -61,6 +61,7 @@ export async function createEvent(client, fields = {}) {
     if (fields.ticketExpiryLimit != null || fields.ticketExpiryOrder != null) {
         await setTicketExpiryScope(client, event.id, { limit: fields.ticketExpiryLimit ?? null, order: fields.ticketExpiryOrder ?? 'oldest' });
     }
+    if (fields.ticketExpiryMode != null) await setTicketExpiryMode(client, event.id, fields.ticketExpiryMode);
     if (fields.publicRegistration) await client.put(`/api/event/${event.id}/public-registration`, { enabled: true });
     if (fields.waitlist) await client.put(`/api/event/${event.id}/waitlist-enabled`, { enabled: true });
     if (fields.ticketPrice != null) await setTicketPrice(client, event.id, fields.ticketPrice);
@@ -93,6 +94,8 @@ export async function updateEvent(client, event, changes = {}) {
     else if (event.ticketExpiryLimit) fd.append('ticketExpiryLimit', String(event.ticketExpiryLimit));
     if ('ticketExpiryOrder' in changes) fd.append('ticketExpiryOrder', changes.ticketExpiryOrder || 'oldest');
     else if (event.ticketExpiryOrder) fd.append('ticketExpiryOrder', event.ticketExpiryOrder);
+    if ('ticketExpiryMode' in changes) fd.append('ticketExpiryMode', changes.ticketExpiryMode || 'freeSeatsOnly');
+    else if (event.ticketExpiryMode) fd.append('ticketExpiryMode', event.ticketExpiryMode);
     return client.put(`/api/event/${event.id}`, undefined, { form: fd });
 }
 
@@ -111,6 +114,12 @@ export async function setTicketExpiresAt(client, eventId, iso) {
 export async function setTicketExpiryScope(client, eventId, { limit = null, order = 'oldest' } = {}) {
     const cur = (await client.get(`/api/event/${eventId}`)).body;
     return updateEvent(client, cur, { ticketExpiryLimit: limit, ticketExpiryOrder: order });
+}
+
+/** `mode` is 'freeSeatsOnly' (default) | 'ifWaitlistEnabled' | 'always'. */
+export async function setTicketExpiryMode(client, eventId, mode) {
+    const cur = (await client.get(`/api/event/${eventId}`)).body;
+    return updateEvent(client, cur, { ticketExpiryMode: mode });
 }
 
 /** `ticketPrice` here is dollars, as the form field is. */
