@@ -31,6 +31,7 @@ window.HELP_CONTENT = {
         summary: 'The event\'s start time, entered in whatever zone the Timezone field below is set to and converted to a stored UTC instant.',
         details: [
             `Clearing this field entirely is a valid state — an "undated" event. Several features (Apple Wallet pass layout, calendar invites) branch explicitly on there being no start time.`,
+            `Apple Wallet passes normally expire 24h after the start time. An undated event has nothing to count from, so each pass instead expires 24h after that ticket is first checked in; a ticket that's never checked in keeps its pass until it's expired or deleted.`,
             `Changing this does <strong>not</strong> shift the ticket-expiry cutoff or anything else — every time-based setting on this event is independent.`,
         ],
     },

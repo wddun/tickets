@@ -7624,7 +7624,7 @@ async function generateVoidedPassBuffer(tombstone) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 18;
+const PASS_TEMPLATE_VERSION = 19;
 // A ticket the organiser expired — manually, or via the sweep watching
 // events.ticketExpiresAt (see expireTicket() and the sweep below). Once
 // used_at is set the ticket already did its job, so expiry never applies
@@ -7827,8 +7827,10 @@ async function generatePassBuffer(ticket, event) {
     // underneath the title, which reads as broken rather than intentional.
     // Three cases: a valid date (format it and drive relevance/expiry), a
     // present-but-unparseable legacy value (show the raw string, no
-    // relevance/expiry), or no date at all (omit the field entirely — the
-    // pass simply never auto-expires and carries no relevance window).
+    // relevance/expiry), or no date at all (omit the field entirely, no
+    // relevance window). With no usable date there is nothing to count the
+    // expiry from, so an undated pass instead expires 24h after the ticket
+    // is first checked in — otherwise it would sit in Wallet forever.
     if (hasValidDate) {
         if (isMultiDay) {
             pass.secondaryFields.push({ key: "date", label: buildDateLabel(), value: buildDateValue(eventDate) });
@@ -7841,6 +7843,10 @@ async function generatePassBuffer(ticket, event) {
         setRelevantDatesAndExpiry();
     } else if (hasTime) {
         pass.secondaryFields.push({ key: "date", label: "DATE", value: String(event.time) });
+    }
+    if (!hasValidDate && ticket.used_at) {
+        const checkedInAt = new Date(ticket.used_at);
+        if (!Number.isNaN(checkedInAt.getTime())) pass.setExpirationDate(new Date(checkedInAt.getTime() + 24 * 60 * 60 * 1000));
     }
 
     // Auxiliary row: Location, plus the first custom field alongside it —
