@@ -7624,7 +7624,7 @@ async function generateVoidedPassBuffer(tombstone) {
 // Compute a short hash of the fields that actually affect pass content.
 // Only when this changes should we stamp updated_at and push to Wallet.
 // Bump PASS_TEMPLATE_VERSION whenever template-level fields (organizationName, relevantText, etc.) change.
-const PASS_TEMPLATE_VERSION = 17;
+const PASS_TEMPLATE_VERSION = 18;
 // A ticket the organiser expired — manually, or via the sweep watching
 // events.ticketExpiresAt (see expireTicket() and the sweep below). Once
 // used_at is set the ticket already did its job, so expiry never applies
@@ -7808,7 +7808,11 @@ async function generatePassBuffer(ticket, event) {
         const expiresAt = isMultiDay
             ? new Date(eventEndDate.getTime() + 24 * 60 * 60 * 1000)
             : new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
-        pass.expirationDate = expiresAt;
+        // passkit-generator v3 has no expirationDate setter — plain assignment
+        // (as this previously did) is the same silent no-op as `voided`
+        // below, so no pass ever carried an expiry and checked-in tickets sat
+        // in Wallet indefinitely.
+        pass.setExpirationDate(expiresAt);
         if (event.walletLockScreenEnabled) {
             const windowStart = new Date(eventDate.getTime() - 2 * 60 * 60 * 1000);
             const windowEnd = isMultiDay
@@ -11112,6 +11116,30 @@ function gracefulShutdown(signal) {
 }
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Bumping PASS_TEMPLATE_VERSION changes every ticket's passContentHash, but
+// nothing re-hashes a ticket until something else about it changes — so a
+// template fix would only ever reach a pass already in someone's Wallet by
+// accident. On boot, re-check every ticket that has a registered Wallet
+// device and push the ones whose content no longer matches what they were
+// last sent. A no-op on an ordinary restart (every hash already matches).
+async function refreshStaleWalletPasses() {
+    const rows = stmt.tickets.withWalletDevices.all().map(rowToTicket);
+    if (!rows.length) return;
+    const byEvent = new Map();
+    for (const t of rows) {
+        if (!byEvent.has(t.eventId)) byEvent.set(t.eventId, []);
+        byEvent.get(t.eventId).push(t);
+    }
+    let pushedEvents = 0;
+    for (const [eventId, tickets] of byEvent) {
+        const event = rowToEvent(stmt.events.byId.get(eventId));
+        if (!event) continue;
+        if (await pushWalletIfChanged(tickets, event)) pushedEvents++;
+    }
+    if (pushedEvents) log('wallet-pass', `[startup] Refreshed stale Wallet passes across ${pushedEvents} event(s)`);
+}
+if (!process.env.TICKETS_DB) setTimeout(() => refreshStaleWalletPasses().catch(err => log('wallet-pass', `[ERR] Startup refresh: ${err.message}`)), 10000);
 
 const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\nTicket Check-in System running at:\n - Local: http://localhost:${PORT}\n   - Network:  http://0.0.0.0:${PORT}\n`);

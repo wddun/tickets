@@ -997,6 +997,7 @@ export const stmt = {
         clearExpired: db.prepare(`UPDATE tickets SET expiredAt=NULL, returnedAt=NULL, updated_at=? WHERE id=?`),
         setReturned: db.prepare(`UPDATE tickets SET returnedAt=? WHERE id=?`),
         setPassHash: db.prepare(`UPDATE tickets SET passHash=?, updated_at=? WHERE id=?`),
+        withWalletDevices: db.prepare(`SELECT * FROM tickets WHERE token IN (SELECT DISTINCT serialNumber FROM walletDevices)`),
         setWalletDownloaded: db.prepare(`UPDATE tickets SET wallet_downloaded_at=? WHERE token=?`),
         setEmailOpened: db.prepare(`UPDATE tickets SET email_opened_at=? WHERE registrationId=? AND email_opened_at IS NULL`),
         setConfirmationSent: db.prepare(`UPDATE tickets SET confirmation_sent_at=? WHERE registrationId=? AND confirmation_sent_at IS NULL`),
