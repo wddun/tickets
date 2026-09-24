@@ -66,6 +66,12 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "cd /Users/will/Documents/obstimer && PORT=3060 node server.js"],
       "port": 3060
+    },
+    {
+      "name": "wts-coupons-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/will/Documents/wts-coupons && PORT=3070 node server.js"],
+      "port": 3070
     }
   ]
 }

@@ -100,7 +100,17 @@
       "Bash(rsync -avz --checksum /Users/will/Documents/tickets/public/login.html ubuntu:/opt/tickets/public/)",
       "Bash(rsync -avz --checksum /Users/will/Documents/tickets/server.js /Users/will/Documents/tickets/public/dashboard.html ubuntu:/opt/tickets/ ubuntu:/opt/tickets/public/)",
       "Bash(rsync -avz --checksum /Users/will/Documents/tickets/server.js ubuntu:/opt/tickets/)",
-      "Bash(rsync -avz --checksum /Users/will/Documents/tickets/public/dashboard.html ubuntu:/opt/tickets/public/)"
+      "Bash(rsync -avz --checksum /Users/will/Documents/tickets/public/dashboard.html ubuntu:/opt/tickets/public/)",
+      "Bash(rtk git *)",
+      "Bash(rtk grep *)",
+      "Bash(rtk ssh *)",
+      "Bash(npm run *)",
+      "Read(//tmp/**)",
+      "Bash(rtk read *)",
+      "Bash(sqlite3 /Users/will/Documents/tickets/tickets.db \"PRAGMA table_info\\(users\\);\")",
+      "Bash(sqlite3 /Users/will/Documents/tickets/tickets.db \"SELECT email, password FROM users WHERE email = 'willdunning01@gmail.com';\")",
+      "Bash(pkill -f \"node --watch server.js\")",
+      "Bash(npm list *)"
     ]
   }
 }

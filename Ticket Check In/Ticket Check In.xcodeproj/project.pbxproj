@@ -406,6 +406,7 @@
 				INFOPLIST_FILE = "Ticket-Check-In-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "WTS Tickets";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Used to pair with a nearby display screen to show scan results.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to scan ticket QR codes.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -417,7 +418,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.11.6;
+				MARKETING_VERSION = 1.11.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.willstechsupport.wtstickets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -448,6 +449,7 @@
 				INFOPLIST_FILE = "Ticket-Check-In-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "WTS Tickets";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Used to pair with a nearby display screen to show scan results.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to scan ticket QR codes.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -459,7 +461,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.11.6;
+				MARKETING_VERSION = 1.11.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.willstechsupport.wtstickets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
