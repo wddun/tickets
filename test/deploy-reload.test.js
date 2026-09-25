@@ -12,7 +12,13 @@ import { startServer } from './helpers/server.js';
 import { openSseReader } from './helpers/sse.js';
 import { newUser, createEvent, addTicket } from './helpers/factories.js';
 
-describe('deploy-triggered reload signal', () => {
+// Windows has no POSIX signals: child.kill('SIGTERM') there terminates the
+// process outright, so the handler under test can never run. Production is
+// Linux, and the suite still runs this everywhere else (the Mac included).
+const NO_SIGNALS = process.platform === 'win32'
+    && 'SIGTERM cannot be delivered to a handler on Windows (kill() is a hard terminate)';
+
+describe('deploy-triggered reload signal', { skip: NO_SIGNALS }, () => {
     test('reaches the waitlist status stream, the door display, and the giveaway room before the process exits', async () => {
         const server = await startServer();
         try {

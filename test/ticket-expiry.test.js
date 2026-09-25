@@ -261,6 +261,32 @@ describe('waitlist integration', () => {
         assert.equal(tickets.find(t => t.email === emails[1]).expiredAt, null, 'no waiter left to receive this seat');
         assert.equal(tickets.find(t => t.email === emails[2]).expiredAt, null, 'no waiter left to receive this seat');
     });
+
+    test('two expiries landing at once promote the one waiter once, not twice', async () => {
+        // promoteWaitlistEntry used to mark the entry 'converted' only after
+        // issueTicketForPayment returned, and that awaits the confirmation
+        // email build after inserting the ticket. A second expiry arriving in
+        // that gap still saw the entry as 'waiting' and promoted it again,
+        // issuing the same person a second ticket. In the full parallel suite
+        // the 300ms sweep hit the same gap after a save and expired an extra
+        // attendee (the "past cutoff on save" test above). Two concurrent
+        // manual expiries make the overlap deterministic instead.
+        const ev = await createEvent(owner.client, { capacity: 2, waitlist: true });
+        const seatEmails = [uniqueEmail('race-a'), uniqueEmail('race-b')];
+        await addTicket(owner.client, ev.id, { name: 'A', email: seatEmails[0] });
+        await addTicket(owner.client, ev.id, { name: 'B', email: seatEmails[1] });
+        const waiter = await addWaiter(ev.id, 'race-waiter');
+
+        const tickets = await listTickets(owner.client, ev.id);
+        const ids = seatEmails.map(email => tickets.find(t => t.email === email).id);
+        const results = await Promise.all(ids.map(id => owner.client.post(`/api/ticket/${id}/expire`)));
+        results.forEach(r => assert.equal(r.status, 200));
+
+        const after = await listTickets(owner.client, ev.id);
+        assert.equal(after.filter(t => t.email === waiter).length, 1, 'the waiter should hold exactly one ticket');
+        const waitlist = (await owner.client.get(`/api/event/${ev.id}/waitlist`)).body;
+        assert.equal(waitlist.find(w => w.email === waiter).status, 'converted');
+    });
 });
 
 describe('the limit is a running cap, not "N more every sweep tick"', () => {

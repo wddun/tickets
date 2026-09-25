@@ -4210,9 +4210,25 @@ async function promoteWaitlistEntry(entry, event) {
         return { success: true, notified: true };
     }
 
-    const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email, source: 'waitlistPromoted', customFields: entry.customFields });
-    if (!issued) return { success: false, error: 'Failed to issue ticket' };
+    // Take the entry off the waitlist *before* issuing, not after.
+    // issueTicketForPayment inserts the ticket and then awaits the
+    // confirmation email build; while the entry still counted as waiting
+    // across that await, a concurrent expiry pass (the cutoff sweep, or a
+    // save/return/manual expire landing at the same moment) saw the event
+    // sold out again with someone still waiting, expired a second attendee's
+    // ticket, and promoted this same entry again. Marking it converted here
+    // and the ticket insert both happen before the first await, so nothing
+    // can run in between. issueTicketForPayment only returns null before
+    // inserting anything (event gone), so undoing the status then is safe; a
+    // throw after the insert leaves it converted, which is correct, since
+    // they hold the ticket.
+    const priorStatus = entry.status || 'waiting';
     stmt.waitlist.setStatus.run('converted', entry.id);
+    const issued = await issueTicketForPayment({ eventId: event.id, buyerName: entry.name, buyerEmail: entry.email, source: 'waitlistPromoted', customFields: entry.customFields });
+    if (!issued) {
+        stmt.waitlist.setStatus.run(priorStatus, entry.id);
+        return { success: false, error: 'Failed to issue ticket' };
+    }
     broadcastWaitlistChanged(event.id);
     broadcastEventCounts(event.id);
     return { success: true, ticket: issued.ticket };
