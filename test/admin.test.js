@@ -330,3 +330,68 @@ describe('the admin room overview', () => {
         assert.equal(users.find(u => u.email === guest.email).ownedRooms, 0);
     });
 });
+
+describe('admin adding themselves to a room', () => {
+    test('a normal user cannot use the add-self route', async () => {
+        const ev = await createEvent(owner.client, { name: 'Add Self Guard' });
+        assert.equal((await owner.client.post(`/api/admin/event/${ev.id}/add-self`, {})).status, 403);
+    });
+
+    test('a visible add shows on the sharing list and in the admin rooms', async () => {
+        const ev = await createEvent(owner.client, { name: 'Visible Add' });
+        assert.equal((await admin.client.post(`/api/admin/event/${ev.id}/add-self`, { silent: false })).status, 200);
+
+        const access = (await owner.client.get(`/api/event/${ev.id}/access`)).body.access;
+        assert.ok(access.some(a => a.email === admin.email), 'a visible add should be on the sharing list');
+        const mine = (await admin.client.get('/api/events')).body;
+        assert.ok(mine.some(e => e.id === ev.id), 'the room should be in the admin\'s own list');
+    });
+
+    test('a silent add works everywhere but is off the sharing list, the count and the event audit log', async () => {
+        const ev = await createEvent(owner.client, { name: 'Silent Add' });
+        const r = await admin.client.post(`/api/admin/event/${ev.id}/add-self`, { silent: true });
+        assert.equal(r.status, 200);
+        assert.equal(r.body.myAccess.hidden, true);
+
+        const access = (await owner.client.get(`/api/event/${ev.id}/access`)).body.access;
+        assert.ok(!access.some(a => a.email === admin.email), 'a silent add must not appear on the owner\'s sharing list');
+
+        const mine = (await admin.client.get('/api/events')).body;
+        const entry = mine.find(e => e.id === ev.id);
+        assert.ok(entry, 'the room should still be in the admin\'s own list');
+        assert.ok(entry.capabilities.includes('checkin'));
+
+        const overview = (await admin.client.get('/api/admin/all-rooms')).body.rooms.find(x => x.event.id === ev.id);
+        assert.equal(overview.isMine, true);
+        assert.equal(overview.myAccess.hidden, true);
+
+        const linkInfo = (await anon().get(`/api/sheet/link-info/${(await owner.client.get(`/api/event/${ev.id}/access`)).body.linkUrl.split('/link/')[1]}`)).body;
+        assert.equal(linkInfo.accessCount, 0, 'a silent grant must not count toward the link\'s access count');
+
+        const ownerLog = (await owner.client.get(`/api/event/${ev.id}/audit-log?limit=200`)).body.entries;
+        assert.ok(!ownerLog.some(e => e.action.startsWith('access.')), 'no access entry on the event\'s own log');
+        const sysLog = (await admin.client.get('/api/admin/audit-log?limit=200')).body.entries;
+        assert.ok(sysLog.some(e => e.action === 'access.self_added_silent' && e.details?.eventId === ev.id), 'the admin-wide log still records it');
+    });
+
+    test('duplicating a room with access does not copy a silent grant', async () => {
+        const ev = await createEvent(owner.client, { name: 'Silent Dup' });
+        await admin.client.post(`/api/admin/event/${ev.id}/add-self`, { silent: true });
+        const dup = await owner.client.post(`/api/event/${ev.id}/duplicate`, { includeAccess: true });
+        assert.equal(dup.status, 200);
+        assert.equal(dup.body.copiedAccess, 0);
+    });
+
+    test('leaving removes the grant', async () => {
+        const ev = await createEvent(owner.client, { name: 'Leave Room' });
+        await admin.client.post(`/api/admin/event/${ev.id}/add-self`, { silent: true });
+        assert.equal((await admin.client.del(`/api/admin/event/${ev.id}/add-self`)).status, 200);
+        const mine = (await admin.client.get('/api/events')).body;
+        assert.ok(!mine.some(e => e.id === ev.id));
+    });
+
+    test('the admin cannot add themselves to a room they already own', async () => {
+        const ev = await createEvent(admin.client, { name: 'Own Room' });
+        assert.equal((await admin.client.post(`/api/admin/event/${ev.id}/add-self`, {})).status, 400);
+    });
+});

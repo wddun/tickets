@@ -4924,9 +4924,14 @@ app.get('/api/admin/all-rooms', requireAdmin, (req, res) => {
     const rooms = stmt.events.all.all().map(rowToEvent).map(event => {
         const owner = rowToUser(stmt.users.byId.get(event.userId));
         const link = stmt.sheetLinks.byEventId.get(event.id);
+        const accessRows = link ? stmt.sheetAccess.byLinkId.all(link.id) : [];
+        // The admin's own grant (silent or not) is reported separately so the
+        // overview can offer "leave" / "show in sharing" instead of listing it
+        // as one more collaborator.
+        const myRow = accessRows.find(a => a.userId === req.session.userId);
         const collaborators = link
-            ? stmt.sheetAccess.byLinkId.all(link.id)
-                .filter(a => a.userId !== event.userId)
+            ? accessRows
+                .filter(a => a.userId !== event.userId && a.userId !== req.session.userId)
                 .map(a => {
                     const u = rowToUser(stmt.users.byId.get(a.userId));
                     const capabilities = capabilitiesForAccessRow(a);
@@ -4937,6 +4942,7 @@ app.get('/api/admin/all-rooms', requireAdmin, (req, res) => {
             event,
             owner: { userId: event.userId, email: owner ? owner.email : 'Unknown' },
             collaborators,
+            myAccess: myRow ? { id: myRow.id, hidden: !!myRow.hidden } : null,
             ticketCount: stmt.tickets.countByEventId.get(event.id)?.cnt ?? 0,
             // Lets the UI mark which of these already show up under "My rooms".
             isMine: mine.has(event.id),
@@ -5042,7 +5048,7 @@ app.post('/api/event/:id/duplicate', requireAuth, (req, res) => {
     let copiedAccess = 0;
     if (req.body?.includeAccess) {
         const sourceLink = stmt.sheetLinks.byEventId.get(source.id);
-        const grants = sourceLink ? stmt.sheetAccess.byLinkId.all(sourceLink.id) : [];
+        const grants = sourceLink ? stmt.sheetAccess.byLinkId.all(sourceLink.id).filter(g => !g.hidden) : [];
         if (grants.length) {
             const newEvent = rowToEvent(stmt.events.byId.get(newId));
             const newLink = ensureSheetLink(newEvent);
@@ -8386,8 +8392,9 @@ app.get('/api/event/:id/access', requireAuth, (req, res) => {
     const shared = link
         ? stmt.sheetAccess.byLinkId.all(link.id)
             // The owner can also hold a stale share row on their own event;
-            // showing it twice would just be confusing.
-            .filter(a => a.userId !== event.userId)
+            // showing it twice would just be confusing. Hidden rows are the
+            // admin's silent self-grant and stay off every sharing list.
+            .filter(a => a.userId !== event.userId && !a.hidden)
             .map(a => {
                 const u = rowToUser(stmt.users.byId.get(a.userId));
                 const grantedBy = a.grantedBy ? rowToUser(stmt.users.byId.get(a.grantedBy)) : null;
@@ -9460,7 +9467,62 @@ app.delete('/api/sheet/access/:id', requireAuth, async (req, res) => {
 
     stmt.sheetAccess.deleteById.run(req.params.id);
     const revokedUser = rowToUser(stmt.users.byId.get(access.userId));
-    logAudit(req, { eventId: event?.id, action: 'access.revoked', details: { email: revokedUser?.email } });
+    logAudit(req, { eventId: access.hidden ? null : event?.id, action: 'access.revoked', details: { email: revokedUser?.email, ...(access.hidden ? { eventId: event?.id, hidden: true } : {}) } });
+    res.json({ success: true });
+});
+
+// The admin's own way into someone else's room. Deliberately separate from
+// /api/sheet/share, which refuses to share with yourself. `silent` marks the
+// grant hidden: it works like any other (rooms list, phone app, capabilities)
+// but never appears on the room's sharing list, in its access count, in a
+// duplicate's copied access, or in that event's own audit log.
+app.post('/api/admin/event/:id/add-self', requireAdmin, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (event.userId === req.session.userId) return res.status(400).json({ error: 'You already own this room' });
+
+    const silent = !!req.body?.silent;
+    const me = rowToUser(stmt.users.byId.get(req.session.userId));
+    const link = ensureSheetLink(event);
+    const caps = CAPABILITY_KEYS.slice();
+    const role = roleForCapabilities(caps);
+
+    const existing = stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId);
+    let accessId;
+    if (existing) {
+        stmt.sheetAccess.setGrant.run(role, JSON.stringify(caps), link.id, req.session.userId);
+        accessId = existing.id;
+    } else {
+        accessId = nanoid(10);
+        stmt.sheetAccess.insert.run(accessId, req.session.userId, link.id, new Date().toISOString(), role, JSON.stringify(caps), req.session.userId);
+    }
+    stmt.sheetAccess.setHiddenById.run(silent ? 1 : 0, accessId);
+
+    logAudit(req, {
+        eventId: silent ? null : event.id,
+        action: silent ? 'access.self_added_silent' : 'access.granted',
+        details: silent
+            ? { email: me?.email, eventId: event.id, eventName: event.name }
+            : { email: me?.email, permission: role, capabilities: caps },
+    });
+    res.json({ success: true, myAccess: { id: accessId, hidden: silent } });
+});
+
+// Leave a room the admin added themselves to (silent or not).
+app.delete('/api/admin/event/:id/add-self', requireAdmin, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const link = stmt.sheetLinks.byEventId.get(event.id);
+    const access = link ? stmt.sheetAccess.byLinkAndUser.get(link.id, req.session.userId) : null;
+    if (!access) return res.status(404).json({ error: 'You have no access entry on this room' });
+
+    stmt.sheetAccess.deleteById.run(access.id);
+    const me = rowToUser(stmt.users.byId.get(req.session.userId));
+    logAudit(req, {
+        eventId: access.hidden ? null : event.id,
+        action: 'access.revoked',
+        details: { email: me?.email, ...(access.hidden ? { eventId: event.id, hidden: true } : {}) },
+    });
     res.json({ success: true });
 });
 

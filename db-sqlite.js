@@ -288,6 +288,10 @@ try { db.exec(`ALTER TABLE events ADD COLUMN waitlistEnabled INTEGER DEFAULT 0`)
 try { db.exec(`ALTER TABLE sheetAccess ADD COLUMN capabilities TEXT`); } catch {}
 // Who granted this access, for the "shared by" line in the access list.
 try { db.exec(`ALTER TABLE sheetAccess ADD COLUMN grantedBy TEXT`); } catch {}
+// 1 = a grant the admin gave themselves silently: it works everywhere (rooms
+// list, phone app, capabilities) but is left out of every sharing list, count
+// and copy that other people can see.
+try { db.exec(`ALTER TABLE sheetAccess ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`); } catch {}
 // Visual theme for the public registration page (see REGISTRATION_THEMES in
 // server.js). NULL means the default.
 try { db.exec(`ALTER TABLE events ADD COLUMN theme TEXT`); } catch {}
@@ -1088,7 +1092,8 @@ export const stmt = {
         byLinkId: db.prepare('SELECT * FROM sheetAccess WHERE sheetLinkId=?'),
         byUserId: db.prepare('SELECT * FROM sheetAccess WHERE userId=?'),
         byLinkAndUser: db.prepare('SELECT * FROM sheetAccess WHERE sheetLinkId=? AND userId=?'),
-        countByLinkId: db.prepare('SELECT COUNT(*) as cnt FROM sheetAccess WHERE sheetLinkId=?'),
+        countByLinkId: db.prepare('SELECT COUNT(*) as cnt FROM sheetAccess WHERE sheetLinkId=? AND hidden=0'),
+        setHiddenById: db.prepare(`UPDATE sheetAccess SET hidden=? WHERE id=?`),
         insert: db.prepare(`INSERT INTO sheetAccess (id, userId, sheetLinkId, claimedAt, permission, capabilities, grantedBy) VALUES (?,?,?,?,?,?,?)`),
         setPermission: db.prepare(`UPDATE sheetAccess SET permission=? WHERE sheetLinkId=? AND userId=?`),
         setGrant: db.prepare(`UPDATE sheetAccess SET permission=?, capabilities=? WHERE sheetLinkId=? AND userId=?`),

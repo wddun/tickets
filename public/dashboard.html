@@ -8446,6 +8446,38 @@
             await selectEvent(eventId);
         }
 
+        // Adds the admin to someone else's room (or flips an existing entry
+        // between visible and silent), then refreshes the sidebar and overview.
+        async function adminSetSelfAccess(eventId, silent) {
+            try {
+                const r = await fetch(`/api/admin/event/${eventId}/add-self`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ silent }),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) return showToast(d.error || 'Could not update your access.');
+                showToast(silent ? 'Added silently. It will not show on their sharing list.' : 'Added to your rooms.');
+                await loadEvents();
+                openAdminOverview();
+            } catch (_) {
+                showToast('Could not reach the server. Try again.');
+            }
+        }
+
+        async function adminLeaveRoom(eventId) {
+            if (!await confirmDialog('Remove yourself from this room? You can add yourself again from here.', { confirmText: 'Leave', danger: false })) return;
+            try {
+                const r = await fetch(`/api/admin/event/${eventId}/add-self`, { method: 'DELETE' });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) return showToast(d.error || 'Could not leave the room.');
+                await loadEvents();
+                openAdminOverview();
+            } catch (_) {
+                showToast('Could not reach the server. Try again.');
+            }
+        }
+
         function renderAdminOverview(d, roomData) {
             const eventRows = d.events.map(e => `
                 <tr style="cursor:pointer;" onclick="openRoomAsAdmin('${e.id}')">
@@ -8700,6 +8732,13 @@
                                     </div>
                                 </div>
                                 <div class="access-actions">
+                                    ${r.myAccess ? `
+                                        <button class="access-edit-btn" onclick="adminSetSelfAccess('${r.event.id}', ${!r.myAccess.hidden})">${r.myAccess.hidden ? 'Show in sharing' : 'Hide from sharing'}</button>
+                                        <button class="access-edit-btn" onclick="adminLeaveRoom('${r.event.id}')">Leave</button>
+                                    ` : `
+                                        <button class="access-edit-btn" onclick="adminSetSelfAccess('${r.event.id}', false)">Add me</button>
+                                        <button class="access-edit-btn" onclick="adminSetSelfAccess('${r.event.id}', true)" title="Adds you without showing on their sharing list">Add me silently</button>
+                                    `}
                                     <button class="access-edit-btn" onclick="openRoomAsAdmin('${r.event.id}')">Open</button>
                                 </div>
                             </div>
