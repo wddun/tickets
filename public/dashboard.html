@@ -915,11 +915,31 @@
             color: var(--text-muted);
         }
 
+        .ticket-edit-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 12px;
+            align-items: stretch;
+        }
+        .ticket-edit-card { justify-content: space-between; min-width: 0; }
+        .ticket-edit-pills {
+            display: flex; flex-direction: column; align-items: center; gap: 4px;
+        }
         .ticket-edit-actions {
-            display: flex;
+            display: grid;
+            grid-template-columns: 1fr;
             gap: 6px;
-            flex-wrap: wrap;
+            width: 100%;
+            margin-top: auto;
+        }
+        .ticket-edit-actions .btn {
+            width: 100%;
+            min-height: 32px;
+            padding: 6px 10px;
+            font-size: 12px;
             justify-content: center;
+            text-align: center;
+            white-space: nowrap;
         }
 
         .winner-badge {
@@ -9790,14 +9810,13 @@
                 const expireBtn = checkedIn || !reentryEvent?.fullAccess ? '' : tk.expiredAt
                     ? `<button class="btn btn-secondary btn-sm" onclick="setTicketExpiredInModal('${tk.id}', false, '${regId}')">${tk.returnedAt ? 'Reinstate Ticket' : 'Restore Ticket'}</button>`
                     : `<button class="btn btn-danger btn-sm" onclick="setTicketExpiredInModal('${tk.id}', true, '${regId}')">Expire Ticket</button>`;
-                const size = showLarge ? 120 : 80;
+                const size = showLarge ? 120 : 96;
                 const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:var(--text-muted);">Ticket ${i + 1}</div>` : '';
                 return `<div class="ticket-edit-card">
                     ${label}
                     <img src="/qr/${tk.token}" style="width:${size}px;height:${size}px;display:block;" />
                     <div style="font-size:10px;color:var(--text-muted);font-family:monospace;">${tk.token}</div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">${statusPill}${walletPill}</div>
-                    ${walletExact}
+                    <div class="ticket-edit-pills">${statusPill}${walletPill}${walletExact}</div>
                     <div class="ticket-edit-actions">${toggleBtn}${expireBtn}</div>
                 </div>`;
             };
@@ -9816,7 +9835,7 @@
             preview.innerHTML = `
                 ${infoBar}
                 <div style="padding:12px;background:var(--surface-soft);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;">
-                    <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">${qrItems}</div>
+                    <div class="ticket-edit-grid">${qrItems}</div>
                 </div>`;
 
             const extra = document.getElementById('editTicketExtraList');

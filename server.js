@@ -6893,11 +6893,13 @@ app.get('/api/tickets/bulk-preview', requireAuth, async (req, res) => {
     <h2 style="margin-bottom:4px;">${ticket.name}</h2>
     <p style="color:#888;margin:0 0 4px;">${ticket.email}</p>
     <p style="color:#888;margin:0 0 16px;">Registered ${formatEventDateTime(ticket.created_at, event, { withWeekday: false, dateOnly: true })}</p>
+    <div class="reg-detail">
     <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
     <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
     ${(() => { const v = eventVenue(event); return v.hasAny ? `<p style="color:#555;margin:0 0 4px;">📍 ${v.name}${v.name && v.address ? ' — ' : ''}${v.address}</p>` : ''; })()}
     ${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${formatEventDateRange(event, { withWeekday: false })}</p>` : ''}
     ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
+    </div>
     ${qrBlocks}
 </div>`);
     }
@@ -6914,20 +6916,52 @@ app.get('/api/tickets/bulk-preview', requireAuth, async (req, res) => {
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 40px auto; padding: 24px; color: #333; }
     .qr-block { text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa; }
     .registration-block { margin-bottom: 40px; }
+    body.compact { max-width: 100%; margin: 0 auto; padding: 16px; }
+    body.compact #grid { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 10px; }
+    body.compact .sep, body.compact .reg-detail { display: none; }
+    body.compact .registration-block { margin: 0; padding: 8px; border: 1px solid #ccc; border-radius: 8px; break-inside: avoid; page-break-inside: avoid; }
+    body.compact .registration-block h2 { font-size: 14px; margin: 0 0 2px !important; }
+    body.compact .registration-block p { font-size: 11px; margin: 0 0 4px !important; }
+    body.compact .qr-block { margin: 6px 0 0; padding: 6px; border-radius: 6px; }
+    body.compact .qr-block p { display: none; }
+    body.compact .qr-block p:first-child { display: block; margin: 0 0 4px !important; }
+    body.compact .qr-block img { width: var(--qr, 110px); height: var(--qr, 110px); }
+    #compactBar { display: none; align-items: center; gap: 8px; font-size: 13px; color: #444; }
     @media print {
         body { margin: 0; max-width: 100%; padding: 16px; }
         .no-print { display: none !important; }
         .qr-block { break-inside: avoid; page-break-inside: avoid; border: 1px solid #ccc; }
         .registration-block { page-break-after: always; }
         .registration-block:last-child { page-break-after: avoid; }
+        body.compact .registration-block, body.compact .registration-block:last-child { page-break-after: auto; }
     }
 </style>
 </head>
 <body>
 <div class="no-print" style="margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
     <span id="loadHint" style="font-size:12px;color:#888;">Loading QR codes…</span>
+    <label id="compactBar"><input type="checkbox" id="compactToggle"> Compact</label>
+    <label id="compactCols" style="display:none;align-items:center;gap:6px;font-size:13px;color:#444;">Per row
+        <select id="compactColsSel"><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+    </label>
 </div>
-${sections.join('\n<hr style="border:none;border-top:2px solid #e5e7eb;margin:32px 0;">\n')}
+<div id="grid">
+${sections.join('\n<hr class="sep" style="border:none;border-top:2px solid #e5e7eb;margin:32px 0;">\n')}
+</div>
+<script>
+    (function () {
+        var t = document.getElementById('compactToggle'), sel = document.getElementById('compactColsSel');
+        function apply() {
+            document.body.classList.toggle('compact', t.checked);
+            document.getElementById('compactCols').style.display = t.checked ? 'flex' : 'none';
+            var n = parseInt(sel.value, 10);
+            document.body.style.setProperty('--cols', n);
+            document.body.style.setProperty('--qr', (Math.floor(560 / n) - 30) + 'px');
+        }
+        t.addEventListener('change', apply); sel.addEventListener('change', apply);
+        document.getElementById('compactBar').style.display = 'flex';
+    })();
+</script>
 <script>
     var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     var imgs = document.querySelectorAll('img');

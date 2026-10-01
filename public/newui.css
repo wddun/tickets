@@ -101,7 +101,8 @@
 .newui .nu-block #editEventTicketPrice { padding-left: 28px !important; }
 .newui .nu-block label[for] { font-size: var(--fs-sm) !important; font-weight: 600; }
 .newui .nu-block input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
-.newui .nu-block .settings-toggle { padding: var(--sp-3) 0; min-height: 44px; }
+.newui .nu-block .settings-toggle { padding: var(--sp-3) var(--sp-4); min-height: 44px; gap: var(--sp-3); }
+.newui .nu-block .settings-toggle input[type=checkbox] { flex: 0 0 18px; margin: 0; }
 .newui .nu-block .settings-card { border-radius: var(--r-md); }
 .newui .nu-block .btn { min-height: var(--field-h); border-radius: var(--r-sm); }
 .newui .nu-block .btn-sm { min-height: 34px; }
