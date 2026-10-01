@@ -601,6 +601,33 @@
             font-size: 12px;
         }
 
+        /* ── Attendee search + status filter ── */
+        .attendee-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+        .attendee-toolbar .search-box { flex: 1 1 260px; margin-bottom: 0; }
+        .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+        .filter-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 7px 12px;
+            border: 1px solid var(--border);
+            border-radius: 99px;
+            background: var(--card);
+            color: var(--text-muted);
+            font: inherit; font-size: 12px; font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .filter-chip:hover { color: var(--text); }
+        .filter-chip:focus-visible { outline: 2px solid var(--accent-indigo); outline-offset: 2px; }
+        .filter-chip.active { background: var(--navy); border-color: var(--navy); color: #fff; }
+        [data-theme="dark"] .filter-chip.active { background: #5b68ab; border-color: #5b68ab; }
+        .filter-chip-count {
+            font-size: 11px; font-weight: 700;
+            padding: 0 6px; border-radius: 99px;
+            background: var(--bg); color: var(--text-muted);
+        }
+        .filter-chip.active .filter-chip-count { background: rgba(255,255,255,0.2); color: #fff; }
+        .link-btn { background: none; border: none; padding: 0; margin-left: 6px; font: inherit; color: var(--accent-indigo); text-decoration: underline; cursor: pointer; }
+
         /* ── Start Scanning card ── */
         .scan-access-card {
             background: var(--card);
@@ -615,14 +642,22 @@
             align-items: center;
         }
         .scan-access-qr {
-            width: 100px;
-            height: 100px;
-            border-radius: 10px;
+            width: 64px;
+            height: 64px;
+            border-radius: 8px;
             border: 1px solid var(--border);
-            flex-shrink: 0;
+            display: block;
         }
+        .scan-access-qr-btn { background: none; border: none; padding: 0; cursor: zoom-in; flex-shrink: 0; border-radius: 8px; }
+        .scan-access-qr-btn:focus-visible { outline: 2px solid var(--accent-indigo); outline-offset: 2px; }
         .scan-access-info { flex: 1; min-width: 0; }
-        .scan-access-title { font-size: 16px; font-weight: 800; margin-bottom: 4px; }
+        .scan-access-title { font-size: 15px; font-weight: 800; margin-bottom: 2px; }
+        .scan-access-actions { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+        @media (max-width: 700px) {
+            .scan-access-main { flex-wrap: wrap; }
+            .scan-access-actions { flex-basis: 100%; }
+            .scan-access-actions .btn { flex: 1; justify-content: center; }
+        }
         .scan-access-sub { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
         .scan-access-toggle {
             background: none;
@@ -732,6 +767,8 @@
             font-size: 14px;
             margin-bottom: 12px;
             outline: none;
+            background: var(--card);
+            color: var(--text);
         }
 
         .search-box:focus {
@@ -3699,6 +3736,17 @@
             // torn down and reloaded from the network on every 15s silent
             // auto-refresh, flickering, even though the scan link's content
             // never actually changes between refreshes.
+            const prevSearch = document.getElementById('searchBox');
+            const keepSearch = prevSearch && prevSearch.dataset.eventId === event.id ? {
+                value: prevSearch.value,
+                focused: document.activeElement === prevSearch,
+                start: prevSearch.selectionStart,
+                end: prevSearch.selectionEnd,
+            } : null;
+            // Opening an event (rather than refreshing the one on screen)
+            // starts it unfiltered, like the empty search box it gets.
+            if (!keepSearch) activeStatFilter = 'all';
+
             const prevScanCard = document.getElementById('scanAccessCard');
             const reuseScanCard = prevScanCard && prevScanCard.dataset.eventId === event.id ? prevScanCard : null;
 
@@ -3723,8 +3771,14 @@
                         Open Scanner
                     </a>
                     ${event.atDoorEnabled ? `<a href="/at-door.html?id=${event.id}" target="_blank" class="btn-settings" style="text-decoration:none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v4a1 1 0 0 0 1 1 2 2 0 1 1 0 4 1 1 0 0 0-1 1v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4a1 1 0 0 0-1-1 2 2 0 1 1 0-4 1 1 0 0 0 1-1V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/></svg> At Door</a>` : ''}
-                    <button class="btn-settings" onclick="openMetricsModal('${event.id}')">📊 Metrics</button>
-                    <button class="btn-settings" onclick="openBulkEmailModal('${event.id}', ${grouped.length})">✉️ Email All</button>
+                    <button class="btn-settings" onclick="openMetricsModal('${event.id}')">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="20"/><rect x="5" y="11" width="3" height="6"/><rect x="10.5" y="6" width="3" height="11"/><rect x="16" y="9" width="3" height="8"/></svg>
+                        Metrics
+                    </button>
+                    <button class="btn-settings" onclick="openBulkEmailModal('${event.id}', ${grouped.length})">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><polyline points="3 7 12 13 21 7"/></svg>
+                        Email All
+                    </button>
                     <button class="btn-settings" onclick="openManifest('${event.id}')" title="Printable door list">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
                         Print List
@@ -3745,8 +3799,6 @@
                 </div>
             </div>
         </div>
-
-        <div id="scanAccessCardSlot"></div>
 
         <div class="stats-row">
             <div class="stat-box${activeStatFilter === 'all' ? ' stat-active' : ''}" data-filter="all" onclick="setStatFilter('all')">
@@ -3775,10 +3827,12 @@
             </div>
         </div>
 
+        <div id="scanAccessCardSlot"></div>
+
         <div class="section-header">
             <div style="display:flex;align-items:center;gap:12px;">
                 <span class="section-title">Attendees</span>${helpIcon('attendees.printList')}
-                <button class="btn btn-primary btn-sm" onclick="openBulkImportModal()">➕ Add Tickets</button>
+                <button class="btn btn-primary btn-sm" onclick="openBulkImportModal()" style="display:inline-flex;align-items:center;gap:5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Tickets</button>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
                 <span id="ticketBulkDelete" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;">
@@ -3795,7 +3849,10 @@
                 <span class="refresh-hint"><span class="live-dot"></span>auto-refreshing</span>
             </div>
         </div>
-        <input type="search" class="search-box" id="searchBox" placeholder="Search by name or email…" oninput="filterAttendees()" enterkeyhint="search" />
+        <div class="attendee-toolbar">
+            <input type="search" class="search-box" id="searchBox" data-event-id="${event.id}" placeholder="Search by name or email…" oninput="filterAttendees()" enterkeyhint="search" aria-label="Search attendees" />
+            <div class="filter-chips" id="attendeeFilterChips" role="group" aria-label="Filter by status">${renderFilterChips(grouped)}</div>${helpIcon('attendees.filter')}
+        </div>
         <div class="attendee-table" id="attendeeTable">
             ${renderAttendeeRows(grouped)}
         </div>
@@ -3811,7 +3868,37 @@
                 scanCardSlot.replaceWith(freshScanCard);
                 if (!scanAccessCache[event.id]) loadScanAccessCard(event.id);
             }
+            // Re-render after the outgoing search box is gone: the template
+            // above already used it to filter, this just puts the text back.
+            if (keepSearch) {
+                const box = document.getElementById('searchBox');
+                box.value = keepSearch.value;
+                if (keepSearch.focused) {
+                    box.focus({ preventScroll: true });
+                    try { box.setSelectionRange(keepSearch.start, keepSearch.end); } catch (_) {}
+                }
+            }
             updateTicketBulkBar();
+        }
+
+        // Status filter, as visible chips next to search. The stat cards above
+        // have always filtered the list on click, but nothing said so; the
+        // chips show the same state with counts, and both stay in sync
+        // through setStatFilter().
+        const STAT_FILTERS = [
+            { key: 'all', label: 'All', match: () => true },
+            { key: 'pending', label: 'Not checked in', match: g => g.tickets.some(t => !t.used_at) },
+            { key: 'checked', label: 'Checked in', match: g => g.tickets.length > 0 && g.tickets.every(t => t.used_at) },
+            { key: 'expired', label: 'Expired', match: g => g.tickets.some(t => t.expired && !t.used_at) },
+        ];
+        function renderFilterChips(groups) {
+            return STAT_FILTERS.map(f => {
+                const n = groups.filter(f.match).length;
+                // Expired only matters once something has expired, same as its stat card.
+                if (f.key === 'expired' && n === 0 && activeStatFilter !== 'expired') return '';
+                const on = activeStatFilter === f.key;
+                return `<button type="button" class="filter-chip${on ? ' active' : ''}" aria-pressed="${on}" onclick="setStatFilter('${f.key}', false)">${f.label}<span class="filter-chip-count">${n}</span></button>`;
+            }).join('');
         }
 
         function groupTickets(tickets) {
@@ -3881,7 +3968,11 @@
         function renderAttendeeRows(groups) {
             const filtered = getFilteredSortedGroups(groups);
 
-            if (!filtered.length) return `<div class="empty-list">No attendees found</div>`;
+            if (!filtered.length) {
+                const filtering = activeStatFilter !== 'all' || (document.getElementById('searchBox')?.value || '').trim();
+                if (!groups.length) return `<div class="empty-list">No attendees yet. Use Add Tickets, or share the registration link.</div>`;
+                return `<div class="empty-list">No attendees match${filtering ? ` <button type="button" class="link-btn" onclick="clearAttendeeFilters()">Clear filters</button>` : ''}</div>`;
+            }
 
             const nameActive = sortState.field === 'firstname' || sortState.field === 'lastname';
             const ticketsActive = sortState.field === 'tickets';
@@ -4203,12 +4294,24 @@
 
         function rerenderTable() {
             const grouped = groupTickets(allTickets);
-            document.getElementById('attendeeTable').innerHTML = renderAttendeeRows(grouped);
+            const table = document.getElementById('attendeeTable');
+            if (!table) return;
+            table.innerHTML = renderAttendeeRows(grouped);
+            const chips = document.getElementById('attendeeFilterChips');
+            if (chips) chips.innerHTML = renderFilterChips(grouped);
             updateTicketBulkBar();
         }
 
-        function setStatFilter(filter) {
-            activeStatFilter = activeStatFilter === filter ? 'all' : filter;
+        function clearAttendeeFilters() {
+            const box = document.getElementById('searchBox');
+            if (box) box.value = '';
+            setStatFilter('all', false);
+        }
+
+        // Stat cards toggle (click the active one again to clear); the chips
+        // just select, like any segmented control.
+        function setStatFilter(filter, toggle = true) {
+            activeStatFilter = toggle && activeStatFilter === filter ? 'all' : filter;
             // Re-render stats row active states without full refetch. Matched
             // by data-filter, not position — the Waiting box sits between
             // Pending and Expired only when the waitlist is enabled, which
@@ -4239,25 +4342,41 @@
             rerenderTable();
         }
 
-        async function manualCheckin(registrationId) {
-            const r = await fetch(`/api/checkin/${registrationId}`, { method: 'POST' });
-            if (r.ok) {
-                const event = events.find(e => e.id === selectedId);
-                if (event) await fetchAndRender(event, true);
-            } else {
-                showToast('Check-in failed.');
+        // Optimistic: the row and the stats change the moment the button is
+        // pressed, mirroring what the server route does (every ticket in the
+        // registration, re-entry tickets marked inside), so door staff on a
+        // slow connection aren't left staring at a button that seems to have
+        // done nothing. If the server refuses, the old state comes back and a
+        // toast says why. A successful call still re-fetches, quietly, so
+        // anything else that changed meanwhile catches up.
+        async function applyCheckinChange(registrationId, checkIn) {
+            const event = events.find(e => e.id === selectedId);
+            const before = allTickets;
+            const now = new Date().toISOString();
+            allTickets = allTickets.map(t => {
+                if ((t.registrationId || t.id) !== registrationId) return t;
+                if (!checkIn) return { ...t, used_at: null, reentry_status: null };
+                return { ...t, used_at: t.used_at || now, reentry_status: event?.allowReentry ? 'inside' : t.reentry_status };
+            });
+            if (event) renderDetail(event, allTickets);
+
+            let r = null, data = {};
+            try {
+                r = await fetch(`/api/checkin/${registrationId}`, { method: checkIn ? 'POST' : 'DELETE' });
+                data = await r.json().catch(() => ({}));
+            } catch (_) {}
+            if (!r || !r.ok) {
+                allTickets = before;
+                if (event) renderDetail(event, allTickets);
+                const why = data.error || (r ? 'The server refused it.' : 'Could not reach the server.');
+                showToast(`${checkIn ? 'Check-in' : 'Undo'} failed: ${why}`);
+                return;
             }
+            if (event) fetchAndRender(event, true);
         }
 
-        async function undoCheckin(registrationId) {
-            const r = await fetch(`/api/checkin/${registrationId}`, { method: 'DELETE' });
-            if (r.ok) {
-                const event = events.find(e => e.id === selectedId);
-                if (event) await fetchAndRender(event, true);
-            } else {
-                showToast('Undo failed.');
-            }
-        }
+        function manualCheckin(registrationId) { return applyCheckinChange(registrationId, true); }
+        function undoCheckin(registrationId) { return applyCheckinChange(registrationId, false); }
 
         function openTicketPicker(registrationId, tickets) {
             const unchecked = tickets.filter(t => !t.used_at);
@@ -7939,15 +8058,17 @@
             return `
                 <div class="scan-access-card">
                     <div class="scan-access-main">
-                        <img class="scan-access-qr" src="/api/scanner-links/${primary.id}/qr" alt="Scan code" width="100" height="100">
+                        <button type="button" class="scan-access-qr-btn" onclick="showScanQrLarge('${primary.id}', '${esc(primary.url)}')" aria-label="Show a larger scan code" title="Show larger">
+                            <img class="scan-access-qr" src="/api/scanner-links/${primary.id}/qr" alt="" width="64" height="64">
+                        </button>
                         <div class="scan-access-info">
                             <div class="scan-access-title">Start Scanning${helpIcon('access.scanLinks')}</div>
-                            <div class="scan-access-sub">Scan this code with any camera app, or share the link — it opens straight into the scanner for this event only, no login needed.</div>
-                            <div style="display:flex;gap:8px;margin-top:10px;">
-                                <input type="text" value="${esc(primary.url)}" readonly onclick="this.select()" class="inline-copy-input" style="flex:1;min-width:0;padding:8px;border-radius:6px;outline:none;font-size:12px;color:var(--text);background:var(--card);">
-                                <button class="btn btn-primary btn-sm tap-target-sm" onclick="copySettingsLink('${esc(primary.url)}')">Copy</button>
-                            </div>
-                            <button class="scan-access-toggle" onclick="toggleScanAccessManage()">Manage scan links (${links.length})</button>
+                            <div class="scan-access-sub">Scan with any phone camera, or share the link. It opens the scanner for this event only, no login needed.</div>
+                        </div>
+                        <div class="scan-access-actions">
+                            <button type="button" class="btn btn-primary btn-sm" onclick="copySettingsLink('${esc(primary.url)}')">Copy Link</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="showScanQrLarge('${primary.id}', '${esc(primary.url)}')">Show QR</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleScanAccessManage()" aria-controls="scanAccessManage">Manage Links (${links.length})</button>
                         </div>
                     </div>
                     <div id="scanAccessManage" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
@@ -7968,6 +8089,32 @@
                     </div>
                 </div>
             `;
+        }
+
+        // The card's QR is kept small so it doesn't crowd the attendee list;
+        // this puts a phone-scannable one on screen when someone needs it.
+        function showScanQrLarge(linkId, url) {
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.style.zIndex = '1500';
+            overlay.innerHTML = `
+                <div class="modal" role="dialog" aria-modal="true" aria-labelledby="scanQrLargeTitle" style="max-width:380px;text-align:center;">
+                    <div class="modal-header"><h2 id="scanQrLargeTitle">Scan to open the scanner</h2></div>
+                    <img src="/api/scanner-links/${encodeURIComponent(linkId)}/qr" alt="Scan code" width="280" height="280" style="width:280px;max-width:100%;height:auto;border:1px solid var(--border);border-radius:12px;background:#fff;padding:8px;">
+                    <div style="margin:12px 0 18px;font-size:12px;color:var(--text-muted);word-break:break-all;">${esc(url)}</div>
+                    <div style="display:flex;gap:8px;justify-content:center;">
+                        <button type="button" class="btn btn-secondary" data-act="copy">Copy Link</button>
+                        <button type="button" class="btn btn-primary" data-act="close">Done</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+            const onKey = (e) => { if (e.key === 'Escape') close(); };
+            document.addEventListener('keydown', onKey);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+            overlay.querySelector('[data-act="close"]').onclick = close;
+            overlay.querySelector('[data-act="copy"]').onclick = () => copySettingsLink(url);
+            overlay.querySelector('[data-act="close"]').focus();
         }
 
         function toggleScanAccessManage() {

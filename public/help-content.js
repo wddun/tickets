@@ -187,6 +187,17 @@ window.HELP_CONTENT = {
             `This is the paper fallback for when the door has no signal. It is a different thing from "Print Selected", which prints the attendees' actual QR tickets.`,
         ],
     },
+    'attendees.filter': {
+        title: 'Filtering the Attendee List',
+        summary: 'The chips next to search narrow the list by check-in status: All, Not checked in, Checked in, and Expired (shown once something has expired).',
+        details: [
+            `Each chip shows how many registrations it matches. Counts are per registration, not per ticket, so a family of four counts once.`,
+            `"Not checked in" includes a registration where only some of its tickets have been scanned; "Checked in" means every ticket in it has.`,
+            `The stat cards above the list do the same thing: click one to filter, click it again to clear. Cards and chips always agree.`,
+            `Filters and search work together, and both stay put while the list auto-refreshes. Opening a different event starts it unfiltered.`,
+            `Check In and Undo update the row and the numbers instantly. If the server refuses, the row goes back to how it was and a message says why.`,
+        ],
+    },
     'general.duplicate': {
         title: 'Duplicate This Event',
         summary: 'Creates a new event from this one\'s setup. Useful for a season, a tour, or a meetup that runs every month — the settings that take longest to get right are exactly the ones that never change between runs.',
@@ -388,6 +399,7 @@ window.HELP_CONTENT = {
         summary: 'No-login links for door staff — anyone holding the link can scan and check in tickets for this one event, nothing else.',
         details: [
             `Deliberately narrow: no editing the event, no emailing attendees, no exports, no managing access — just checking people in (and undoing a mis-scan).`,
+            `On the event page, the Start Scanning card shows the first link: "Copy Link" copies it, "Show QR" (or clicking the small code) opens a large scannable code, and "Manage Links" lists every link to create or revoke.`,
             `Create as many as you want, one per staffer or device, each independently labeled and revocable — nobody has to share one credential.`,
             `Revoking a link takes effect immediately — it's re-checked on every single scan, so anyone still using a revoked link is refused on their very next action, not at some later "session expiry".`,
             `Creating or revoking a link needs "Edit event settings"; anyone with any access at all to the event can view/copy an existing one.`,
