@@ -1362,6 +1362,15 @@
         .ac-item:hover { background: #f8f9fa; }
         .ac-item strong { color: var(--text); display: block; }
         .ac-item span { color: var(--text-muted); font-size: 12px; }
+        .ac-status { padding: 9px 12px; font-size: 13px; color: var(--text-muted); }
+        .ac-attribution {
+            /* First in the list and pinned to its top: the New Event modal clips the
+               bottom of this dropdown, so a credit at the end was never visible. */
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 12px; font-size: 11px; color: var(--text-muted);
+            border-bottom: 1px solid var(--border); background: var(--card);
+        }
+        .ac-attribution a { color: inherit; }
 
         .modal-section-title {
             font-size: 12px;
@@ -2854,7 +2863,7 @@
             <div class="form-group" id="newEventAddressGroup" style="margin-bottom:14px;">
                 <label for="newEventAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
                 <div class="addr-wrap">
-                    <input type="text" id="newEventAddress" placeholder="Start typing an address…"
+                    <input type="text" id="newEventAddress" placeholder="Type an address, then press Enter to look it up"
                         autocomplete="off"
                         style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
                     <div class="ac-dropdown" id="newEventAddressAC"></div>
@@ -4767,7 +4776,7 @@
                 <div style="margin-bottom:16px;">
                     <label for="editEventLocAddress" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Address${helpIcon('general.address')}</label>
                     <div class="addr-wrap">
-                        <input type="text" id="editEventLocAddress" placeholder="Start typing an address…"
+                        <input type="text" id="editEventLocAddress" placeholder="Type an address, then press Enter to look it up"
                             autocomplete="off" value="${esc(ev.location?.address || '')}"
                             style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;">
                         <div class="ac-dropdown" id="editEventAddressAC"></div>
@@ -6093,27 +6102,36 @@
             if (!e.target.closest('.dropdown-wrap')) closeAllDropdowns();
         });
 
-        // ── Address autocomplete (Nominatim + IP-bias) ──────────────────────────
+        // ── Address lookup (OpenStreetMap Nominatim) ────────────────────────────
+        //
+        // Nominatim's usage policy (operations.osmfoundation.org/policies/nominatim)
+        // forbids client-side autocomplete on its API, caps use at 1 request/second,
+        // and requires "© OpenStreetMap contributors" attribution on results. So:
+        // lookups run only when the organiser presses Enter in the address field,
+        // at most one a second, and the results list carries the attribution.
+        // (This used to search on every keystroke, biased by the organiser's
+        // location from ipapi.co — which also sent their IP to a third party.)
 
-        let _ipLat = null, _ipLng = null, _ipCountry = null;
-        let _acTimers = {}, _acResults = {};
-
-        // Fetch approximate location from IP on load
-        fetch('https://ipapi.co/json/')
-            .then(r => r.json())
-            .then(d => { _ipLat = d.latitude; _ipLng = d.longitude; _ipCountry = d.country_code; })
-            .catch(() => {});
+        let _acResults = {};
+        let _acLastLookup = 0;
+        const AC_MIN_INTERVAL_MS = 1100;
+        const OSM_ATTRIBUTION = '<div class="ac-attribution">Address search &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>';
 
         function initAddressAutocomplete(inputId, dropdownId, latId, lngId) {
             const input    = document.getElementById(inputId);
             const dropdown = document.getElementById(dropdownId);
             if (!input || !dropdown) return;
 
-            input.addEventListener('input', function () {
-                clearTimeout(_acTimers[inputId]);
+            input.addEventListener('keydown', function (e) {
+                if (e.key !== 'Enter') return;
+                e.preventDefault(); // Enter looks the address up instead of submitting the form
                 const q = this.value.trim();
                 if (q.length < 3) { dropdown.style.display = 'none'; return; }
-                _acTimers[inputId] = setTimeout(() => _acSearch(q, input, dropdown, latId, lngId), 200);
+                _acSearch(q, input, dropdown, latId, lngId);
+            });
+
+            input.addEventListener('input', function () {
+                dropdown.style.display = 'none'; // results are for the text as it was looked up
             });
 
             input.addEventListener('blur', function () {
@@ -6123,21 +6141,23 @@
         }
 
         async function _acSearch(query, input, dropdown, latId, lngId) {
+            const wait = _acLastLookup + AC_MIN_INTERVAL_MS - Date.now();
+            if (wait > 0) await new Promise(r => setTimeout(r, wait));
+            _acLastLookup = Date.now();
+            dropdown.innerHTML = '<div class="ac-status">Looking up address…</div>';
+            dropdown.style.display = 'block';
             try {
-                let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&addressdetails=1`;
-                if (_ipLat && _ipLng) {
-                    const d = 1.5; // ~150 km viewbox half-extent
-                    url += `&viewbox=${_ipLng - d},${_ipLat + d},${_ipLng + d},${_ipLat - d}`;
-                }
-                if (_ipCountry) url += `&countrycodes=${_ipCountry.toLowerCase()}`;
-
-                const r = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+                const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&addressdetails=1`;
+                const r = await fetch(url, { headers: { 'Accept-Language': navigator.language || 'en' } });
                 const results = await r.json();
                 _acResults[input.id] = results;
 
-                if (!results.length) { dropdown.style.display = 'none'; return; }
+                if (!results.length) {
+                    dropdown.innerHTML = OSM_ATTRIBUTION + '<div class="ac-status">No matches. Try adding the city or postcode.</div>';
+                    return;
+                }
 
-                dropdown.innerHTML = results.map((item, i) => {
+                dropdown.innerHTML = OSM_ATTRIBUTION + results.map((item, i) => {
                     const parts  = item.display_name.split(', ');
                     // Nominatim separates street number and street name with a comma;
                     // join them with a space instead when the first segment is numeric.
@@ -6163,7 +6183,7 @@
 
                 dropdown.style.display = 'block';
             } catch (_) {
-                dropdown.style.display = 'none';
+                dropdown.innerHTML = '<div class="ac-status">Address lookup is unavailable right now. You can still type the address yourself.</div>';
             }
         }
 

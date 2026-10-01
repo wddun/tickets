@@ -264,7 +264,9 @@ button.primary:disabled { opacity: .5; cursor: not-allowed; }
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<!-- Served from this site: qrcode@1.5.3 has no browser build, so the CDN URL this
+     used to load 404'd and the QR never drew. See public/qrcode.js's header. -->
+<script src="/qrcode.js"></script>
 <script>
 (function(){
     var btn = document.getElementById('theme-toggle');

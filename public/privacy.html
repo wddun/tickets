@@ -91,49 +91,67 @@
     </nav>
     <div class="content">
         <h1>Privacy Policy</h1>
-        <p class="meta">WTS Tickets &nbsp;·&nbsp; Last updated: March 28, 2026</p>
+        <p class="meta">WTS Tickets &nbsp;·&nbsp; Last updated: October 1, 2026</p>
 
-        <p>WTS Tickets ("we", "our", or "us") is operated by Will's Tech Support. This policy explains what information we collect, how we use it, and your rights regarding your data.</p>
+        <p>WTS Tickets ("we", "our", or "us") is operated by Will's Tech Support. This policy explains what information we collect, how we use it, who else processes it, and your rights regarding your data. It covers the website at tickets.willstechsupport.com and the Ticket Check In iOS app.</p>
+
+        <p><strong>If you registered for an event:</strong> the event's organizer decides what to ask you and what to do with your registration. We store and process it on their behalf to issue and check your ticket. Questions about how an organizer uses your details are best sent to them; we'll help with anything we hold.</p>
 
         <h2>1. Information We Collect</h2>
         <ul>
-            <li><strong>Account information:</strong> When you create an organizer account, we collect your email address and a hashed password.</li>
-            <li><strong>Event and attendee data:</strong> Events you create, including attendee names, email addresses, and ticket check-in status.</li>
-            <li><strong>Camera access:</strong> The app uses the camera only to scan QR codes. We do not capture or store photos or videos.</li>
-            <li><strong>Usage data:</strong> Standard server logs including IP addresses and request timestamps, used solely for security and debugging.</li>
+            <li><strong>Organizer accounts:</strong> your email address, a hashed password, whether your email is verified, and security settings such as devices you've chosen to trust.</li>
+            <li><strong>Attendee registrations:</strong> name, email address, and answers to any questions the organizer added, plus ticket status: check-in and scan times, waitlist position, ticket returns, and giveaway wins.</li>
+            <li><strong>Paid tickets:</strong> the buyer's name and email, the amount, and the order status. Card details go directly to Stripe and never reach our servers.</li>
+            <li><strong>Apple Wallet:</strong> if you add a ticket to Apple Wallet, your device registers with us using an identifier and a push token issued by Apple, so we can update or void the pass.</li>
+            <li><strong>Notifications:</strong> if an organizer allows notifications in the Ticket Check In app, we store the device's push token.</li>
+            <li><strong>Camera:</strong> the scanner uses the camera only to read QR codes. We do not capture or store photos or video.</li>
+            <li><strong>IP addresses and logs:</strong> our server logs record IP addresses and request details. Sign-in and sign-up attempts are logged with the email address entered. Organizer actions (such as editing an event or checking someone in) are kept in an audit log with the IP address they came from. While a scanner device is connected, its IP address is shown on the organizer's live scanner monitor. We use this to keep accounts secure, investigate problems, and show organizers who did what. Our site administrator can view the logs.</li>
         </ul>
 
         <h2>2. How We Use Your Information</h2>
         <ul>
-            <li>To provide and operate the WTS Tickets service.</li>
-            <li>To send ticket QR codes to attendees on your behalf.</li>
-            <li>To authenticate you and maintain your session.</li>
-            <li>We do not sell, rent, or share your data with third parties for marketing purposes.</li>
+            <li>To run the service: issuing tickets, checking people in, managing waitlists and capacity.</li>
+            <li>To send emails about your registration on the organizer's behalf: tickets, waitlist updates, reminders, and return or giveaway notices.</li>
+            <li>To sign organizers in and protect accounts from abuse.</li>
+            <li>We do not sell, rent, or share your data for advertising or marketing, and we use no analytics or advertising trackers.</li>
         </ul>
 
-        <h2>3. Data Storage</h2>
-        <p>Your data is stored on secure servers. Passwords are hashed using bcrypt and are never stored in plain text. Session data is stored server-side and expires automatically.</p>
+        <h2>3. Third-Party Services</h2>
+        <p>These services process data on our behalf:</p>
+        <ul>
+            <li><strong>Oracle Cloud:</strong> hosts our servers, where all event, ticket, and account data is stored.</li>
+            <li><strong>Cloudflare:</strong> sits in front of the website for speed and protection against attacks. It handles your connection, including your IP address.</li>
+            <li><strong>Amazon Web Services (SES):</strong> delivers our emails. It processes recipients' email addresses and the email contents.</li>
+            <li><strong>Stripe:</strong> processes payments and refunds for paid tickets under <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe's privacy policy</a>.</li>
+            <li><strong>Apple:</strong> delivers Apple Wallet pass updates and app notifications through Apple's push service.</li>
+            <li><strong>Google:</strong> if an organizer links a Google Sheet, our server downloads that sheet from Google to import registrations.</li>
+            <li><strong>OpenStreetMap Foundation:</strong> when an organizer looks up an event address, the typed address is sent from their browser to OpenStreetMap's Nominatim service, which also sees their IP address.</li>
+        </ul>
+        <p>Links to add an event to Google Calendar or open it in Apple Maps only send information to those services if you click them.</p>
 
-        <h2>4. Third-Party Services</h2>
-        <p>We use Amazon Web Services (AWS SES) to send transactional emails (ticket delivery). AWS may process recipient email addresses in order to deliver those emails. No other third-party analytics or advertising services are used.</p>
+        <h2>4. Cookies and Local Storage</h2>
+        <p>We use a session cookie to keep organizers and door staff signed in. If an organizer limits registration to one per device, we set a cookie on the registering device, kept for 180 days, so that limit can be enforced. The site also remembers small preferences, such as light or dark theme, in your browser. We don't use advertising or tracking cookies.</p>
 
-        <h2>5. Data Retention</h2>
-        <p>Your account data is retained until you delete your account. You can delete your account at any time from the dashboard (Settings → Delete Account). Deleting your account permanently removes all associated events, tickets, and personal data.</p>
+        <h2>5. Data Storage and Security</h2>
+        <p>Data is stored on our servers and sent over encrypted HTTPS (TLS) connections. Passwords are hashed using bcrypt and are never stored in plain text. Session data is stored server-side and expires automatically.</p>
 
-        <h2>6. Children's Privacy</h2>
-        <p>WTS Tickets is intended for use by event organizers and is not directed at children under 13. We do not knowingly collect personal information from children.</p>
+        <h2>6. Data Retention</h2>
+        <p>Organizer accounts and their events, tickets, and attendee data are kept until the organizer deletes them or their account (Settings → Delete Account), which permanently removes everything associated with the account. Server logs and the audit log are kept for security and troubleshooting. If you'd like log entries about you removed, contact us.</p>
 
-        <h2>7. Your Rights</h2>
-        <p>You have the right to access, correct, or delete your personal data at any time. To exercise these rights, use the in-app account management features or contact us directly.</p>
+        <h2>7. Children's Privacy</h2>
+        <p>WTS Tickets is intended for use by event organizers and is not directed at children under 13. We do not knowingly collect personal information from children under 13; organizers registering children for an event should do so as their parent or guardian.</p>
 
-        <h2>8. Changes to This Policy</h2>
-        <p>We may update this policy from time to time. Continued use of the service after changes constitutes acceptance of the updated policy.</p>
+        <h2>8. Your Rights</h2>
+        <p>You can ask to see, correct, or delete the personal data we hold about you. Organizers can do most of this from their account. Attendees can contact the event's organizer or email us, and we'll work with the organizer to handle the request.</p>
 
-        <h2>9. Contact</h2>
+        <h2>9. Changes to This Policy</h2>
+        <p>We may update this policy from time to time and will change the "Last updated" date above when we do. Continued use of the service after changes constitutes acceptance of the updated policy.</p>
+
+        <h2>10. Contact</h2>
         <p>For privacy-related questions: <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a></p>
 
         <div class="footer-bar">
-            © 2026 Will's Tech Support &nbsp;·&nbsp; <a href="/">WTS Tickets</a>
+            © 2026 Will's Tech Support &nbsp;·&nbsp; <a href="/">WTS Tickets</a> &nbsp;·&nbsp; <a href="/terms.html">Terms of Service</a>
         </div>
     </div>
     <script>

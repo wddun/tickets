@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms of Service | WTS Tickets</title>
+    <meta name="description" content="WTS Tickets terms of service: organizer responsibilities, paid ticketing, attendee data, acceptable use, copyright complaints and trademarks.">
+    <link rel="canonical" href="https://tickets.willstechsupport.com/terms.html">
+    <meta name="theme-color" content="#1a1f3c">
+    <script>
+    (function(){
+      var saved = localStorage.getItem('wts-theme');
+      var theme = saved || 'light'; // default light regardless of OS preference; only an explicit toggle changes it
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+    </script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root, [data-theme="light"] {
+            --bg: #f4f5f8; --text: #1e293b; --text-muted: #94a3b8; --navy: #1a1f3c;
+            --red: #c4294a; --red-text: #c4294a; --border: #e5e7eb; --body-text: #374151;
+        }
+        [data-theme="dark"] {
+            --bg: #10132a; --text: #e9ecf5; --text-muted: #8b90a3; --navy: #1a1f3c;
+            --red: #c4294a; --red-text: #e78098; --border: #252b52; --body-text: #c5cadb;
+        }
+        .theme-toggle {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.08); color: #fff;
+            font-size: 14px; cursor: pointer; padding: 0;
+        }
+        .theme-toggle:hover { background: rgba(255,255,255,.16); }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text);
+            -webkit-font-smoothing: antialiased;
+        }
+        nav {
+            background: var(--navy); height: 52px;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px;
+        }
+        nav img { height: 24px; width: auto; }
+        nav .nav-right { display: flex; align-items: center; gap: 14px; }
+        nav a   { font-size: 13px; color: rgba(255,255,255,.6); font-weight: 500; text-decoration: none; }
+        nav a:hover { color: #fff; }
+
+        .content {
+            max-width: 700px; margin: 0 auto;
+            padding: 40px 20px 60px;
+        }
+        h1 {
+            font-size: clamp(24px, 5vw, 32px);
+            font-weight: 800; color: var(--text);
+            margin-bottom: 4px;
+        }
+        .meta { font-size: 13px; color: var(--text-muted); margin-bottom: 32px; }
+        h2 {
+            font-size: 16px; font-weight: 700;
+            color: var(--text); margin-top: 32px; margin-bottom: 8px;
+        }
+        p, li {
+            font-size: 15px; line-height: 1.75; color: var(--body-text);
+        }
+        ul { padding-left: 20px; }
+        li { margin-bottom: 4px; }
+        a  { color: var(--red-text); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .footer-bar {
+            margin-top: 48px; padding-top: 20px;
+            border-top: 1px solid var(--border);
+            font-size: 13px; color: var(--text-muted);
+        }
+        .footer-bar a { color: var(--text-muted); }
+        .footer-bar a:hover { color: var(--text); }
+
+        @media (max-width: 480px) {
+            .content { padding: 28px 16px 48px; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/"><img src="/logo-nav.svg" alt="Will's Tech Support"></a>
+        <div class="nav-right">
+            <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+            <a href="/">← Home</a>
+        </div>
+    </nav>
+    <div class="content">
+        <h1>Terms of Service</h1>
+        <p class="meta">WTS Tickets &nbsp;·&nbsp; Last updated: October 1, 2026</p>
+
+        <p>WTS Tickets (the website at tickets.willstechsupport.com and the Ticket Check In iOS app) is operated by Will's Tech Support ("we", "us"). By using it you agree to these terms. If you use it for an organization, you confirm you're allowed to accept these terms on its behalf.</p>
+
+        <h2>1. What WTS Tickets does</h2>
+        <p>WTS Tickets lets organizers create events, register attendees, issue tickets, sell paid tickets, run waitlists and giveaways, and check people in at the door. We may change, add, or remove features at any time, and we don't promise the service will always be available or free of errors.</p>
+
+        <h2>2. Organizer responsibilities</h2>
+        <ul>
+            <li><strong>Your event is yours.</strong> You're responsible for your event, what you promise attendees, and your dealings with them.</li>
+            <li><strong>Attendee data.</strong> You decide what to collect from attendees and must have a lawful reason to collect and use it. Tell attendees how you'll use their details, honor their requests about their data, and don't use attendee emails for marketing they haven't agreed to.</li>
+            <li><strong>Giveaways.</strong> Prize drawings and giveaways can be regulated by local law (for example sweepstakes and lottery rules). You're responsible for running yours lawfully, including any official rules and "no purchase necessary" requirements.</li>
+            <li><strong>Accounts and access.</strong> Keep your password safe. You're responsible for anyone you give access to, including shared accounts, scan links, kiosks, and API keys.</li>
+        </ul>
+
+        <h2>3. Paid tickets</h2>
+        <p>Paid ticketing is a beta feature. When you sell tickets, <strong>you are the seller</strong>. Payments are processed by Stripe, and your use of Stripe is also governed by <a href="https://stripe.com/legal" target="_blank" rel="noopener">Stripe's terms</a>. You're responsible for your prices, any taxes, and your refund policy, including honoring refunds you promise. We are not a party to the sale between you and your attendees.</p>
+
+        <h2>4. Attendees</h2>
+        <p>If you register for an event, the organizer runs that event and decides its rules, including refunds, returns, and waitlists. Tickets are for the person and event they were issued for and may be voided by the organizer. Our <a href="/privacy.html">Privacy Policy</a> explains how your registration details are handled.</p>
+
+        <h2>5. Acceptable use</h2>
+        <p>Don't use WTS Tickets to:</p>
+        <ul>
+            <li>break the law or anyone else's rights, or run fraudulent events or sales;</li>
+            <li>send spam or collect people's details for anything they didn't agree to;</li>
+            <li>upload content (event images, descriptions, email text) you don't have the right to use;</li>
+            <li>access events, accounts, or data that aren't yours, or get around capacity, ticket, or scanner controls;</li>
+            <li>disrupt, overload, probe, or scrape the service, except through the documented API within its limits.</li>
+        </ul>
+        <p>We may remove content, void misused tickets, or suspend accounts that break these rules.</p>
+
+        <h2 id="copyright">6. Copyright complaints</h2>
+        <p>If you believe content on WTS Tickets infringes your copyright, email <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a> with the work concerned, where it appears, your contact details, a statement that you believe in good faith the use isn't authorized and that your notice is accurate, and your signature. We'll remove or disable the content and let the organizer know.</p>
+
+        <h2>7. Third-party services and trademarks</h2>
+        <p>WTS Tickets works with other services, including Apple Wallet, Google Sheets, Google Calendar, Apple Maps, Stripe, and OpenStreetMap. These may change or stop working, and they have their own terms. Address search uses data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>.</p>
+        <p>Apple, Apple Wallet, Apple Maps, and iPhone are trademarks of Apple Inc. Google, Google Sheets, and Google Calendar are trademarks of Google LLC. Stripe is a trademark of Stripe, Inc. These names are used only to describe compatibility. WTS Tickets is not affiliated with, sponsored by, or endorsed by these companies.</p>
+
+        <h2>8. No warranty</h2>
+        <p>WTS Tickets is provided "as is" and "as available", without warranties of any kind, to the fullest extent the law allows. Have a backup plan for important events: a network or service outage can affect registration and check-in.</p>
+
+        <h2>9. Limitation of liability</h2>
+        <p>To the fullest extent the law allows, we aren't liable for indirect, incidental, special, or consequential damages, lost profits or data, or disputes between organizers and attendees. Our total liability for any claim is limited to the amount you paid us for WTS Tickets in the twelve months before the claim.</p>
+
+        <h2>10. Ending your use</h2>
+        <p>You can stop using WTS Tickets and delete your account at any time (Settings → Delete Account). We may suspend or end access for anyone who breaks these terms.</p>
+
+        <h2>11. Changes to these terms</h2>
+        <p>We may update these terms and will change the "Last updated" date above when we do. Continuing to use WTS Tickets after a change means you accept the updated terms.</p>
+
+        <h2>12. Contact</h2>
+        <p>Questions about these terms: <a href="mailto:support@willstechsupport.com">support@willstechsupport.com</a></p>
+
+        <div class="footer-bar">
+            © 2026 Will's Tech Support &nbsp;·&nbsp; <a href="/">WTS Tickets</a> &nbsp;·&nbsp; <a href="/privacy.html">Privacy Policy</a>
+        </div>
+    </div>
+    <script>
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            function paint(){ btn.innerHTML = document.documentElement.getAttribute('data-theme') === 'dark' ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'; }
+            paint();
+            btn.addEventListener('click', function(){
+                var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('wts-theme', next);
+                paint();
+            });
+        })();
+    </script>
+</body>
+</html>

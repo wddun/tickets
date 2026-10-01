@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **No emojis in code, UI text, comments, commit messages, or files unless the user explicitly asks or there's no alternative that fits.** Prefer inline SVG icons (the codebase already uses them widely — see scanner.html, checkin.html, dashboard.html) or plain text labels. When editing existing UI that already contains emojis, do not add more — leave the existing ones in place unless asked to clean them up.
 
+## Legal pages and outside services
+
+`public/privacy.html` lists every outside service that sees user data (Oracle Cloud,
+Cloudflare, AWS SES, Stripe, Apple push, Google Sheets, OpenStreetMap Nominatim) and every
+place IP addresses are kept (server logs, `auditLog`, the scanner monitor);
+`public/terms.html` holds the organizer/attendee terms. Adding an outside call, or
+starting to store something new about people, means updating the privacy policy in the
+same change. Load browser libraries from `public/` (e.g. `public/qrcode.js`), not a CDN.
+Address lookup must keep to Nominatim's usage policy: lookups on Enter only (no
+keystroke autocomplete), at most one a second, with the OpenStreetMap credit shown.
+
 ## Line endings
 
 **Every file in this repo is LF.** `server.js` was the lone CRLF holdout and was converted

@@ -25,7 +25,7 @@ const anon = () => createClient(server.base);
 describe('public pages', () => {
     const publicPages = [
         '/', '/index.html', '/login.html', '/register.html', '/support.html',
-        '/privacy.html', '/forgot-password.html', '/reset-password.html',
+        '/privacy.html', '/terms.html', '/forgot-password.html', '/reset-password.html',
         '/verify-email.html', '/waitlist-status.html', '/manage-ticket.html',
         '/display.html', '/scanner.html',
     ];
@@ -288,5 +288,49 @@ describe('the scanner page', () => {
 
     test('holds off a service-worker reload while a scan result is on screen', async () => {
         assert.match(scanner, /__swHoldReload/);
+    });
+});
+
+describe('legal pages and third parties', () => {
+    test('privacy and terms are themselves and link to each other', async () => {
+        const privacy = await anon().get('/privacy.html');
+        const terms = await anon().get('/terms.html');
+        assert.match(privacy.text, /<title>Privacy Policy/);
+        assert.match(terms.text, /<title>Terms of Service/);
+        assert.ok(privacy.text.includes('href="/terms.html"'), 'privacy should link to the terms');
+        assert.ok(terms.text.includes('href="/privacy.html"'), 'terms should link to privacy');
+    });
+
+    test('attendees can reach both policies from the registration page and the home page', async () => {
+        for (const page of ['register.html', 'index.html']) {
+            const src = readPublic(page);
+            assert.match(src, /href="\/?privacy\.html"/, `${page} should link the privacy policy`);
+            assert.match(src, /href="\/?terms\.html"/, `${page} should link the terms`);
+        }
+    });
+
+    // The door/kiosk QR library is served from this site: the CDN URL these pages
+    // used (qrcode@1.5.3/build/qrcode.min.js) never existed, so their QR never drew.
+    test('door and kiosk pages load the QR library from this site, and it is served', async () => {
+        for (const page of ['at-door.html', 'kiosk.html']) {
+            const src = readPublic(page);
+            assert.match(src, /<script src="\/qrcode\.js"><\/script>/, `${page} should load /qrcode.js`);
+            assert.doesNotMatch(src, /cdn\.jsdelivr\.net/, `${page} should not load scripts from a CDN`);
+        }
+        const r = await anon().get('/qrcode.js');
+        assert.equal(r.status, 200);
+        assert.match(r.headers.get('content-type') || '', /javascript/);
+        assert.match(r.text, /var QRCode=function/);
+        assert.match(r.text, /MIT License/, 'keep the library\'s license notice');
+    });
+
+    // privacy.html lists every outside service; these two were removed on purpose.
+    test('no page calls ipapi.co, and address lookup follows the Nominatim usage policy', async () => {
+        const all = fs.readdirSync(path.join(REPO_ROOT, 'public')).filter(f => f.endsWith('.html'));
+        for (const f of all) assert.doesNotMatch(readPublic(f), /https?:\/\/ipapi\.co/, `${f} sends the visitor's IP to ipapi.co`);
+        const dash = readPublic('dashboard.html');
+        assert.match(dash, /OpenStreetMap contributors/, 'Nominatim results need OSM attribution');
+        assert.match(dash, /e\.key !== 'Enter'/, 'lookups run on Enter, not on every keystroke');
+        assert.doesNotMatch(dash, /addEventListener\('input', function \(\) \{\s*clearTimeout\(_acTimers/, 'no keystroke autocomplete');
     });
 });
