@@ -4044,7 +4044,7 @@
             <div>
                 <div class="attendee-name">${esc(g.name)}</div>
                 <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap;">
-                    ${g.tickets[0]?.email_opened_at ? `<span title="Email opened ${new Date(g.tickets[0].email_opened_at).toLocaleString()}" style="font-size:10px;font-weight:600;color:#10b981;">Opened</span>` : g.tickets[0]?.confirmation_sent_at ? `<span title="Email not opened" style="font-size:10px;font-weight:600;color:var(--text-muted);">Sent</span>` : ''}
+                    ${g.tickets[0]?.confirmation_sent_at ? `<span title="Confirmation email sent" style="font-size:10px;font-weight:600;color:var(--text-muted);">Sent</span>` : ''}
                     ${expiredCount > 0 ? `<span title="${allReturned ? 'Handed back by the attendee' : 'Not checked in before the ticket expiry cutoff'}" style="font-size:10px;font-weight:600;color:#b45309;">${voidLabel}</span>` : ''}
                     ${(() => { const wins = g.tickets[0]?.giveawayWins || []; if (!wins.length) return ''; const prizes = wins.map(w => w.prizeLabel).filter(Boolean).join(', '); return `<span class="winner-badge" title="${esc(prizes || 'Giveaway winner')}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a2 2 0 0 0 0 4h.5M17 6h3a2 2 0 0 1 0 4h-.5"/></svg>${wins.length > 1 ? `Won &times;${wins.length}` : 'Winner'}</span>`; })()}
                     ${g.tickets.some(t => t.wallet_downloaded_at) ? `<span title="Wallet downloaded" style="font-size:10px;font-weight:600;color:var(--text-muted);">Downloaded to Wallet</span>` : ''}
@@ -8637,7 +8637,6 @@
                     <div class="metrics-stat"><div class="metrics-stat-num" style="color:var(--text-muted)">${d.pct}%</div><div class="metrics-stat-label">Attendance</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.uniqueRegistrations}</div><div class="metrics-stat-label">Registrations</div></div>
                     <div class="metrics-stat"><div class="metrics-stat-num">${d.walletDownloads}</div><div class="metrics-stat-label">Wallet DL</div></div>
-                    <div class="metrics-stat"><div class="metrics-stat-num">${d.emailOpens}</div><div class="metrics-stat-label">Email Opens</div></div>
                 </div>
                 <div class="metrics-section-title">Check-Ins by Hour</div>
                 ${checkinBars}
@@ -8740,7 +8739,6 @@
                         </div>
                     </td>
                     <td style="color:var(--text-muted);">${e.walletDownloads}</td>
-                    <td style="color:var(--text-muted);">${e.emailOpens}</td>
                 </tr>`).join('');
 
             document.getElementById('eventDetail').innerHTML = `
@@ -8752,7 +8750,6 @@
                         <div class="metrics-stat"><div class="metrics-stat-num" style="color:#10b981">${d.totalScanned}</div><div class="metrics-stat-label">Checked In</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num" style="color:var(--text-muted)">${d.totalPct}%</div><div class="metrics-stat-label">Overall Rate</div></div>
                         <div class="metrics-stat"><div class="metrics-stat-num">${d.totalWalletDownloads}</div><div class="metrics-stat-label">Wallet DLs</div></div>
-                        <div class="metrics-stat"><div class="metrics-stat-num">${d.totalEmailOpens}</div><div class="metrics-stat-label">Email Opens</div></div>
                     </div>
 
                     <div class="metrics-section-title">System</div>
@@ -8787,7 +8784,7 @@
                     <div style="overflow-x:auto;">
                         <table class="admin-events-table">
                             <thead><tr>
-                                <th>Event</th><th>Date</th><th>Tickets</th><th>Checked In</th><th>Rate</th><th>Wallet</th><th>Emails</th>
+                                <th>Event</th><th>Date</th><th>Tickets</th><th>Checked In</th><th>Rate</th><th>Wallet</th>
                             </tr></thead>
                             <tbody>${eventRows}</tbody>
                         </table>
@@ -9537,8 +9534,6 @@
         .edit-reg-email-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
         .edit-reg-email-actions .btn { justify-content: center; }
         .email-pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--bg); color: var(--text-muted); }
-        .email-pill.opened { background: #d1fae5; color: #065f46; }
-        [data-theme="dark"] .email-pill.opened { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; }
         /* Sticky so Save/Cancel never scroll out of reach on a registration
            with several tickets and custom fields. The negative margins pull
            it flush to the modal's edges, past .modal's 28px padding. */
@@ -10149,18 +10144,15 @@
             };
 
             const qrItems = tickets.map((tk, i) => renderTicketCard(tk, i, tickets.length === 1)).join('');
-            const emailOpenedExact = t.email_opened_at ? fmtExact(t.email_opened_at) : null;
-            const emailBadge = emailOpenedExact
-                ? `<span class="email-pill opened" title="Opened ${esc(t.email_opened_at)}">Opened</span>`
-                : t.confirmation_sent_at
-                    ? `<span class="email-pill">Sent</span>`
-                    : `<span class="email-pill">Not sent</span>`;
+            const emailBadge = t.confirmation_sent_at
+                ? `<span class="email-pill">Sent</span>`
+                : `<span class="email-pill">Not sent</span>`;
 
             const subtitleParts = [];
             if (tickets.length > 1) subtitleParts.push(`${tickets.length} tickets`);
             if (createdStr) subtitleParts.push(`Registered ${createdStr}`);
             document.getElementById('editTicketSubtitle').textContent = subtitleParts.join(' · ');
-            document.getElementById('editTicketEmailStatus').innerHTML = `<span>Confirmation email</span>${emailBadge}${emailOpenedExact ? `<span>${emailOpenedExact}</span>` : ''}`;
+            document.getElementById('editTicketEmailStatus').innerHTML = `<span>Confirmation email</span>${emailBadge}`;
 
             preview.innerHTML = `
                 <div style="padding:12px;background:var(--surface-soft);border:1px solid var(--border);border-radius:10px;">

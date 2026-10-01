@@ -198,7 +198,6 @@ struct StatsView: View {
                 }
 
                 Section("Before the door") {
-                    statRow("Tickets emailed and opened", value: "\(m.emailOpens)", systemImage: "envelope.open.fill", tint: .secondary)
                     statRow("Added to Apple Wallet", value: "\(m.walletDownloads)", systemImage: "wallet.pass.fill", tint: .secondary)
                 }
             }

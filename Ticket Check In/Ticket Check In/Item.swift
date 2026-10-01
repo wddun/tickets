@@ -100,7 +100,6 @@ struct EventMetrics: Codable {
     let pct: Int
     let uniqueRegistrations: Int
     let walletDownloads: Int
-    let emailOpens: Int
     let capacity: Int?
     let remaining: Int?
     let soldOut: Bool?

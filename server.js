@@ -1662,9 +1662,6 @@ ${imageHtml ? `<tr><td>${imageHtml}</td></tr>` : ''}
 </html>`;
 }
 
-// 1x1 transparent GIF for email open tracking
-const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
-
 // ── APNs push for Wallet pass updates ──────────────────────────────────────
 let _apnsJwtCache = { token: null, iat: 0 };
 const APP_BUNDLE_ID = process.env.APP_BUNDLE_ID || 'com.willstechsupport.wtstickets';
@@ -3068,21 +3065,6 @@ app.post('/api/event/:id/push-send', requireAuth, async (req, res) => {
     res.json({ success: true, sent: tokens.length });
 });
 
-// Email open tracking pixel (public — no auth, called by email clients)
-app.get('/api/track/open/:registrationId', async (req, res) => {
-    res.set('Content-Type', 'image/gif');
-    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    res.send(TRANSPARENT_GIF);
-    // Record after responding so we don't slow the email client
-    const { registrationId } = req.params;
-    const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
-    if (tickets.length && !tickets[0].email_opened_at) {
-        const now = new Date().toISOString();
-        stmt.tickets.setEmailOpened.run(now, registrationId);
-        log('email-open', `[opened] Opened — regId: ${registrationId}  name: ${tickets[0].name}`);
-    }
-});
-
 // ── Seat holds ─────────────────────────────────────────────────────────────
 //
 // Capacity used to be checked only at submit, which meant ten people could
@@ -3383,7 +3365,7 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
     const registrationId = nanoid(10);
     const now = new Date().toISOString();
 
-    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, name.trim(), firstName, lastName, email.trim().toLowerCase(), Object.keys(cf.fields).length ? JSON.stringify(cf.fields) : null, null, null, null, null, now, null, null);
+    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, name.trim(), firstName, lastName, email.trim().toLowerCase(), Object.keys(cf.fields).length ? JSON.stringify(cf.fields) : null, null, null, null, null, now, null);
     const ticket = rowToTicket(stmt.tickets.byToken.get(token));
 
     const qrDataUrl = await QRCode.toDataURL(`ticket:${token}`);
@@ -3475,7 +3457,7 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 
     const now = new Date().toISOString();
 
     const cfJson = customFields && Object.keys(customFields).length ? JSON.stringify(customFields) : null;
-    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, buyerName, firstName, lastName, buyerEmail, cfJson, null, null, null, null, now, null, null);
+    stmt.tickets.insert.run(ticketId, eventId, token, registrationId, buyerName, firstName, lastName, buyerEmail, cfJson, null, null, null, null, now, null);
     const ticket = rowToTicket(stmt.tickets.byToken.get(token));
 
     if (buyerEmail && process.env.SES_FROM && process.env.AWS_ACCESS_KEY_ID
@@ -4597,7 +4579,7 @@ app.post('/api/register-bulk', async (req, res) => {
                         t.name = fullName; t.firstName = firstName; t.lastName = lastName; t.customFields = customFields;
                     }
                     for (const t of newTickets) {
-                        stmt.tickets.insert.run(t.id, t.eventId, t.token, t.registrationId, t.name, t.firstName, t.lastName, t.email, cfJson, null, null, null, null, t.created_at, null, null);
+                        stmt.tickets.insert.run(t.id, t.eventId, t.token, t.registrationId, t.name, t.firstName, t.lastName, t.email, cfJson, null, null, null, null, t.created_at, null);
                     }
                 });
                 bulkUpdate();
@@ -4650,7 +4632,7 @@ app.post('/api/register-bulk', async (req, res) => {
             const cfJson = JSON.stringify(customFields);
             const insertAll = db.transaction(() => {
                 for (const t of ticketsToSend) {
-                    stmt.tickets.insert.run(t.id, t.eventId, t.token, t.registrationId, t.name, t.firstName, t.lastName, t.email, cfJson, null, null, null, null, t.created_at, null, null);
+                    stmt.tickets.insert.run(t.id, t.eventId, t.token, t.registrationId, t.name, t.firstName, t.lastName, t.email, cfJson, null, null, null, null, t.created_at, null);
                 }
             });
             insertAll();
@@ -5969,7 +5951,7 @@ app.post('/api/event/:id/ticket', requireAuth, async (req, res) => {
                 created_at: now,
                 used_at: null
             };
-            stmt.tickets.insert.run(t.id, t.eventId, t.token, t.registrationId, t.name, t.firstName, t.lastName, t.email, JSON.stringify(t.customFields), null, null, null, null, t.created_at, null, null);
+            stmt.tickets.insert.run(t.id, t.eventId, t.token, t.registrationId, t.name, t.firstName, t.lastName, t.email, JSON.stringify(t.customFields), null, null, null, null, t.created_at, null);
             newTickets.push(t);
         }
     });
@@ -10628,7 +10610,6 @@ app.get('/api/event/:id/metrics', requireAuth, (req, res) => {
     const pct = total ? Math.round(scanned / total * 100) : 0;
     const uniqueRegistrations = new Set(tickets.map(t => t.registrationId || t.id)).size;
     const walletDownloads = tickets.filter(t => t.wallet_downloaded_at).length;
-    const emailOpens = tickets.filter(t => t.email_opened_at).length;
 
     // Everything below is additive — the dashboard's metrics modal predates
     // it and reads only the fields above. It exists so the iOS Stats tab can
@@ -10675,7 +10656,11 @@ app.get('/api/event/:id/metrics', requireAuth, (req, res) => {
     });
 
     res.json({
-        total, scanned, pct, uniqueRegistrations, walletDownloads, emailOpens,
+        total, scanned, pct, uniqueRegistrations, walletDownloads,
+        // Email open tracking is gone (mail clients prefetch images, so every
+        // email read as opened). Installed iOS builds decode this as a
+        // required Int, so it stays as a constant until they've updated.
+        emailOpens: 0,
         checkinTimeline, registrationTimeline, customFieldBreakdowns,
         eventName: event.name,
         eventTime: event.time || null,
@@ -10694,19 +10679,17 @@ app.get('/api/event/:id/metrics', requireAuth, (req, res) => {
 
 app.get('/api/admin/metrics', requireAdmin, (req, res) => {
     const allEvents = stmt.events.all.all().map(rowToEvent);
-    let totalTickets = 0, totalScanned = 0, totalWallet = 0, totalEmailOpens = 0;
+    let totalTickets = 0, totalScanned = 0, totalWallet = 0;
 
     const eventStats = allEvents.map(event => {
         const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket);
         const total = tickets.length;
         const scanned = tickets.filter(t => t.used_at).length;
         const walletDownloads = tickets.filter(t => t.wallet_downloaded_at).length;
-        const emailOpens = tickets.filter(t => t.email_opened_at).length;
         const uniqueRegistrations = new Set(tickets.map(t => t.registrationId || t.id)).size;
         totalTickets += total;
         totalScanned += scanned;
         totalWallet += walletDownloads;
-        totalEmailOpens += emailOpens;
         return {
             id: event.id,
             name: event.name,
@@ -10716,7 +10699,6 @@ app.get('/api/admin/metrics', requireAdmin, (req, res) => {
             scanned,
             pct: total ? Math.round(scanned / total * 100) : 0,
             walletDownloads,
-            emailOpens,
             uniqueRegistrations
         };
     });
@@ -10730,7 +10712,6 @@ app.get('/api/admin/metrics', requireAdmin, (req, res) => {
         totalScanned,
         totalPct: totalTickets ? Math.round(totalScanned / totalTickets * 100) : 0,
         totalWalletDownloads: totalWallet,
-        totalEmailOpens,
         events: eventStats
     });
 });
@@ -11052,7 +11033,7 @@ app.post('/api/v1/registrations', ...apiRoute('manage_tickets'), async (req, res
             const id = nanoid(8);
             const token = nanoid(12);
             stmt.tickets.insert.run(id, event.id, token, registrationId, name, firstName, lastName,
-                email, JSON.stringify(customFields), null, null, null, null, now, null, null);
+                email, JSON.stringify(customFields), null, null, null, null, now, null);
             made.push(token);
         }
     })();

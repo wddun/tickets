@@ -67,7 +67,6 @@ CREATE TABLE IF NOT EXISTS tickets (
     updated_at TEXT,
     created_at TEXT,
     wallet_downloaded_at TEXT,
-    email_opened_at TEXT,
     confirmation_sent_at TEXT
 );
 
@@ -696,7 +695,7 @@ if (!fs.existsSync(migrationFlag) && fs.existsSync(legacyDb)) {
 
         const insertUser = db.prepare(`INSERT OR IGNORE INTO users (id, email, password, emailVerified, verifyToken, createdAt) VALUES (?,?,?,?,?,?)`);
         const insertEvent = db.prepare(`INSERT OR IGNORE INTO events (id, userId, name, time, endTime, color, imageUrl, scannerPin, location, allowReentry, capacity, displayToken, reminderEnabled, reminderMessage, reminderHoursBefore, reminderSentAt, customFields, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-        const insertTicket = db.prepare(`INSERT OR IGNORE INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at, email_opened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+        const insertTicket = db.prepare(`INSERT OR IGNORE INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
         const insertSheetLink = db.prepare(`INSERT OR IGNORE INTO sheetLinks (id, token, spreadsheetId, sheetName, eventId, createdAt) VALUES (?,?,?,?,?,?)`);
         const insertSheetAccess = db.prepare(`INSERT OR IGNORE INTO sheetAccess (id, userId, sheetLinkId, claimedAt, permission) VALUES (?,?,?,?,?)`);
         const insertWalletDevice = db.prepare(`INSERT OR IGNORE INTO walletDevices (id, deviceId, passTypeId, serialNumber, pushToken, registeredAt) VALUES (?,?,?,?,?,?)`);
@@ -736,7 +735,7 @@ if (!fs.existsSync(migrationFlag) && fs.existsSync(legacyDb)) {
                     t.customFields ? JSON.stringify(t.customFields) : null,
                     t.used_at || null, t.reentry_status || null, t.passHash || null,
                     t.updated_at || null, t.created_at || null,
-                    t.wallet_downloaded_at || null, t.email_opened_at || null
+                    t.wallet_downloaded_at || null
                 );
                 counts.tickets++;
             }
@@ -1001,7 +1000,7 @@ export const stmt = {
         // against events.ticketExpiryLimit.
         countExpiredByEventId: db.prepare(`SELECT COUNT(*) as cnt FROM tickets WHERE eventId = ? AND expiredAt IS NOT NULL`),
         byEventAndEmail: db.prepare('SELECT * FROM tickets WHERE eventId = ? AND lower(email) = ? LIMIT 1'),
-        insert: db.prepare(`INSERT INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at, email_opened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+        insert: db.prepare(`INSERT INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
         updateInfo: db.prepare(`UPDATE tickets SET name=?, firstName=?, lastName=?, email=?, customFields=? WHERE id=?`),
         checkIn: db.prepare(`UPDATE tickets SET used_at=?, updated_at=? WHERE id=?`),
         checkInReentry: db.prepare(`UPDATE tickets SET used_at=?, updated_at=?, reentry_status='inside' WHERE id=?`),
@@ -1017,7 +1016,6 @@ export const stmt = {
         setPassHash: db.prepare(`UPDATE tickets SET passHash=?, updated_at=? WHERE id=?`),
         withWalletDevices: db.prepare(`SELECT * FROM tickets WHERE token IN (SELECT DISTINCT serialNumber FROM walletDevices)`),
         setWalletDownloaded: db.prepare(`UPDATE tickets SET wallet_downloaded_at=? WHERE token=?`),
-        setEmailOpened: db.prepare(`UPDATE tickets SET email_opened_at=? WHERE registrationId=? AND email_opened_at IS NULL`),
         setConfirmationSent: db.prepare(`UPDATE tickets SET confirmation_sent_at=? WHERE registrationId=? AND confirmation_sent_at IS NULL`),
         deleteById: db.prepare(`DELETE FROM tickets WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM tickets WHERE eventId=?`),

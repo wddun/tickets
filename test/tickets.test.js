@@ -204,16 +204,6 @@ describe('what the attendee receives', () => {
         assert.equal((await anon().get('/qr/not-a-real-token', { raw: true })).status, 200);
     });
 
-    test('the email open pixel is served and does not need a session', async () => {
-        const ev = await createEvent(owner.client, { name: 'Tracked Event' });
-        await addTicket(owner.client, ev.id, { name: 'Tracked Person' });
-        const [ticket] = await listTickets(owner.client, ev.id);
-
-        const r = await anon().get(`/api/track/open/${ticket.registrationId}`, { raw: true });
-        assert.equal(r.status, 200);
-        assert.match(r.headers.get('content-type') || '', /image/);
-    });
-
     test('a ticket preview is owner-only', async () => {
         const ev = await createEvent(owner.client, { name: 'Preview Event' });
         await addTicket(owner.client, ev.id, { name: 'Previewed Person' });
