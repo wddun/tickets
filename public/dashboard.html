@@ -9208,53 +9208,157 @@
     </div>
 
     <!-- Edit Ticket Modal -->
+    <!-- Layout follows the usual dialog conventions (WAI-ARIA APG dialog
+         pattern, Carbon/PatternFly modal guidelines): title + secondary
+         header action, content grouped under section labels, and a footer
+         that stays visible while the body scrolls, with Cancel/Save on the
+         right and the destructive Delete set apart on the left so it can't
+         be hit by a slip aimed at Save. -->
     <div class="modal-overlay" id="editTicketModal" style="display:none;"
         onclick="if(event.target===this)closeEditTicketModal()">
-        <div class="modal" style="max-width:460px;background: var(--card);border-radius:14px;max-height:90vh;overflow-y:auto;">
-            <div class="modal-header">
-                <h2>Edit Registration</h2>
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <button class="btn btn-secondary" style="padding:5px 12px;font-size:13px;"
-                        onclick="printTicketEmail()">Print</button>
-                    <button class="modal-close" onclick="closeEditTicketModal()">&times;</button>
+        <div class="modal edit-reg-modal" role="dialog" aria-modal="true" aria-labelledby="editTicketTitle">
+            <div class="modal-header" style="margin-bottom:16px;">
+                <div style="min-width:0;">
+                    <h2 id="editTicketTitle">Edit Registration</h2>
+                    <div id="editTicketSubtitle" class="edit-reg-subtitle"></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="printTicketEmail()">Print</button>
+                    <button type="button" class="modal-close" aria-label="Close" onclick="closeEditTicketModal()">&times;</button>
                 </div>
             </div>
 
-            <!-- Ticket preview -->
-            <div id="editTicketPreview" style="margin-bottom:16px;"></div>
+            <form id="editTicketForm" novalidate onsubmit="event.preventDefault();submitEditTicket(true);">
+                <section class="edit-reg-section">
+                    <h3 class="edit-reg-section-title">Tickets</h3>
+                    <div id="editTicketPreview"></div>
+                </section>
 
-            <div style="margin-bottom:12px;">
-                <label for="editTicketName" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Name</label>
-                <input type="text" id="editTicketName"
-                    style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;" />
-            </div>
-            <div style="margin-bottom:16px;">
-                <label for="editTicketEmail" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Email</label>
-                <div style="display:flex;gap:8px;">
-                    <input type="email" id="editTicketEmail"
-                        style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;" />
-                    <button type="button" class="btn btn-secondary" id="editTicketCopyEmailBtn" onclick="copyToClipboard(document.getElementById('editTicketEmail').value, this)">Copy</button>
+                <section class="edit-reg-section">
+                    <h3 class="edit-reg-section-title">Attendee</h3>
+                    <div class="edit-reg-field">
+                        <label for="editTicketName">Name</label>
+                        <input type="text" id="editTicketName" required autocomplete="off" aria-describedby="editTicketNameError" />
+                        <div class="edit-reg-error" id="editTicketNameError"></div>
+                    </div>
+                    <div class="edit-reg-field">
+                        <label for="editTicketEmail">Email</label>
+                        <div style="display:flex;gap:8px;">
+                            <input type="email" id="editTicketEmail" required autocomplete="off" aria-describedby="editTicketEmailError" style="flex:1;min-width:0;" />
+                            <button type="button" class="btn btn-secondary" id="editTicketCopyEmailBtn" onclick="copyToClipboard(document.getElementById('editTicketEmail').value, this)">Copy</button>
+                        </div>
+                        <div class="edit-reg-error" id="editTicketEmailError"></div>
+                    </div>
+                    <div id="editTicketCustomFields"></div>
+                </section>
+
+                <section class="edit-reg-section">
+                    <h3 class="edit-reg-section-title">Email</h3>
+                    <div id="editTicketEmailStatus" class="edit-reg-email-status"></div>
+                    <div class="edit-reg-email-actions">
+                        <button type="button" class="btn btn-secondary" onclick="resendTicketEmail(this)">Resend Ticket</button>
+                        <button type="button" class="btn btn-secondary" onclick="openDirectEmailModal()">Custom Email</button>
+                        <button type="button" class="btn btn-secondary" id="resendWinnerEmailBtn" style="display:none;" onclick="resendWinnerEmailFromModal(this)">Resend Winner Email</button>
+                    </div>
+                </section>
+
+                <input type="hidden" id="editTicketId" />
+                <input type="hidden" id="editRegId" />
+                <input type="hidden" id="editTicketWinnerId" />
+                <input type="hidden" id="editTicketPrizeLabel" />
+
+                <div class="edit-reg-footer">
+                    <div id="editTicketExtraList" class="edit-reg-note"></div>
+                    <div class="edit-reg-footer-row">
+                        <button type="button" class="btn edit-reg-delete" onclick="deleteRegistrationFromModal()">Delete Registration</button>
+                        <div class="edit-reg-footer-main">
+                            <button type="button" class="btn btn-secondary" onclick="closeEditTicketModal()">Cancel</button>
+                            <button type="submit" class="btn btn-primary" id="editTicketSaveBtn">Save Changes</button>
+                        </div>
+                    </div>
                 </div>
-                <div id="editTicketEmailStatus" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
-                <div style="display:flex;gap:8px;margin-top:8px;">
-                    <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Ticket</button>
-                    <button class="btn btn-secondary" style="flex:1;" onclick="openDirectEmailModal()">Custom Email</button>
-                </div>
-            </div>
-            <div id="editTicketCustomFields" style="margin-bottom:16px;"></div>
-            <input type="hidden" id="editTicketId" />
-            <input type="hidden" id="editRegId" />
-            <input type="hidden" id="editTicketWinnerId" />
-            <input type="hidden" id="editTicketPrizeLabel" />
-            <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket(true)">Save Changes</button>
-                <button class="btn btn-secondary" id="resendWinnerEmailBtn" style="flex:1;display:none;" onclick="resendWinnerEmailFromModal(this)">Resend Winner Email</button>
-            </div>
-            <button class="btn btn-danger" style="width:100%;margin-top:4px;"
-                onclick="deleteRegistrationFromModal()">Delete Registration</button>
-            <div id="editTicketExtraList" style="margin-top:12px;font-size:12px;color:var(--text-muted);"></div>
+            </form>
         </div>
     </div>
+
+    <style>
+        .edit-reg-modal { max-width: 480px; max-height: 90vh; padding-bottom: 0; }
+        .edit-reg-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+        .edit-reg-section { margin-bottom: 20px; }
+        .edit-reg-section-title {
+            margin: 0 0 10px;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .edit-reg-field { margin-bottom: 12px; }
+        .edit-reg-field label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+        .edit-reg-modal input[type=text], .edit-reg-modal input[type=email] {
+            width: 100%;
+            padding: 9px 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-sizing: border-box;
+            font: inherit;
+            font-size: 14px;
+            background: var(--card);
+            color: var(--text);
+            outline: none;
+        }
+        /* Inputs here used to set outline:none with nothing in its place, so a
+           keyboard user had no idea which field had focus (WCAG 2.4.7). */
+        .edit-reg-modal input[type=text]:focus, .edit-reg-modal input[type=email]:focus, .edit-reg-modal select:focus {
+            border-color: var(--accent-indigo, #6366f1);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+        .edit-reg-modal input[aria-invalid=true] { border-color: var(--danger, #dc2626); }
+        .edit-reg-modal input[aria-invalid=true]:focus { box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18); }
+        .edit-reg-modal .btn:focus-visible, .edit-reg-modal .modal-close:focus-visible {
+            outline: 2px solid var(--accent-indigo, #6366f1);
+            outline-offset: 2px;
+        }
+        .edit-reg-error { font-size: 12px; color: var(--danger, #dc2626); margin-top: 4px; }
+        .edit-reg-error:empty { display: none; }
+        .edit-reg-email-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; color: var(--text-muted); }
+        .edit-reg-email-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+        .edit-reg-email-actions .btn { justify-content: center; }
+        .email-pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--bg); color: var(--text-muted); }
+        .email-pill.opened { background: #d1fae5; color: #065f46; }
+        [data-theme="dark"] .email-pill.opened { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; }
+        /* Sticky so Save/Cancel never scroll out of reach on a registration
+           with several tickets and custom fields. The negative margins pull
+           it flush to the modal's edges, past .modal's 28px padding. */
+        .edit-reg-footer {
+            position: sticky;
+            bottom: 0;
+            margin: 0 -28px;
+            padding: 14px 28px 20px;
+            background: var(--card);
+            border-top: 1px solid var(--border);
+            z-index: 1;
+        }
+        .edit-reg-note { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+        .edit-reg-note:empty { display: none; }
+        .edit-reg-footer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+        .edit-reg-footer-main { display: flex; gap: 8px; margin-left: auto; }
+        .edit-reg-delete {
+            background: none;
+            border: 1px solid transparent;
+            color: var(--danger, #dc2626);
+            padding-left: 0;
+            padding-right: 0;
+        }
+        .edit-reg-delete:hover { text-decoration: underline; background: none; }
+        [data-theme="dark"] .edit-reg-delete { color: #f87171; }
+        @media (max-width: 480px) {
+            .edit-reg-footer-row { flex-direction: column-reverse; align-items: stretch; }
+            .edit-reg-footer-main { margin-left: 0; }
+            .edit-reg-footer-main .btn { flex: 1; justify-content: center; }
+            .edit-reg-delete { align-self: center; }
+        }
+    </style>
 
     <!-- Image Crop Modal -->
     <div class="modal-overlay" id="imageCropModal" style="display:none;z-index:200;"
@@ -9385,7 +9489,7 @@
             return `<div class="cf-row" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                 <input type="text" class="cf-key" ${keyAttrs} value="${esc(key)}">
                 ${valueField}
-                <button type="button" onclick="this.closest('.cf-row').remove()"
+                <button type="button" aria-label="Remove field" title="Remove field" onclick="this.closest('.cf-row').remove()"
                     style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>
             </div>`;
         }
@@ -9426,7 +9530,7 @@
                     style="width:36%;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;">
                 <input type="text" class="cf-value" placeholder="Value"
                     style="flex:1;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;">
-                <button type="button" onclick="this.closest('.cf-row').remove()"
+                <button type="button" aria-label="Remove field" title="Remove field" onclick="this.closest('.cf-row').remove()"
                     style="background:none;border:none;color:var(--border);cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;">&times;</button>`;
             rows.appendChild(div);
             div.querySelector('.cf-key').focus();
@@ -9741,10 +9845,19 @@
             }, 1000);
         }
 
-        function openEditTicketModal(regId, tickets) {
+        // `refresh` re-renders the ticket cards and email status after an
+        // in-modal action (check in, expire) without touching the form, so a
+        // half-typed name/email edit survives — it used to be overwritten
+        // with the saved values every time a ticket was toggled.
+        let _editTicketReturnFocus = null;
+        let _editTicketConfirmingClose = false;
+        function openEditTicketModal(regId, tickets, { refresh = false } = {}) {
             const t = tickets[0];
-            document.getElementById('editTicketName').value = t.name || '';
-            document.getElementById('editTicketEmail').value = t.email || '';
+            if (!refresh) {
+                document.getElementById('editTicketName').value = t.name || '';
+                document.getElementById('editTicketEmail').value = t.email || '';
+                clearEditTicketErrors();
+            }
             document.getElementById('editTicketId').value = t.id;
             document.getElementById('editRegId').value = regId;
 
@@ -9758,10 +9871,12 @@
                 resendWinnerBtn.style.display = 'none';
             }
 
-            renderCustomFieldsInputs('editTicketCustomFields', t.customFields || {});
-            const _origCf = t.customFields || {};
-            const _sortedCf = Object.fromEntries(Object.keys(_origCf).sort().map(k => [k, _origCf[k]]));
-            _editOriginal = { name: t.name || '', email: t.email || '', customFields: JSON.stringify(_sortedCf) };
+            if (!refresh) {
+                renderCustomFieldsInputs('editTicketCustomFields', t.customFields || {});
+                const _origCf = t.customFields || {};
+                const _sortedCf = Object.fromEntries(Object.keys(_origCf).sort().map(k => [k, _origCf[k]]));
+                _editOriginal = { name: t.name || '', email: t.email || '', customFields: JSON.stringify(_sortedCf) };
+            }
 
             // Build ticket QR preview
             const preview = document.getElementById('editTicketPreview');
@@ -9803,13 +9918,13 @@
                     ? `<div style="font-size:9px;color:var(--text-muted);">Downloaded ${fmtExact(tk.wallet_downloaded_at)}</div>`
                     : '';
                 const toggleBtn = checkedIn
-                    ? (reentryEvent?.fullAccess ? `<button class="btn btn-secondary btn-sm" onclick="toggleTicketInModal('${tk.id}', false, '${regId}')">Undo Check-in</button>` : '')
-                    : `<button class="btn btn-secondary btn-sm" onclick="toggleTicketInModal('${tk.id}', true, '${regId}')">Mark Checked In</button>`;
+                    ? (reentryEvent?.fullAccess ? `<button type="button" class="btn btn-secondary btn-sm" onclick="toggleTicketInModal('${tk.id}', false, '${regId}')">Undo Check-in</button>` : '')
+                    : `<button type="button" class="btn btn-secondary btn-sm" onclick="toggleTicketInModal('${tk.id}', true, '${regId}')">Mark Checked In</button>`;
                 // Only meaningful before check-in — a used ticket already did
                 // its job and can't be expired (see isTicketExpired()).
                 const expireBtn = checkedIn || !reentryEvent?.fullAccess ? '' : tk.expiredAt
-                    ? `<button class="btn btn-secondary btn-sm" onclick="setTicketExpiredInModal('${tk.id}', false, '${regId}')">${tk.returnedAt ? 'Reinstate Ticket' : 'Restore Ticket'}</button>`
-                    : `<button class="btn btn-danger btn-sm" onclick="setTicketExpiredInModal('${tk.id}', true, '${regId}')">Expire Ticket</button>`;
+                    ? `<button type="button" class="btn btn-secondary btn-sm" onclick="setTicketExpiredInModal('${tk.id}', false, '${regId}')">${tk.returnedAt ? 'Reinstate Ticket' : 'Restore Ticket'}</button>`
+                    : `<button type="button" class="btn btn-danger btn-sm" onclick="setTicketExpiredInModal('${tk.id}', true, '${regId}')">Expire Ticket</button>`;
                 const size = showLarge ? 120 : 96;
                 const label = tickets.length > 1 ? `<div style="font-size:11px;font-weight:600;color:var(--text-muted);">Ticket ${i + 1}</div>` : '';
                 return `<div class="ticket-edit-card">
@@ -9824,30 +9939,105 @@
             const qrItems = tickets.map((tk, i) => renderTicketCard(tk, i, tickets.length === 1)).join('');
             const emailOpenedExact = t.email_opened_at ? fmtExact(t.email_opened_at) : null;
             const emailBadge = emailOpenedExact
-                ? `<span style="background:#d1fae5;color:#065f46;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;" title="Opened ${esc(t.email_opened_at)}">Opened</span>`
+                ? `<span class="email-pill opened" title="Opened ${esc(t.email_opened_at)}">Opened</span>`
                 : t.confirmation_sent_at
-                    ? `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Sent</span>`
-                    : `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Not sent</span>`;
+                    ? `<span class="email-pill">Sent</span>`
+                    : `<span class="email-pill">Not sent</span>`;
 
-            const infoBar = createdStr ? `<div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);">Registered ${createdStr}</div>` : '';
-            document.getElementById('editTicketEmailStatus').innerHTML = `${emailBadge}${emailOpenedExact ? `<span>Opened ${emailOpenedExact}</span>` : ''}`;
+            const subtitleParts = [];
+            if (tickets.length > 1) subtitleParts.push(`${tickets.length} tickets`);
+            if (createdStr) subtitleParts.push(`Registered ${createdStr}`);
+            document.getElementById('editTicketSubtitle').textContent = subtitleParts.join(' · ');
+            document.getElementById('editTicketEmailStatus').innerHTML = `<span>Confirmation email</span>${emailBadge}${emailOpenedExact ? `<span>${emailOpenedExact}</span>` : ''}`;
 
             preview.innerHTML = `
-                ${infoBar}
-                <div style="padding:12px;background:var(--surface-soft);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;">
+                <div style="padding:12px;background:var(--surface-soft);border:1px solid var(--border);border-radius:10px;">
                     <div class="ticket-edit-grid">${qrItems}</div>
                 </div>`;
 
             const extra = document.getElementById('editTicketExtraList');
-            extra.innerHTML = tickets.length > 1
-                ? `Note: ${tickets.length} bundled tickets — saving will update ALL and send one email.`
+            extra.textContent = tickets.length > 1
+                ? `Saving applies to all ${tickets.length} tickets in this registration.`
                 : '';
 
-            document.getElementById('editTicketModal').style.display = 'flex';
+            const modal = document.getElementById('editTicketModal');
+            if (!refresh) {
+                _editTicketReturnFocus = document.activeElement;
+                modal.style.display = 'flex';
+                modal.querySelector('.modal').scrollTop = 0;
+                document.getElementById('editTicketName').focus({ preventScroll: true });
+            }
         }
-        function closeEditTicketModal() {
-            document.getElementById('editTicketModal').style.display = 'none';
+
+        // Every way out (x, Cancel, Esc, backdrop) goes through here, so none
+        // of them can silently throw away an edit. `force` skips the check
+        // for the paths that already saved or deleted.
+        async function closeEditTicketModal(force = false) {
+            const modal = document.getElementById('editTicketModal');
+            if (modal.style.display === 'none') return;
+            if (force !== true && hasUnsavedChanges()) {
+                // Esc reaches the page-wide modal handler as well as the
+                // confirm dialog's own, so without this guard a second Esc
+                // would stack a second "Discard changes?" on top of the first.
+                if (_editTicketConfirmingClose) return;
+                _editTicketConfirmingClose = true;
+                const discard = await confirmDialog(
+                    'Your changes to this registration have not been saved.',
+                    { title: 'Discard changes?', confirmText: 'Discard' },
+                );
+                _editTicketConfirmingClose = false;
+                if (!discard) return;
+            }
+            modal.style.display = 'none';
+            if (_editTicketReturnFocus && document.contains(_editTicketReturnFocus)) _editTicketReturnFocus.focus();
+            _editTicketReturnFocus = null;
         }
+
+        // Keep Tab inside the dialog while it's open (WAI-ARIA dialog pattern).
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Tab') return;
+            const modal = document.getElementById('editTicketModal');
+            if (!modal || modal.style.display === 'none') return;
+            // Something stacked on top (Custom Email, a confirm) owns focus.
+            const stacked = [...document.querySelectorAll('.modal-overlay')]
+                .some(o => o !== modal && getComputedStyle(o).display !== 'none');
+            if (stacked) return;
+            const box = modal.querySelector('.modal');
+            const focusable = [...box.querySelectorAll('button, input:not([type=hidden]), select, textarea, a[href], [tabindex]:not([tabindex="-1"])')]
+                .filter(el => !el.disabled && el.offsetParent !== null);
+            if (!focusable.length) return;
+            const first = focusable[0], last = focusable[focusable.length - 1];
+            if (!box.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+            else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        });
+
+        function setEditTicketError(inputId, message) {
+            const input = document.getElementById(inputId);
+            const err = document.getElementById(inputId + 'Error');
+            if (message) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+            if (err) err.textContent = message || '';
+        }
+        function clearEditTicketErrors() {
+            setEditTicketError('editTicketName', '');
+            setEditTicketError('editTicketEmail', '');
+        }
+        // Errors show under the field they belong to, not in a toast that
+        // disappears before you've found which field it meant.
+        function validateEditTicketForm() {
+            clearEditTicketErrors();
+            const nameEl = document.getElementById('editTicketName');
+            const emailEl = document.getElementById('editTicketEmail');
+            let firstBad = null;
+            if (!nameEl.value.trim()) { setEditTicketError('editTicketName', 'Enter a name.'); firstBad = firstBad || nameEl; }
+            if (!emailEl.value.trim()) { setEditTicketError('editTicketEmail', 'Enter an email address.'); firstBad = firstBad || emailEl; }
+            else if (!emailEl.checkValidity()) { setEditTicketError('editTicketEmail', 'Enter a valid email address, like name@example.com.'); firstBad = firstBad || emailEl; }
+            if (firstBad) firstBad.focus();
+            return !firstBad;
+        }
+        ['editTicketName', 'editTicketEmail'].forEach(id => {
+            document.getElementById(id)?.addEventListener('input', () => setEditTicketError(id, ''));
+        });
 
         function copyToClipboard(text, btn) {
             navigator.clipboard.writeText(text).then(() => {
@@ -9868,7 +10058,7 @@
                     allTickets = await r.json();
                     rerenderTable();
                     const freshTickets = allTickets.filter(t => t.registrationId === regId);
-                    if (freshTickets.length) openEditTicketModal(regId, freshTickets);
+                    if (freshTickets.length) openEditTicketModal(regId, freshTickets, { refresh: true });
                 }
             }
         }
@@ -9891,7 +10081,7 @@
                     allTickets = await r2.json();
                     rerenderTable();
                     const freshTickets = allTickets.filter(t => t.registrationId === regId);
-                    if (freshTickets.length) openEditTicketModal(regId, freshTickets);
+                    if (freshTickets.length) openEditTicketModal(regId, freshTickets, { refresh: true });
                 }
             }
             loadEvents();
@@ -9899,7 +10089,11 @@
 
         async function deleteRegistrationFromModal() {
             const regId = document.getElementById('editRegId').value;
-            if (!await confirmDialog('Delete this registration and all its tickets? This cannot be undone.')) return;
+            const n = allTickets.filter(t => t.registrationId === regId).length;
+            if (!await confirmDialog(
+                `${n > 1 ? `All ${n} tickets` : 'The ticket'} will stop scanning and the registration will be removed from this event. This cannot be undone.`,
+                { title: 'Delete this registration?', confirmText: 'Delete Registration' },
+            )) return;
             const r = await fetch('/api/registrations/bulk', {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
@@ -9907,7 +10101,7 @@
             });
             if (r.ok) {
                 const d = await r.json().catch(() => ({}));
-                closeEditTicketModal();
+                closeEditTicketModal(true);
                 const event = events.find(e => e.id === selectedId);
                 if (event) await fetchAndRender(event, true);
                 if (d.promoted) showToast(`Deleted. ${d.promoted} promoted from the waitlist.`);
@@ -9926,7 +10120,7 @@
 
         async function resendTicketEmail(btn) {
             if (hasUnsavedChanges()) {
-                if (!await confirmDialog('You have unsaved changes. "Resend Only" sends the currently saved data; your edits will not be included. Continue?')) return;
+                if (!await confirmDialog('The email will use the saved details, not the edits you have made here. Save first if you want them included.', { title: 'Resend without your edits?', confirmText: 'Resend Anyway', danger: false })) return;
             }
             const id = document.getElementById('editTicketId').value;
             const originalText = btn.textContent;
@@ -10149,15 +10343,28 @@
             const email = document.getElementById('editTicketEmail').value;
             const customFields = getCustomFieldsValues('editTicketCustomFields');
 
-            if (!name || !email) return showToast('Name and email required');
-            const r = await fetch('/api/ticket/' + id, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email, customFields, noEmail })
-            });
-            const data = await r.json();
-            if (r.ok) {
-                closeEditTicketModal();
+            if (!validateEditTicketForm()) return;
+            const saveBtn = document.getElementById('editTicketSaveBtn');
+            if (saveBtn.disabled) return;
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving…';
+            let r, data;
+            try {
+                r = await fetch('/api/ticket/' + id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, customFields, noEmail })
+                });
+                data = await r.json().catch(() => ({}));
+            } catch (_) {
+                r = null;
+                data = { error: 'Could not reach the server. Your changes were not saved.' };
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+            }
+            if (r && r.ok) {
+                closeEditTicketModal(true);
                 const event = events.find(e => e.id === selectedId);
                 fetchAndRender(event, true);
                 showToast(noEmail ? 'Tickets updated.' : 'Tickets updated and email sent.');
