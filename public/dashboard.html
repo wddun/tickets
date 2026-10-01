@@ -16,6 +16,7 @@
     <link rel="manifest" href="/manifest-dashboard.json">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <script src="help-content.js"></script>
+    <script src="newui-flag.js"></script>
     <script>
     (function(){
       var saved = localStorage.getItem('wts-theme');
@@ -3169,6 +3170,7 @@
         function setUrlState(params) {
             const url = new URL(location.href);
             url.search = '';
+            if (window.__newui) url.searchParams.set('newui', '1');
             Object.entries(params).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
             history.replaceState(null, '', url);
         }
@@ -10822,6 +10824,7 @@
             }
         }
     </script>
+    <script src="newui-settings.js"></script>
 </body>
 
 </html>

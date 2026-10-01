@@ -1,0 +1,144 @@
+/* Redesigned dashboard. Loaded only with ?newui=1 (see newui-flag.js).
+   Tokens are local so the offline PWA needs nothing from a CDN. */
+.newui {
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
+  --fs-xs: 12px; --fs-sm: 13px; --fs-md: 14px; --fs-lg: 17px; --fs-xl: 22px;
+  --r-sm: 8px; --r-md: 10px; --r-lg: 14px;
+  --ring: #6366f1;
+  --focus: 0 0 0 3px rgba(99, 102, 241, 0.35);
+  --field-h: 40px;
+  --accent: #4f46e5;
+  --ok: #059669;
+  font-feature-settings: 'tnum' 1, 'cv11' 1;
+}
+.newui :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.newui button:active:not(:disabled) { transform: translateY(1px); }
+.newui button:disabled, .newui input:disabled, .newui select:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---- Settings shell: no box around the panel, hierarchy from type and space ---- */
+.newui .settings-page { max-width: 1120px; }
+.newui .settings-page-header { margin-bottom: var(--sp-5); }
+.newui .settings-page-header h1 { font-size: var(--fs-xl); letter-spacing: -0.01em; }
+.newui .settings-layout { gap: var(--sp-6); }
+.newui .settings-sidebar {
+  width: 240px; background: transparent; border: none; box-shadow: none; padding: 0;
+  top: var(--sp-3);
+}
+.newui .settings-back-bar { border-bottom: none; padding: 0 0 var(--sp-3); }
+.newui .settings-nav { gap: 2px; }
+.newui .settings-nav-item {
+  justify-content: space-between; min-height: 40px; padding: 0 var(--sp-3);
+  font-size: var(--fs-md); border-radius: var(--r-sm);
+}
+.newui .settings-nav-item.active { background: var(--card); box-shadow: inset 3px 0 0 var(--accent), 0 1px 2px rgba(16, 24, 40, 0.06); }
+.newui .nu-dot { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; opacity: 0; transition: opacity 0.15s; }
+.newui .has-dirty .nu-dot { opacity: 1; }
+
+.newui .settings-panel {
+  background: transparent; border: none; box-shadow: none; padding: 0; max-width: 760px;
+}
+
+/* ---- Search ---- */
+.nu-search { position: relative; margin-bottom: var(--sp-3); }
+.nu-search input {
+  width: 100%; box-sizing: border-box; height: var(--field-h); padding: 0 64px 0 var(--sp-3);
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--card);
+  color: var(--text); font: inherit; font-size: var(--fs-md);
+}
+.nu-search input:focus { outline: none; border-color: var(--ring); box-shadow: var(--focus); }
+.nu-search kbd {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  font: inherit; font-size: 11px; color: var(--text-muted); border: 1px solid var(--border);
+  border-radius: 5px; padding: 1px 5px; pointer-events: none;
+}
+.nu-results {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18); overflow: hidden; min-width: 260px;
+}
+.nu-result {
+  display: flex; justify-content: space-between; gap: var(--sp-3); width: 100%; text-align: left;
+  padding: 10px var(--sp-3); border: none; background: none; color: var(--text);
+  font: inherit; font-size: var(--fs-sm); cursor: pointer; min-height: 44px; align-items: center;
+}
+.nu-result:hover, .nu-result:focus-visible { background: var(--bg); }
+.nu-result small { color: var(--text-muted); white-space: nowrap; }
+.nu-result-empty { padding: var(--sp-3); font-size: var(--fs-sm); color: var(--text-muted); }
+
+/* ---- Pages and blocks ---- */
+.nu-page[hidden], #nuStash[hidden], .nu-results[hidden] { display: none !important; }
+.nu-page-head h2 { margin: 0; font-size: var(--fs-xl); letter-spacing: -0.01em; color: var(--text); }
+.nu-page-head p { margin: var(--sp-1) 0 var(--sp-5); font-size: var(--fs-md); color: var(--text-muted); }
+.nu-block {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: var(--sp-5); margin-bottom: var(--sp-4);
+}
+.nu-block-title, .newui .nu-block .modal-section-title {
+  margin: 0 0 var(--sp-4); font-size: var(--fs-lg); font-weight: 650; color: var(--text);
+  letter-spacing: -0.005em; text-transform: none; display: flex; align-items: center; gap: var(--sp-2);
+}
+.newui .nu-block-whole > .settings-section {
+  border: none; padding: 0; margin: 0; scroll-margin-top: var(--sp-5);
+}
+.newui .nu-block .settings-hint { font-size: var(--fs-sm); line-height: 1.5; }
+.newui .nu-block .settings-subhead { font-size: var(--fs-md); margin: var(--sp-5) 0 var(--sp-2); }
+.newui .nu-block .settings-divider { margin: var(--sp-5) 0; }
+.nu-flash { animation: nuflash 1.6s ease-out; border-radius: var(--r-sm); }
+@keyframes nuflash { 0% { background: rgba(99, 102, 241, 0.28); } 100% { background: transparent; } }
+
+/* Consistent controls: inline styles in the legacy markup are overridden here. */
+.newui .nu-block input[type=text], .newui .nu-block input[type=email], .newui .nu-block input[type=number],
+.newui .nu-block input[type=password], .newui .nu-block input[type=datetime-local], .newui .nu-block input[type=search],
+.newui .nu-block select, .newui .nu-block textarea {
+  min-height: var(--field-h); padding: 8px 12px !important; font-size: var(--fs-md) !important;
+  border: 1px solid var(--border) !important; border-radius: var(--r-sm) !important;
+  background: var(--card); color: var(--text); font-family: inherit;
+}
+.newui .nu-block input:focus, .newui .nu-block select:focus, .newui .nu-block textarea:focus {
+  outline: none !important; border-color: var(--ring) !important; box-shadow: var(--focus);
+}
+.newui .nu-block #editEventTicketPrice { padding-left: 28px !important; }
+.newui .nu-block label[for] { font-size: var(--fs-sm) !important; font-weight: 600; }
+.newui .nu-block input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+.newui .nu-block .settings-toggle { padding: var(--sp-3) 0; min-height: 44px; }
+.newui .nu-block .settings-card { border-radius: var(--r-md); }
+.newui .nu-block .btn { min-height: var(--field-h); border-radius: var(--r-sm); }
+.newui .nu-block .btn-sm { min-height: 34px; }
+.newui .nu-block table { font-variant-numeric: tabular-nums; }
+.newui .nu-block div[style*="background:var(--bg);border:1px solid var(--border);border-radius:10px"] {
+  background: transparent !important; border: none !important; border-top: 1px solid var(--border) !important;
+  border-radius: 0 !important; padding: var(--sp-3) 0 !important; margin-bottom: 0 !important;
+}
+
+/* ---- Live preview ---- */
+.nu-preview { margin-bottom: var(--sp-4); }
+.nu-preview-label { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: var(--sp-2); }
+.nu-preview-card { display: flex; background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
+.nu-preview-bar { width: 8px; background: var(--nu-pv); flex-shrink: 0; }
+.nu-preview-body { padding: var(--sp-4); min-width: 0; }
+.nu-preview-name { font-size: var(--fs-lg); font-weight: 650; color: var(--text); overflow-wrap: anywhere; }
+.nu-preview-line { font-size: var(--fs-sm); color: var(--text-muted); margin-top: 2px; overflow-wrap: anywhere; }
+.nu-preview-meta { display: flex; gap: var(--sp-4); margin-top: var(--sp-3); font-size: var(--fs-sm); font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.nu-preview-note { font-size: var(--fs-xs); color: var(--text-muted); margin-top: var(--sp-2); }
+
+/* ---- Save bar ---- */
+.newui .settings-save-bar { max-width: 720px; border-radius: var(--r-lg); }
+.newui .settings-save-bar-text { font-size: var(--fs-sm); }
+
+/* ---- Phone ---- */
+@media (max-width: 700px) {
+  .newui .settings-layout { gap: var(--sp-3); }
+  .newui .settings-sidebar { width: 100%; background: var(--bg); padding: 0 0 var(--sp-2); }
+  .newui .settings-nav { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: var(--sp-1); }
+  .newui .settings-nav::-webkit-scrollbar { display: none; }
+  .newui .settings-nav-item { min-height: 44px; gap: var(--sp-2); }
+  .newui .settings-nav-item.active { background: var(--navy); color: #fff; box-shadow: none; }
+  .newui .nu-search kbd { display: none; }
+  .nu-search input { padding-right: var(--sp-3); }
+  .newui .nu-block { padding: var(--sp-4); border-radius: var(--r-md); }
+  .nu-page-head h2 { font-size: var(--fs-lg); }
+  .newui .nu-block input, .newui .nu-block select, .newui .nu-block textarea { font-size: 16px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .newui *, .nu-flash { animation: none !important; transition: none !important; }
+}
