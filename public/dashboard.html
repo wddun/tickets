@@ -770,6 +770,29 @@
             border-bottom: none;
         }
 
+        /* Each row used to be its own independent grid, so its auto columns
+           (ticket count, status, buttons) sized to that row alone — a
+           2-ticket row's wider "2 tickets" and extra "Check In 1" button
+           shrank its fr columns and pushed its email out of line with every
+           other row. With subgrid the table owns the column tracks and every
+           row shares them, like a real table. Desktop only: below 700px the
+           rows become stacked flex cards (see the max-width:700px block). */
+        @media (min-width: 701px) {
+            @supports (grid-template-columns: subgrid) {
+                .attendee-table {
+                    display: grid;
+                    grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1.4fr) auto auto auto;
+                    column-gap: 12px;
+                }
+                .attendee-row {
+                    grid-column: 1 / -1;
+                    grid-template-columns: subgrid;
+                    column-gap: 12px;
+                }
+                .attendee-table > .empty-list { grid-column: 1 / -1; }
+            }
+        }
+
         .attendee-row.header-row {
             background: var(--bg);
             font-size: 11px;
