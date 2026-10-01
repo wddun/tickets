@@ -1,5 +1,5 @@
 import express from 'express';
-import { db, stmt, rowToTicket, rowToEvent, rowToUser, rowToDiscountCode, rowToWaitlistEntry, rowToGiveawayWinner, getWalletDevicesBySerials, getTicketsByTokens, DUPLICABLE_EVENT_COLUMNS } from './db-sqlite.js';
+import { db, stmt, rowToTicket, rowToEvent, rowToUser, rowToDiscountCode, rowToWaitlistEntry, rowToGiveawayWinner, getWalletDevicesBySerials, getTicketsByTokens, DUPLICABLE_EVENT_COLUMNS, archiveEvent, recordAccountDeletion, purgeExpiredDeletions, backfillOrphanedDeletions } from './db-sqlite.js';
 import { nanoid } from 'nanoid';
 import QRCode from 'qrcode';
 import { SESClient, SendEmailCommand, SendRawEmailCommand } from '@aws-sdk/client-ses';
@@ -2522,17 +2522,30 @@ app.delete('/api/auth/account', async (req, res) => {
     const userId = req.session.userId;
     const userToDelete = rowToUser(stmt.users.byId.get(userId));
     log('account', `[delete] Account deletion — email: ${userToDelete?.email || 'unknown'}  id: ${userId}  ip: ${getIP(req)}`);
+    // Audit entries written before the user row goes, so they still carry the email.
+    const ownedEvents = stmt.events.byUserId.all(userId);
+    for (const ev of ownedEvents) logAudit(req, { eventId: ev.id, action: 'event.deleted', details: { name: ev.name, reason: 'account deleted' } });
+    logAudit(req, { action: 'account.deleted' });
+    // Each owned event goes the same way as deleting it directly (archived, purged 90
+    // days later). This used to delete only tickets and events, leaving waitlists,
+    // orders, giveaway winners, scans and the rest behind for good.
+    const archivedEvents = [];
     const deleteAccount = db.transaction(() => {
-        const eventIds = stmt.events.byUserId.all(userId).map(e => e.id);
-        for (const eventId of eventIds) stmt.tickets.deleteByEventId.run(eventId);
-        stmt.events.deleteByUserId.run(userId);
+        for (const ev of ownedEvents) {
+            const archived = archiveEvent(ev.id, userId);
+            if (archived) archivedEvents.push(archived);
+        }
         stmt.sheetAccess.deleteByUserId.run(userId);
         stmt.scannerAccess.deleteByUserId.run(userId);
         stmt.pushDevices.deleteByUserId.run(userId);
         stmt.pushSubscriptions.deleteByUserId.run(userId);
+        stmt.trustedDevices.deleteByUserId.run(userId);
+        stmt.passwordResetTokens.deleteByUserId.run(userId);
+        recordAccountDeletion(userId, userToDelete?.email);
         stmt.users.deleteById.run(userId);
     });
     deleteAccount();
+    for (const { event, tickets } of archivedEvents) voidWalletTickets(tickets, rowToEvent(event));
     req.session.destroy();
     res.json({ success: true });
 });
@@ -5779,28 +5792,10 @@ app.delete('/api/event/:id', requireAuth, async (req, res) => {
         return res.status(404).json({ error: 'Event not found' });
     }
 
-    const ticketsBeforeDelete = stmt.tickets.byEventId.all(req.params.id);
-    const deleteEvent = db.transaction(() => {
-        stmt.tickets.deleteByEventId.run(req.params.id);
-        stmt.pushSubscriptions.deleteByEventId.run(req.params.id);
-        stmt.scannerLinks.deleteByEventId.run(req.params.id);
-        stmt.scannerAccess.deleteByEventId.run(req.params.id);
-        stmt.seatHolds.deleteByEventId.run(req.params.id);
-        stmt.apiKeys.deleteByEventId.run(req.params.id);
-        stmt.giveawayWinners.deleteByEventId.run(req.params.id);
-        stmt.discountCodes.deleteByEventId.run(req.params.id);
-        stmt.waitlist.deleteByEventId.run(req.params.id);
-        deleteEventSharing(req.params.id);
-        const watcher = stmt.sheetWatchers.byEventId.get(req.params.id);
-        if (watcher) stmt.sheetWatchers.deleteById.run(watcher.id);
-        // Keyed by event id now (see db-sqlite.js), and disconnecting a
-        // watcher no longer clears it — so this is the only place seen-rows
-        // for a watcher that predates this event's deletion get cleaned up.
-        stmt.sheetWatcherSeen.deleteByEventId.run(req.params.id);
-        stmt.events.deleteById.run(req.params.id);
-    });
-    deleteEvent();
-    voidWalletTickets(ticketsBeforeDelete, event);
+    // Gone from every live table at once; kept as an archive for 90 days, then purged
+    // with its audit history (archiveEvent / purgeExpiredDeletions in db-sqlite.js).
+    const archived = archiveEvent(event.id, req.session.userId);
+    if (archived) voidWalletTickets(archived.tickets, event);
     logAudit(req, { eventId: event.id, action: 'event.deleted', details: { name: event.name } });
     res.json({ success: true });
 });
@@ -5814,27 +5809,12 @@ app.delete('/api/events/bulk', requireAuth, async (req, res) => {
     );
     const ticketsBeforeDelete = [];
     const eventsBeforeDelete = [];
-    for (const eventId of allowed) {
-        ticketsBeforeDelete.push(...stmt.tickets.byEventId.all(eventId));
-        const ev = rowToEvent(stmt.events.byId.get(eventId));
-        if (ev) eventsBeforeDelete.push(ev);
-    }
     const bulkDelete = db.transaction(() => {
         for (const eventId of allowed) {
-            stmt.tickets.deleteByEventId.run(eventId);
-            stmt.pushSubscriptions.deleteByEventId.run(eventId);
-            stmt.scannerLinks.deleteByEventId.run(eventId);
-            stmt.scannerAccess.deleteByEventId.run(eventId);
-            stmt.seatHolds.deleteByEventId.run(eventId);
-            stmt.apiKeys.deleteByEventId.run(eventId);
-            stmt.giveawayWinners.deleteByEventId.run(eventId);
-            stmt.discountCodes.deleteByEventId.run(eventId);
-            stmt.waitlist.deleteByEventId.run(eventId);
-            deleteEventSharing(eventId);
-            const watcher = stmt.sheetWatchers.byEventId.get(eventId);
-            if (watcher) stmt.sheetWatchers.deleteById.run(watcher.id);
-            stmt.sheetWatcherSeen.deleteByEventId.run(eventId);
-            stmt.events.deleteById.run(eventId);
+            const archived = archiveEvent(eventId, req.session.userId);
+            if (!archived) continue;
+            ticketsBeforeDelete.push(...archived.tickets);
+            eventsBeforeDelete.push(rowToEvent(archived.event));
         }
     });
     bulkDelete();
@@ -7771,7 +7751,7 @@ function voidWalletTickets(tickets, events) {
     const voided = [];
     for (const ticket of tickets) {
         const event = events && events.find ? events.find(e => e.id === ticket.eventId) : events;
-        stmt.voidedTickets.insert.run(ticket.token, ticket.id, ticket.name, event?.name || null, event?.color || null, now);
+        stmt.voidedTickets.insert.run(ticket.token, ticket.id, ticket.name, event?.name || null, event?.color || null, now, ticket.eventId || event?.id || null);
         const cachePath = path.join(passCacheDir, `${ticket.token}.pkpass`);
         try { if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath); } catch (_) {}
         try { if (fs.existsSync(cachePath + '.meta')) fs.unlinkSync(cachePath + '.meta'); } catch (_) {}
@@ -9436,16 +9416,6 @@ app.delete('/api/event/:id/sheet-watch', requireAuth, (req, res) => {
     res.json({ success: true });
 });
 
-// Tear down an event's sharing rows. Deleting an event used to leave these
-// behind, so a revoked-by-deletion collaborator kept a grant pointing at an
-// event that no longer existed.
-function deleteEventSharing(eventId) {
-    for (const link of [stmt.sheetLinks.byEventId.get(eventId)].filter(Boolean)) {
-        stmt.sheetAccess.deleteByLinkId.run(link.id);
-    }
-    stmt.sheetLinks.deleteByEventId.run(eventId);
-}
-
 // Sharing hangs off a sheetLink, which an event may not have yet (it only
 // exists once someone shares or connects a sheet). Create one on demand.
 function ensureSheetLink(event) {
@@ -9918,6 +9888,29 @@ setInterval(async () => {
         }
     }
 }, TICKET_EXPIRY_SWEEP_MS);
+
+// Deleted events and accounts: archived at deletion, erased once this long has passed
+// (privacy.html promises 90 days). Both env vars are test hooks only, like the sweeps
+// above — unset in production. The backfill runs once at startup to bring deletions
+// made before archiving existed onto the same schedule.
+const DELETED_DATA_RETENTION_MS = parseInt(process.env.DELETED_DATA_RETENTION_MS) || 90 * 24 * 60 * 60 * 1000;
+const DELETED_DATA_SWEEP_MS = parseInt(process.env.DELETED_DATA_SWEEP_MS) || 60 * 60 * 1000;
+function runDeletedDataPurge() {
+    try {
+        const { events, accounts } = purgeExpiredDeletions(DELETED_DATA_RETENTION_MS);
+        if (events || accounts) log('retention', `[purge] Erased ${events} deleted event(s), ${accounts} deleted account(s) past the retention period`);
+    } catch (err) {
+        log('retention', `[ERR] Purge failed — ${err.message}`);
+    }
+}
+try {
+    const { events, accounts } = backfillOrphanedDeletions();
+    if (events || accounts) log('retention', `[backfill] Archived leftovers of ${events} previously deleted event(s), ${accounts} deleted account(s)`);
+} catch (err) {
+    log('retention', `[ERR] Backfill failed — ${err.message}`);
+}
+runDeletedDataPurge();
+setInterval(runDeletedDataPurge, DELETED_DATA_SWEEP_MS);
 
 
 

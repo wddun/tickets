@@ -113,6 +113,7 @@
             <li>To run the service: issuing tickets, checking people in, managing waitlists and capacity.</li>
             <li>To send emails about your registration on the organizer's behalf: tickets, waitlist updates, reminders, and return or giveaway notices.</li>
             <li>To sign organizers in and protect accounts from abuse.</li>
+            <li>To provide support and keep the service running. Our site administrator can view events and their data, including attendee registrations and change history.</li>
             <li>We do not sell, rent, or share your data for advertising or marketing, and we use no analytics or advertising trackers.</li>
         </ul>
 
@@ -136,7 +137,13 @@
         <p>Data is stored on our servers and sent over encrypted HTTPS (TLS) connections. Passwords are hashed using bcrypt and are never stored in plain text. Session data is stored server-side and expires automatically.</p>
 
         <h2>6. Data Retention</h2>
-        <p>Organizer accounts and their events, tickets, and attendee data are kept until the organizer deletes them or their account (Settings → Delete Account). Deleting an account permanently removes the account, its events, and their tickets. Some related records are currently kept after that: waitlist entries, paid-order records, giveaway winners, scan history, and the audit log of organizer actions (which records the organizer's email, the IP address, and details such as the name on a ticket that was changed). Server logs are deleted automatically after 90 days. If you'd like any of these records about you removed, contact us and we'll delete them.</p>
+        <ul>
+            <li><strong>While an event exists:</strong> its details, tickets, attendee registrations, waitlist, orders, scans, and its full change history are kept. The change history is the audit log of organizer actions, which records the organizer's email, the IP address, and details such as the name on a ticket that was changed.</li>
+            <li><strong>When an event is deleted</strong> (directly, or because its organizer deleted their account): it disappears immediately for organizers, door staff, and attendees. We keep its data, change history included, for <strong>90 days</strong> for support, disputes, and recovering accidental deletions. Then all of it is permanently deleted.</li>
+            <li><strong>When an account is deleted</strong> (Settings → Delete Account): its events are deleted as above, its sign-in records (trusted devices, password-reset links, notification tokens) are removed immediately, and the account's own activity history is deleted 90 days later.</li>
+            <li><strong>Server logs:</strong> deleted automatically after 90 days.</li>
+        </ul>
+        <p>Paid-ticket payments also stay on record with Stripe under Stripe's own retention rules. If you'd like something about you deleted sooner, contact us.</p>
 
         <h2>7. Children's Privacy</h2>
         <p>WTS Tickets is intended for use by event organizers and is not directed at children under 13. We do not knowingly collect personal information from children under 13; organizers registering children for an event should do so as their parent or guardian.</p>

@@ -17,6 +17,17 @@ same change. Load browser libraries from `public/` (e.g. `public/qrcode.js`), no
 Address lookup must keep to Nominatim's usage policy: lookups on Enter only (no
 keystroke autocomplete), at most one a second, with the OpenStreetMap credit shown.
 
+**Deletion is archive-then-purge** (privacy.html's Data Retention promises it).
+Deleting an event (single, bulk, or via account deletion) goes through `archiveEvent()`
+in db-sqlite.js: every row in `EVENT_SCOPED_TABLES` moves into a JSON snapshot in
+`deletedEvents` and out of the live tables; `auditLog` and `voidedTickets` stay put.
+`purgeExpiredDeletions()` (hourly, plus at startup) erases the snapshot, the event's
+audit history, tombstones and Wallet registrations 90 days later; account-level audit
+entries go 90 days after `deletedAccounts` records the account. A live event's audit
+history is never purged. **A new table with an `eventId` column must be added to
+`EVENT_SCOPED_TABLES`**, or deleted events' rows in it stay forever;
+`test/data-retention.test.js` fails if one is missing.
+
 ## Line endings
 
 **Every file in this repo is LF.** `server.js` was the lone CRLF holdout and was converted

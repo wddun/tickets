@@ -682,6 +682,32 @@ try {
         CREATE INDEX IF NOT EXISTS idx_roomMessages_eventId ON roomMessages(eventId, createdAt);
     `);
 } catch {}
+// Deletion is archive-then-purge: deleting an event (or an account, which deletes its
+// events) removes everything from the live tables at once, keeps a JSON snapshot here,
+// and purgeExpiredDeletions() erases the snapshot plus the event's audit history 90
+// days later. See archiveEvent() below and privacy.html's Data Retention section.
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS deletedEvents (
+            eventId TEXT PRIMARY KEY,
+            userId TEXT,               -- owner at deletion time
+            name TEXT,
+            deletedAt TEXT NOT NULL,
+            deletedBy TEXT,            -- userId who deleted it (NULL for the legacy backfill)
+            snapshot TEXT NOT NULL     -- JSON: { event, tickets, waitlist, orders, ... }
+        );
+        CREATE INDEX IF NOT EXISTS idx_deletedEvents_deletedAt ON deletedEvents(deletedAt);
+        CREATE TABLE IF NOT EXISTS deletedAccounts (
+            userId TEXT PRIMARY KEY,
+            email TEXT,
+            deletedAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_deletedAccounts_deletedAt ON deletedAccounts(deletedAt);
+    `);
+} catch {}
+// Lets a voided ticket's tombstone be purged with its event. Rows written before this
+// column existed stay NULL and are left alone (nothing to tie them to).
+try { db.exec(`ALTER TABLE voidedTickets ADD COLUMN eventId TEXT`); } catch {}
 
 // ── One-time migration from db.json ──────────────────────────────────────────
 
@@ -1061,7 +1087,7 @@ export const stmt = {
     },
     voidedTickets: {
         byToken: db.prepare(`SELECT * FROM voidedTickets WHERE token=?`),
-        insert: db.prepare(`INSERT OR REPLACE INTO voidedTickets (token, ticketId, name, eventName, eventColor, voidedAt) VALUES (?,?,?,?,?,?)`),
+        insert: db.prepare(`INSERT OR REPLACE INTO voidedTickets (token, ticketId, name, eventName, eventColor, voidedAt, eventId) VALUES (?,?,?,?,?,?,?)`),
     },
     pushDevices: {
         byToken: db.prepare('SELECT * FROM pushDevices WHERE token=?'),
@@ -1263,3 +1289,132 @@ export function getTicketsByTokens(tokens) {
     const placeholders = tokens.map(() => '?').join(',');
     return db.prepare(`SELECT * FROM tickets WHERE token IN (${placeholders})`).all(...tokens).map(rowToTicket);
 }
+
+// ── Deletion: archive now, purge after the retention period ──────────────────
+//
+// Every table that holds rows for one event, other than `events` itself and
+// `auditLog` (which stays in place as the event's change history until the purge).
+// Adding a table with an eventId column means adding it here, or a deleted event's
+// rows in it are left behind forever. test/data-retention.test.js checks this list
+// against the live schema.
+export const EVENT_SCOPED_TABLES = [
+    'tickets', 'waitlist', 'orders', 'giveawayWinners', 'discountCodes',
+    'ticketScans', 'scannerActivity', 'scannerMessages', 'roomMessages',
+    'scannerLinks', 'scannerAccess', 'apiKeys', 'pushSubscriptions', 'seatHolds',
+    'sheetWatchers', 'sheetWatcherSeen', 'sheetLinks',
+];
+const eventScoped = Object.fromEntries(EVENT_SCOPED_TABLES.map(t => [t, {
+    select: db.prepare(`SELECT * FROM ${t} WHERE eventId=?`),
+    remove: db.prepare(`DELETE FROM ${t} WHERE eventId=?`),
+}]));
+const retention = {
+    eventIdsWithRows: db.prepare(
+        EVENT_SCOPED_TABLES.map(t => `SELECT DISTINCT eventId FROM ${t}`).join(' UNION ') +
+        ' UNION SELECT DISTINCT eventId FROM auditLog WHERE eventId IS NOT NULL'),
+    eventExists: db.prepare('SELECT 1 FROM events WHERE id=?'),
+    lastDeletedAudit: db.prepare(`SELECT MAX(createdAt) AS at FROM auditLog WHERE eventId=? AND action='event.deleted'`),
+    sheetAccessByLink: db.prepare('SELECT * FROM sheetAccess WHERE sheetLinkId=?'),
+    deleteSheetAccessByLink: db.prepare('DELETE FROM sheetAccess WHERE sheetLinkId=?'),
+    insertDeletedEvent: db.prepare(`INSERT OR REPLACE INTO deletedEvents (eventId, userId, name, deletedAt, deletedBy, snapshot) VALUES (?,?,?,?,?,?)`),
+    deletedEventById: db.prepare('SELECT * FROM deletedEvents WHERE eventId=?'),
+    expiredDeletedEvents: db.prepare('SELECT * FROM deletedEvents WHERE deletedAt < ?'),
+    removeDeletedEvent: db.prepare('DELETE FROM deletedEvents WHERE eventId=?'),
+    insertDeletedAccount: db.prepare(`INSERT OR REPLACE INTO deletedAccounts (userId, email, deletedAt) VALUES (?,?,?)`),
+    expiredDeletedAccounts: db.prepare('SELECT * FROM deletedAccounts WHERE deletedAt < ?'),
+    removeDeletedAccount: db.prepare('DELETE FROM deletedAccounts WHERE userId=?'),
+    auditDeleteByEvent: db.prepare('DELETE FROM auditLog WHERE eventId=?'),
+    auditDeleteAccountLevel: db.prepare('DELETE FROM auditLog WHERE userId=? AND eventId IS NULL'),
+    voidedDeleteByEvent: db.prepare('DELETE FROM voidedTickets WHERE eventId=?'),
+    voidedDeleteByToken: db.prepare('DELETE FROM voidedTickets WHERE token=?'),
+    walletDeleteBySerial: db.prepare('DELETE FROM walletDevices WHERE serialNumber=?'),
+    orphanAuditUserIds: db.prepare(`SELECT DISTINCT userId FROM auditLog WHERE userId IS NOT NULL
+        AND userId NOT IN (SELECT id FROM users) AND userId NOT IN (SELECT userId FROM deletedAccounts)`),
+    deleteOrphanTrustedDevices: db.prepare('DELETE FROM trustedDevices WHERE userId NOT IN (SELECT id FROM users)'),
+    deleteOrphanResetTokens: db.prepare('DELETE FROM passwordResetTokens WHERE userId NOT IN (SELECT id FROM users)'),
+    deleteOrphanPushDevices: db.prepare('DELETE FROM pushDevices WHERE userId NOT IN (SELECT id FROM users)'),
+};
+
+function snapshotAndClearEvent(eventId) {
+    const snapshot = {};
+    for (const t of EVENT_SCOPED_TABLES) snapshot[t] = eventScoped[t].select.all(eventId);
+    snapshot.sheetAccess = snapshot.sheetLinks.flatMap(l => retention.sheetAccessByLink.all(l.id));
+    for (const l of snapshot.sheetLinks) retention.deleteSheetAccessByLink.run(l.id);
+    for (const t of EVENT_SCOPED_TABLES) eventScoped[t].remove.run(eventId);
+    return snapshot;
+}
+
+// Removes an event and everything attached to it from the live tables (so it's gone
+// for organizers, attendees, scanners and the API at once) and keeps a snapshot in
+// deletedEvents until purgeExpiredDeletions() erases it. The event's auditLog rows
+// stay where they are until then. Returns { event, tickets } (raw rows) for the caller
+// to void Wallet passes, or null if there was no such event. Safe to call inside
+// another transaction (better-sqlite3 nests them as savepoints).
+export const archiveEvent = db.transaction((eventId, deletedBy, now = new Date().toISOString()) => {
+    const event = stmt.events.byId.get(eventId);
+    if (!event) return null;
+    const snapshot = { event, ...snapshotAndClearEvent(eventId) };
+    stmt.events.deleteById.run(eventId);
+    retention.insertDeletedEvent.run(eventId, event.userId || null, event.name || null, now, deletedBy || null, JSON.stringify(snapshot));
+    return { event, tickets: snapshot.tickets };
+});
+
+// Called with an account's deletion: its own audit entries (sign-ins, account
+// actions — the ones with no eventId) are purged with it after the retention period.
+export function recordAccountDeletion(userId, email, now = new Date().toISOString()) {
+    retention.insertDeletedAccount.run(userId, email || null, now);
+}
+
+// Erases deleted events and accounts whose retention period has run out: the
+// archive snapshot, the event's audit history, its voided-ticket tombstones and the
+// Wallet registrations for its passes; for an account, its account-level audit
+// entries. Audit entries a deleted user made on someone else's event belong to that
+// event's history and go with that event instead.
+export const purgeExpiredDeletions = db.transaction((retentionMs, now = Date.now()) => {
+    const cutoff = new Date(now - retentionMs).toISOString();
+    let events = 0, accounts = 0;
+    for (const row of retention.expiredDeletedEvents.all(cutoff)) {
+        let tokens = [];
+        try { tokens = (JSON.parse(row.snapshot).tickets || []).map(t => t.token).filter(Boolean); } catch {}
+        retention.auditDeleteByEvent.run(row.eventId);
+        retention.voidedDeleteByEvent.run(row.eventId);
+        for (const token of tokens) {
+            retention.voidedDeleteByToken.run(token);
+            retention.walletDeleteBySerial.run(token);
+        }
+        retention.removeDeletedEvent.run(row.eventId);
+        events++;
+    }
+    for (const row of retention.expiredDeletedAccounts.all(cutoff)) {
+        retention.auditDeleteAccountLevel.run(row.userId);
+        retention.removeDeletedAccount.run(row.userId);
+        accounts++;
+    }
+    return { events, accounts };
+});
+
+// One-time catch-up for deletions made before archiving existed: those left rows
+// behind in the event-scoped tables (account deletion only removed tickets and
+// events) and never cleaned up the audit log. Archives whatever is still there for
+// each event that no longer exists, dated by its 'event.deleted' audit entry when
+// there is one (so it's purged 90 days after the real deletion) or now otherwise;
+// does the same for deleted users' account-level audit entries; and drops sign-in
+// leftovers (trusted devices, reset tokens, push devices) for users that no longer
+// exist. Idempotent: once caught up it finds nothing.
+export const backfillOrphanedDeletions = db.transaction((now = new Date().toISOString()) => {
+    let events = 0, accounts = 0;
+    for (const { eventId } of retention.eventIdsWithRows.all()) {
+        if (!eventId || retention.eventExists.get(eventId) || retention.deletedEventById.get(eventId)) continue;
+        const snapshot = { event: null, legacy: true, ...snapshotAndClearEvent(eventId) };
+        const deletedAt = retention.lastDeletedAudit.get(eventId)?.at || now;
+        retention.insertDeletedEvent.run(eventId, null, null, deletedAt, null, JSON.stringify(snapshot));
+        events++;
+    }
+    for (const { userId } of retention.orphanAuditUserIds.all()) {
+        retention.insertDeletedAccount.run(userId, null, now);
+        accounts++;
+    }
+    retention.deleteOrphanTrustedDevices.run();
+    retention.deleteOrphanResetTokens.run();
+    retention.deleteOrphanPushDevices.run();
+    return { events, accounts };
+});

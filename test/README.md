@@ -70,6 +70,7 @@ that path for real.
 | `pages.test.js` | which pages are served to whom, the service-worker contract, `?fresh=1` on generated links |
 | `rate-limits.test.js` | the login/reset/scan limiters — this file boots its own server with them left on |
 | `sheet-watch.test.js` | sheet import preview: row cap/truncation, condition matching correctness at 10,000+ rows |
+| `data-retention.test.js` | deleting an event or account archives everything and clears the live tables; the 90-day purge (shrunk via `DELETED_DATA_RETENTION_MS` / `DELETED_DATA_SWEEP_MS`, test-only like the other sweep intervals); catching up pre-archive leftovers; `EVENT_SCOPED_TABLES` matches the schema. Reads the server's SQLite file directly, read-only |
 
 ## Writing a new test
 
