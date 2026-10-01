@@ -2446,6 +2446,8 @@ app.get('/api/auth/me', (req, res) => {
                     allowReentry: event ? event.allowReentry : false,
                     scanResultDurationMs: event ? event.scanResultDurationMs : null,
                     roomChatEnabled: event ? event.roomChatEnabled : false,
+                    offlineBackupEnabled: event ? event.offlineBackupEnabled : false,
+                    offlineFallbackMs: event ? event.offlineFallbackMs : null,
                     capabilities: scanLinkCapabilities(event),
                 },
             });
@@ -4061,6 +4063,23 @@ app.put('/api/event/:id/room-chat', requireAuth, (req, res) => {
     broadcastToEventScanners(event.id, { type: 'settings_update', roomChatEnabled: enabled });
     broadcastToMonitors(event.id, { type: 'room_chat_toggled', eventId: event.id, enabled });
     res.json({ success: true, roomChatEnabled: enabled });
+});
+
+// Offline backup for scanners — see offlineBackupEnabled in db-sqlite.js.
+// Pushed live like room chat, so a scanner already at the door starts (or
+// stops) keeping its local copy without being reopened. Turning it off also
+// tells every scanner to throw its copy away.
+app.put('/api/event/:id/offline-backup', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
+    const enabled = 'enabled' in req.body ? !!req.body.enabled : event.offlineBackupEnabled;
+    const raw = parseInt(req.body.fallbackMs, 10);
+    const fallbackMs = Number.isFinite(raw) ? Math.max(1000, Math.min(15000, raw)) : event.offlineFallbackMs;
+    stmt.events.setOfflineBackup.run(enabled ? 1 : 0, fallbackMs, event.id);
+    logAudit(req, { eventId: event.id, action: 'scanner.offlineBackupChanged', details: { enabled, fallbackMs } });
+    broadcastToEventScanners(event.id, { type: 'settings_update', offlineBackupEnabled: enabled, offlineFallbackMs: fallbackMs });
+    res.json({ success: true, offlineBackupEnabled: enabled, offlineFallbackMs: fallbackMs });
 });
 
 
@@ -7410,6 +7429,130 @@ app.post('/api/ticket-check', validateLimiter, (req, res) => {
     });
 });
 
+// ── Offline backup ─────────────────────────────────────────────────────────
+// A scanner with offlineBackupEnabled on keeps this snapshot locally and
+// answers from it when /api/validate doesn't come back in time. Tokens are
+// sent as sha256 hashes only: the device can recognise a ticket it scans, but
+// a lost phone (or anyone reading its storage) can't turn the copy back into
+// working QR codes. Email is left out for the same reason — the door needs a
+// name, not a mailing list. POST, not GET, so the scan-link token can ride in
+// the body the same way it does for /api/validate; display tokens are not
+// accepted — a door display has no business holding the guest list.
+function offlineTokenHash(token) {
+    return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+app.post('/api/event/:id/offline-snapshot', validateLimiter, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!scannerAuthorized(req, event.id, { allowDisplayToken: false })) {
+        return res.status(401).json({ error: 'Sign in or use a valid scan link to download the offline copy.' });
+    }
+    if (!event.offlineBackupEnabled) return res.status(403).json({ error: 'Offline backup is not enabled for this event', offlineBackupEnabled: false });
+    const tickets = stmt.tickets.byEventId.all(event.id).map(rowToTicket).map(t => ({
+        h: offlineTokenHash(t.token),
+        id: t.id,
+        registrationId: t.registrationId,
+        name: t.name,
+        firstName: t.firstName ?? null,
+        lastName: t.lastName ?? null,
+        customFields: t.customFields ?? null,
+        usedAt: t.used_at || null,
+        reentryStatus: t.reentry_status || null,
+        expired: isTicketExpired(t),
+    }));
+    res.json({
+        eventId: event.id,
+        eventName: event.name,
+        allowReentry: event.allowReentry,
+        offlineFallbackMs: event.offlineFallbackMs,
+        generatedAt: new Date().toISOString(),
+        tickets,
+    });
+});
+
+// Replays check-ins a scanner made against its offline copy. Each scan is
+// final once it has a result here — the device drops it from its queue
+// whatever the answer — so this never errors per item, it reports:
+//   applied       checked in now, stamped with the time it actually happened
+//   already_used  someone else got there first (another device, online or
+//                 off) — the person was let in twice; logged, nothing to undo
+//   expired       the ticket was expired before the device scanned it
+//   invalid       not a ticket for this event
+// A retry of a scan that already landed (the reply was lost on the way back)
+// finds used_at equal to the time it would have written and reports
+// `applied` again rather than a false double-entry.
+const OFFLINE_SYNC_MAX = 500;
+const OFFLINE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+app.post('/api/event/:id/offline-sync', validateLimiter, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!scannerAuthorized(req, event.id, { allowDisplayToken: false })) {
+        return res.status(401).json({ error: 'Sign in or use a valid scan link to sync offline check-ins.' });
+    }
+    const scans = Array.isArray(req.body.scans) ? req.body.scans.slice(0, OFFLINE_SYNC_MAX) : [];
+    const pairToken = req.body.pairToken || null;
+    const now = Date.now();
+    const results = [];
+    const applied = [];
+    const counts = { applied: 0, already_used: 0, expired: 0, invalid: 0 };
+
+    for (const scan of scans) {
+        const id = String(scan?.id || '');
+        const raw = String(scan?.token || '');
+        const cleanToken = (raw.startsWith('ticket:') ? raw.split(':')[1] : raw).trim();
+        const ticket = cleanToken ? rowToTicket(stmt.tickets.byToken.get(cleanToken)) : null;
+        // A device clock can be wrong; never stamp the future, and don't
+        // trust anything older than a week.
+        const t = Date.parse(scan?.scannedAt);
+        const scannedAt = new Date(Number.isFinite(t) && t <= now + 60000 && now - t < OFFLINE_MAX_AGE_MS ? Math.min(t, now) : now).toISOString();
+        let result;
+        if (!ticket || ticket.eventId !== event.id) {
+            result = 'invalid';
+        } else if (scan.kind === 'reentry_enter') {
+            if (ticket.used_at && event.allowReentry && ticket.reentry_status === 'outside') {
+                stmt.tickets.reentryEnter.run(scannedAt, ticket.id);
+                ticket.reentry_status = 'inside';
+                applied.push({ ticket, status: 'reentry_enter' });
+                result = 'applied';
+            } else {
+                // Already back inside — fine either way, nothing to change.
+                result = ticket.used_at ? 'applied' : 'invalid';
+            }
+        } else if (ticket.used_at) {
+            result = ticket.used_at === scannedAt ? 'applied' : 'already_used';
+        } else if (isTicketExpired(ticket)) {
+            result = 'expired';
+        } else {
+            if (event.allowReentry) stmt.tickets.checkInReentry.run(scannedAt, scannedAt, ticket.id);
+            else stmt.tickets.checkIn.run(scannedAt, scannedAt, ticket.id);
+            ticket.used_at = scannedAt;
+            ticket.updated_at = scannedAt;
+            if (event.allowReentry) ticket.reentry_status = 'inside';
+            applied.push({ ticket, status: 'valid' });
+            result = 'applied';
+        }
+        counts[result]++;
+        results.push({ id, result, usedAt: ticket?.used_at || null });
+        if (result === 'already_used') {
+            log('offline-sync', `[warn] DOUBLE ENTRY — ticket: ${ticket.id}  name: ${ticket.name}  event: ${event.name}  usedAt: ${ticket.used_at}  offlineScanAt: ${scannedAt}`);
+        }
+    }
+
+    if (applied.length) {
+        ticketStatusCache.clear();
+        const all = stmt.tickets.byEventId.all(event.id);
+        for (const { ticket, status } of applied) recordScan(pairToken, event, status, ticket, all);
+        pushWalletIfChanged(applied.map(a => a.ticket), event).catch(() => { });
+    }
+    if (scans.length) {
+        log('offline-sync', `[OK] event: ${event.name}  pair: ${pairToken || '-'}  ${JSON.stringify(counts)}  ip: ${getIP(req)}`);
+        logAudit(req, { eventId: event.id, action: 'checkin.offlineSync', details: { ...counts, pairToken } });
+    }
+    res.json({ results, counts });
+});
+
 // Create a no-login scanner link for one event. Anyone with the link can
 // scan/check in tickets for exactly this event (nothing else) — no account
 // needed. Multiple links per event so each staffer/device can be named and
@@ -7490,6 +7633,8 @@ app.get('/api/scanner-links/:token', (req, res) => {
         allowReentry: event.allowReentry,
         scanResultDurationMs: event.scanResultDurationMs,
         roomChatEnabled: event.roomChatEnabled,
+        offlineBackupEnabled: event.offlineBackupEnabled,
+        offlineFallbackMs: event.offlineFallbackMs,
         linkLabel: link.label || '',
         capabilities: req.session.userId
             ? userEventCapabilities(req.session.userId, event.id)
@@ -8471,7 +8616,7 @@ app.get('/api/event/:id/access', requireAuth, (req, res) => {
 // merely presents a plausible-looking ticket token can check someone in —
 // which is exactly what let a stale cached scanner.html page (with no live
 // session and no scan-link) keep scanning.
-function scannerAuthorized(req, eventId) {
+function scannerAuthorized(req, eventId, { allowDisplayToken = true } = {}) {
     // Having *an* account was treated as proof for *every* event, so any
     // signed-in user could check in (or check out) an attendee at an event
     // they have nothing to do with. A session only counts when it actually
@@ -8486,7 +8631,7 @@ function scannerAuthorized(req, eventId) {
         const link = stmt.scannerLinks.byToken.get(linkToken);
         if (link && link.eventId === eventId) return true;
     }
-    const dToken = req.body?.displayToken;
+    const dToken = allowDisplayToken ? req.body?.displayToken : null;
     if (dToken) {
         const event = rowToEvent(stmt.events.byId.get(eventId));
         if (event?.displayToken && event.displayToken === dToken) return true;

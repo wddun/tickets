@@ -311,6 +311,52 @@ class APIService: ObservableObject {
         return result
     }
 
+    // MARK: - Offline backup
+
+    func fetchOfflineSnapshot(eventId: String, scanLinkToken: String?) async throws -> OfflineSnapshot {
+        guard let url = URL(string: "\(baseURL)/api/event/\(eventId)/offline-snapshot") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var body: [String: String] = [:]
+        if let scanLinkToken, !scanLinkToken.isEmpty { body["scanLinkToken"] = scanLinkToken }
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+        guard let snapshot = try? JSONDecoder().decode(OfflineSnapshot.self, from: data) else { throw APIError.decodingError }
+        return snapshot
+    }
+
+    private struct OfflineSyncBody: Encodable {
+        struct Scan: Encodable { let id, token, scannedAt, kind: String }
+        let pairToken: String?
+        let scanLinkToken: String?
+        let scans: [Scan]
+    }
+
+    func syncOfflineScans(eventId: String, scans: [OfflineQueuedScan], pairToken: String?, scanLinkToken: String?) async throws -> OfflineSyncResponse {
+        guard let url = URL(string: "\(baseURL)/api/event/\(eventId)/offline-sync") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        // Bounded, so one request stuck on a dead connection can't hold up
+        // every sync after it.
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = OfflineSyncBody(
+            pairToken: (pairToken?.isEmpty == false) ? pairToken : nil,
+            scanLinkToken: (scanLinkToken?.isEmpty == false) ? scanLinkToken : nil,
+            scans: scans.map { .init(id: $0.id, token: $0.token, scannedAt: $0.scannedAt, kind: $0.kind) }
+        )
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+        guard let result = try? JSONDecoder().decode(OfflineSyncResponse.self, from: data) else { throw APIError.decodingError }
+        return result
+    }
+
     func checkIn(registrationId: String) async throws {
         guard let url = URL(string: "\(baseURL)/api/checkin/\(registrationId)") else { throw APIError.invalidURL }
         var request = URLRequest(url: url)

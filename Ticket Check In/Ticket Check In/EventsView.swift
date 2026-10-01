@@ -63,6 +63,7 @@ struct ManualCheckInView: View {
             scannerPin: nil, location: nil, allowReentry: link.allowReentry,
             atDoorEnabled: false, ticketPrice: nil, userId: nil,
             scanResultDurationMs: link.scanResultDurationMs, roomChatEnabled: link.roomChatEnabled,
+            offlineBackupEnabled: link.offlineBackupEnabled, offlineFallbackMs: link.offlineFallbackMs,
             fullAccess: false, capabilities: link.capabilities ?? ["checkin", "undo_checkin"]
         )
     }

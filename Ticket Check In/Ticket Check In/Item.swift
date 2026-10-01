@@ -29,6 +29,12 @@ struct Event: Codable, Identifiable, Hashable {
     // whoever has the monitor open — off by default, toggled by an
     // organiser. var for the same live-patch reason as scanResultDurationMs.
     var roomChatEnabled: Bool?
+    // Offline backup — see offlineBackupEnabled in db-sqlite.js. When on,
+    // ScannerView keeps a local copy of the guest list (OfflineBackupStore)
+    // and answers from it if /api/validate hasn't replied within
+    // offlineFallbackMs. var for the same live-patch reason as above.
+    var offlineBackupEnabled: Bool? = nil
+    var offlineFallbackMs: Int? = nil
     // Owner, admin, or a 'full' sheetAccess grant — computed server-side per
     // caller in GET /api/events. View-only collaborators can check people in
     // but can't undo it. Kept for older cached copies; prefer `capabilities`.
@@ -139,6 +145,8 @@ struct ScannerLinkInfo: Codable {
     // var, not let — see the matching note on Event.scanResultDurationMs.
     var scanResultDurationMs: Int?
     var roomChatEnabled: Bool?
+    var offlineBackupEnabled: Bool? = nil
+    var offlineFallbackMs: Int? = nil
     // This link's own organiser-set label (scannerLinks.label) — lets the
     // monitor tell apart otherwise-anonymous scan-link devices, e.g. "Front
     // Gate" vs "VIP Entrance".
@@ -168,4 +176,53 @@ struct RoomChatMessage: Codable, Identifiable {
 
 struct RoomChatMessagesResponse: Codable {
     let messages: [RoomChatMessage]
+}
+
+// MARK: - Offline backup (POST /api/event/:id/offline-snapshot, /offline-sync)
+
+/// The event's guest list as a scanner keeps it for when the server can't be
+/// reached. Tokens arrive as sha256 hashes (`h`), never raw — the copy can
+/// recognise a scanned ticket but can't be turned back into working QR codes.
+struct OfflineSnapshot: Codable {
+    let eventId: String
+    let eventName: String?
+    let allowReentry: Bool?
+    let offlineFallbackMs: Int?
+    let generatedAt: String
+    var tickets: [OfflineTicket]
+    /// Set locally when the copy arrives — "updated 12s ago" is about this
+    /// device's clock, not the server's.
+    var receivedAt: Date? = nil
+}
+
+struct OfflineTicket: Codable {
+    let h: String
+    let id: String
+    let registrationId: String
+    let name: String?
+    let firstName: String?
+    let lastName: String?
+    let customFields: [String: String]?
+    var usedAt: String?
+    var reentryStatus: String?
+    var expired: Bool?
+}
+
+/// A check-in made against the offline copy, waiting to be replayed.
+struct OfflineQueuedScan: Codable, Identifiable {
+    let id: String
+    let eventId: String
+    let scanLinkToken: String?
+    let token: String
+    let h: String
+    let kind: String        // "checkin" | "reentry_enter"
+    let scannedAt: String
+}
+
+struct OfflineSyncResponse: Codable {
+    struct Result: Codable {
+        let id: String
+        let result: String  // applied | already_used | expired | invalid
+    }
+    let results: [Result]
 }

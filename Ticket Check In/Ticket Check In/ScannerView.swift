@@ -68,6 +68,7 @@ struct ScannerView: View {
     @State private var notifDismissTask: Task<Void, Never>?
     @State private var showRoomChat = false
     @ObservedObject private var roomChat = RoomChatStore.shared
+    @ObservedObject private var offline = OfflineBackupStore.shared
     private let scanDebounceInterval: TimeInterval = 5.0
 
     var body: some View {
@@ -110,6 +111,9 @@ struct ScannerView: View {
             // Room chat button (top-trailing) — every scanner + the monitor,
             // shown only once an organiser has turned it on for this event
             roomChatButton
+            // Offline backup status (top-leading) — only when it's on for this
+            // event or there are offline check-ins still waiting to sync
+            offlineStatusButton
             // Persistent pill naming the locked event (scan-link mode only)
             scanLinkBanner
             // One-second full-screen "entering" animation, scan-link mode only
@@ -140,6 +144,11 @@ struct ScannerView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             heartbeatTask?.cancel()
             notifTask?.cancel()
+        }
+        .onChange(of: offline.syncReport) { report in
+            guard let report else { return }
+            showNotifBannerWith(title: "Offline check-ins synced", message: report)
+            offline.syncReport = nil
         }
         .onChange(of: bluetooth.receivedResult) { result in
             if let result = result {
@@ -210,6 +219,69 @@ struct ScannerView: View {
             // only as the tiebreak, so this button sat behind the pill
             // (unclickable wherever they overlapped) despite coming later
             // in the ZStack until this was raised above it.
+            .zIndex(160)
+        }
+    }
+
+    private var offlineBackupEnabledForCurrentEvent: Bool {
+        (scanLinkEvent?.offlineBackupEnabled ?? selectedOwnEvent?.offlineBackupEnabled) ?? false
+    }
+
+    private var offlineFallbackSeconds: Double {
+        let ms = scanLinkEvent?.offlineFallbackMs ?? selectedOwnEvent?.offlineFallbackMs ?? 4000
+        return Double(max(ms, 1000)) / 1000.0
+    }
+
+    /// Ready to answer from the local copy if the server doesn't.
+    private var offlineReady: Bool {
+        offlineBackupEnabledForCurrentEvent && offline.isReady(for: selectedEventId())
+    }
+
+    private func refreshOfflineCopy() async {
+        await offline.refresh(eventId: selectedEventId(), enabled: offlineBackupEnabledForCurrentEvent, scanLinkToken: scanLinkEvent?.token)
+    }
+
+    @ViewBuilder private var offlineStatusButton: some View {
+        if offlineBackupEnabledForCurrentEvent || !offline.queue.isEmpty {
+            let pending = offline.queue.count
+            let tint: Color = pending > 0 ? Color(red: 0.99, green: 0.83, blue: 0.30)
+                : offlineReady ? Color(red: 0.53, green: 0.94, blue: 0.67)
+                : .white.opacity(0.5)
+            VStack {
+                HStack {
+                    Button {
+                        showNotifBannerWith(title: "Offline backup", message: offline.statusText(
+                            eventId: selectedEventId(), enabled: offlineBackupEnabledForCurrentEvent,
+                            fallbackMs: scanLinkEvent?.offlineFallbackMs ?? selectedOwnEvent?.offlineFallbackMs))
+                        Task { await offline.flush() }
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "externaldrive.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(tint)
+                                .padding(10)
+                                .background(Color.black.opacity(0.55))
+                                .clipShape(Circle())
+                            if pending > 0 {
+                                Text(pending > 99 ? "99+" : "\(pending)")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.black)
+                                    .padding(4)
+                                    .frame(minWidth: 16, minHeight: 16)
+                                    .background(tint)
+                                    .clipShape(Capsule())
+                                    .offset(x: 5, y: -5)
+                            }
+                        }
+                    }
+                    .accessibilityLabel("Offline backup status")
+                    .padding(.leading, 14)
+                    .padding(.top, 8)
+                    Spacer()
+                }
+                Spacer()
+            }
+            // Same reasoning as roomChatButton's zIndex.
             .zIndex(160)
         }
     }
@@ -397,16 +469,60 @@ struct ScannerView: View {
         if eventAccessIssue != nil { return }
 
         beginPending(for: token)
+
+        // With offline backup on, the server still gets the first chance —
+        // but only for the event's fallback delay. After that (or the moment
+        // the request fails outright) the answer comes from the local copy.
+        // The request is left running rather than cancelled: if it did reach
+        // the server, its late reply tells the offline queue the check-in
+        // already landed, so the sync doesn't report it as a double entry.
+        let backup = offlineReady
+        let race = ScanRace()
+        let answerFromCopy = {
+            guard !race.answered else { return }
+            race.answered = true
+            race.fallback?.cancel()
+            endPending(for: token)
+            let (response, note) = offline.answer(token: token, eventName: currentEventInfo?.name, scanLinkToken: scanLinkEvent?.token)
+            showResult(for: response, token: token, offlineNote: note)
+        }
+        if backup {
+            let delay = offlineFallbackSeconds
+            race.fallback = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                answerFromCopy()
+            }
+        }
+
         Task {
             do {
                 if scannerPairToken.isEmpty { scannerPairToken = UUID().uuidString }
                 let response = try await APIService.shared.validateTicket(token: token, pairToken: scannerPairToken, eventId: selectedEventId(), scanLinkToken: scanLinkEvent?.token)
                 await MainActor.run {
+                    if race.answered {
+                        offline.noteLateReply(token: token, status: response.status)
+                        return
+                    }
+                    race.answered = true
+                    race.fallback?.cancel()
                     endPending(for: token)
+                    offline.noteOnlineResult(token: token, response: response)
                     showResult(for: response, token: token)
+                    if !offline.queue.isEmpty { Task { await offline.flush() } }
                 }
             } catch {
                 await MainActor.run {
+                    // Only a connection problem or a server fault goes to the
+                    // copy — a 401 (revoked link, signed out) must not be
+                    // waved through by it.
+                    if backup, Self.isConnectionFailure(error) {
+                        answerFromCopy()
+                        return
+                    }
+                    if race.answered { return }
+                    race.answered = true
+                    race.fallback?.cancel()
                     endPending(for: token)
                     // The scan is the one thing that definitely happened, so
                     // say which ticket failed rather than only that something
@@ -454,6 +570,12 @@ struct ScannerView: View {
         pendingScan = nil
     }
 
+    private static func isConnectionFailure(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if case APIError.httpError(let code) = error, code >= 500 { return true }
+        return false
+    }
+
     /// Network errors as something a person at a door can act on.
     private func friendlyScanError(_ error: Error) -> String {
         let urlError = error as? URLError
@@ -467,21 +589,20 @@ struct ScannerView: View {
         }
     }
 
-    private func showResult(for response: ValidateResponse, token: String) {
-        let result: ScanResult
+    private func showResult(for response: ValidateResponse, token: String, offlineNote: String? = nil) {
+        var result: ScanResult
+        let displayStatus: String
         switch response.status {
         case "valid":
             lastRegistrationId = response.registrationId ?? response.ticketId
             result = ScanResult(from: response, status: .success, title: "Checked In!")
             CheckInFeedback.shared.success()
-            showBanner(result)
-            sendToDisplay(response: response, status: "valid")
+            displayStatus = "valid"
         case "reentry_enter":
             lastRegistrationId = response.registrationId ?? response.ticketId
             result = ScanResult(from: response, status: .reentryEnter, title: "Checked Back In!")
             CheckInFeedback.shared.success()
-            showBanner(result)
-            sendToDisplay(response: response, status: "reentry_enter")
+            displayStatus = "reentry_enter"
         case "reentry_exit":
             pendingCheckoutToken = token
             result = ScanResult(from: response, status: .reentryExitPrompt, title: "Confirm Check-Out")
@@ -489,22 +610,23 @@ struct ScannerView: View {
             withAnimation { scanResult = result }
             sendToDisplay(response: response, status: "reentry_exit")
             startExitOverlayAutoDismiss()
+            return
         case "used":
             result = ScanResult(from: response, status: .alreadyUsed, title: "Already Checked In")
             CheckInFeedback.shared.alreadyUsed()
-            showBanner(result)
-            sendToDisplay(response: response, status: "used")
+            displayStatus = "used"
         case "expired":
             result = ScanResult(from: response, status: .expired, title: "Ticket Expired")
             CheckInFeedback.shared.alreadyUsed()
-            showBanner(result)
-            sendToDisplay(response: response, status: "expired")
+            displayStatus = "expired"
         default:
             result = ScanResult(status: .error, title: "Invalid Ticket", name: response.name ?? "")
             CheckInFeedback.shared.error()
-            showBanner(result)
-            sendToDisplay(response: response, status: "invalid")
+            displayStatus = "invalid"
         }
+        result.offlineNote = offlineNote
+        showBanner(result)
+        sendToDisplay(response: response, status: displayStatus)
     }
 
     private static let maxRecentScans = 20
@@ -554,6 +676,7 @@ struct ScannerView: View {
                     try await APIService.shared.confirmCheckout(token: token, pairToken: scannerPairToken, scanLinkToken: scanLinkEvent?.token)
                 }
                 await MainActor.run {
+                    offline.noteCheckout(token: token, registrationId: rid)
                     // No tone here — checkout() already played when the exit
                     // prompt appeared, matching the website, which is also
                     // silent on the actual /api/checkout confirm. Just a
@@ -667,6 +790,22 @@ struct ScannerView: View {
         }
     }
 
+    // Same live-patch pattern, for PUT /api/event/:id/offline-backup — and
+    // fetches (or drops) the local copy straight away rather than on the next
+    // heartbeat.
+    private func applyLiveOfflineBackup(_ enabled: Bool, fallbackMs: Int?) {
+        if var link = scanLinkEvent {
+            link.offlineBackupEnabled = enabled
+            if let fallbackMs { link.offlineFallbackMs = fallbackMs }
+            if let data = try? JSONEncoder().encode(link) { scanLinkEventData = data }
+        } else if var event = selectedOwnEvent {
+            event.offlineBackupEnabled = enabled
+            if let fallbackMs { event.offlineFallbackMs = fallbackMs }
+            if let data = try? JSONEncoder().encode(event) { lastSelectedEventData = data }
+        }
+        Task { await refreshOfflineCopy() }
+    }
+
     // Whatever event this scanner is currently locked to — a no-login scan
     // link (revocable via the banner's X) or the signed-in user's own choice
     // (only changed via the banner's Switch Event affordance).
@@ -698,12 +837,24 @@ struct ScannerView: View {
             eventAccessIssue = nil
             return
         }
+        // A dropped connection says nothing about whether this account can
+        // still reach the event. Treating it as "signed out" put a wall in
+        // front of the door the moment the signal went — exactly when offline
+        // backup needs the scanner to keep going.
         await api.checkAuth()
         guard api.isAuthenticated else {
+            if await serverUnreachable() { return }
             eventAccessIssue = .notSignedIn(eventName: event.name)
             return
         }
-        let events = (try? await api.getEvents()) ?? []
+        let events: [Event]
+        do {
+            events = try await api.getEvents()
+        } catch is URLError {
+            return
+        } catch {
+            events = []
+        }
         guard let fresh = events.first(where: { $0.id == event.id }) else {
             eventAccessIssue = .noAccess(eventName: event.name)
             return
@@ -715,6 +866,17 @@ struct ScannerView: View {
         // duration override) would sit unused until lastSelectedEventData
         // got overwritten some other way, e.g. relaunching the app.
         if let encoded = try? JSONEncoder().encode(fresh) { lastSelectedEventData = encoded }
+    }
+
+    private func serverUnreachable() async -> Bool {
+        do {
+            _ = try await api.getCurrentUser()
+            return false
+        } catch is URLError {
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func switchAccount() {
@@ -745,6 +907,7 @@ struct ScannerView: View {
         // next 30s heartbeat happens to call verifyEventAccess() again.
         eventAccessIssue = nil
         showEnteringAnimation()
+        Task { await refreshOfflineCopy() }
     }
 
     private func switchToOwnEvent(_ event: Event) {
@@ -752,6 +915,7 @@ struct ScannerView: View {
         lastSelectedEventData = (try? JSONEncoder().encode(event)) ?? Data()
         eventAccessIssue = nil // picked from this account's own event list — known-good
         showEnteringAnimation()
+        Task { await refreshOfflineCopy() }
     }
 
     private func showEnteringAnimation() {
@@ -904,6 +1068,9 @@ struct ScannerView: View {
                 // door then picks up an organiser's dashboard change on its
                 // own, not just when the tab is reopened or the app relaunched.
                 await verifyEventAccess()
+                // Offline backup: send anything queued, then pull a fresh copy
+                // so check-ins made on other devices show up in it too.
+                await refreshOfflineCopy()
                 try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 s
             }
         }
@@ -985,9 +1152,12 @@ struct ScannerView: View {
                                         let hasResultDuration = json.keys.contains("scanResultDurationMs")
                                         let ms = json["scanResultDurationMs"] as? Int
                                         let roomChatEnabled = json["roomChatEnabled"] as? Bool
+                                        let offlineEnabled = json["offlineBackupEnabled"] as? Bool
+                                        let offlineFallbackMs = json["offlineFallbackMs"] as? Int
                                         await MainActor.run {
                                             if hasResultDuration { self.applyLiveScanResultDuration(ms) }
                                             if let roomChatEnabled { self.applyLiveRoomChatEnabled(roomChatEnabled) }
+                                            if let offlineEnabled { self.applyLiveOfflineBackup(offlineEnabled, fallbackMs: offlineFallbackMs) }
                                         }
                                     } else if type == "room_chat",
                                               let id = json["id"] as? String,
@@ -1288,6 +1458,8 @@ struct ScanResult: Equatable {
     let customFields: [String: String]?
     let usedAt: String?
     let registrationId: String?
+    /// Set when the verdict came from the offline copy rather than the server.
+    var offlineNote: String? = nil
 
     init(status: Status, title: String, name: String = "", firstName: String? = nil, email: String? = nil, eventName: String? = nil, customFields: [String: String]? = nil) {
         self.status = status; self.title = title; self.name = name
@@ -1306,6 +1478,14 @@ struct ScanResult: Equatable {
         self.usedAt = response.used_at
         self.registrationId = response.registrationId
     }
+}
+
+/// Which of the server and the offline copy answered a scan first — only
+/// the first one gets to put a verdict on screen.
+@MainActor
+final class ScanRace {
+    var answered = false
+    var fallback: Task<Void, Never>?
 }
 
 enum EventAccessIssue: Equatable {
@@ -1501,6 +1681,20 @@ struct ScanFlashOverlay: View {
                         }
                     }
                     .padding(.horizontal, 32)
+                    .padding(.top, 4)
+                }
+
+                if let note = result.offlineNote {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "wifi.slash")
+                        Text(note).multilineTextAlignment(.leading)
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal, 28)
                     .padding(.top, 4)
                 }
             }

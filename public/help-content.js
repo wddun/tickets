@@ -112,6 +112,19 @@ window.HELP_CONTENT = {
             `Also saves the instant you change it, independent of the tab's batched Save bar — same as Allow Shuttle Linking.`,
         ],
     },
+    'general.offlineBackup': {
+        title: 'Offline Backup for Scanners',
+        summary: 'Lets scanners keep checking people in when the venue\'s connection drops, by answering from a local copy of the guest list.',
+        details: [
+            `Off by default. While it's on, every scanner working this event — the web scanner and the iOS app, signed in or on a scan link — downloads a copy of the guest list and refreshes it every 30 seconds, so check-ins made on other devices show up in it too.`,
+            `The server is always asked first. Only when it hasn't answered within the delay you set here (1–10 seconds, 4 by default) does the scanner use its copy. A shorter delay keeps the line moving on a bad connection; a longer one gives a slow-but-working connection more chance to answer for real.`,
+            `Check-ins made offline are marked on screen as "Offline" and queued on that device. They're sent to the server automatically once it's reachable again, stamped with the time the person actually came in. Nothing needs to be done by hand.`,
+            `The one thing a local copy can't know is what other devices did while everyone was offline: if the same ticket is scanned at two doors during an outage, both will let it in. The second one is recorded as a double entry in the server log and the audit log when it syncs.`,
+            `A ticket issued after a scanner's last refresh isn't in its copy, so it shows as not found while offline. Re-entry check-outs need a connection; offline, a guest already inside is shown as already checked in.`,
+            `The copy holds ticket codes only in hashed form and leaves out email addresses, so a lost phone can't be used to produce working tickets. Turning this off tells every scanner to delete its copy.`,
+            `Saves the instant you change it, independent of the tab's batched Save bar.`,
+        ],
+    },
     'general.walletLockScreen': {
         title: 'Show on Lock Screen',
         summary: 'Controls whether the Apple Wallet pass surfaces a lock-screen reminder near the event time and when the phone is close to the venue.',

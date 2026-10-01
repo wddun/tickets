@@ -521,6 +521,17 @@
         .ro-field-value { font-size: 28px; font-weight: 700; color: #fff; text-align: right; margin-left: 16px; }
 
         .ro-bottom { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+        .ro-offline-note {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 14px; border-radius: 999px;
+            background: rgba(0,0,0,0.28); color: #fff;
+            font-size: 13px; font-weight: 600; text-align: left; max-width: 100%;
+        }
+        .ro-offline-note svg { flex-shrink: 0; }
+        .pill-btn-offline { position: relative; }
+        .pill-btn-offline.offline-ready { color: #86efac; }
+        .pill-btn-offline.offline-pending { color: #fcd34d; }
+        .pill-btn-offline.offline-missing { color: rgba(255,255,255,0.5); }
         .ro-confirm-btn {
             width: 100%; padding: 15px; border: none; border-radius: 14px;
             font-size: 17px; font-weight: 700; cursor: pointer;
@@ -908,6 +919,10 @@
         </button>
     </div>
     <div class="top-bar-right">
+        <button id="offlineBtn" class="pill-btn pill-btn-offline" onclick="showOfflineStatus()" style="display:none;" aria-label="Offline backup status">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-2px;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            <span id="offlineBtnBadge" class="chat-btn-badge" style="display:none;"></span>
+        </button>
         <button id="torchBtn" class="pill-btn" onclick="toggleTorch()" style="display:none;" aria-label="Toggle flashlight">🔦</button>
     </div>
 </div>
@@ -1267,6 +1282,7 @@ function lockToEvent(event) {
         eventId: event.id, eventName: event.name, color: event.color,
         allowReentry: event.allowReentry, scanResultDurationMs: event.scanResultDurationMs ?? null,
         roomChatEnabled: !!event.roomChatEnabled,
+        offlineBackupEnabled: !!event.offlineBackupEnabled, offlineFallbackMs: event.offlineFallbackMs ?? null,
         source: 'selected',
     };
     localStorage.setItem('selectedEventId', event.id);
@@ -1303,6 +1319,7 @@ function consumeSettingsTabParam() {
     }
 
     let resumableScanLink = null;
+    let unreachable = false;
     try {
         const r = await fetch('/api/auth/me');
         if (r.ok) {
@@ -1316,7 +1333,12 @@ function consumeSettingsTabParam() {
                 resumableScanLink = data.scanLink;
             }
         }
-    } catch (_) {}
+    } catch (_) { unreachable = true; }
+
+    // Reopened with no connection: if this device was working an event with
+    // offline backup on, go straight back to it rather than to a sign-in gate
+    // it can't get past until the signal returns.
+    if (unreachable && resumeOfflineFromSaved()) return;
 
     if (resumableScanLink) {
         resumeScanLinkMode(resumableScanLink);
@@ -1489,7 +1511,15 @@ async function initScanLinkMode(scanToken, opts = {}) {
 
     let link;
     try {
-        const r = await fetch(`/api/scanner-links/${encodeURIComponent(scanToken)}`);
+        let r;
+        try {
+            r = await fetch(`/api/scanner-links/${encodeURIComponent(scanToken)}`);
+        } catch (networkErr) {
+            // No connection at all — not a verdict on the link. A device that
+            // was already working this event with offline backup carries on.
+            if (!opts.onError && resumeOfflineFromSaved({ scanLinkToken: scanToken })) return true;
+            throw networkErr;
+        }
         if (!r.ok) throw new Error();
         link = await r.json();
     } catch (_) {
@@ -1512,7 +1542,7 @@ async function initScanLinkMode(scanToken, opts = {}) {
     // scanToken is kept on currentEvent (not just used to resolve the link)
     // so every subsequent /api/validate and /api/checkout call can prove
     // this device holds a real, still-valid scan-link token for this event.
-    currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, scanResultDurationMs: link.scanResultDurationMs ?? null, roomChatEnabled: !!link.roomChatEnabled, linkLabel: link.linkLabel || '', source: 'link', scanLinkToken: scanToken };
+    currentEvent = { eventId: link.eventId, eventName: link.eventName, color: link.color, allowReentry: link.allowReentry, scanResultDurationMs: link.scanResultDurationMs ?? null, roomChatEnabled: !!link.roomChatEnabled, offlineBackupEnabled: !!link.offlineBackupEnabled, offlineFallbackMs: link.offlineFallbackMs ?? null, linkLabel: link.linkLabel || '', source: 'link', scanLinkToken: scanToken };
     scanLinkCapabilities = link.capabilities || [];
     // Resolving the link also scoped the session to this event server-side, so
     // the check-in list and door display work here the same as when signed in.
@@ -1545,6 +1575,8 @@ function resumeScanLinkMode(scanLink) {
         allowReentry: scanLink.allowReentry,
         scanResultDurationMs: scanLink.scanResultDurationMs ?? null,
         roomChatEnabled: !!scanLink.roomChatEnabled,
+        offlineBackupEnabled: !!scanLink.offlineBackupEnabled,
+        offlineFallbackMs: scanLink.offlineFallbackMs ?? null,
         source: 'link',
     };
     scanLinkCapabilities = scanLink.capabilities || [];
@@ -1944,6 +1976,11 @@ function openScannerSSE() {
                     currentEvent.roomChatEnabled = !!d.roomChatEnabled;
                     updateRoomChatButtonVisibility();
                 }
+                if ('offlineBackupEnabled' in d) {
+                    currentEvent.offlineBackupEnabled = !!d.offlineBackupEnabled;
+                    if ('offlineFallbackMs' in d) currentEvent.offlineFallbackMs = d.offlineFallbackMs ?? null;
+                    refreshOfflineSnapshot();
+                }
             } else if (d.type === 'force-update') {
                 forceUpdateReload();
             }
@@ -1976,10 +2013,13 @@ function forceUpdateReload() {
 function initScannerChannel() {
     sendHeartbeat();
     refreshScanResultDuration();
+    loadOfflineSnapshot();
+    refreshOfflineSnapshot();
     if (!heartbeatIntervalStarted) {
         heartbeatIntervalStarted = true;
         setInterval(sendHeartbeat, 30000);
         setInterval(refreshScanResultDuration, 30000);
+        setInterval(refreshOfflineSnapshot, OFFLINE_REFRESH_MS);
     }
     openScannerSSE();
 }
@@ -2024,6 +2064,7 @@ async function refreshScanResultDuration() {
     try {
         let ms = null;
         let roomChat = false;
+        let src = null;
         if (currentEvent.source === 'link' && currentEvent.scanLinkToken) {
             // Re-resolving the link directly works regardless of session
             // state — unlike /api/auth/me below, which reports this browser's
@@ -2035,6 +2076,7 @@ async function refreshScanResultDuration() {
                 const d = await r.json();
                 ms = d.scanResultDurationMs ?? null;
                 roomChat = !!d.roomChatEnabled;
+                src = d;
             }
         } else if (currentEvent.source === 'link') {
             const r = await fetch('/api/auth/me');
@@ -2043,6 +2085,7 @@ async function refreshScanResultDuration() {
                 if (d.scanLink && d.scanLink.eventId === currentEvent.eventId) {
                     ms = d.scanLink.scanResultDurationMs ?? null;
                     roomChat = !!d.scanLink.roomChatEnabled;
+                    src = d.scanLink;
                 }
             }
         } else if (currentEvent.eventId) {
@@ -2051,7 +2094,12 @@ async function refreshScanResultDuration() {
                 const d = await r.json();
                 ms = d.scanResultDurationMs ?? null;
                 roomChat = !!d.roomChatEnabled;
+                src = d;
             }
+        }
+        if (src && 'offlineBackupEnabled' in src) {
+            currentEvent.offlineBackupEnabled = !!src.offlineBackupEnabled;
+            currentEvent.offlineFallbackMs = src.offlineFallbackMs ?? null;
         }
         currentEvent.scanResultDurationMs = ms;
         currentEvent.roomChatEnabled = roomChat;
@@ -2410,6 +2458,7 @@ async function confirmCheckout() {
         });
     } catch (_) {}
     clearTimeout(timeoutId);
+    offlineNoteCheckout(pendingCheckoutToken);
     const name = pendingCheckoutName;
     closeResult();
     showFlash({ status: 'checkout_done', firstName: name });
@@ -2488,6 +2537,25 @@ function onScanSuccess(decodedText) {
     // immediately and let only the verdict wait. See #pendingOverlay's CSS.
     beginPendingScan(token);
 
+    // With offline backup on, the server still gets the first chance — but
+    // only for offlineFallbackMs. After that (or the moment the request fails
+    // outright) the answer comes from this device's copy instead. The request
+    // is left running rather than aborted: if it did reach the server, its
+    // late reply tells the offline queue the check-in already landed, so the
+    // sync doesn't later report it as someone else's double entry.
+    const backup = offlineReady();
+    let answered = false;
+    const answerFromCopy = () => {
+        if (answered) return;
+        answered = true;
+        clearTimeout(fallbackTimer);
+        answerOffline(token).then(data => {
+            endPendingScan(token);
+            presentScanResult(data);
+        });
+    };
+    const fallbackTimer = backup ? setTimeout(answerFromCopy, offlineFallbackMs()) : null;
+
     fetch('/api/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2495,8 +2563,14 @@ function onScanSuccess(decodedText) {
         // *different* event than the one currently selected on this scanner.
         body: JSON.stringify({ token, pairToken: SCANNER_PAIR_TOKEN, eventId: getSelectedEventId(), scanLinkToken: getScanLinkToken() })
     })
-    .then(r => r.json().then(data => ({ status: r.status, data })))
+    .then(r => {
+        if (backup && r.status >= 500) throw new Error('server error');
+        return r.json().then(data => ({ status: r.status, data }));
+    })
     .then(({ status, data }) => {
+        if (answered) { offlineLateReply(token, data); return; }
+        answered = true;
+        clearTimeout(fallbackTimer);
         endPendingScan(token);
         if (status === 401) {
             playSound('error');
@@ -2504,25 +2578,12 @@ function onScanSuccess(decodedText) {
             return;
         }
         data._token = token;
-        const isSuccess = data.status === 'valid' || data.status === 'reentry_enter';
-        const sound = isSuccess ? 'success' : data.status === 'reentry_exit' ? 'checkout' : 'error';
-
-        // Checkout confirm is showing — process silently so it isn't disrupted
-        if (pendingCheckoutToken) {
-            if (data.status === 'reentry_exit') return; // can't nest two checkout confirms
-            playSound(sound);
-            addToHistory(data, data.status);
-            return;
-        }
-
-        playSound(sound);
-        if (data.status === 'reentry_exit') {
-            openExitConfirm(data);
-        } else {
-            showFlash(data);
-        }
+        offlineNoteOnlineResult(token, data);
+        presentScanResult(data);
+        if (offlineQueue.length) flushOfflineQueue();
     })
     .catch(() => {
+        if (backup) { answerFromCopy(); return; }
         endPendingScan(token);
         if (pendingCheckoutToken) return;
         playSound('error');
@@ -2535,6 +2596,362 @@ function onScanSuccess(decodedText) {
                 : 'Could not reach the server. Check the signal and scan again.',
         });
     });
+}
+
+// One verdict on screen, whether it came from the server or the offline copy.
+function presentScanResult(data) {
+    const isSuccess = data.status === 'valid' || data.status === 'reentry_enter';
+    const sound = isSuccess ? 'success' : data.status === 'reentry_exit' ? 'checkout' : 'error';
+
+    // Checkout confirm is showing — process silently so it isn't disrupted
+    if (pendingCheckoutToken) {
+        if (data.status === 'reentry_exit') return; // can't nest two checkout confirms
+        playSound(sound);
+        addToHistory(data, data.status);
+        return;
+    }
+
+    playSound(sound);
+    if (data.status === 'reentry_exit') {
+        openExitConfirm(data);
+    } else {
+        showFlash(data);
+        if (data.offline) {
+            document.getElementById('roBottom').innerHTML = `<div class="ro-offline-note">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+                <span>${escHtml(data.offlineNote || 'Offline — checked against this device\'s copy. Will sync when back online.')}</span>
+            </div>`;
+        }
+    }
+}
+
+// ── Offline backup ─────────────────────────────────────────────────────────
+// When the organiser turns on offline backup (dashboard → settings), this
+// device keeps a copy of the event's guest list — token hashes only, see
+// /api/event/:id/offline-snapshot — refreshed every 30s so check-ins made on
+// other devices show up in it. Check-ins made from the copy are queued here
+// and replayed through /api/event/:id/offline-sync when the server is back.
+// The queue is kept even if the setting is switched off, so nothing that
+// already happened at the door is ever thrown away.
+const OFFLINE_REFRESH_MS = 30000;
+const OFFLINE_FALLBACK_DEFAULT_MS = 4000;
+const OFFLINE_SNAP_PREFIX = 'wtsOfflineSnap:';
+const OFFLINE_QUEUE_KEY = 'wtsOfflineQueue';
+const OFFLINE_RESUME_KEY = 'wtsOfflineResume';
+let offlineSnap = null;       // { eventId, allowReentry, generatedAt, tickets, byHash }
+let offlineQueue = loadOfflineQueue();
+let offlineSyncing = false;
+let offlineLastError = null;
+
+function offlineSupported() { return !!(window.crypto && crypto.subtle && window.TextEncoder); }
+function offlineEnabled() { return !!(currentEvent && currentEvent.offlineBackupEnabled) && offlineSupported(); }
+function offlineReady() {
+    return offlineEnabled() && !!offlineSnap && offlineSnap.eventId === currentEvent.eventId;
+}
+function offlineFallbackMs() {
+    return currentEvent?.offlineFallbackMs || OFFLINE_FALLBACK_DEFAULT_MS;
+}
+
+async function sha256Hex(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function lsGet(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
+function lsSet(key, value) { try { localStorage.setItem(key, value); return true; } catch (_) { return false; } }
+function lsRemove(key) { try { localStorage.removeItem(key); } catch (_) {} }
+
+function loadOfflineQueue() {
+    try { return JSON.parse(lsGet(OFFLINE_QUEUE_KEY) || '[]') || []; } catch (_) { return []; }
+}
+function saveOfflineQueue() { lsSet(OFFLINE_QUEUE_KEY, JSON.stringify(offlineQueue)); renderOfflineStatus(); }
+
+function indexOfflineSnap(snap) {
+    snap.byHash = new Map(snap.tickets.map(t => [t.h, t]));
+    // Anything this device did that the server hasn't confirmed yet still
+    // counts locally — a fresh copy must not forget it and let them in twice.
+    for (const q of offlineQueue) {
+        if (q.eventId !== snap.eventId) continue;
+        const rec = snap.byHash.get(q.h);
+        if (!rec) continue;
+        if (q.kind === 'checkin' && !rec.usedAt) rec.usedAt = q.scannedAt;
+        if (snap.allowReentry) rec.reentryStatus = 'inside';
+    }
+    return snap;
+}
+
+function persistOfflineSnap() {
+    if (!offlineSnap) return;
+    const { byHash, ...plain } = offlineSnap;
+    if (!lsSet(OFFLINE_SNAP_PREFIX + offlineSnap.eventId, JSON.stringify(plain))) {
+        offlineLastError = 'This device is out of storage for the offline copy.';
+    }
+}
+
+function loadOfflineSnapshot() {
+    if (!currentEvent) { offlineSnap = null; return; }
+    if (offlineSnap && offlineSnap.eventId === currentEvent.eventId) return;
+    offlineSnap = null;
+    try {
+        const raw = lsGet(OFFLINE_SNAP_PREFIX + currentEvent.eventId);
+        if (raw) offlineSnap = indexOfflineSnap(JSON.parse(raw));
+    } catch (_) { offlineSnap = null; }
+    renderOfflineStatus();
+}
+
+function dropOfflineSnapshot(eventId) {
+    lsRemove(OFFLINE_SNAP_PREFIX + eventId);
+    if (offlineSnap && offlineSnap.eventId === eventId) offlineSnap = null;
+    try {
+        const saved = JSON.parse(lsGet(OFFLINE_RESUME_KEY) || 'null');
+        if (saved && saved.event && saved.event.eventId === eventId) lsRemove(OFFLINE_RESUME_KEY);
+    } catch (_) {}
+}
+
+async function refreshOfflineSnapshot() {
+    if (!currentEvent) return;
+    const eventId = currentEvent.eventId;
+    if (!offlineEnabled()) {
+        dropOfflineSnapshot(eventId);
+        renderOfflineStatus();
+        if (offlineQueue.length) flushOfflineQueue();
+        return;
+    }
+    // Send what this device did first, so the copy that comes back already
+    // includes it.
+    await flushOfflineQueue();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+        const r = await fetch(`/api/event/${encodeURIComponent(eventId)}/offline-snapshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scanLinkToken: getScanLinkToken() }),
+            signal: controller.signal,
+        });
+        if (r.status === 403) {
+            const d = await r.json().catch(() => ({}));
+            if (d.offlineBackupEnabled === false && currentEvent?.eventId === eventId) {
+                currentEvent.offlineBackupEnabled = false;
+                dropOfflineSnapshot(eventId);
+            }
+            return;
+        }
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!currentEvent || currentEvent.eventId !== eventId) return;
+        offlineSnap = indexOfflineSnap({
+            eventId: d.eventId, allowReentry: !!d.allowReentry,
+            generatedAt: d.generatedAt, receivedAt: Date.now(), tickets: d.tickets || [],
+        });
+        offlineLastError = null;
+        persistOfflineSnap();
+        lsSet(OFFLINE_RESUME_KEY, JSON.stringify({ event: currentEvent, isLoggedIn }));
+    } catch (_) {
+        // Offline or slow — keep using the copy we already have.
+    } finally {
+        clearTimeout(timer);
+        renderOfflineStatus();
+    }
+}
+
+function queueOfflineScan(token, h, kind, scannedAt) {
+    offlineQueue.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+        eventId: currentEvent.eventId,
+        scanLinkToken: getScanLinkToken() || null,
+        token, h, kind, scannedAt,
+    });
+    saveOfflineQueue();
+}
+
+async function answerOffline(token) {
+    const h = await sha256Hex(token);
+    const snap = offlineSnap;
+    const base = { _token: token, offline: true, eventId: snap.eventId, eventName: currentEvent?.eventName || '' };
+    const rec = snap.byHash.get(h);
+    if (!rec) {
+        return { ...base, status: 'invalid', name: '', offlineNote: 'Not in this device\'s offline copy. It may have been issued after the last sync, or be for another event.' };
+    }
+    const fields = {
+        ...base, name: rec.name, firstName: rec.firstName, lastName: rec.lastName,
+        customFields: rec.customFields, ticketId: rec.id, registrationId: rec.registrationId,
+    };
+    if (!rec.usedAt && rec.expired) return { ...fields, status: 'expired' };
+    if (rec.usedAt) {
+        if (snap.allowReentry && rec.reentryStatus === 'outside') {
+            const now = new Date().toISOString();
+            rec.reentryStatus = 'inside';
+            persistOfflineSnap();
+            queueOfflineScan(token, h, 'reentry_enter', now);
+            return { ...fields, status: 'reentry_enter' };
+        }
+        return {
+            ...fields, status: 'used', used_at: rec.usedAt,
+            offlineNote: snap.allowReentry
+                ? 'Offline — already inside. Checking out needs a connection.'
+                : 'Offline — this device\'s copy shows them already checked in.',
+        };
+    }
+    const now = new Date().toISOString();
+    rec.usedAt = now;
+    if (snap.allowReentry) rec.reentryStatus = 'inside';
+    persistOfflineSnap();
+    queueOfflineScan(token, h, 'checkin', now);
+    return { ...fields, status: 'valid' };
+}
+
+// Keep the copy in step with what the server just said about this ticket.
+async function offlineNoteOnlineResult(token, data) {
+    if (!offlineSnap || !offlineSupported()) return;
+    const rec = offlineSnap.byHash.get(await sha256Hex(token));
+    if (!rec) return;
+    if (data.status === 'valid') { rec.usedAt = rec.usedAt || new Date().toISOString(); if (offlineSnap.allowReentry) rec.reentryStatus = 'inside'; }
+    else if (data.status === 'reentry_enter') rec.reentryStatus = 'inside';
+    else if (data.status === 'used') rec.usedAt = data.used_at || rec.usedAt || new Date().toISOString();
+    else if (data.status === 'expired') rec.expired = true;
+    else return;
+    persistOfflineSnap();
+}
+
+async function offlineNoteCheckout(token) {
+    if (!token || !offlineSnap || !offlineSupported()) return;
+    const rec = offlineSnap.byHash.get(await sha256Hex(token));
+    if (rec) { rec.reentryStatus = 'outside'; persistOfflineSnap(); }
+}
+
+// The server answered after the copy already had. If it checked them in, the
+// queued offline scan is a duplicate of something that already landed.
+function offlineLateReply(token, data) {
+    if (data.status !== 'valid' && data.status !== 'reentry_enter') return;
+    const kind = data.status === 'valid' ? 'checkin' : 'reentry_enter';
+    const i = offlineQueue.findIndex(q => q.token === token && q.kind === kind);
+    if (i !== -1) { offlineQueue.splice(i, 1); saveOfflineQueue(); }
+}
+
+async function flushOfflineQueue() {
+    if (offlineSyncing || !offlineQueue.length) return;
+    offlineSyncing = true;
+    try {
+        const groups = new Map();
+        for (const q of offlineQueue) {
+            const key = q.eventId + '|' + (q.scanLinkToken || '');
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(q);
+        }
+        let synced = 0, doubles = [];
+        for (const items of groups.values()) {
+            const { eventId, scanLinkToken } = items[0];
+            let r;
+            // Bounded, so one request stuck on a dead connection can't hold
+            // up every sync after it.
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 15000);
+            try {
+                r = await fetch(`/api/event/${encodeURIComponent(eventId)}/offline-sync`, {
+                    signal: controller.signal,
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        pairToken: SCANNER_PAIR_TOKEN,
+                        scanLinkToken: scanLinkToken || undefined,
+                        scans: items.slice(0, 500).map(({ id, token, scannedAt, kind }) => ({ id, token, scannedAt, kind })),
+                    }),
+                });
+            } catch (_) { break; } // still offline — try again later
+            finally { clearTimeout(timer); }
+            if (r.status === 401 || r.status === 404) {
+                // This device lost access (or the event is gone). Nothing it
+                // can ever send will land; keep it for now, say so.
+                offlineLastError = 'Some offline check-ins can\'t sync — this device no longer has access to that event.';
+                continue;
+            }
+            if (!r.ok) continue;
+            const d = await r.json();
+            const done = new Set((d.results || []).map(x => x.id));
+            for (const x of d.results || []) {
+                if (x.result === 'already_used') {
+                    const q = items.find(i => i.id === x.id);
+                    const rec = q && offlineSnap?.byHash.get(q.h);
+                    doubles.push(rec?.name || 'A guest');
+                }
+            }
+            synced += done.size;
+            offlineQueue = offlineQueue.filter(q => !done.has(q.id));
+        }
+        saveOfflineQueue();
+        if (synced) {
+            showInAppNotif('Offline check-ins synced',
+                `${synced} check-in${synced === 1 ? '' : 's'} sent to the server.` +
+                (doubles.length ? ` ${doubles.length} had already been used on another device: ${doubles.slice(0, 3).join(', ')}${doubles.length > 3 ? '…' : ''}.` : ''));
+        }
+    } finally {
+        offlineSyncing = false;
+        renderOfflineStatus();
+    }
+}
+
+window.addEventListener('online', () => { flushOfflineQueue().then(refreshOfflineSnapshot); });
+
+// Reopened with no connection — pick the saved event back up from this
+// device's own records. `scanLinkToken`, when given, must match.
+function resumeOfflineFromSaved({ scanLinkToken } = {}) {
+    let saved = null;
+    try { saved = JSON.parse(lsGet(OFFLINE_RESUME_KEY) || 'null'); } catch (_) {}
+    const ev = saved && saved.event;
+    if (!ev || !ev.offlineBackupEnabled || !offlineSupported()) return false;
+    if (scanLinkToken && ev.scanLinkToken !== scanLinkToken) return false;
+    if (!lsGet(OFFLINE_SNAP_PREFIX + ev.eventId)) return false;
+    currentEvent = ev;
+    isLoggedIn = !!saved.isLoggedIn && ev.source !== 'link';
+    document.getElementById('anonGate').classList.remove('show');
+    document.getElementById('eventPicker').classList.remove('show');
+    if (ev.source === 'link') scanLinkCapabilities = ['checkin'];
+    showTabBar({ scanLink: ev.source === 'link' });
+    playEnteringAnimation(currentEvent);
+    ensureCameraRunning();
+    initScannerChannel();
+    setTimeout(() => showInAppNotif('No connection', 'Scanning against this device\'s offline copy. Check-ins will sync when the connection is back.'), 1400);
+    return true;
+}
+
+function offlineAgo(ms) {
+    const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    return `${Math.round(s / 3600)} h ago`;
+}
+
+function renderOfflineStatus() {
+    const btn = document.getElementById('offlineBtn');
+    if (!btn) return;
+    const pending = offlineQueue.length;
+    const show = offlineEnabled() || pending > 0;
+    btn.style.display = show ? '' : 'none';
+    if (!show) return;
+    btn.classList.toggle('offline-ready', offlineReady() && !pending);
+    btn.classList.toggle('offline-pending', pending > 0);
+    btn.classList.toggle('offline-missing', offlineEnabled() && !offlineReady());
+    const badge = document.getElementById('offlineBtnBadge');
+    badge.textContent = pending > 99 ? '99+' : String(pending);
+    badge.style.display = pending ? '' : 'none';
+}
+
+function showOfflineStatus() {
+    const pending = offlineQueue.length;
+    let msg;
+    if (offlineReady()) {
+        const at = offlineSnap.receivedAt || Date.parse(offlineSnap.generatedAt);
+        msg = `Offline copy ready: ${offlineSnap.tickets.length} ticket${offlineSnap.tickets.length === 1 ? '' : 's'}, updated ${offlineAgo(at)}. If the server takes longer than ${(offlineFallbackMs() / 1000).toFixed(1)}s, scans are checked against it.`;
+    } else if (offlineEnabled()) {
+        msg = 'Offline backup is on, but this device hasn\'t downloaded a copy yet. It needs a connection once.';
+    } else {
+        msg = 'Offline backup is off for this event.';
+    }
+    if (pending) msg += ` ${pending} offline check-in${pending === 1 ? ' is' : 's are'} waiting to sync.`;
+    if (offlineLastError) msg += ' ' + offlineLastError;
+    showInAppNotif('Offline backup', msg);
+    if (pending) flushOfflineQueue();
 }
 
 // ── Pending scan ───────────────────────────────────────────────────────────

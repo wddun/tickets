@@ -659,6 +659,15 @@ try {
 // other per-event opt-ins, so an existing event's door staff don't suddenly
 // see a new chat surface nobody asked for.
 try { db.exec(`ALTER TABLE events ADD COLUMN roomChatEnabled INTEGER DEFAULT 0`); } catch {}
+
+// Offline backup for scanners (web + iOS). When on, every scanner working the
+// event keeps a local copy of the ticket list (hashed tokens, never the raw
+// ones — see /api/event/:id/offline-snapshot) and falls back to it when
+// /api/validate hasn't answered within offlineFallbackMs. Check-ins made
+// against the copy are queued on the device and replayed through
+// /api/event/:id/offline-sync once the connection is back. Off by default.
+try { db.exec(`ALTER TABLE events ADD COLUMN offlineBackupEnabled INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE events ADD COLUMN offlineFallbackMs INTEGER`); } catch {}
 try {
     db.exec(`
         CREATE TABLE IF NOT EXISTS roomMessages (
@@ -830,6 +839,10 @@ export function rowToEvent(row) {
         ticketExpiryMode: ['freeSeatsOnly', 'ifWaitlistEnabled', 'always'].includes(row.ticketExpiryMode) ? row.ticketExpiryMode : 'freeSeatsOnly',
         ticketReturnsEnabled: !!row.ticketReturnsEnabled,
         roomChatEnabled: !!row.roomChatEnabled,
+        offlineBackupEnabled: !!row.offlineBackupEnabled,
+        // How long a scanner waits on the server before answering from its
+        // local copy. NULL (never configured) reads as the default.
+        offlineFallbackMs: Math.max(1000, Math.min(15000, parseInt(row.offlineFallbackMs, 10) || 4000)),
         // Anything that isn't the explicit opt-in reads as 'none', so a NULL
         // from before the column existed can never mean "refund automatically".
         ticketReturnRefund: row.ticketReturnRefund === 'auto' ? 'auto' : 'none',
@@ -897,7 +910,7 @@ export const DUPLICABLE_EVENT_COLUMNS = [
     'waitlistMessage', 'waitlistEmailTemplate', 'waitlistClaimEmailTemplate',
     'scanResultDurationMs', 'reminderEnabled', 'reminderMessage', 'reminderHoursBefore',
     'ticketReturnsEnabled', 'ticketReturnRefund', 'ticketReturnCutoffMinutes', 'ticketReturnCutoffUnit',
-    'roomChatEnabled',
+    'roomChatEnabled', 'offlineBackupEnabled', 'offlineFallbackMs',
 ];
 
 // ── Prepared statements ────────────────────────────────────────────────────────
@@ -933,6 +946,7 @@ export const stmt = {
         setScanResultDuration: db.prepare(`UPDATE events SET scanResultDurationMs=? WHERE id=?`),
         setTicketReturns: db.prepare(`UPDATE events SET ticketReturnsEnabled=?, ticketReturnRefund=?, ticketReturnCutoffMinutes=?, ticketReturnCutoffUnit=? WHERE id=?`),
         setRoomChatEnabled: db.prepare(`UPDATE events SET roomChatEnabled=? WHERE id=?`),
+        setOfflineBackup: db.prepare(`UPDATE events SET offlineBackupEnabled=?, offlineFallbackMs=? WHERE id=?`),
         setTicketExpiryScope: db.prepare(`UPDATE events SET ticketExpiryLimit=?, ticketExpiryOrder=? WHERE id=?`),
         setTicketExpiryMode: db.prepare(`UPDATE events SET ticketExpiryMode=? WHERE id=?`),
         setTicketExpiryPromotesWaitlist: db.prepare(`UPDATE events SET ticketExpiryPromotesWaitlist=? WHERE id=?`),

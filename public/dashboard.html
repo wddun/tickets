@@ -4820,6 +4820,28 @@
                 <div
                     style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;" data-no-dirty>
                     <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+                        <input type="checkbox" id="offlineBackupToggle" ${ev.offlineBackupEnabled ? 'checked' : ''}
+                            onchange="saveOfflineBackup('${eventId}', { enabled: this.checked })"
+                            style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
+                        <div style="flex:1;">
+                            <div style="font-size:13px;font-weight:600;">Offline Backup for Scanners${helpIcon('general.offlineBackup')}</div>
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Every scanner (web or iOS) keeps a copy of this event's guest list and keeps it
+                                updated. Scans still go to the server first; if it hasn't answered after the delay below, the scanner answers from its copy and syncs the check-in once it's back online.</div>
+                        </div>
+                    </label>
+                    <div id="offlineBackupRow" style="display:${ev.offlineBackupEnabled ? 'flex' : 'none'};align-items:center;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+                        <span style="font-size:12px;color:var(--text-muted);white-space:nowrap;">Use offline copy after</span>
+                        <input type="range" id="offlineFallbackSlider" min="1000" max="10000" step="500"
+                            value="${ev.offlineFallbackMs || 4000}"
+                            oninput="document.getElementById('offlineFallbackLabel').textContent = (this.value/1000).toFixed(1) + 's'"
+                            onchange="saveOfflineBackup('${eventId}', { fallbackMs: parseInt(this.value) })"
+                            style="flex:1;accent-color:var(--navy);">
+                        <span id="offlineFallbackLabel" style="font-size:13px;font-weight:600;min-width:36px;text-align:right;">${((ev.offlineFallbackMs || 4000)/1000).toFixed(1)}s</span>
+                    </div>
+                </div>
+                <div
+                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;" data-no-dirty>
+                    <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
                         <input type="checkbox" id="editEventShuttleLink" ${ev.shuttleLinkEnabled ? 'checked' : ''}
                             onchange="setShuttleLinkEnabled('${eventId}', this.checked)"
                             style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
@@ -8018,6 +8040,26 @@
                 showToast(d.scanResultDurationMs ? 'Scan result display time updated.' : 'Scan result display time override turned off.');
             } catch {
                 showToast('Failed to update scan result display time.');
+            }
+        }
+
+        async function saveOfflineBackup(eventId, changes) {
+            if ('enabled' in changes) document.getElementById('offlineBackupRow').style.display = changes.enabled ? 'flex' : 'none';
+            try {
+                const r = await fetch(`/api/event/${eventId}/offline-backup`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(changes)
+                });
+                if (!r.ok) throw new Error();
+                const d = await r.json();
+                const ev = events.find(e => e.id === eventId);
+                if (ev) { ev.offlineBackupEnabled = d.offlineBackupEnabled; ev.offlineFallbackMs = d.offlineFallbackMs; }
+                showToast('enabled' in changes
+                    ? (d.offlineBackupEnabled ? 'Offline backup turned on.' : 'Offline backup turned off.')
+                    : `Scanners will use their offline copy after ${(d.offlineFallbackMs / 1000).toFixed(1)}s.`);
+            } catch {
+                showToast('Failed to update offline backup.');
             }
         }
 
