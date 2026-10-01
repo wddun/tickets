@@ -168,6 +168,15 @@
 
         .topbar-logo img { height: 26px; width: auto; display: block; }
 
+        .site-footer { background: var(--header-bg); border-top: 1px solid var(--border); }
+        .site-footer-text { font-size: 12px; color: var(--text-muted); }
+        .site-footer-link { font-size: 12px; color: var(--text-muted); }
+        .site-footer-link:hover { color: var(--text); }
+        #adminLogsPanel { background: var(--header-bg); border-top: 1px solid var(--border); }
+        #adminLogsPanel > div:first-child { border-bottom: 1px solid var(--border) !important; }
+        #adminLogsPanel > div:first-child span, #adminLogsToggle { color: var(--text-muted) !important; }
+        #adminLogsBody { background: #0f172a; }
+
         .topbar-actions { display: flex; align-items: center; gap: 6px; }
 
         .topbar-btn {
@@ -2593,7 +2602,7 @@
     </div>
 
     <!-- Admin Logs Panel (admin only, shown via JS) -->
-    <div id="adminLogsPanel" style="display:none;background:#0f172a;border-top:2px solid #1e293b;">
+    <div id="adminLogsPanel" style="display:none;">
         <div
             style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px;border-bottom:1px solid #1e293b;">
             <span style="color:#94a3b8;font-size:12px;font-weight:600;letter-spacing:.5px;">SERVER LOGS</span>
@@ -2605,12 +2614,12 @@
         </div>
     </div>
 
-    <footer style="background:#10132a;border-top:1px solid rgba(255,255,255,0.06);padding:10px 20px calc(env(safe-area-inset-bottom, 0px) + 10px);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;">
-        <img src="/logo-nav.svg" alt="WTS Tickets" style="height:20px;width:auto;opacity:0.7;">
-        <span style="font-size:12px;color:rgba(255,255,255,0.28);">&copy; 2026 Will's Tech Support</span>
+    <footer class="site-footer" style="padding:10px 20px calc(env(safe-area-inset-bottom, 0px) + 10px);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;">
+        <span class="topbar-logo"><img class="logo-swap-light" src="/logo-nav-dark.svg" alt="WTS Tickets" style="height:20px;width:auto;opacity:0.7;"><img class="logo-swap-dark" src="/logo-nav.svg" alt="" style="height:20px;width:auto;opacity:0.7;"></span>
+        <span class="site-footer-text">&copy; 2026 Will's Tech Support</span>
         <span style="display:flex;align-items:center;gap:14px;">
-            <button type="button" onclick="openReportProblemModal()" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;background:none;border:none;padding:0;cursor:pointer;font-family:inherit;">Report a Problem</button>
-            <a href="/support.html" style="font-size:12px;color:rgba(255,255,255,0.35);text-decoration:none;">Support</a>
+            <button type="button" class="site-footer-link" onclick="openReportProblemModal()" style="font-size:12px;text-decoration:none;background:none;border:none;padding:0;cursor:pointer;font-family:inherit;">Report a Problem</button>
+            <a href="/support.html" class="site-footer-link" style="font-size:12px;text-decoration:none;">Support</a>
         </span>
     </footer>
 
