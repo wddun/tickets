@@ -133,26 +133,40 @@
     return block;
   }
 
-  function setActive(key, scrollTo) {
-    if (!state.pages[key]) key = 'basics';
-    state.active = key;
-    Object.keys(state.pages).forEach(function (k) {
-      state.pages[k].hidden = k !== key;
+  var spy = null;
+  function highlight(key) {
+    Object.keys(state.navBtns).forEach(function (k) {
       state.navBtns[k].classList.toggle('active', k === key);
       state.navBtns[k].setAttribute('aria-current', k === key ? 'page' : 'false');
     });
-    var g = GROUPS.filter(function (x) { return x.key === key; })[0];
-    var h = document.getElementById('nuPageTitle');
-    if (h && g) h.textContent = g.label;
-    var d = document.getElementById('nuPageDesc');
-    if (d && g) d.textContent = g.desc;
-    var main = document.getElementById('main');
+    var btn = state.navBtns[key], nav = btn && btn.parentElement;
+    if (nav && nav.scrollWidth > nav.clientWidth) nav.scrollTo({ left: btn.offsetLeft - (nav.clientWidth - btn.clientWidth) / 2, behavior: 'smooth' });
+  }
+
+  function setActive(key, scrollTo, instant) {
+    if (!state.pages[key]) key = 'basics';
+    state.active = key;
+    highlight(key);
+    var target = scrollTo || state.pages[key];
+    target.scrollIntoView({ block: scrollTo ? 'center' : 'start', behavior: instant ? 'auto' : 'smooth' });
     if (scrollTo) {
-      scrollTo.scrollIntoView({ block: 'center' });
       scrollTo.classList.add('nu-flash');
       setTimeout(function () { scrollTo.classList.remove('nu-flash'); }, 1600);
-    } else if (main) main.scrollTop = 0;
-    try { sessionStorage.setItem('nuGroup', key); } catch (e) {}
+    }
+  }
+
+  function initSpy() {
+    if (spy) spy.disconnect();
+    var root = document.getElementById('main');
+    if (!root) return;
+    spy = new IntersectionObserver(function (entries) {
+      var vis = entries.filter(function (e) { return e.isIntersecting; });
+      if (!vis.length) return;
+      vis.sort(function (a, b) { return a.boundingClientRect.top - b.boundingClientRect.top; });
+      var key = vis[0].target.id.replace('nu-g-', '');
+      state.active = key; highlight(key);
+    }, { root: root, rootMargin: '0px 0px -70% 0px', threshold: 0 });
+    GROUPS.forEach(function (g) { spy.observe(state.pages[g.key]); });
   }
 
   function refreshDirty() {
@@ -266,7 +280,8 @@
     var pages = el('div', 'nu-pages');
     state.pages = {};
     GROUPS.forEach(function (g) {
-      var p = el('div', 'nu-page'); p.id = 'nu-g-' + g.key; p.hidden = true;
+      var p = el('div', 'nu-page'); p.id = 'nu-g-' + g.key;
+      p.appendChild(el('div', 'nu-page-head', '<h2>' + esc(g.label) + '</h2><p>' + esc(g.desc) + '</p>'));
       state.pages[g.key] = p; pages.appendChild(p);
     });
 
@@ -285,7 +300,6 @@
     Object.keys(sections).forEach(function (id) { if (sections[id].parentNode === content) stash.appendChild(sections[id]); });
     // Sections whose children were split keep their ids for any code that looks them up.
     content.innerHTML = '';
-    content.appendChild(el('div', 'nu-page-head', '<h2 id="nuPageTitle"></h2><p id="nuPageDesc"></p>'));
     content.appendChild(pages);
     content.appendChild(stash);
 
@@ -307,10 +321,11 @@
     });
     installPreview();
 
-    var saved = null;
-    try { saved = sessionStorage.getItem('nuGroup'); } catch (e) {}
-    setActive(state.pendingGroup || saved || 'basics');
+    var start = state.pendingGroup;
     state.pendingGroup = null;
+    highlight(start || 'basics');
+    initSpy();
+    if (start && start !== 'basics') setActive(start, null, true);
     refreshDirty();
     wireSearch();
 
@@ -361,7 +376,6 @@
 
   var origShow = window.showSettingsView;
   window.showSettingsView = async function (id, initialTab) {
-    try { sessionStorage.removeItem('nuGroup'); } catch (e) {}
     state.pendingGroup = initialTab ? LEGACY_TAB_GROUP[initialTab] : null;
     var p = origShow.apply(this, arguments);
     decorateShell();

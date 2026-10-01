@@ -67,6 +67,7 @@
 
 /* ---- Pages and blocks ---- */
 .nu-page[hidden], #nuStash[hidden], .nu-results[hidden] { display: none !important; }
+.nu-page { margin-bottom: var(--sp-7); scroll-margin-top: var(--sp-3); }
 .nu-page-head h2 { margin: 0; font-size: var(--fs-xl); letter-spacing: -0.01em; color: var(--text); }
 .nu-page-head p { margin: var(--sp-1) 0 var(--sp-5); font-size: var(--fs-md); color: var(--text-muted); }
 .nu-block {
@@ -136,7 +137,8 @@
   .newui .nu-search kbd { display: none; }
   .nu-search input { padding-right: var(--sp-3); }
   .newui .nu-block { padding: var(--sp-4); border-radius: var(--r-md); }
-  .nu-page-head h2 { font-size: var(--fs-lg); }
+  .nu-page { margin-bottom: var(--sp-7); scroll-margin-top: var(--sp-3); }
+.nu-page-head h2 { font-size: var(--fs-lg); }
   .newui .nu-block input, .newui .nu-block select, .newui .nu-block textarea { font-size: 16px !important; }
 }
 @media (prefers-reduced-motion: reduce) {
