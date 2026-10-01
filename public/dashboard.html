@@ -9201,8 +9201,16 @@
             </div>
             <div style="margin-bottom:16px;">
                 <label for="editTicketEmail" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Email</label>
-                <input type="email" id="editTicketEmail"
-                    style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;" />
+                <div style="display:flex;gap:8px;">
+                    <input type="email" id="editTicketEmail"
+                        style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;" />
+                    <button type="button" class="btn btn-secondary" id="editTicketCopyEmailBtn" onclick="copyToClipboard(document.getElementById('editTicketEmail').value, this)">Copy</button>
+                </div>
+                <div id="editTicketEmailStatus" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                    <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Ticket</button>
+                    <button class="btn btn-secondary" style="flex:1;" onclick="openDirectEmailModal()">Custom Email</button>
+                </div>
             </div>
             <div id="editTicketCustomFields" style="margin-bottom:16px;"></div>
             <input type="hidden" id="editTicketId" />
@@ -9212,10 +9220,6 @@
             <div style="display:flex;gap:8px;margin-bottom:8px;">
                 <button class="btn btn-primary" style="flex:1;" onclick="submitEditTicket(true)">Save Changes</button>
                 <button class="btn btn-secondary" id="resendWinnerEmailBtn" style="flex:1;display:none;" onclick="resendWinnerEmailFromModal(this)">Resend Winner Email</button>
-            </div>
-            <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <button class="btn btn-secondary" style="flex:1;" onclick="resendTicketEmail(this)">Resend Ticket</button>
-                <button class="btn btn-secondary" style="flex:1;" onclick="openDirectEmailModal()">Custom Email</button>
             </div>
             <button class="btn btn-danger" style="width:100%;margin-top:4px;"
                 onclick="deleteRegistrationFromModal()">Delete Registration</button>
@@ -9797,14 +9801,8 @@
                     ? `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Sent</span>`
                     : `<span style="background:#f3f4f6;color:var(--text-muted);font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;">Not sent</span>`;
 
-            const infoBar = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:2px;font-size:12px;color:var(--text-muted);">
-                <span>${createdStr ? `Registered ${createdStr}` : ''}</span>
-                <div style="display:flex;gap:6px;align-items:center;">
-                    ${emailBadge}
-                    <button class="copy-email-btn" onclick="copyToClipboard('${esc(t.email || '')}', this)" title="Copy email">Copy</button>
-                </div>
-            </div>
-            ${emailOpenedExact ? `<div style="text-align:right;font-size:10px;color:var(--text-muted);margin-bottom:6px;">Email opened ${emailOpenedExact}</div>` : ''}`;
+            const infoBar = createdStr ? `<div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);">Registered ${createdStr}</div>` : '';
+            document.getElementById('editTicketEmailStatus').innerHTML = `${emailBadge}${emailOpenedExact ? `<span>Opened ${emailOpenedExact}</span>` : ''}`;
 
             preview.innerHTML = `
                 ${infoBar}
