@@ -119,6 +119,9 @@ struct ManualCheckInView: View {
             return
         }
         let events = (try? await api.getEvents()) ?? []
+        // The selection may have changed while this was in flight — see the
+        // matching guard in ScannerView.verifyEventAccess().
+        guard scanLinkEvent == nil, currentEvent?.id == event.id else { return }
         accessIssue = events.contains(where: { $0.id == event.id }) ? nil : .noAccess(eventName: event.name)
     }
 

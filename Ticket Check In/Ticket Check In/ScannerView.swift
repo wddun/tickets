@@ -145,6 +145,13 @@ struct ScannerView: View {
             heartbeatTask?.cancel()
             notifTask?.cancel()
         }
+        // The stream and heartbeat both capture the event they were started
+        // for, so a switch left them reporting (and taking dashboard settings
+        // from) the previous event until the tab was reopened.
+        .onChange(of: selectedEventId()) { _ in
+            startNotifListener()
+            startHeartbeat()
+        }
         .onChange(of: offline.syncReport) { report in
             guard let report else { return }
             showNotifBannerWith(title: "Offline check-ins synced", message: report)
@@ -841,9 +848,19 @@ struct ScannerView: View {
         // still reach the event. Treating it as "signed out" put a wall in
         // front of the door the moment the signal went — exactly when offline
         // backup needs the scanner to keep going.
+        // Everything below awaits the network, and the operator can switch
+        // events (or scan a link) in the meantime. Acting on the event this
+        // check *started* with once it finishes wrote the old event straight
+        // back over their new choice — tap X on a scan link, pick Dinner, and
+        // the scanner silently went back to the previous event and called
+        // every Dinner ticket "not valid for this event". So each result is
+        // only applied if the selection is still the one that was checked.
+        func stillSelected() -> Bool { scanLinkEvent == nil && selectedOwnEvent?.id == event.id }
         await api.checkAuth()
+        guard stillSelected() else { return }
         guard api.isAuthenticated else {
             if await serverUnreachable() { return }
+            guard stillSelected() else { return }
             eventAccessIssue = .notSignedIn(eventName: event.name)
             return
         }
@@ -855,6 +872,7 @@ struct ScannerView: View {
         } catch {
             events = []
         }
+        guard stillSelected() else { return }
         guard let fresh = events.first(where: { $0.id == event.id }) else {
             eventAccessIssue = .noAccess(eventName: event.name)
             return
