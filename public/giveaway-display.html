@@ -210,6 +210,7 @@
 </div>
 
 <script src="giveaway-pot.js"></script>
+<script src="server-clock.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const eventId = params.get('eventId');
@@ -432,6 +433,18 @@ function reelGlowAmount(centerPos, itemsPerSec) {
     return fast * 0.62 + (1 - fast) * Math.pow(centred, 3);
 }
 
+// How far into a spin this screen already is when it receives it. The
+// controller stamps the spin with its start time on the server clock; a
+// display that hears about it late (slow wifi, or reconnecting mid-spin and
+// getting the replay) seeks forward by this much so every screen in the room
+// shows the same frame. Past the end, the spin has finished and the runners
+// go straight to the winner. 0 whenever there's no stamp or no clock yet,
+// which is exactly the old act-on-arrival behaviour.
+function spinElapsedMs(payload) {
+    if (typeof payload.startAt !== 'number' || !window.ServerClock || !ServerClock.synced) return 0;
+    return Math.max(0, ServerClock.elapsedSince(payload.startAt));
+}
+
 function runClassicSpin(payload) {
     document.getElementById('idleMsg').style.display = 'none';
     document.getElementById('wheelPointerMount').classList.add('show');
@@ -476,7 +489,8 @@ function runClassicSpin(payload) {
 
     let lastTickCount = 0;
     let settled = false;
-    const startTime = performance.now();
+    const elapsed = spinElapsedMs(payload);
+    const startTime = performance.now() - elapsed;
     let rafId;
     const finish = () => {
         if (settled) return;
@@ -498,7 +512,7 @@ function runClassicSpin(payload) {
         else finish();
     };
     rafId = requestAnimationFrame(frame);
-    setTimeout(finish, payload.durationSec * 1000 + 800);
+    setTimeout(finish, Math.max(0, payload.durationSec * 1000 - elapsed) + 800);
 }
 
 function runReelSpin(payload) {
@@ -537,7 +551,8 @@ function runReelSpin(payload) {
     let lastTickCount = 0;
     let lastTickSoundMs = 0;
     let settled = false;
-    const startTime = performance.now();
+    const elapsed = spinElapsedMs(payload);
+    const startTime = performance.now() - elapsed;
     let rafId;
     const finish = () => {
         if (settled) return;
@@ -570,7 +585,7 @@ function runReelSpin(payload) {
         else finish();
     };
     rafId = requestAnimationFrame(frame);
-    setTimeout(finish, payload.durationSec * 1000 + 800);
+    setTimeout(finish, Math.max(0, payload.durationSec * 1000 - elapsed) + 800);
 }
 
 function runPotSpin(payload) {
@@ -587,13 +602,20 @@ function runPotSpin(payload) {
     // Whatever is still fluttering down would be competing with the draw for
     // attention, and the controller has stopped sending arrivals anyway.
     pot.setResting(Math.max(0, potTotal));
+    // The pot's physics can't be fast-forwarded the way the wheel and reel
+    // can, so a late screen runs a shortened draw that lands at the same
+    // moment as everyone else's instead.
+    const durationMs = (payload.durationSec || 5.2) * 1000;
+    const remainingMs = durationMs - spinElapsedMs(payload);
+    if (remainingMs <= 0) { showWinner(names.join(', '), payload.prizeLabel); return; }
     pot.spin({
         names,
         churnNames: payload.churnNames || [],
-        durationMs: (payload.durationSec || 5.2) * 1000,
+        durationMs: Math.max(remainingMs, 1500),
         onDone: () => showWinner(names.join(', '), payload.prizeLabel),
     });
-    setTimeout(() => { playWinChime(); fireConfetti(); }, (payload.durationSec || 5.2) * 1000 * 0.86);
+    const revealIn = durationMs * 0.86 - (durationMs - Math.max(remainingMs, 1500));
+    setTimeout(() => { playWinChime(); fireConfetti(); }, Math.max(0, revealIn));
 }
 
 function showWinner(name, prizeLabel) {

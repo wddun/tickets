@@ -4842,6 +4842,18 @@
                 <div
                     style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;" data-no-dirty>
                     <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+                        <input type="checkbox" id="roomChatToggle" ${ev.roomChatEnabled ? 'checked' : ''}
+                            onchange="setRoomChatEnabled('${eventId}', this.checked)"
+                            style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
+                        <div>
+                            <div style="font-size:13px;font-weight:600;">Room Chat${helpIcon('general.roomChat')}</div>
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">One shared message thread for every scanner working this event and whoever has the Scanner Monitor open.</div>
+                        </div>
+                    </label>
+                </div>
+                <div
+                    style="margin-bottom:20px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;" data-no-dirty>
+                    <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
                         <input type="checkbox" id="editEventShuttleLink" ${ev.shuttleLinkEnabled ? 'checked' : ''}
                             onchange="setShuttleLinkEnabled('${eventId}', this.checked)"
                             style="width:18px;height:18px;accent-color:var(--navy);cursor:pointer;flex-shrink:0;">
@@ -8060,6 +8072,25 @@
                     : `Scanners will use their offline copy after ${(d.offlineFallbackMs / 1000).toFixed(1)}s.`);
             } catch {
                 showToast('Failed to update offline backup.');
+            }
+        }
+
+        async function setRoomChatEnabled(eventId, enabled) {
+            try {
+                const r = await fetch(`/api/event/${eventId}/room-chat`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!r.ok) throw new Error();
+                const d = await r.json();
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.roomChatEnabled = d.roomChatEnabled;
+                showToast(d.roomChatEnabled ? 'Room chat turned on.' : 'Room chat turned off.');
+            } catch {
+                const box = document.getElementById('roomChatToggle');
+                if (box) box.checked = !enabled;
+                showToast('Failed to update room chat.');
             }
         }
 

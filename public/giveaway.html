@@ -664,6 +664,7 @@
 </div>
 
 <script src="giveaway-pot.js"></script>
+<script src="server-clock.js"></script>
 <script>
 let events = [];
 let currentEventId = null;
@@ -2038,7 +2039,11 @@ async function giveawayBroadcast(type, payload) {
 
 async function broadcastSpin(payload) {
     const ev = events.find(e => e.id === currentEventId);
-    giveawayBroadcast('spin', { ...payload, eventName: ev ? ev.name : '', theme: THEMES[customization.theme].accent, soundEnabled: customization.soundOnPresenter, potSize: customization.potSize, potHeadroom: customization.potHeadroom });
+    // The instant this screen starts its own animation, on the server's
+    // clock. Displays seek to it, so they run in step with this one and with
+    // each other however late the message reaches them (see server-clock.js).
+    const startAt = window.ServerClock && ServerClock.synced ? ServerClock.now() : undefined;
+    giveawayBroadcast('spin', { ...payload, startAt, eventName: ev ? ev.name : '', theme: THEMES[customization.theme].accent, soundEnabled: customization.soundOnPresenter, potSize: customization.potSize, potHeadroom: customization.potHeadroom });
 }
 // The pot is the one style that shows something between spins, so the display
 // (and every other controller — see applyRemotePotMode) needs its state

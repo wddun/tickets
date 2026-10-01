@@ -100,3 +100,22 @@ describe('room broadcast authorization', () => {
         assert.equal(ok.body.connected, false, 'nothing is listening yet, but the broadcast must still succeed and be cached');
     });
 });
+
+describe('shared server clock', () => {
+    test('/api/time is public, uncached, and close to the real time', async () => {
+        const r = await createClient(server.base).get('/api/time');
+        assert.equal(r.status, 200);
+        assert.equal(typeof r.body.now, 'number');
+        assert.ok(Math.abs(r.body.now - Date.now()) < 5000);
+        assert.match(r.headers.get('cache-control') || '', /no-store/);
+    });
+
+    test('both giveaway screens load it, so spins can start in step', async () => {
+        for (const page of ['/giveaway.html', '/giveaway-display.html']) {
+            const r = await createClient(server.base).get(page);
+            assert.match(r.text, /<script src="server-clock\.js"><\/script>/, page);
+        }
+        const js = await createClient(server.base).get('/server-clock.js', { raw: true });
+        assert.equal(js.status, 200);
+    });
+});

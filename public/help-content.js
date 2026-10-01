@@ -125,6 +125,16 @@ window.HELP_CONTENT = {
             `Saves the instant you change it, independent of the tab's batched Save bar.`,
         ],
     },
+    'general.roomChat': {
+        title: 'Room Chat',
+        summary: 'One shared message thread for everyone working the door at this event.',
+        details: [
+            `Off by default. While it's on, every scanner on this event (the web scanner and the iOS app, signed in or on a scan link) gets a chat button, and the Scanner Monitor shows the same thread when this event is selected. Anything one person sends, everyone sees.`,
+            `This is separate from the monitor's private messages to a single scanner, which work whether or not room chat is on.`,
+            `Can also be switched from the Scanner Monitor; both places change the same setting. Scanners that are already open pick up the change straight away.`,
+            `Saves the instant you change it, independent of the tab's batched Save bar.`,
+        ],
+    },
     'general.walletLockScreen': {
         title: 'Show on Lock Screen',
         summary: 'Controls whether the Apple Wallet pass surfaces a lock-screen reminder near the event time and when the phone is close to the venue.',

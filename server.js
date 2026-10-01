@@ -5715,6 +5715,14 @@ app.get('/api/giveaway/room/:eventId/stream', (req, res) => {
     });
 });
 
+// The server's clock, for public/server-clock.js. Screens in a giveaway room
+// estimate their offset from it so a spin starts at the same instant on every
+// one of them rather than whenever each happens to receive the message.
+app.get('/api/time', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ now: Date.now() });
+});
+
 // How many controllers/displays are currently in the room — the Present
 // panel polls this so it can show real connection counts instead of a
 // binary connected/disconnected dot.
