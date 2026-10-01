@@ -3945,7 +3945,7 @@
                         ${unchecked > 1 ? `<button class="btn btn-secondary btn-sm" onclick="openTicketPicker(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Check In 1</button>` : ''}
                         <button class="btn btn-primary btn-sm" onclick="manualCheckin('${g.registrationId}')">${unchecked > 1 ? 'Check In All' : 'Check In'}</button>`;
                 const editBtn = `<button class="btn btn-secondary btn-sm" onclick="openEditTicketModal(${JSON.stringify(g.registrationId).replace(/"/g, '&quot;')}, ${JSON.stringify(g.tickets).replace(/"/g, '&quot;')})">Edit</button>`;
-                const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap">${checkInBtns}${undoBtn}${editBtn}</div>`;
+                const btns = `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${checkInBtns}${undoBtn}${editBtn}</div>`;
                 return `
         <div class="attendee-row${isChecked ? ' row-selected' : ''}" data-regid="${g.registrationId}">
             <input type="checkbox" class="ticket-checkbox" data-regid="${g.registrationId}" ${isChecked ? 'checked' : ''}
