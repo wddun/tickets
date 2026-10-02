@@ -3326,6 +3326,11 @@
             if (eventParam && events.find(e => e.id === eventParam)) {
                 await selectEvent(eventParam);
                 if (viewParam === 'settings') showSettingsView(eventParam);
+            } else if (eventParam && currentUser.isAdmin) {
+                // The iOS app's "Open Web Dashboard" passes whichever event it has
+                // selected, which for the admin can be someone else's room.
+                await openRoomAsAdmin(eventParam);
+                if (viewParam === 'settings' && events.find(e => e.id === eventParam)) showSettingsView(eventParam);
             } else if (viewParam === 'admin-overview' && currentUser.isAdmin) {
                 openAdminOverview();
             }
