@@ -1250,16 +1250,23 @@
             card.style.borderColor = border;
             card.style.color = '#fff';
 
-            // Hold the color for 1.8s then fade back
+            // Hold the color for 1.8s then fade back to whatever the stylesheet
+            // says. This used to fade to a hard-coded white and leave it there
+            // as an inline style, so in dark mode every card that had ever
+            // flashed stayed white with light text on it — unreadable until
+            // the page was reloaded.
             setTimeout(() => {
                 card.style.transition = 'background-color 1s ease-out, border-color 1s ease-out, color 0.5s ease-out';
-                card.style.backgroundColor = '#fff';
+                card.style.backgroundColor = 'var(--card)';
+                card.style.borderColor = '';   // back to its status-* class colour
                 card.style.color = '';
-                // Restore border to its status class color after fade
-                const statusClass = [...card.classList].find(c => c.startsWith('status-'));
-                const borderMap = { 'status-online': '#6ee7b7', 'status-idle': '#fde68a', 'status-offline': '#fecaca' };
-                card.style.borderColor = borderMap[statusClass] || '#e8e8e8';
-                setTimeout(() => { card._flashing = false; }, 1000);
+                setTimeout(() => {
+                    // Drop the inline styles entirely so a later theme switch
+                    // (or status change) still applies to this card.
+                    card.style.transition = '';
+                    card.style.backgroundColor = '';
+                    card._flashing = false;
+                }, 1000);
             }, 1800);
         }
 
