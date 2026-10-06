@@ -9178,6 +9178,10 @@
                     <div style="text-align:center;margin-bottom:14px;">
                         <img src="${d.qrDataUrl}" alt="Two-factor setup QR code" style="width:180px;height:180px;border:1px solid var(--border);border-radius:8px;">
                     </div>
+                    <a class="btn btn-secondary" href="${esc(d.otpauthUrl)}" style="display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;margin-bottom:6px;">Set up on this device</a>
+                    <div style="font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:14px;text-align:center;">
+                        On iPhone, iPad or Mac this adds the code to Apple Passwords, which then fills it in for you at sign-in.
+                    </div>
                     <div style="margin-bottom:16px;">
                         <label style="display:block;margin-bottom:6px;font-size:12px;color:var(--text-muted);">Manual entry secret</label>
                         <div style="display:flex;gap:8px;">
@@ -9188,7 +9192,7 @@
                     </div>
                     <div style="margin-bottom:16px;">
                         <label for="twoFactorEnableCode" style="display:block;margin-bottom:6px;font-size:13px;font-weight:600;">Enter the 6-digit code from your app</label>
-                        <input type="text" id="twoFactorEnableCode" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"
+                        <input type="text" id="twoFactorEnableCode" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" placeholder="123456"
                             style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;font-size:16px;letter-spacing:2px;text-align:center;">
                     </div>
                     <button class="btn btn-primary" style="width:100%;" id="twoFactorVerifyBtn" onclick="verify2FAEnable()">Verify &amp; Enable</button>

@@ -362,6 +362,7 @@ struct TotpEntryView: View {
                 .padding(.horizontal)
 
             TextField("Code", text: $code)
+                .textContentType(.oneTimeCode)
                 .keyboardType(.asciiCapable)
                 .autocapitalization(.allCharacters)
                 .disableAutocorrection(true)

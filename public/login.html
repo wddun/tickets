@@ -119,9 +119,12 @@
                     Enter the 6-digit code from your authenticator app.
                 </div>
                 <form id="totpForm" onsubmit="event.preventDefault(); submitTotp();">
+                    <!-- Hidden username so iCloud Passwords / 1Password / Chrome know
+                         which saved account's verification code to offer. -->
+                    <input type="text" id="totpUsername" name="username" autocomplete="username" readonly hidden>
                     <div class="form-group">
                         <label for="totpCode" id="totpCodeLabel">Authentication Code</label>
-                        <input type="text" id="totpCode" name="totp" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"
+                        <input type="text" id="totpCode" name="totp" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" placeholder="123456"
                             style="letter-spacing:3px; text-align:center; font-size:18px;">
                     </div>
                     <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); margin-bottom:18px; cursor:pointer;">
@@ -274,6 +277,7 @@
         function showTotpState(pendingToken) {
             pendingTotpToken = pendingToken;
             totpUsingBackupCode = false;
+            document.getElementById('totpUsername').value = document.getElementById('email').value;
             document.getElementById('authForm').style.display  = 'none';
             document.getElementById('forgotRow').style.display = 'none';
             document.getElementById('toggleRow').style.display = 'none';
@@ -302,6 +306,9 @@
                 document.getElementById('totpCodeLabel').textContent = 'Backup Code';
                 input.maxLength = 12;
                 input.inputMode = 'text';
+                // Don't let autofill drop an authenticator code into the backup field.
+                input.autocomplete = 'off';
+                input.removeAttribute('pattern');
                 input.autocapitalize = 'characters';
                 input.placeholder = 'XXXXXXXXXX';
                 input.style.letterSpacing = '1px';
@@ -309,14 +316,25 @@
             } else {
                 document.getElementById('totpPrompt').textContent = 'Enter the 6-digit code from your authenticator app.';
                 document.getElementById('totpCodeLabel').textContent = 'Authentication Code';
-                input.maxLength = 6;
+                input.removeAttribute('maxlength'); // the input handler trims to 6 digits, so "123 456" still fits
                 input.inputMode = 'numeric';
+                input.autocomplete = 'one-time-code';
+                input.pattern = '[0-9]*';
                 input.removeAttribute('autocapitalize');
                 input.placeholder = '123456';
                 input.style.letterSpacing = '3px';
                 document.getElementById('totpModeToggle').textContent = 'Use a backup code instead';
             }
         }
+
+        // A code autofilled from Passwords/Messages/Mail (or the sixth digit
+        // typed) signs straight in, so autofill is one tap rather than two.
+        document.getElementById('totpCode').addEventListener('input', e => {
+            if (totpUsingBackupCode) return;
+            const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+            if (digits !== e.target.value) e.target.value = digits;
+            if (digits.length === 6 && !document.getElementById('totpSubmitBtn').disabled) submitTotp();
+        });
 
         async function submitTotp() {
             const code = document.getElementById('totpCode').value.trim();
