@@ -140,6 +140,13 @@ struct ScannerView: View {
                 showEnteringAnimation()
             }
         }
+        // A scan link opened from outside the app while this tab is already
+        // on screen — onAppear above won't fire again for it.
+        .onChange(of: scanLinkJustEntered) { entered in
+            guard entered, scanLinkEvent != nil else { return }
+            scanLinkJustEntered = false
+            showEnteringAnimation()
+        }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             heartbeatTask?.cancel()

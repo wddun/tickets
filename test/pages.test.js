@@ -59,6 +59,15 @@ describe('public pages', () => {
         assert.ok(Array.isArray(r.body));
         assert.equal(r.body[0].relation[0], 'delegate_permission/common.handle_all_urls');
     });
+
+    test('the iOS universal-links file claims scan links only, as JSON with no redirect', async () => {
+        const r = await anon().get('/.well-known/apple-app-site-association');
+        assert.equal(r.status, 200);
+        assert.match(r.headers.get('content-type') || '', /application\/json/);
+        const d = r.body.applinks.details[0];
+        assert.deepEqual(d.appIDs, ['G39XK56M64.com.willstechsupport.wtstickets']);
+        assert.deepEqual(d.components, [{ '/': '/scan/*' }]);
+    });
 });
 
 describe('the API documentation', () => {

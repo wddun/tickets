@@ -517,7 +517,10 @@ struct ScanLinkEntrySheet: View {
         }
     }
 
-    private func extractToken(from raw: String) -> String {
+    /// Pulls the scan-link token out of anything a person might paste or a
+    /// link might deliver: https://…/scan/<token>, …/scanner.html?scanToken=,
+    /// wtstickets://scan/<token>, or the bare token itself.
+    static func extractToken(from raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed),
               let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
@@ -530,11 +533,22 @@ struct ScanLinkEntrySheet: View {
         if comps.path.contains("/scan/"), let last = segments.last {
             return String(last)
         }
+        // wtstickets://scan/<token> — "scan" parses as the host, not the path.
+        if comps.scheme == "wtstickets", comps.host == "scan", let last = segments.last {
+            return String(last)
+        }
         return trimmed
     }
 
+    /// Scan tokens are nanoids. Anything else arriving from an opened link is
+    /// refused before it's interpolated into an API path.
+    static func isPlausibleToken(_ token: String) -> Bool {
+        !token.isEmpty && token.count <= 128 &&
+            token.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" }
+    }
+
     private func resolve(_ raw: String) {
-        let token = extractToken(from: raw)
+        let token = Self.extractToken(from: raw)
         guard !token.isEmpty else { return }
         isLoading = true
         errorMessage = nil

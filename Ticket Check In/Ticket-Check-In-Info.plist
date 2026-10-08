@@ -7,5 +7,16 @@
 		<string>bluetooth-central</string>
 		<string>bluetooth-peripheral</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.willstechsupport.wtstickets</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>wtstickets</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

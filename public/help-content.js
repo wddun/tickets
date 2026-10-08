@@ -423,6 +423,7 @@ window.HELP_CONTENT = {
         details: [
             `Deliberately narrow: no editing the event, no emailing attendees, no exports, no managing access — just checking people in (and undoing a mis-scan).`,
             `On the event page, the Start Scanning card shows the first link: "Copy Link" copies it, "Show QR" (or clicking the small code) opens a large scannable code, and "Manage Links" lists every link to create or revoke.`,
+            `On an iPhone with the WTS Tickets app installed, tapping a scan link (in Messages, Mail, Slack and so on) opens it straight into the app's scanner, locked to this event. Without the app it opens the web scanner instead, so the same link works for everyone. Pasting the link into Safari's address bar always uses the web scanner — that's an iOS rule, not a setting.`,
             `Create as many as you want, one per staffer or device, each independently labeled and revocable — nobody has to share one credential.`,
             `Revoking a link takes effect immediately — it's re-checked on every single scan, so anyone still using a revoked link is refused on their very next action, not at some later "session expiry".`,
             `Creating or revoking a link needs "Edit event settings"; anyone with any access at all to the event can view/copy an existing one.`,

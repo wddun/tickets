@@ -11,10 +11,52 @@ struct ContentView: View {
     @AppStorage("displayModeActive")    private var displayModeActive    = false
     @AppStorage("displayInitialMode")   private var displayInitialMode   = "bluetooth"
     @AppStorage("displayPreconnectURL") private var displayPreconnectURL = ""
+    @AppStorage("scanLinkEventData")    private var scanLinkEventData    = Data()
+    @AppStorage("scanLinkJustEntered")  private var scanLinkJustEntered  = false
     @StateObject private var bluetooth = BluetoothManager.shared
     @ObservedObject private var api = APIService.shared
+    @State private var deepLinkError: String?
 
     var body: some View {
+        // Attached outside the onboarding branch so a link tapped on a fresh
+        // install still lands — it skips onboarding and goes straight to the
+        // scanner, which is all door staff opening a scan link want.
+        mainContent
+            .onOpenURL { url in openScanLink(url) }
+            .alert("Couldn't open scan link", isPresented: Binding(
+                get: { deepLinkError != nil },
+                set: { if !$0 { deepLinkError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(deepLinkError ?? "")
+            }
+    }
+
+    /// A scan link opened from outside the app — a Universal Link
+    /// (https://tickets.willstechsupport.com/scan/<token>, which iOS routes
+    /// here when the app is installed) or wtstickets://scan/<token>. Resolves
+    /// it the same way pasting it into the Scan Link sheet does, then locks
+    /// the scanner to that event.
+    private func openScanLink(_ url: URL) {
+        let token = ScanLinkEntrySheet.extractToken(from: url.absoluteString)
+        guard ScanLinkEntrySheet.isPlausibleToken(token) else { return }
+        Task {
+            do {
+                let link = try await APIService.shared.resolveScannerLink(token: token)
+                scanLinkEventData = (try? JSONEncoder().encode(link)) ?? Data()
+                scanLinkJustEntered = true
+                hasSeenOnboarding = true
+                displayModeActive = false
+                selectedTab = 0
+            } catch {
+                deepLinkError = error.localizedDescription
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         if !hasSeenOnboarding {
             OnboardingView {
                 withAnimation { hasSeenOnboarding = true }

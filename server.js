@@ -2117,6 +2117,28 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
     }]);
 });
 
+// iOS Universal Links. Apple fetches this to decide which paths on this
+// domain open the WTS Tickets app instead of Safari. Only /scan/* is claimed:
+// a shared scan link opens straight into the app's scanner when it's
+// installed, and when it isn't, iOS just loads the URL as normal and the
+// /scan/:token redirect below lands them on the web scanner. Every other path
+// (registration, dashboard, ticket pages) stays in the browser. Must be JSON
+// at this exact path with no redirect, or iOS silently ignores it.
+const IOS_APP_ID = process.env.IOS_APP_ID || 'G39XK56M64.com.willstechsupport.wtstickets';
+app.get('/.well-known/apple-app-site-association', (req, res) => {
+    res.json({
+        applinks: {
+            apps: [],
+            details: [{
+                appIDs: [IOS_APP_ID],
+                appID: IOS_APP_ID, // iOS 12 and earlier read the singular form
+                components: [{ '/': '/scan/*' }],
+                paths: ['/scan/*']
+            }]
+        }
+    });
+});
+
 // Rate limiting is real protection in production but makes an automated
 // test run flaky the moment it logs in eleven times, so the suite turns it
 // off with DISABLE_RATE_LIMITS=1. The limiter tests deliberately boot a
