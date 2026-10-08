@@ -6,7 +6,7 @@
     ?asset=search  3840 x 2560 (3:2)
   The hero sits inside Apple's central "art safe area" for each canvas; the
   edges are background-only tickets, so any crop the App Store applies still
-  reads. No text: the store overlays the app name and Get button itself.
+  reads. Deliberately plain: one level ticket, no background clutter. No text: the store overlays the app name and Get button itself.
 -->
 <html>
 <head>
@@ -64,34 +64,6 @@ function qr(size, n = 25) {
     return out.join('');
 }
 
-// Background: a field of faint tickets, kept clear of the hero.
-function backgroundTickets() {
-    const out = [];
-    const [sx0, sy0, sx1, sy1] = SPEC.safe;
-    const clearRx = (sx1 - sx0) / 2 + 260 * S, clearRy = (sy1 - sy0) / 2 + 200 * S;
-    let placed = 0, tries = 0;
-    const count = ASSET === 'header' ? 34 : 46;
-    while (placed < count && tries < 4000) {
-        tries++;
-        const tw = 180 + rand() * 360, th = tw * 0.5;
-        const x = rand() * (W + 200) - 100, y = rand() * (H + 200) - 100;
-        const dx = (x - CX) / clearRx, dy = (y - CY) / clearRy;
-        if (dx * dx + dy * dy < 1) continue;
-        const depth = rand();                      // 0 = far, 1 = near
-        const op = 0.035 + depth * 0.075;
-        const rot = (rand() - 0.5) * 60;
-        const blur = depth < 0.5 ? 'url(#blurFar)' : '';
-        const checked = false;
-        out.push(`<g transform="translate(${x},${y}) rotate(${rot}) translate(${-tw / 2},${-th / 2})" filter="${blur}">
-            <path d="${ticketPath(tw, th)}" fill="${PAPER}" opacity="${op}"/>
-            <line x1="${tw * 0.36}" y1="${th * 0.18}" x2="${tw * 0.36}" y2="${th * 0.82}" stroke="${NAVY_DEEP}" stroke-opacity="${op * 2}" stroke-width="${th * 0.035}" stroke-dasharray="${th * 0.07} ${th * 0.06}"/>
-            ${checked ? `<circle cx="${tw * 0.86}" cy="${th * 0.12}" r="${th * 0.15}" fill="${GREEN}" opacity="${op * 3}"/>` : ''}
-        </g>`);
-        placed++;
-    }
-    return out.join('');
-}
-
 function hero() {
     const tw = 1120 * S, th = 540 * S;
     const stub = tw * 0.36;
@@ -108,7 +80,7 @@ function hero() {
       <g fill="none" stroke="${GREEN_LIGHT}" stroke-width="${sw}" stroke-linecap="round" filter="url(#softGlow)">
         ${corner(bx0, by0, 1, 1)}${corner(bx1, by0, -1, 1)}${corner(bx0, by1, 1, -1)}${corner(bx1, by1, -1, -1)}
       </g>
-      <g transform="rotate(-4)">
+      <g>
         <g transform="translate(${-tw / 2},${-th / 2})" filter="url(#ticketShadow)">
           <path d="${ticketPath(tw, th)}" fill="${PAPER}"/>
           <line x1="${stub}" y1="${th * 0.12}" x2="${stub}" y2="${th * 0.88}" stroke="${INK}" stroke-width="${th * 0.028}" stroke-dasharray="${th * 0.065} ${th * 0.055}" stroke-linecap="butt"/>
@@ -155,7 +127,6 @@ svg.innerHTML = `
       <stop offset="0.5" stop-color="${GREEN_LIGHT}" stop-opacity="0.5"/>
       <stop offset="1" stop-color="${GREEN_LIGHT}" stop-opacity="0"/>
     </linearGradient>
-    <filter id="blurFar" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${6 * S}"/></filter>
     <filter id="blurGlow" x="-50%" y="-100%" width="200%" height="300%"><feGaussianBlur stdDeviation="${90 * S}"/></filter>
     <filter id="softGlow" x="-20%" y="-60%" width="140%" height="220%">
       <feGaussianBlur in="SourceGraphic" stdDeviation="${10 * S}" result="b"/>
@@ -169,7 +140,6 @@ svg.innerHTML = `
     </filter>
   </defs>
   <rect width="${W}" height="${H}" fill="url(#bg)"/>
-  ${backgroundTickets()}
   ${hero()}
   <g id="guides" fill="none" stroke="#ff3b30" stroke-width="6" stroke-dasharray="30 20">
     <rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}"/>
