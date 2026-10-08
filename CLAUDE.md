@@ -38,6 +38,19 @@ line should read `i/lf`). Don't rely on `file`: it doesn't report line endings f
 and a `git ls-files | xargs file` loop skips paths with spaces (all of `Ticket Check In/`).
 `rtk diff` also hides CRLF-only differences (see `~/.claude/DEPLOY.md`).
 
+**On the Windows PC (`D:\tickets`)**, every CRLF file this repo ever had came from there.
+`.gitattributes` already stops git from checking files out as CRLF, but it can't stop an
+editor or a script from *writing* CRLF into a file. So on Windows:
+
+- Set git to never convert, once per machine:
+  `git config --global core.autocrlf false` and `git config --global core.eol lf`.
+- Write files with `\n` only. In PowerShell, `Set-Content`/`Out-File` and `>` write CRLF.
+  Use the Write/Edit tools, or `[IO.File]::WriteAllText(path, text.Replace("`r`n","`n"))`.
+- Editors: set VS Code's `"files.eol": "\n"` (or click CRLF in the status bar and pick LF).
+- Before committing, `git ls-files --eol | Select-String "w/crlf"` must print nothing.
+  If it lists files, convert those to LF and commit them on their own, not mixed in with
+  a real change.
+
 ## Sync with GitHub before anything else
 
 This repo is worked on from the Mac, the Windows PC and several parallel sessions. Before
