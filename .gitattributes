@@ -1,0 +1,3 @@
+# Every file in this repo is LF, on every machine (see CLAUDE.md "Line endings").
+# Overrides core.autocrlf, so a Windows checkout can never write CRLF back.
+* text=auto eol=lf

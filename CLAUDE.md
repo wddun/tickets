@@ -30,10 +30,22 @@ history is never purged. **A new table with an `eventId` column must be added to
 
 ## Line endings
 
-**Every file in this repo is LF.** `server.js` was the lone CRLF holdout and was converted
-in one commit, precisely so no future edit has to preserve it. Don't reintroduce CRLF: a
-scripted edit that normalises newlines would otherwise rewrite all 8000 lines and bury the
-real change in the diff.
+**Every file in this repo is LF**, and `.gitattributes` (`* text=auto eol=lf`) enforces it
+on every machine, overriding `core.autocrlf`, so a Windows checkout can't write CRLF back.
+Don't reintroduce CRLF: a scripted edit that normalises newlines would otherwise rewrite a
+whole file and bury the real change in the diff. To check, use `git ls-files --eol` (every
+line should read `i/lf`). Don't rely on `file`: it doesn't report line endings for JSON,
+and a `git ls-files | xargs file` loop skips paths with spaces (all of `Ticket Check In/`).
+`rtk diff` also hides CRLF-only differences (see `~/.claude/DEPLOY.md`).
+
+## Sync with GitHub before anything else
+
+This repo is worked on from the Mac, the Windows PC and several parallel sessions. Before
+editing anything, run `git fetch` and `git status -sb`; if it says `behind`, pull or rebase
+first. **Never run `ccdeploy.js` from a checkout that's behind `origin/master`:** it rsyncs
+the local files, so a stale checkout puts old code on production. That happened on
+2026-10-08: a Mac checkout 7 commits behind deployed over newer work from the PC, and it was
+only caught because the push afterwards was rejected.
 
 ## Running the server
 
