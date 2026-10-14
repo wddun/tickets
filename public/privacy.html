@@ -101,6 +101,7 @@
         <ul>
             <li><strong>Organizer accounts:</strong> your email address, a hashed password, whether your email is verified, and security settings such as devices you've chosen to trust.</li>
             <li><strong>Attendee registrations:</strong> name, email address, and answers to any questions the organizer added, plus ticket status: check-in and scan times, waitlist position, ticket returns, and giveaway wins.</li>
+            <li><strong>Ticket sign-in links:</strong> if you ask to see your tickets on the My Tickets page, we email you a one-time sign-in link. We store a scrambled (hashed) copy of the link with your email address until it is used or expires after 30 minutes. Each request is logged with the email address entered.</li>
             <li><strong>Paid tickets:</strong> the buyer's name and email, the amount, and the order status. Card details go directly to Stripe and never reach our servers.</li>
             <li><strong>Apple Wallet:</strong> if you add a ticket to Apple Wallet, your device registers with us using an identifier and a push token issued by Apple, so we can update or void the pass.</li>
             <li><strong>Notifications:</strong> if an organizer allows notifications in the Ticket Check In app, we store the device's push token.</li>
@@ -131,7 +132,7 @@
         <p>Links to add an event to Google Calendar or open it in Apple Maps only send information to those services if you click them.</p>
 
         <h2>4. Cookies and Local Storage</h2>
-        <p>We use a session cookie to keep organizers and door staff signed in. If an organizer limits registration to one per device, we set a cookie on the registering device, kept for 180 days, so that limit can be enforced. The site also remembers small preferences, such as light or dark theme, in your browser. We don't use advertising or tracking cookies.</p>
+        <p>We use a session cookie to keep organizers and door staff signed in, and to keep attendees signed in to My Tickets for up to 14 days. If an organizer limits registration to one per device, we set a cookie on the registering device, kept for 180 days, so that limit can be enforced. The site also remembers small preferences, such as light or dark theme, in your browser. We don't use advertising or tracking cookies.</p>
 
         <h2>5. Data Storage and Security</h2>
         <p>Data is stored on our servers and sent over encrypted HTTPS (TLS) connections. Passwords are hashed using bcrypt and are never stored in plain text. Session data is stored server-side and expires automatically.</p>

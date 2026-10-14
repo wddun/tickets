@@ -1421,6 +1421,12 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
         }
     }
     flushBody();
+    // Outside the block template on purpose (like an unsubscribe link): an
+    // organiser's saved custom template can't drop the one way back to a
+    // lost ticket.
+    rows.push(`<tr><td style="padding:14px 32px 20px;border-top:1px solid #f3f4f6;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.5;">Lost a ticket email? <a href="${BASE_URL}/my-tickets.html" style="color:#4f46e5;text-decoration:underline;">See all your tickets</a> in one place.</p>
+</td></tr>`);
 
     // Every color here (page/card background, block text, an organiser's
     // custom accent) is authored assuming light mode and never adapts —
@@ -6479,6 +6485,240 @@ app.put('/api/event/:id/ticket-returns', requireAuth, (req, res) => {
         ticketReturnCutoffUnit: cutoffUnit,
         cutoffValue: cutoffMinutes / RETURN_CUTOFF_UNITS[cutoffUnit],
     });
+});
+
+// ── My Tickets (attendee sign-in by emailed link) ──────────────────────────
+// An attendee who has lost a confirmation email, or wants every ticket they
+// hold in one place, types their address on /my-tickets.html and is emailed a
+// one-time sign-in link. Following it puts `attendeeEmail` on the session —
+// a third kind of identity next to `userId` (organiser) and `scanLink` (door
+// staff) — which grants exactly "see, re-send and print the tickets issued
+// to this address". No account is created and nothing else is unlocked:
+// organiser routes still look only at req.session.userId.
+//
+// The link is single-use and short-lived, and only its sha256 is stored. The
+// link opens a page that *posts* the token rather than redeeming it on GET,
+// so a mail provider's link scanner pre-fetching it can't burn it first.
+// Whether an address holds any tickets is never revealed to the requester:
+// the response is the same either way, and mail only goes out when there is
+// something to show.
+const ATTENDEE_LINK_TTL_MS = 30 * 60 * 1000;
+const ATTENDEE_LINK_RESEND_GAP_MS = 60 * 1000;
+const ATTENDEE_SESSION_MAX_MS = 14 * 24 * 60 * 60 * 1000;
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const attendeeLinkLimiter = makeLimiter({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please try again in a few minutes.' },
+});
+const attendeeResendLimiter = makeLimiter({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many emails requested. Please try again in a few minutes.' },
+});
+
+function hashAttendeeToken(raw) {
+    return crypto.createHash('sha256').update(String(raw)).digest('hex');
+}
+
+function sessionAttendeeEmail(req) {
+    const email = req.session?.attendeeEmail;
+    if (!email) return null;
+    const since = Date.parse(req.session.attendeeSince || '');
+    if (!since || Date.now() - since > ATTENDEE_SESSION_MAX_MS) {
+        delete req.session.attendeeEmail;
+        delete req.session.attendeeSince;
+        return null;
+    }
+    return email;
+}
+
+function requireAttendee(req, res, next) {
+    const email = sessionAttendeeEmail(req);
+    if (!email) return res.status(401).json({ error: 'Please sign in with the link we emailed you.' });
+    req.attendeeEmail = email;
+    next();
+}
+
+// The tickets at `registrationId` that were issued to the signed-in address.
+// A group booking normally shares one email, but filtering per ticket means a
+// registration someone else is also on can never leak their ticket.
+function attendeeRegistrationTickets(req, registrationId) {
+    return stmt.tickets.byRegistrationId.all(String(registrationId)).map(rowToTicket)
+        .filter(t => (t.email || '').toLowerCase().trim() === req.attendeeEmail);
+}
+
+app.post('/api/my-tickets/request-link', attendeeLinkLimiter, async (req, res) => {
+    const email = String(req.body?.email || '').toLowerCase().trim();
+    if (!EMAIL_SHAPE.test(email) || email.length > 254) {
+        return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+    const now = Date.now();
+    stmt.attendeeLoginTokens.deleteExpired.run(new Date(now).toISOString());
+
+    const has = stmt.tickets.countByEmail.get(email).cnt > 0;
+    const latest = stmt.attendeeLoginTokens.latestForEmail.get(email);
+    const tooSoon = latest && now - Date.parse(latest.createdAt) < ATTENDEE_LINK_RESEND_GAP_MS;
+    if (!has || tooSoon) {
+        log('my-tickets', `[note] Link not sent (${!has ? 'no tickets' : 'requested again too soon'}) — email: ${email}  ip: ${getIP(req)}`);
+        return res.json({ success: true });
+    }
+
+    const raw = crypto.randomBytes(32).toString('hex');
+    stmt.attendeeLoginTokens.insert.run(hashAttendeeToken(raw), email, new Date(now + ATTENDEE_LINK_TTL_MS).toISOString(), new Date(now).toISOString());
+    const link = `${BASE_URL}/my-tickets.html?token=${raw}`;
+    sendEmail({
+        to: email,
+        subject: 'Your sign-in link for WTS Tickets',
+        html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
+  <h2 style="font-size:22px;font-weight:700;color:#1a1f3c;margin:0 0 10px;">View your tickets</h2>
+  <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 28px;">
+    Use the button below to see every ticket issued to <strong>${escEmailText(email)}</strong>. From there you can add them to Apple Wallet, print them, or have them emailed again.
+  </p>
+  <div style="text-align:center;margin-bottom:28px;">
+    <a href="${link}" style="background:#1a1f3c;color:#fff;text-decoration:none;font-size:16px;font-weight:700;padding:14px 32px;border-radius:10px;display:inline-block;">View My Tickets</a>
+  </div>
+  <p style="color:#94a3b8;font-size:13px;line-height:1.6;margin:0;">
+    This link works once and expires in 30 minutes. If you did not ask for it, you can ignore this email.
+  </p>
+  <div style="margin-top:12px;padding:12px 14px;background:#f8fafc;border-radius:8px;word-break:break-all;">
+    <span style="color:#64748b;font-size:12px;">${link}</span>
+  </div>
+</div>`,
+    }).catch(err => log('my-tickets', `[ERR] Link email failed — email: ${email}  err: ${err.message}`));
+    log('my-tickets', `[OK] Sign-in link sent — email: ${email}  ip: ${getIP(req)}`);
+    res.json({ success: true });
+});
+
+app.post('/api/my-tickets/verify', attendeeLinkLimiter, (req, res) => {
+    const raw = String(req.body?.token || '');
+    const now = new Date().toISOString();
+    stmt.attendeeLoginTokens.deleteExpired.run(now);
+    const hash = hashAttendeeToken(raw);
+    const entry = raw ? stmt.attendeeLoginTokens.byTokenHash.get(hash) : null;
+    if (!entry) {
+        log('my-tickets', `[ERR] Invalid or expired sign-in link  ip: ${getIP(req)}`);
+        return res.status(400).json({ error: 'This link has expired or has already been used. Please request a new one.' });
+    }
+    stmt.attendeeLoginTokens.deleteByTokenHash.run(hash);
+    req.session.attendeeEmail = entry.email;
+    req.session.attendeeSince = now;
+    log('my-tickets', `[OK] Signed in — email: ${entry.email}  ip: ${getIP(req)}`);
+    res.json({ success: true, email: entry.email });
+});
+
+app.post('/api/my-tickets/logout', (req, res) => {
+    if (req.session) {
+        delete req.session.attendeeEmail;
+        delete req.session.attendeeSince;
+    }
+    res.json({ success: true });
+});
+
+app.get('/api/my-tickets', requireAttendee, (req, res) => {
+    const groups = new Map();
+    for (const t of stmt.tickets.byEmail.all(req.attendeeEmail).map(rowToTicket)) {
+        const key = t.registrationId || t.id;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(t);
+    }
+
+    const walletAvailable = !checkPassPrereqs();
+    const eventCache = new Map();
+    const registrations = [];
+    for (const [registrationId, tickets] of groups) {
+        const eventId = tickets[0].eventId;
+        if (!eventCache.has(eventId)) eventCache.set(eventId, rowToEvent(stmt.events.byId.get(eventId)));
+        const event = eventCache.get(eventId);
+        if (!event) continue;
+        registrations.push({
+            registrationId,
+            registeredAt: tickets[0].created_at || null,
+            event: {
+                id: event.id,
+                name: event.name,
+                time: event.time || null,
+                endTime: event.endTime || null,
+                location: eventLocationLine(event) || null,
+                color: eventAccentHexFor(event),
+                imageUrl: safeEmailImageUrl(event.imageUrl) || null,
+            },
+            returnsEnabled: ticketReturnWindow(event).enabled,
+            tickets: tickets.map(t => {
+                const live = !t.expiredAt;
+                return {
+                    id: t.id,
+                    name: t.name,
+                    checkedIn: !!t.used_at,
+                    returned: !!t.returnedAt,
+                    expired: !!t.expiredAt,
+                    // The holder has proved they own this address, which is
+                    // exactly what the confirmation email already trusts with
+                    // the QR. A voided ticket's token is withheld — it would
+                    // only produce a QR the door refuses.
+                    token: live ? t.token : null,
+                };
+            }),
+        });
+    }
+
+    // Upcoming events first, soonest at the top; then past ones, most recent
+    // first; events with no date at all after the upcoming ones.
+    const now = Date.now();
+    const when = r => (r.event.time ? Date.parse(r.event.time) : NaN);
+    const isPast = r => {
+        const end = r.event.endTime ? Date.parse(r.event.endTime) : when(r);
+        return !isNaN(end) && end < now;
+    };
+    registrations.sort((a, b) => {
+        const pa = isPast(a), pb = isPast(b);
+        if (pa !== pb) return pa ? 1 : -1;
+        const ta = when(a), tb = when(b);
+        if (isNaN(ta) || isNaN(tb)) return isNaN(ta) - isNaN(tb);
+        return pa ? tb - ta : ta - tb;
+    });
+    for (const r of registrations) r.past = isPast(r);
+
+    res.json({ email: req.attendeeEmail, walletAvailable, registrations });
+});
+
+app.post('/api/my-tickets/:registrationId/resend', requireAttendee, attendeeResendLimiter, async (req, res) => {
+    const tickets = attendeeRegistrationTickets(req, req.params.registrationId);
+    if (!tickets.length) return res.status(404).json({ error: 'Not found' });
+    const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+    if (!event) return res.status(404).json({ error: 'Not found' });
+    const live = tickets.filter(t => !t.expiredAt);
+    if (!live.length) return res.status(409).json({ error: 'These tickets are no longer valid, so there is nothing to send.' });
+
+    const n = live.length;
+    try {
+        const { html, attachments, subject } = await buildTicketEmailHtml({
+            firstName: live[0].firstName,
+            intro: `This is a copy of your ticket${n > 1 ? 's' : ''} for <strong>${escEmailText(event.name)}</strong>.`,
+            event,
+            tickets: live,
+        });
+        await sendEmail({
+            to: req.attendeeEmail,
+            fromName: `Tickets - ${event.name}`,
+            replyTo: REPLY_TO_EMAIL,
+            subject: subject || `Your ticket${n > 1 ? 's' : ''} for ${event.name}`,
+            html,
+            attachments,
+            registrationId: live[0].registrationId,
+        });
+    } catch (err) {
+        log('my-tickets', `[ERR] Resend failed — email: ${req.attendeeEmail}  err: ${err.message}`);
+        return res.status(500).json({ error: 'Could not send the email. Please try again.' });
+    }
+    logAudit(req, { eventId: event.id, action: 'ticket.resent_by_attendee', details: { email: req.attendeeEmail, count: n } });
+    log('my-tickets', `[email] Attendee re-sent ${n} ticket(s) — email: ${req.attendeeEmail}  event: ${event.name}`);
+    res.json({ success: true, count: n });
 });
 
 // Resend ticket email without changing any data

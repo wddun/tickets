@@ -705,6 +705,23 @@ try {
         CREATE INDEX IF NOT EXISTS idx_deletedAccounts_deletedAt ON deletedAccounts(deletedAt);
     `);
 } catch {}
+// "My Tickets" sign-in links: an attendee types their email, gets a one-time
+// link, and following it lets that browser see every ticket issued to that
+// address. Only sha256(token) is stored, and a row lives at most
+// ATTENDEE_LINK_TTL_MS (see server.js) — expired rows are swept on every new
+// request and every redemption, so this never holds more than a handful.
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS attendeeLoginTokens (
+            tokenHash TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            expiresAt TEXT NOT NULL,
+            createdAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_attendeeLoginTokens_email ON attendeeLoginTokens(email);
+        CREATE INDEX IF NOT EXISTS idx_tickets_email_lower ON tickets(lower(email));
+    `);
+} catch {}
 // Lets a voided ticket's tombstone be purged with its event. Rows written before this
 // column existed stay NULL and are left alone (nothing to tie them to).
 try { db.exec(`ALTER TABLE voidedTickets ADD COLUMN eventId TEXT`); } catch {}
@@ -1026,6 +1043,10 @@ export const stmt = {
         // against events.ticketExpiryLimit.
         countExpiredByEventId: db.prepare(`SELECT COUNT(*) as cnt FROM tickets WHERE eventId = ? AND expiredAt IS NOT NULL`),
         byEventAndEmail: db.prepare('SELECT * FROM tickets WHERE eventId = ? AND lower(email) = ? LIMIT 1'),
+        // Every ticket issued to an address, across all events — what the
+        // attendee "My Tickets" page lists. `email` must already be lowercased.
+        byEmail: db.prepare('SELECT * FROM tickets WHERE lower(email) = ? ORDER BY created_at'),
+        countByEmail: db.prepare('SELECT COUNT(*) as cnt FROM tickets WHERE lower(email) = ?'),
         insert: db.prepare(`INSERT INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
         updateInfo: db.prepare(`UPDATE tickets SET name=?, firstName=?, lastName=?, email=?, customFields=? WHERE id=?`),
         checkIn: db.prepare(`UPDATE tickets SET used_at=?, updated_at=? WHERE id=?`),
@@ -1146,6 +1167,13 @@ export const stmt = {
         insert: db.prepare(`INSERT OR IGNORE INTO scannerAccess (id, userId, eventId, createdAt) VALUES (?,?,?,?)`),
         deleteByUserId: db.prepare(`DELETE FROM scannerAccess WHERE userId=?`),
         deleteByEventId: db.prepare(`DELETE FROM scannerAccess WHERE eventId=?`),
+    },
+    attendeeLoginTokens: {
+        byTokenHash: db.prepare('SELECT * FROM attendeeLoginTokens WHERE tokenHash=?'),
+        latestForEmail: db.prepare('SELECT * FROM attendeeLoginTokens WHERE email=? ORDER BY createdAt DESC LIMIT 1'),
+        insert: db.prepare(`INSERT INTO attendeeLoginTokens (tokenHash, email, expiresAt, createdAt) VALUES (?,?,?,?)`),
+        deleteByTokenHash: db.prepare(`DELETE FROM attendeeLoginTokens WHERE tokenHash=?`),
+        deleteExpired: db.prepare(`DELETE FROM attendeeLoginTokens WHERE expiresAt < ?`),
     },
     passwordResetTokens: {
         byTokenHash: db.prepare('SELECT * FROM passwordResetTokens WHERE tokenHash=?'),
