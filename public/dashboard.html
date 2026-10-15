@@ -8848,6 +8848,9 @@
                     ${renderAdminRoomsByOwner(roomData)}
                     ${renderAdminUsers(roomData)}
 
+                    <div class="metrics-section-title" style="margin-top:28px;">Phone Call${helpIcon('admin.phoneCall')}</div>
+                    <div id="adminPhoneCard"><div class="settings-hint">Loading…</div></div>
+
                     <div class="metrics-section-title" style="margin-top:28px;">Maintenance</div>
                     <div class="settings-hint" style="margin-bottom:10px;">
                         Every open scanner PWA — web or installed, any event — reloads immediately and picks up
@@ -8858,6 +8861,159 @@
                 </div>
             `;
             renderSystemPanel();
+            loadAdminPhone();
+        }
+
+        // ── Phone Call (Admin Overview) ─────────────────────────────────────
+        // Reads typed text aloud to one of the PBX's extensions or a phone
+        // number. The server renders the speech (Kokoro) and places the call
+        // through Asterisk; this card just submits and polls until it's over.
+        let adminPhonePoll = null;
+        const PHONE_FIELD_STYLE = 'width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;outline:none;box-sizing:border-box;background:var(--bg);color:var(--text);font-family:inherit;font-size:14px;';
+        const PHONE_LABEL_STYLE = 'display:block;margin-bottom:6px;font-size:13px;font-weight:600;';
+
+        async function loadAdminPhone() {
+            const el = document.getElementById('adminPhoneCard');
+            if (!el) return;
+            let d;
+            try {
+                const r = await fetch('/api/admin/phone');
+                d = await r.json();
+                if (!r.ok) throw new Error(d.error);
+            } catch (_) {
+                el.innerHTML = '<div class="settings-hint">Could not load the phone tool.</div>';
+                return;
+            }
+            if (!d.enabled) {
+                el.innerHTML = '<div class="settings-hint">The phone system is not set up on this server.</div>';
+                return;
+            }
+            const extOptions = d.extensions.map(e => `<option value="${esc(e.ext)}">${esc(e.label)} (${esc(e.ext)})</option>`).join('');
+            const voiceOptions = d.voices.map(v => `<option value="${esc(v.id)}">${esc(v.label)}</option>`).join('');
+            el.innerHTML = `
+                <div class="settings-hint" style="margin-bottom:10px;">
+                    Calls one of your extensions or any US/Canada number and reads your message aloud in an AI voice,
+                    generated on this server. Extensions ring directly; outside numbers go through your Twilio line.
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:10px;">
+                    <div>
+                        <label for="phoneTarget" style="${PHONE_LABEL_STYLE}">Call</label>
+                        <select id="phoneTarget" onchange="onPhoneTargetChange()" style="${PHONE_FIELD_STYLE}">
+                            ${extOptions}
+                            <option value="__number">Phone number…</option>
+                        </select>
+                    </div>
+                    <div id="phoneNumberWrap" style="display:none;">
+                        <label for="phoneNumber" style="${PHONE_LABEL_STYLE}">Phone number</label>
+                        <input type="tel" id="phoneNumber" placeholder="(919) 555-0123" autocomplete="off" style="${PHONE_FIELD_STYLE}">
+                    </div>
+                    <div>
+                        <label for="phoneVoice" style="${PHONE_LABEL_STYLE}">Voice</label>
+                        <select id="phoneVoice" style="${PHONE_FIELD_STYLE}">${voiceOptions}</select>
+                    </div>
+                </div>
+                <label for="phoneText" style="${PHONE_LABEL_STYLE}">Message</label>
+                <textarea id="phoneText" rows="3" maxlength="${d.maxChars}" oninput="onPhoneTextInput(${d.maxChars})"
+                    placeholder="Hi, this is Will's Tech Support. Your repair is ready for pickup."
+                    style="${PHONE_FIELD_STYLE}resize:vertical;"></textarea>
+                <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                    <button class="btn btn-primary btn-sm" id="phoneCallBtn" onclick="placeAdminPhoneCall(this)">Call</button>
+                    <span id="phoneCharCount" style="font-size:12px;color:var(--text-muted);">0 / ${d.maxChars}</span>
+                </div>
+                <div id="phoneCallList" style="margin-top:14px;"></div>
+            `;
+            renderPhoneCalls(d.calls);
+            if (d.calls.some(c => c.status !== 'ended' && c.status !== 'failed')) startAdminPhonePoll();
+        }
+
+        function onPhoneTargetChange() {
+            const isNumber = document.getElementById('phoneTarget').value === '__number';
+            document.getElementById('phoneNumberWrap').style.display = isNumber ? '' : 'none';
+            if (isNumber) document.getElementById('phoneNumber').focus();
+        }
+
+        function onPhoneTextInput(max) {
+            const n = document.getElementById('phoneText').value.length;
+            document.getElementById('phoneCharCount').textContent = `${n} / ${max}`;
+        }
+
+        async function placeAdminPhoneCall(btn) {
+            const sel = document.getElementById('phoneTarget').value;
+            const target = sel === '__number' ? document.getElementById('phoneNumber').value.trim() : sel;
+            const text = document.getElementById('phoneText').value.trim();
+            const voice = document.getElementById('phoneVoice').value;
+            if (!target) return showToast('Enter a phone number.');
+            if (!text) return showToast('Type something to say.');
+            if (sel === '__number' && !await confirmDialog(`Call ${target} and read your message aloud? This uses your Twilio line.`, { confirmText: 'Call', danger: false })) return;
+
+            btn.disabled = true;
+            try {
+                const r = await fetch('/api/admin/phone/call', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target, text, voice }),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) return showToast(d.error || 'Could not place the call.');
+                showToast('Generating speech, then calling.');
+                refreshAdminPhone();
+                startAdminPhonePoll();
+            } catch (_) {
+                showToast('Could not reach the server. Try again.');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function startAdminPhonePoll() {
+            clearInterval(adminPhonePoll);
+            adminPhonePoll = setInterval(refreshAdminPhone, 2000);
+        }
+
+        async function refreshAdminPhone() {
+            if (!document.getElementById('phoneCallList')) { clearInterval(adminPhonePoll); return; } // navigated away
+            try {
+                const r = await fetch('/api/admin/phone');
+                if (!r.ok) return;
+                const d = await r.json();
+                renderPhoneCalls(d.calls);
+                if (!d.calls.some(c => c.status !== 'ended' && c.status !== 'failed')) clearInterval(adminPhonePoll);
+            } catch (_) { /* next tick retries */ }
+        }
+
+        const PHONE_STATUS = {
+            generating: { text: 'Generating speech', color: '#f59e0b' },
+            dialing:    { text: 'Ringing',           color: '#f59e0b' },
+            answered:   { text: 'Speaking',          color: '#3b82f6' },
+            ended:      { text: 'Done',              color: '#10b981' },
+            failed:     { text: 'Failed',            color: '#ef4444' },
+        };
+
+        function renderPhoneCalls(list) {
+            const el = document.getElementById('phoneCallList');
+            if (!el) return;
+            if (!list.length) { el.innerHTML = ''; return; }
+            el.innerHTML = `
+                <div style="font-size:13px;font-weight:700;margin-bottom:8px;">Recent calls</div>
+                <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+                    ${list.map(c => {
+                        const s = PHONE_STATUS[c.status] || PHONE_STATUS.failed;
+                        const when = new Date(c.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+                        const detail = c.status === 'failed' ? c.detail : s.text;
+                        return `
+                            <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-top:1px solid var(--border);">
+                                <span style="width:8px;height:8px;border-radius:50%;background:${s.color};margin-top:6px;flex-shrink:0;"></span>
+                                <div style="flex:1;min-width:0;">
+                                    <div style="font-size:13px;font-weight:600;">${esc(c.label)} <span style="font-weight:500;color:var(--text-muted);">· ${esc(when)}</span></div>
+                                    <div style="font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(c.preview)}</div>
+                                </div>
+                                <span style="font-size:12px;font-weight:600;color:${s.color};white-space:nowrap;">${esc(detail)}</span>
+                            </div>`;
+                    }).join('')}
+                </div>`;
+            // The first row shouldn't draw a divider above itself.
+            const first = el.querySelector('div[style*="border-top"]');
+            if (first) first.style.borderTop = 'none';
         }
 
         // ── System panel (Admin Overview → System) ──────────────────────────

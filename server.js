@@ -21,6 +21,7 @@ import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import http2 from 'http2';
 import os from 'os';
+import * as phone from './phone.js';
 const FileStore = FileStoreFactory(session);
 
 dotenv.config();
@@ -2850,6 +2851,44 @@ app.post('/api/admin/scanners/force-update', requireAdmin, (req, res) => {
     const sent = broadcastToAllScanners({ type: 'force-update' });
     log('admin', `[note] Force-update pushed to ${sent} scanner(s) — by: ${req.session.userId}`);
     res.json({ success: true, sent });
+});
+
+// ── Phone Call (Admin Overview) ─────────────────────────────────────────────
+// Speaks typed text to one of the PBX's extensions or a US/Canada number, via
+// the Asterisk server on this box. phone.js does the work; it is off unless the
+// PHONE_* env vars are set, so tests and other machines never place real calls.
+app.get('/api/admin/phone', requireAdmin, (req, res) => {
+    res.json({
+        enabled: phone.phoneEnabled(),
+        extensions: phone.phoneExtensions(),
+        voices: phone.VOICES,
+        maxChars: phone.MAX_CHARS,
+        calls: phone.recentCalls(),
+    });
+});
+
+app.post('/api/admin/phone/call', requireAdmin, (req, res) => {
+    if (!phone.phoneEnabled()) return res.status(503).json({ error: 'The phone system is not set up on this server.' });
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Type something to say.' });
+    if (text.length > phone.MAX_CHARS) return res.status(400).json({ error: `Keep it under ${phone.MAX_CHARS} characters.` });
+    const voice = String(req.body?.voice || phone.VOICES[0].id);
+    if (!phone.VOICES.some(v => v.id === voice)) return res.status(400).json({ error: 'Unknown voice.' });
+    let target;
+    try { target = phone.parseTarget(req.body?.target); } catch (err) { return res.status(400).json({ error: err.message }); }
+    // One at a time: speech generation uses the whole CPU on this box.
+    if (phone.callInProgress()) return res.status(409).json({ error: 'A call is already in progress. Wait for it to finish.' });
+
+    const call = phone.startCall({ target, text, voice });
+    log('admin', `[note] Phone call to ${target.label} (${text.length} chars) — by: ${req.session.userId}`);
+    logAudit(req, { action: 'phone.call', details: { to: target.dial, kind: target.kind, chars: text.length, voice } });
+    res.status(202).json({ call });
+});
+
+app.get('/api/admin/phone/call/:id', requireAdmin, (req, res) => {
+    const call = phone.getCall(req.params.id);
+    if (!call) return res.status(404).json({ error: 'Call not found' });
+    res.json({ call });
 });
 
 // ── Granular per-collaborator permissions ──────────────────────────────────

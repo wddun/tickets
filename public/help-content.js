@@ -868,4 +868,15 @@ window.HELP_CONTENT = {
             `Shared across every app on the box — another app's memory spike shows up here even though this app did nothing differently.`,
         ],
     },
+    'admin.phoneCall': {
+        title: 'Phone Call',
+        summary: 'Calls one of your phone extensions or a US/Canada number and reads your typed message aloud in an AI voice.',
+        details: [
+            `The speech is generated on this server by Kokoro, an open-source voice model, so a message takes a little while to prepare before the phone rings — roughly twice as long as it takes to say it.`,
+            `Extensions ring your own phones directly through the Asterisk PBX on this server. Outside numbers are dialled through the Twilio line and show your business number as caller ID.`,
+            `One call at a time, up to 500 characters. International and premium-rate numbers are refused.`,
+            `The audio is deleted when the call ends and the recent-calls list is not saved. The audit log records who was called and when, but not the message.`,
+            `Only shows when the server has the <code>PHONE_*</code> settings; otherwise this section says the phone system is not set up.`,
+        ],
+    },
 };
