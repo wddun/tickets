@@ -3131,6 +3131,7 @@
                 await saveEmailPolicy(id);
                 await saveRegistrationLimits(id);
                 await saveTicketReturns(id);
+                await saveSmsEnabled(id);
             },
             'tab-waitlist': async (id) => {
                 const wl = document.getElementById('waitlistToggle');
@@ -6209,6 +6210,7 @@
             const perDevice = !!ev?.oneRegistrationPerDevice;
             const blockDupes = !!ev?.blockDuplicateEmails;
             const returnsOn = !!ev?.ticketReturnsEnabled;
+            const smsOn = !!ev?.smsEnabled;
             const returnRefund = ev?.ticketReturnRefund === 'auto' ? 'auto' : 'none';
             const returnCutoffUnit = RETURN_CUTOFF_UNITS[ev?.ticketReturnCutoffUnit] ? ev.ticketReturnCutoffUnit : 'hours';
             const returnCutoffValue = (ev?.ticketReturnCutoffMinutes ?? 0) / RETURN_CUTOFF_UNITS[returnCutoffUnit];
@@ -6302,6 +6304,15 @@
                     <div>
                         <div class="settings-toggle-title">One Registration Per Device${helpIcon('registration.oneRegPerDevice')}</div>
                         <div class="settings-toggle-desc">Remembers the browser that registered and turns it away next time, before the form is shown. This is a deterrent, not a lock. Clearing cookies, a private window, or a second phone will bypass it. Pair it with the email limit above for anything that matters.</div>
+                    </div>
+                </label>
+
+                <hr class="settings-divider">
+                <label class="settings-toggle">
+                    <input type="checkbox" id="smsToggle" ${smsOn ? 'checked' : ''}>
+                    <div>
+                        <div class="settings-toggle-title">Text Tickets to Attendees${helpIcon('registration.smsTickets')}</div>
+                        <div class="settings-toggle-desc">Adds an optional mobile number field to the public registration form. Anyone who fills it in gets a text with a link to their ticket as soon as it's issued. US numbers only.${smsServerConfigured === false ? ' <strong>Texting is not set up on this server yet, so the field stays hidden until it is.</strong>' : ''}</div>
                     </div>
                 </label>
 
@@ -6442,6 +6453,30 @@
             el.textContent = value === 0
                 ? 'Returns stay open right up to the start time. An event with no start time set never closes them.'
                 : `Returns close ${value} ${value === 1 ? unit.replace(/s$/, '') : unit} before the event starts.`;
+        }
+
+        // null until /api/sms/status answers; false means the server has no
+        // Twilio account, so the settings toggle says the field won't show.
+        let smsServerConfigured = null;
+        fetch('/api/sms/status').then(r => r.ok ? r.json() : null).then(d => { if (d) smsServerConfigured = !!d.configured; }).catch(() => {});
+
+        async function saveSmsEnabled(eventId) {
+            const toggle = document.getElementById('smsToggle');
+            if (!toggle) return;
+            const ev = events.find(e => e.id === eventId);
+            if (ev && !!ev.smsEnabled === toggle.checked) return;
+            try {
+                const r = await fetch(`/api/event/${eventId}/sms`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: toggle.checked }),
+                });
+                if (!r.ok) { showToast('Could not save the ticket text setting.'); return; }
+                const d = await r.json();
+                if (ev) ev.smsEnabled = d.smsEnabled;
+            } catch {
+                showToast('Network error while saving the ticket text setting.');
+            }
         }
 
         async function saveTicketReturns(eventId) {

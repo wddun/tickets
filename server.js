@@ -22,6 +22,7 @@ import crypto from 'crypto';
 import http2 from 'http2';
 import os from 'os';
 import * as phone from './phone.js';
+import * as sms from './sms.js';
 const FileStore = FileStoreFactory(session);
 
 dotenv.config();
@@ -3395,6 +3396,45 @@ function consumeHoldOrCheckRoom(event, holdToken, quantity = 1) {
     return { ok: true, usedHold: false };
 }
 
+// ── Ticket by text message ────────────────────────────────────────────────────
+// An event with smsEnabled shows an optional phone field on its public form
+// (only when the server has Twilio configured — see sms.js). The number is
+// opt-in per signup and the text carries one link, /t/<token>, to a page that
+// shows the ticket's QR. That link is the same bearer credential the Wallet
+// link in every confirmation email already is (/api/pass/<token>).
+
+// What the public form sent in its phone field: { phone: null } when the
+// field is off or left blank, { error } when something unusable was typed.
+function publicSmsPhone(event, raw) {
+    if (!event.smsEnabled || !sms.smsConfigured()) return { phone: null };
+    if (raw == null || String(raw).trim() === '') return { phone: null };
+    const phone = sms.normalizeUsPhone(raw);
+    if (!phone) return { error: 'Enter a valid US mobile number, or leave the phone field blank.' };
+    return { phone };
+}
+
+function ticketLink(token) {
+    return `${BASE_URL}/t/${token}`;
+}
+
+// Stores the number on the registration and texts the ticket link. Never
+// throws: a failed text must not undo a ticket that's already issued, and the
+// email (when sent) still carries the ticket.
+function textTicketToAttendee({ event, registrationId, phone, firstName, ticket }) {
+    if (!phone || !ticket) return;
+    stmt.tickets.setPhone.run(phone, registrationId);
+    let when = '';
+    try { if (event.time) when = formatEventDateTime(event.time, event, { withWeekday: false, showZone: false }); } catch {}
+    const hi = firstName ? `Hi ${firstName}, you're` : `You're`;
+    const body = `${hi} registered for ${event.name}${when ? ` (${when})` : ''}. Your ticket: ${ticketLink(ticket.token)}\nReply STOP to opt out.`;
+    sms.sendSms({ to: phone, body }).then(() => {
+        stmt.tickets.setSmsSent.run(new Date().toISOString(), registrationId);
+        log('sms', `[sent] Ticket text — event: ${event.name}  to: ${sms.formatUsPhone(phone)}`);
+    }).catch(err => {
+        log('sms', `[error] Ticket text failed — event: ${event.name}  to: ${sms.formatUsPhone(phone)}  ${err.code ? `(${err.code}) ` : ''}${err.message}`);
+    });
+}
+
 // Public self-registration — creates a free ticket and emails it
 app.post('/api/register', publicWriteLimiter, async (req, res) => {
     const { name, email, eventId, holdToken } = req.body;
@@ -3417,6 +3457,8 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
 
     const cf = collectPublicCustomFields(event, req.body.customFields);
     if (cf.error) return res.status(400).json({ error: cf.error });
+    const smsPhone = publicSmsPhone(event, req.body.phone);
+    if (smsPhone.error) return res.status(400).json({ error: smsPhone.error, reason: 'invalid_phone' });
 
     const blockedHere = signupBlockReason(req, event, email);
     if (blockedHere) return res.status(409).json({ error: blockedHere.error, reason: blockedHere.code });
@@ -3469,6 +3511,8 @@ app.post('/api/register', publicWriteLimiter, async (req, res) => {
             stmt.tickets.setConfirmationSent.run(new Date().toISOString(), registrationId);
         }).catch(() => {});
     }
+
+    textTicketToAttendee({ event, registrationId, phone: smsPhone.phone, firstName, ticket });
 
     log('register', `[public] New registration — name: ${name}  email: ${email}  event: ${event.name}`);
     // Marks this browser so "one registration per device" can recognise it
@@ -3524,7 +3568,7 @@ function validateDiscountCode(eventId, rawCode, baseAmount) {
 // promoteWaitlistEntry). Turning waitlistPromoted off still reserves/issues
 // the seat — it only silences the notification, so the organiser is choosing
 // to tell that person some other way.
-async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 'public', customFields = null }) {
+async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 'public', customFields = null, phone = null }) {
     const dbEvent = rowToEvent(stmt.events.byId.get(eventId));
     if (!dbEvent) return null;
 
@@ -3561,6 +3605,8 @@ async function issueTicketForPayment({ eventId, buyerName, buyerEmail, source = 
         }).catch(() => {});
     }
 
+    textTicketToAttendee({ event: dbEvent, registrationId, phone, firstName, ticket });
+
     return { ticket, dbEvent, firstName, registrationId };
 }
 
@@ -3579,6 +3625,8 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
 
     const cf = collectPublicCustomFields(event, req.body.customFields);
     if (cf.error) return res.status(400).json({ error: cf.error });
+    const smsPhone = publicSmsPhone(event, req.body.phone);
+    if (smsPhone.error) return res.status(400).json({ error: smsPhone.error, reason: 'invalid_phone' });
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanName  = name.trim();
@@ -3645,7 +3693,7 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
     // doesn't support $0 payment-mode sessions, so issue the ticket directly
     // instead of round-tripping through Stripe for no reason.
     if (finalAmount <= 0) {
-        const issued = await issueTicketForPayment({ eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail, customFields: cf.fields });
+        const issued = await issueTicketForPayment({ eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail, customFields: cf.fields, phone: smsPhone.phone });
         if (!issued) return res.status(500).json({ error: 'Failed to issue ticket' });
         if (discountCodeId) stmt.discountCodes.incrementUse.run(discountCodeId);
         stmt.orders.insert.run(nanoid(8), nanoid(16), event.id, issued.registrationId, cleanName, cleanEmail, 0, 'usd', 'fulfilled', new Date().toISOString(), discountCodeId, discountAmount);
@@ -3674,6 +3722,7 @@ app.post('/api/checkout/:eventId', publicWriteLimiter, async (req, res) => {
         metadata: {
             eventId: event.id, buyerName: cleanName, buyerEmail: cleanEmail,
             discountCodeId: discountCodeId || '', waitlistId: claimEntry?.id || '', holdToken: paidHoldToken || '',
+            phone: smsPhone.phone || '',
             // Stripe caps a metadata value at 500 characters — well past what
             // the short-answer length cap and option list already keep this
             // under in practice, but a session that somehow doesn't fit loses
@@ -3771,7 +3820,9 @@ app.post('/api/stripe/webhook', async (req, res) => {
         if (session.metadata?.customFields) {
             try { customFields = JSON.parse(session.metadata.customFields); } catch { customFields = null; }
         }
-        const issued = await issueTicketForPayment({ eventId, buyerName, buyerEmail, customFields });
+        // Re-normalised rather than trusted: it round-tripped through Stripe.
+        const phone = sms.normalizeUsPhone(session.metadata?.phone);
+        const issued = await issueTicketForPayment({ eventId, buyerName, buyerEmail, customFields, phone });
         if (!issued) return res.json({ received: true });
 
         stmt.orders.fulfill.run(issued.registrationId, new Date().toISOString(), session.payment_intent || null, session.id);
@@ -4142,6 +4193,62 @@ app.put('/api/event/:id/offline-backup', requireAuth, (req, res) => {
     logAudit(req, { eventId: event.id, action: 'scanner.offlineBackupChanged', details: { enabled, fallbackMs } });
     broadcastToEventScanners(event.id, { type: 'settings_update', offlineBackupEnabled: enabled, offlineFallbackMs: fallbackMs });
     res.json({ success: true, offlineBackupEnabled: enabled, offlineFallbackMs: fallbackMs });
+});
+
+// "Text me my ticket" — see textTicketToAttendee. The dashboard reads
+// /api/sms/status to say so when the server has no Twilio account behind it.
+app.get('/api/sms/status', requireAuth, (req, res) => {
+    res.json({ configured: sms.smsConfigured() });
+});
+
+app.put('/api/event/:id/sms', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) return res.status(403).json({ error: 'Forbidden' });
+    const enabled = req.body.enabled === true || req.body.enabled === 'true';
+    stmt.events.setSmsEnabled.run(enabled ? 1 : 0, event.id);
+    logAudit(req, { eventId: event.id, action: 'event.smsChanged', details: { enabled } });
+    log('event-settings', `[edit] Ticket texts ${enabled ? 'enabled' : 'disabled'} — event: ${event.name}  by: ${req.session.userId}`);
+    res.json({ success: true, smsEnabled: enabled, configured: sms.smsConfigured() });
+});
+
+// The link a ticket text carries. Short on purpose — it's read on a phone.
+app.get('/t/:token', (req, res) => {
+    res.redirect(302, `/ticket.html?t=${encodeURIComponent(req.params.token)}`);
+});
+
+// What /ticket.html shows: the ticket behind one QR token, plus the others in
+// the same registration (one buyer, one email, so the same person). Knowing a
+// token is already enough to scan in with it, so returning it here grants
+// nothing new; a voided ticket's token is withheld, as on My Tickets.
+app.get('/api/ticket/:token', (req, res) => {
+    const first = rowToTicket(stmt.tickets.byToken.get(req.params.token));
+    if (!first) return res.status(404).json({ error: 'Ticket not found' });
+    const event = rowToEvent(stmt.events.byId.get(first.eventId));
+    if (!event) return res.status(404).json({ error: 'Ticket not found' });
+    const tickets = first.registrationId
+        ? stmt.tickets.byRegistrationId.all(first.registrationId).map(rowToTicket)
+        : [first];
+    let when = null;
+    try { if (event.time) when = formatEventDateTime(event.time, event); } catch {}
+    res.json({
+        event: {
+            name: event.name,
+            when,
+            location: eventLocationLine(event) || null,
+            color: eventAccentHexFor(event),
+            imageUrl: safeEmailImageUrl(event.imageUrl) || null,
+        },
+        walletAvailable: !checkPassPrereqs(),
+        registrationId: first.registrationId || null,
+        tickets: tickets.map(t => ({
+            name: t.name,
+            checkedIn: !!t.used_at,
+            returned: !!t.returnedAt,
+            expired: !!t.expiredAt,
+            token: t.expiredAt ? null : t.token,
+        })),
+    });
 });
 
 
@@ -5184,6 +5291,9 @@ app.get('/api/event/:id', (req, res) => {
     // So the form can hide "Register Another Person" and warn about a repeat
     // signup before the visitor fills anything in.
     event.deviceAlreadyRegistered = event.oneRegistrationPerDevice && deviceAlreadyRegistered(req, event.id);
+    // Whether the form should offer "Text me my ticket" — the organiser's
+    // switch alone isn't enough if this server can't send texts.
+    event.smsAvailable = event.smsEnabled && sms.smsConfigured();
     // This route is public — the registration page reads it with no session.
     // The scanner PIN is a door credential and has no business travelling to
     // anyone who merely knows an event id; callers with real access get it

@@ -26,10 +26,11 @@ Every file gets its own throwaway world under `os.tmpdir()`:
 | `SESSIONS_DIR` | its own session store |
 | `PASS_CACHE_DIR` | its own wallet-pass cache |
 | `EMAIL_SINK` | every outgoing email, written to a JSONL file instead of SES |
+| `SMS_SINK` | every outgoing text, written to a JSONL file instead of Twilio (Twilio credentials are blanked too) |
 | `DISABLE_RATE_LIMITS` | the login/scan limiters, which a test run would otherwise trip |
 | `SHEET_TEST_FIXTURES_DIR` | lets a `test-fixture:<file>` sheet-watch URL read a local CSV instead of fetching Google Sheets |
 
-These are the only test hooks in the application code. All six are unset in
+These are the only test hooks in the application code. All seven are unset in
 production, where the extra branches are dead.
 
 **No test can send real mail or reach a live Stripe account.** `EMAIL_SINK`
@@ -42,7 +43,7 @@ that path for real.
 ## Helpers
 
 - `helpers/server.js` — boots and tears down an isolated server; `emails()`,
-  `waitForEmail()`, `clearEmails()` read the sink.
+  `waitForEmail()`, `clearEmails()` read the email sink, `texts()` the SMS sink.
 - `helpers/client.js` — an HTTP client with its own cookie jar. "A user" in
   these tests is just a client with its own jar; two clients are two browsers.
   Door staff on a scan link and logged-out visitors are modelled the same way.
@@ -58,6 +59,7 @@ that path for real.
 | `permissions.test.js` | the capability model — every capability proved to gate its routes, sharing, editing and revoking grants, ownership transfer, admin scoping |
 | `events.test.js` | event CRUD, themes, toggles, signup limits, deletion |
 | `registration.test.js` | public self-registration, the live availability counter, duplicate-email and per-device limits |
+| `sms.test.js` | ticket texts: the per-event switch, phone validation, the texted link and the ticket page it opens |
 | `capacity.test.js` | seat holds and ticket priority: who gets the last seat |
 | `waitlist.test.js` | joining, position, promotion (free and paid), claim offers holding a seat |
 | `tickets.test.js` | manual add/edit/delete, bulk check-in and undo, CSV export, QR and tracking |

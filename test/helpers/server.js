@@ -39,6 +39,8 @@ export async function startServer(opts = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wts-test-'));
     const emailSink = path.join(dir, 'emails.jsonl');
     fs.writeFileSync(emailSink, '');
+    const smsSink = path.join(dir, 'texts.jsonl');
+    fs.writeFileSync(smsSink, '');
 
     const env = {
         ...process.env,
@@ -51,6 +53,12 @@ export async function startServer(opts = {}) {
         SESSIONS_DIR: path.join(dir, 'sessions'),
         PASS_CACHE_DIR: path.join(dir, 'pass-cache'),
         EMAIL_SINK: emailSink,
+        // Every text goes to a file, and the Twilio credentials are blanked,
+        // so no test can ever text a real phone.
+        SMS_SINK: smsSink,
+        TWILIO_ACCOUNT_SID: '',
+        TWILIO_AUTH_TOKEN: '',
+        TWILIO_FROM: '',
         SES_MIN_INTERVAL_MS: '0',
         // Defence in depth: even if the email sink ever failed to divert a
         // send, these credentials cannot reach a real SES account.
@@ -100,6 +108,11 @@ export async function startServer(opts = {}) {
         /** Every email the server tried to send, oldest first. */
         emails() {
             const raw = fs.readFileSync(emailSink, 'utf8').trim();
+            return raw ? raw.split('\n').map(l => JSON.parse(l)) : [];
+        },
+        /** Every text message the server tried to send, oldest first. */
+        texts() {
+            const raw = fs.readFileSync(smsSink, 'utf8').trim();
             return raw ? raw.split('\n').map(l => JSON.parse(l)) : [];
         },
         /** Forget all captured emails, so a test can assert on just its own. */

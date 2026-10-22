@@ -309,6 +309,19 @@ window.HELP_CONTENT = {
             `Off by default.`,
         ],
     },
+    'registration.smsTickets': {
+        title: 'Text Tickets to Attendees',
+        summary: 'Adds an optional "Mobile number" field to the public registration form. Anyone who enters a number gets one text with a link to their ticket the moment it is issued.',
+        details: [
+            `The field is optional and opt-in: people who leave it blank only get the usual email. The form tells them message and data rates may apply and that they can reply STOP.`,
+            `The text links to a page showing the ticket's QR code (and an Apple Wallet button), so they can show it at the door straight from their phone.`,
+            `It covers the public form and paid checkout. Tickets you add by hand, import from a sheet or sell at the door aren't texted.`,
+            `US mobile numbers only. A number someone typed wrong is caught on the form so they can fix it before registering.`,
+            `The number is saved with the ticket. Someone who replies STOP won't get texts from this number again.`,
+            `Texting has to be set up on the server (a Twilio account). Until it is, this switch saves but the field stays hidden.`,
+            `Off by default.`,
+        ],
+    },
     'registration.ticketReturns': {
         title: 'Allow Attendees to Return Tickets',
         summary: 'Adds a "Can\'t make it? Return your ticket" link to every confirmation email for this event, so someone who can no longer come can hand their own ticket back instead of emailing you to be taken off the list.',

@@ -667,6 +667,15 @@ try { db.exec(`ALTER TABLE events ADD COLUMN roomChatEnabled INTEGER DEFAULT 0`)
 // /api/event/:id/offline-sync once the connection is back. Off by default.
 try { db.exec(`ALTER TABLE events ADD COLUMN offlineBackupEnabled INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE events ADD COLUMN offlineFallbackMs INTEGER`); } catch {}
+
+// Ticket by text message. When an event has smsEnabled, its public form shows
+// an optional "Text me my ticket" phone field; a number entered there is kept
+// on the tickets (E.164, US only) and a text with a link to the ticket goes
+// out once it's issued. Off by default, and only offered at all when the
+// server has Twilio configured (sms.js).
+try { db.exec(`ALTER TABLE events ADD COLUMN smsEnabled INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN phone TEXT`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN sms_sent_at TEXT`); } catch {}
 try {
     db.exec(`
         CREATE TABLE IF NOT EXISTS roomMessages (
@@ -882,6 +891,7 @@ export function rowToEvent(row) {
         ticketReturnsEnabled: !!row.ticketReturnsEnabled,
         roomChatEnabled: !!row.roomChatEnabled,
         offlineBackupEnabled: !!row.offlineBackupEnabled,
+        smsEnabled: !!row.smsEnabled,
         // How long a scanner waits on the server before answering from its
         // local copy. NULL (never configured) reads as the default.
         offlineFallbackMs: Math.max(1000, Math.min(15000, parseInt(row.offlineFallbackMs, 10) || 4000)),
@@ -952,7 +962,7 @@ export const DUPLICABLE_EVENT_COLUMNS = [
     'waitlistMessage', 'waitlistEmailTemplate', 'waitlistClaimEmailTemplate',
     'scanResultDurationMs', 'reminderEnabled', 'reminderMessage', 'reminderHoursBefore',
     'ticketReturnsEnabled', 'ticketReturnRefund', 'ticketReturnCutoffMinutes', 'ticketReturnCutoffUnit',
-    'roomChatEnabled', 'offlineBackupEnabled', 'offlineFallbackMs',
+    'roomChatEnabled', 'offlineBackupEnabled', 'offlineFallbackMs', 'smsEnabled',
 ];
 
 // ── Prepared statements ────────────────────────────────────────────────────────
@@ -989,6 +999,7 @@ export const stmt = {
         setTicketReturns: db.prepare(`UPDATE events SET ticketReturnsEnabled=?, ticketReturnRefund=?, ticketReturnCutoffMinutes=?, ticketReturnCutoffUnit=? WHERE id=?`),
         setRoomChatEnabled: db.prepare(`UPDATE events SET roomChatEnabled=? WHERE id=?`),
         setOfflineBackup: db.prepare(`UPDATE events SET offlineBackupEnabled=?, offlineFallbackMs=? WHERE id=?`),
+        setSmsEnabled: db.prepare(`UPDATE events SET smsEnabled=? WHERE id=?`),
         setTicketExpiryScope: db.prepare(`UPDATE events SET ticketExpiryLimit=?, ticketExpiryOrder=? WHERE id=?`),
         setTicketExpiryMode: db.prepare(`UPDATE events SET ticketExpiryMode=? WHERE id=?`),
         setTicketExpiryPromotesWaitlist: db.prepare(`UPDATE events SET ticketExpiryPromotesWaitlist=? WHERE id=?`),
@@ -1064,6 +1075,8 @@ export const stmt = {
         withWalletDevices: db.prepare(`SELECT * FROM tickets WHERE token IN (SELECT DISTINCT serialNumber FROM walletDevices)`),
         setWalletDownloaded: db.prepare(`UPDATE tickets SET wallet_downloaded_at=? WHERE token=?`),
         setConfirmationSent: db.prepare(`UPDATE tickets SET confirmation_sent_at=? WHERE registrationId=? AND confirmation_sent_at IS NULL`),
+        setPhone: db.prepare(`UPDATE tickets SET phone=? WHERE registrationId=?`),
+        setSmsSent: db.prepare(`UPDATE tickets SET sms_sent_at=? WHERE registrationId=? AND sms_sent_at IS NULL`),
         deleteById: db.prepare(`DELETE FROM tickets WHERE id=?`),
         deleteByEventId: db.prepare(`DELETE FROM tickets WHERE eventId=?`),
     },

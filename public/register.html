@@ -236,6 +236,12 @@
                         <label for="email">Email Address</label>
                         <input type="email" id="email" placeholder="jane@example.com" required autocomplete="email">
                     </div>
+                    <div class="form-group" id="smsGroup" style="display:none;">
+                        <label for="smsPhone">Mobile number <span style="font-weight:400;opacity:.65;">(optional)</span></label>
+                        <input type="tel" id="smsPhone" placeholder="(919) 555-0123" autocomplete="tel-national" inputmode="tel" maxlength="20">
+                        <div id="smsError" style="display:none;margin-top:6px;font-size:12px;font-weight:600;color:var(--danger, #dc2626);"></div>
+                        <div style="margin-top:6px;font-size:12px;line-height:1.5;opacity:.7;">Enter your number to get your ticket by text. One message per registration. Msg &amp; data rates may apply. Reply STOP to opt out. US numbers only.</div>
+                    </div>
                     <div id="customFieldsBox"></div>
                     <button type="submit" id="submitBtn">Get My Ticket</button>
                 </form>
@@ -682,6 +688,7 @@
                     [event.location?.name, eventDateStr].filter(Boolean).join(' · ');
                 document.title = `Register — ${event.name}`;
                 renderCustomFields(event.customFields);
+                document.getElementById('smsGroup').style.display = event.smsAvailable ? '' : 'none';
 
                 // Claim links (promoted waitlist entries) always get a shot at
                 // the form — the backend re-validates the claim regardless of
@@ -812,6 +819,14 @@
             const name  = `${firstName} ${lastName}`;
             const email = document.getElementById('email').value;
             const customFields = collectCustomFieldValues();
+            const phone = loadedEvent && loadedEvent.smsAvailable ? document.getElementById('smsPhone').value.trim() : '';
+            document.getElementById('smsError').style.display = 'none';
+            // A bad number is a typo to fix, not a refusal — say it next to the field.
+            const showPhoneError = msg => {
+                const el = document.getElementById('smsError');
+                el.textContent = msg; el.style.display = 'block';
+                document.getElementById('smsPhone').focus();
+            };
             const resetBtnText = () => {
                 btn.textContent = isFullWaitlistable ? 'Join Waitlist'
                     : eventTicketPrice > 0 ? `Buy Ticket — $${(eventTicketPrice/100).toFixed(2)}`
@@ -823,7 +838,7 @@
                     const res  = await fetch(`/api/checkout/${eventId}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, email, claimToken: claimToken || undefined, holdToken: holdToken || undefined, customFields })
+                        body: JSON.stringify({ name, email, claimToken: claimToken || undefined, holdToken: holdToken || undefined, customFields, phone: phone || undefined })
                     });
                     const data = await res.json();
                     if (data.url) {
@@ -834,6 +849,8 @@
                         showSuccess(data.ticket, data.qr);
                     } else if (data.waitlisted) {
                         showWaitlisted(data);
+                    } else if (data.reason === 'invalid_phone') {
+                        showPhoneError(data.error);
                     } else if (data.reason || data.error) {
                         showSignupBlocked(data.error || 'Could not start checkout.');
                     } else {
@@ -843,13 +860,15 @@
                     const res  = await fetch('/api/register', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, email, eventId, holdToken: holdToken || undefined, customFields })
+                        body: JSON.stringify({ name, email, eventId, holdToken: holdToken || undefined, customFields, phone: phone || undefined })
                     });
                     const data = await res.json();
                     if (data.success) {
                         showSuccess(data.ticket, data.qr);
                     } else if (data.waitlisted) {
                         showWaitlisted(data);
+                    } else if (data.reason === 'invalid_phone') {
+                        showPhoneError(data.error);
                     } else if (data.reason || data.error) {
                         // Every refusal the server can give — sold out, filled
                         // up mid-signup, duplicate email, device already used —
