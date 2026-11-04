@@ -2049,6 +2049,8 @@ app.use(express.json({
     limit: '20mb',
     verify: (req, _res, buf) => { if (req.path === '/api/stripe/webhook') req.rawBody = buf; },
 }));
+// Express 5 leaves req.body undefined when a request has no body; keep Express 4's {}.
+app.use((req, _res, next) => { if (req.body === undefined) req.body = {}; next(); });
 app.get('/sw.js', (req, res) => {
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.resolve(__dirname, 'public/sw.js'));
