@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const p12FilePath = './Certificates.p12';
 const wwdrFilePath = './wwdr.cer';
