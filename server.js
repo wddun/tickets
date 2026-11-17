@@ -21,6 +21,7 @@ import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import http2 from 'http2';
 import os from 'os';
+import { AsyncLocalStorage } from 'async_hooks';
 import * as phone from './phone.js';
 import * as sms from './sms.js';
 const FileStore = FileStoreFactory(session);
@@ -72,9 +73,38 @@ function inferLogLevel(msg) {
     if (/\[warn(ing)?\]/i.test(msg)) return 'warn';
     return 'info';
 }
-function log(tag, msg) {
+// Which event a log line is about. A request carries a small context (set up by
+// the middleware right after the session middleware) that log() reads, so a line
+// written anywhere inside a request for /api/event/:id/... is tagged with no change
+// at the call site. Routes that only learn the event later (a Wallet serial, a
+// scanned token) call setLogEvent() once they know it; background jobs pass
+// { eventId } as log()'s third argument.
+const logContext = new AsyncLocalStorage();
+function setLogEvent(eventId) {
+    const store = logContext.getStore();
+    if (store && eventId) store.eventId = eventId;
+}
+function eventIdFromRequest(req) {
+    if (!req) return null;
+    if (req.params?.eventId) return req.params.eventId;
+    if (req.apiKey?.eventId) return req.apiKey.eventId;
+    if (req.session?.scanLink?.eventId) return req.session.scanLink.eventId;
+    if (req.params?.id && /^\/api\/events?\/:id\b/.test(req.route?.path || '')) return req.params.id;
+    return null;
+}
+function logEventFor(explicit) {
+    const store = logContext.getStore();
+    const eventId = explicit || store?.eventId || eventIdFromRequest(store?.req) || null;
+    if (!eventId) return null;
+    let eventName = null;
+    try { eventName = stmt.events.byId.get(eventId)?.name || null; } catch (_) {}
+    return { eventId, eventName };
+}
+function log(tag, msg, opts = {}) {
+    const ev = logEventFor(opts.eventId);
     const entry = { time: new Date().toISOString(), tag, msg, level: inferLogLevel(msg) };
-    console.log(`[${entry.time}] [${tag}] ${msg}`);
+    if (ev) { entry.eventId = ev.eventId; entry.eventName = ev.eventName; }
+    console.log(`[${entry.time}] [${tag}] ${msg}${ev ? `  [event ${ev.eventId}]` : ''}`);
     logBuffer.unshift(entry);
     if (logBuffer.length > MAX_LOG_ENTRIES) logBuffer.pop();
     if (adminLogStreamClients.size) {
@@ -2073,6 +2103,9 @@ app.use(session({
         maxAge: 30 * 24 * 60 * 60 * 1000
     }
 }));
+// Log context for this request (see logContext). Registered after the body parser
+// and session so their stream/file callbacks can't drop it before a route runs.
+app.use((req, res, next) => logContext.run({ req, eventId: null }, next));
 // Gate these pages before express.static gets a chance to serve them
 // unconditionally — static file matches short-circuit the pipeline, so this
 // must run first (scanner is PIN-protected itself, so excluded).
@@ -3431,9 +3464,9 @@ function textTicketToAttendee({ event, registrationId, phone, firstName, ticket 
     const body = `${hi} registered for ${event.name}${when ? ` (${when})` : ''}. Your ticket: ${ticketLink(ticket.token)}\nReply STOP to opt out.`;
     sms.sendSms({ to: phone, body }).then(() => {
         stmt.tickets.setSmsSent.run(new Date().toISOString(), registrationId);
-        log('sms', `[sent] Ticket text — event: ${event.name}  to: ${sms.formatUsPhone(phone)}`);
+        log('sms', `[sent] Ticket text — event: ${event.name}  to: ${sms.formatUsPhone(phone)}`, { eventId: event.id });
     }).catch(err => {
-        log('sms', `[error] Ticket text failed — event: ${event.name}  to: ${sms.formatUsPhone(phone)}  ${err.code ? `(${err.code}) ` : ''}${err.message}`);
+        log('sms', `[error] Ticket text failed — event: ${event.name}  to: ${sms.formatUsPhone(phone)}  ${err.code ? `(${err.code}) ` : ''}${err.message}`, { eventId: event.id });
     });
 }
 
@@ -3792,6 +3825,7 @@ app.post('/api/stripe/webhook', async (req, res) => {
     if (stripeEvent.type === 'checkout.session.completed') {
         const session = stripeEvent.data.object;
         const { eventId, buyerName, buyerEmail, discountCodeId, waitlistId } = session.metadata || {};
+        setLogEvent(eventId);
         if (!eventId || !buyerName || !buyerEmail) return res.json({ received: true });
 
         const existing = stmt.orders.bySessionId.get(session.id);
@@ -4616,6 +4650,7 @@ app.get('/api/event/:id/orders', requireAuth, (req, res) => {
 app.post('/api/orders/:id/refund', requireAuth, async (req, res) => {
     if (!stripe) return res.status(503).json({ error: 'Stripe is not yet connected. Please email support@willstechsupport.com to connect your Stripe account.' });
     const order = stmt.orders.byId.get(req.params.id);
+    setLogEvent(order?.eventId);
     if (!order) return res.status(404).json({ error: 'Order not found' });
     if (!userHasEventCapability(req.session.userId, order.eventId, 'manage_payments')) {
         return res.status(403).json({ error: 'Only the event owner can issue refunds' });
@@ -5493,7 +5528,7 @@ app.put('/api/event/:id', requireAuth, upload.single('image'), async (req, res) 
         const eligible = ticketsEligibleForExpiry(updated);
         for (const ticket of eligible) {
             try { await expireTicket(ticket, updated, req); }
-            catch (err) { log('ticket-expiry', `[ERR] Immediate expire failed — ticket: ${ticket.id}  err: ${err.message}`); }
+            catch (err) { log('ticket-expiry', `[ERR] Immediate expire failed — ticket: ${ticket.id}  err: ${err.message}`, { eventId: ticket.eventId }); }
         }
     }
 
@@ -6504,6 +6539,7 @@ app.get('/api/registration/:id/manage', (req, res) => {
     const tickets = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket);
     if (!tickets.length) return res.status(404).json({ error: 'Not found' });
     const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+    setLogEvent(tickets[0].eventId);
     if (!event) return res.status(404).json({ error: 'Not found' });
 
     const window = ticketReturnWindow(event);
@@ -6537,6 +6573,7 @@ app.post('/api/registration/:id/return', publicWriteLimiter, async (req, res) =>
     const all = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket);
     if (!all.length) return res.status(404).json({ error: 'Not found' });
     const event = rowToEvent(stmt.events.byId.get(all[0].eventId));
+    setLogEvent(all[0].eventId);
     if (!event) return res.status(404).json({ error: 'Not found' });
 
     const window = ticketReturnWindow(event);
@@ -6842,6 +6879,7 @@ app.post('/api/my-tickets/:registrationId/resend', requireAttendee, attendeeRese
     const tickets = attendeeRegistrationTickets(req, req.params.registrationId);
     if (!tickets.length) return res.status(404).json({ error: 'Not found' });
     const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+    setLogEvent(tickets[0].eventId);
     if (!event) return res.status(404).json({ error: 'Not found' });
     const live = tickets.filter(t => !t.expiredAt);
     if (!live.length) return res.status(409).json({ error: 'These tickets are no longer valid, so there is nothing to send.' });
@@ -7018,6 +7056,7 @@ app.post('/api/ticket/:id/resend', requireAuth, async (req, res) => {
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
 
     const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
+    setLogEvent(ticket.eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) {
@@ -7582,6 +7621,7 @@ app.post('/api/checkin/:registrationId', requireAuthOrScanLink, async (req, res)
     }
 
     const checkinEvent = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+    setLogEvent(tickets[0].eventId);
     const now = new Date().toISOString();
     let checkedInCount = 0;
     const doCheckin = db.transaction(() => {
@@ -7631,6 +7671,7 @@ app.delete('/api/checkin/:registrationId', requireAuthOrScanLink, async (req, re
     if (!tickets.length) return res.status(404).json({ error: 'Not found' });
 
     const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
+    setLogEvent(tickets[0].eventId);
     if (!event || !requestHasCapability(req, event.id, 'undo_checkin')) {
         return res.status(403).json({ error: 'You do not have permission to undo check-ins for this event' });
     }
@@ -7673,6 +7714,7 @@ app.post('/api/validate', validateLimiter, async (req, res) => {
 
     const cleanToken = (token.startsWith('ticket:') ? token.split(':')[1] : token).trim();
     const ticket = rowToTicket(stmt.tickets.byToken.get(cleanToken));
+    setLogEvent(ticket?.eventId || req.body?.eventId);
 
     if (!ticket) {
         log('validate', `[ERR] INVALID token: ${cleanToken}  ip: ${getIP(req)}`);
@@ -7794,6 +7836,7 @@ app.post('/api/ticket-check', validateLimiter, (req, res) => {
 
     const cleanToken = (token.startsWith('ticket:') ? token.split(':')[1] : token).trim();
     const ticket = rowToTicket(stmt.tickets.byToken.get(cleanToken));
+    setLogEvent(ticket?.eventId || eventId);
 
     if (!ticket || ticket.eventId !== eventId) {
         log('ticket-check', `[ERR] INVALID/WRONG EVENT — token: ${cleanToken}  eventId: ${eventId}  ip: ${getIP(req)}`);
@@ -8562,6 +8605,7 @@ app.get(['/api/pass/:token', '/api/pass/:token.pkpass'], async (req, res) => {
 app.get('/api/passes/bundle/:registrationId', async (req, res) => {
     const { registrationId } = req.params;
     const tickets = stmt.tickets.byRegistrationId.all(registrationId).map(rowToTicket);
+    setLogEvent(tickets[0]?.eventId);
     if (!tickets.length) return res.status(404).send('No tickets found for this registration');
 
     if (tickets.length === 1) {
@@ -8622,6 +8666,7 @@ function walletAuth(req, serialNumber) {
 app.post('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId/:serialNumber', async (req, res) => {
     const { deviceId, serialNumber } = req.params;
     const ticket = walletAuth(req, serialNumber);
+    setLogEvent(ticket?.eventId);
     if (!ticket) return res.status(401).send();
 
     const { pushToken } = req.body;
@@ -8644,6 +8689,7 @@ app.post('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId/:serialNumb
 app.delete('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId/:serialNumber', async (req, res) => {
     const { deviceId, serialNumber } = req.params;
     const ticket = walletAuth(req, serialNumber);
+    setLogEvent(ticket?.eventId);
     if (!ticket) return res.status(401).send();
 
     stmt.walletDevices.delete.run(deviceId, serialNumber);
@@ -8688,6 +8734,7 @@ app.get('/api/wallet/v1/devices/:deviceId/registrations/:passTypeId', async (req
 app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
     const { serialNumber } = req.params;
     const ticket = walletAuth(req, serialNumber);
+    setLogEvent(ticket?.eventId);
     if (!ticket) {
         log('wallet-pass', `[auth] Auth failed — serial: ${serialNumber.slice(0, 8)}…`);
         return res.status(401).send();
@@ -8715,8 +8762,13 @@ app.get('/api/wallet/v1/passes/:passTypeId/:serialNumber', async (req, res) => {
 
     const ims = req.headers['if-modified-since'];
     if (ims) {
-        const lastMod = new Date(ticket.updated_at || ticket.created_at);
-        if (lastMod <= new Date(ims)) {
+        // Last-Modified goes out at whole-second precision (toUTCString), so the device
+        // echoes back a time with the milliseconds dropped. Compare at that precision,
+        // or a stored "…:15.516Z" is always newer than the echoed "…:15" and an unchanged
+        // pass is re-generated and re-sent on every Wallet refresh.
+        const lastModSec = Math.floor(new Date(ticket.updated_at || ticket.created_at).getTime() / 1000);
+        const imsSec = Math.floor(new Date(ims).getTime() / 1000);
+        if (!Number.isNaN(imsSec) && lastModSec <= imsSec) {
             log('wallet-pass', `[skip] Not modified — serial: ${serialNumber.slice(0, 8)}…`);
             return res.status(304).send();
         }
@@ -9181,7 +9233,14 @@ async function fetchSheetRows(csvUrl) {
     if (resp.url && !sheetRedirectAllowed(resp.url)) {
         throw new Error('That link redirected somewhere that is not Google Sheets.');
     }
-    if (!resp.ok) throw new Error(`Sheet fetch failed (HTTP ${resp.status}) — is the sheet shared as "Anyone with the link"?`);
+    if (!resp.ok) {
+        // Only an access-type status can mean the sharing setting is wrong; a 5xx (or 429)
+        // is Google having trouble, and pointing at sharing then sends people the wrong way.
+        if ([401, 403, 404].includes(resp.status)) {
+            throw new Error(`Sheet fetch failed (HTTP ${resp.status}) — is the sheet shared as "Anyone with the link"?`);
+        }
+        throw new Error(`Google Sheets returned a temporary error (HTTP ${resp.status}); will retry on the next poll.`);
+    }
     const text = await resp.text();
     if (/^\s*</.test(text)) throw new Error('Google returned a sign-in page instead of the sheet. Share it as "Anyone with the link — Viewer" and try again.');
     const rows = parseCsv(text);
@@ -9530,11 +9589,11 @@ async function pollSheetWatcher(watcher) {
                     // one, not us — count it as already handled, not a fresh
                     // issue, so "Issued: N" doesn't overcount.
                     summary.alreadySeen++;
-                    log('sheet-watch', `[already-registered] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`);
+                    log('sheet-watch', `[already-registered] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`, { eventId: watcher.eventId });
                 } else {
                     stmt.sheetWatchers.incrementIssued.run(1, watcher.id);
                     summary.issued++;
-                    log('sheet-watch', `[issued] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`);
+                    log('sheet-watch', `[issued] ${firstName} ${lastName || ''} <${email}> — event: ${watcher.eventId}`, { eventId: watcher.eventId });
                 }
             } else {
                 // Deliberately NOT marked seen — a transient failure (e.g. at
@@ -9542,12 +9601,12 @@ async function pollSheetWatcher(watcher) {
                 summary.failed++;
                 const body = await resp.text().catch(() => '');
                 lastError = `Row ${r + 2} (${email}): HTTP ${resp.status} ${body.slice(0, 200)}`;
-                log('sheet-watch', `[ERR] ${lastError}`);
+                log('sheet-watch', `[ERR] ${lastError}`, { eventId: watcher.eventId });
             }
         }
     } catch (err) {
         lastError = err.message;
-        log('sheet-watch', `[ERR] Poll failed — watcher: ${watcher.id}  ${err.message}`);
+        log('sheet-watch', `[ERR] Poll failed — watcher: ${watcher.id}  ${err.message}`, { eventId: watcher.eventId });
     }
     stmt.sheetWatchers.setPollResult.run(new Date().toISOString(), lastError, watcher.id);
     return summary;
@@ -10212,12 +10271,12 @@ setInterval(async () => {
                 });
                 sent++;
             } catch (err) {
-                log('reminder', `[ERR] Send failed — email: ${ticket.email}  err: ${err.message}`);
+                log('reminder', `[ERR] Send failed — email: ${ticket.email}  err: ${err.message}`, { eventId: ticket.eventId });
             }
         }
 
         stmt.events.setReminderSentAt.run(new Date().toISOString(), event.id);
-        log('reminder', `[email] Sent to ${sent} registrant(s) — event: ${event.name} (${event.id})`);
+        log('reminder', `[email] Sent to ${sent} registrant(s) — event: ${event.name} (${event.id})`, { eventId: event.id });
     }
 }, 5 * 60 * 1000);
 
@@ -10267,7 +10326,7 @@ setInterval(async () => {
             const result = await promoteWaitlistEntry(nextEntry, event);
             if (result.success) {
                 logAudit(WAITLIST_SWEEP_REQ, { eventId: event.id, action: 'waitlist.autoPromoted', details: { email: nextEntry.email, notified: !!result.notified } });
-                log('waitlist', `[auto-promote] ${nextEntry.email} — event: ${event.name} (${event.id})`);
+                log('waitlist', `[auto-promote] ${nextEntry.email} — event: ${event.name} (${event.id})`, { eventId: event.id });
             }
         } catch (err) {
             log('waitlist', `[ERR] Auto-promote failed — email: ${nextEntry.email}  err: ${err.message}`);
@@ -10297,7 +10356,7 @@ setInterval(async () => {
         const tickets = ticketsEligibleForExpiry(event);
         for (const ticket of tickets) {
             try { await expireTicket(ticket, event, TICKET_EXPIRY_SWEEP_REQ); }
-            catch (err) { log('ticket-expiry', `[ERR] Sweep expire failed — ticket: ${ticket.id}  err: ${err.message}`); }
+            catch (err) { log('ticket-expiry', `[ERR] Sweep expire failed — ticket: ${ticket.id}  err: ${err.message}`, { eventId: ticket.eventId }); }
         }
     }
 }, TICKET_EXPIRY_SWEEP_MS);
@@ -10362,7 +10421,7 @@ function broadcastToMonitors(eventId, payload) {
             } catch (_) { }
         }
     }
-    log('monitor-broadcast', `[${payload.type}] event=${eventId} sent=${sent}/${eligible} (${monitorClients.size} total clients)`);
+    log('monitor-broadcast', `[${payload.type}] event=${eventId} sent=${sent}/${eligible} (${monitorClients.size} total clients)`, { eventId });
 }
 
 // Pushes a fresh snapshot of the dashboard's headline numbers — valid

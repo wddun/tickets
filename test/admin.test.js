@@ -395,3 +395,49 @@ describe('admin adding themselves to a room', () => {
         assert.equal((await admin.client.post(`/api/admin/event/${ev.id}/add-self`, {})).status, 400);
     });
 });
+
+describe('log lines carry the event they are about', () => {
+    test('a line written inside an /api/event/:id route is tagged with that event', async () => {
+        const event = await createEvent(owner.client, { name: 'Log Tag Event' });
+        const r1 = await owner.client.put(`/api/event/${event.id}/reminder`, { enabled: false });
+        assert.equal(r1.status, 200, r1.text);
+        const r = await admin.client.get('/api/admin/logs');
+        const hit = r.body.find(e => e.tag === 'reminder' && e.eventId === event.id);
+        assert.ok(hit, 'expected the reminder settings line tagged with the event');
+        assert.equal(hit.eventName, 'Log Tag Event');
+    });
+
+    test('a line that is not about any event has no event tag', async () => {
+        const email = uniqueEmail('untagged');
+        await anon().post('/api/auth/signup', { email, password: 'longenoughpassword' });
+        const r = await admin.client.get('/api/admin/logs');
+        const hit = r.body.find(e => e.tag === 'signup' && e.msg.includes(email));
+        assert.ok(hit);
+        assert.equal(hit.eventId, undefined);
+    });
+});
+
+describe('Wallet pass refresh', () => {
+    // Last-Modified is sent at whole-second precision, so a device echoes the time back
+    // without milliseconds. An unchanged pass must still answer 304 to that echo, not be
+    // re-generated and re-sent on every refresh.
+    test('an unchanged pass answers 304 to the Last-Modified time the device echoes back', async () => {
+        const event = await createEvent(owner.client);
+        await addTicket(owner.client, event.id, { name: 'Wallet Refresh' });
+        const [t] = await listTickets(owner.client, event.id);
+        const full = await owner.client.get(`/api/event/${event.id}/tickets`);
+        const ticket = (Array.isArray(full.body) ? full.body : full.body.tickets || []).find(x => x.id === t.id) || t;
+        assert.ok(ticket.token, 'ticket list exposes the token');
+        const lastMod = new Date(ticket.updated_at || ticket.created_at || ticket.createdAt);
+        assert.ok(!Number.isNaN(lastMod.getTime()), 'ticket list exposes a timestamp: ' + Object.keys(ticket).join(','));
+
+        const r = await anon().get(`/api/wallet/v1/passes/pass.test/${ticket.token}`, {
+            headers: { authorization: `ApplePass ${ticket.id}${ticket.token}`, 'if-modified-since': lastMod.toUTCString() },
+        });
+        assert.equal(r.status, 304);
+
+        const logs = await admin.client.get('/api/admin/logs');
+        const hit = logs.body.find(e => e.tag === 'wallet-pass' && /Not modified/.test(e.msg) && e.eventId === event.id);
+        assert.ok(hit, 'the Wallet line is tagged with the ticket\'s event');
+    });
+});

@@ -881,6 +881,15 @@ window.HELP_CONTENT = {
             `Shared across every app on the box — another app's memory spike shows up here even though this app did nothing differently.`,
         ],
     },
+    'system.liveLogs': {
+        title: 'Live Logs',
+        summary: 'Everything the server has logged since it last restarted (the newest 1,000 lines), streamed in as it happens.',
+        details: [
+            `A line about a particular event shows that event's name in a green tag. Click the tag, or pick the event from the dropdown, to see only that event's lines. "Not tied to an event" shows the rest (logins, the hourly data purge, server start-up).`,
+            `Long lines wrap rather than being cut off. Drag the bottom edge of the box to make it taller.`,
+            `This list is kept in memory, so it starts empty after a restart or deploy. Older lines are still in the server's pm2 log files, which are kept for 90 days.`,
+        ],
+    },
     'admin.phoneCall': {
         title: 'Phone Call',
         summary: 'Calls one of your phone extensions or a US/Canada number and reads your typed message aloud in an AI voice.',

@@ -1949,6 +1949,36 @@
             border-color: #6366f1;
             color: #fff;
         }
+        .sys-log-viewer {
+            height: 420px;
+            min-height: 160px;
+            max-height: 85vh;
+            resize: vertical;
+            overflow-y: auto;
+            background: #0f172a;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-family: monospace;
+        }
+        /* Wrap long lines instead of cutting them off, so the whole message is readable. */
+        .sys-log-line {
+            font-size: 11px;
+            padding: 2px 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+        }
+        .sys-log-event {
+            font: inherit;
+            font-size: 10px;
+            color: #a7f3d0;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            border-radius: 4px;
+            padding: 0 5px;
+            cursor: pointer;
+        }
+        .sys-log-event:hover { background: rgba(16, 185, 129, 0.3); }
         .sys-live-dot {
             display: inline-block;
             width: 7px;
@@ -2698,7 +2728,7 @@
             <button id="adminLogsToggle" onclick="toggleLogsPanel()"
                 style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:13px;padding:2px 6px;">▲</button>
         </div>
-        <div id="adminLogsBody" style="display:none;height:180px;overflow-y:auto;padding:8px 14px;">
+        <div id="adminLogsBody" style="display:none;height:260px;min-height:120px;max-height:80vh;resize:vertical;overflow-y:auto;padding:8px 14px;">
             <div id="adminLogsContent" style="font-family:monospace;"></div>
         </div>
     </div>
@@ -8856,18 +8886,21 @@
                             <div style="font-size:13px;font-weight:700;margin-bottom:8px;">Recent Activity <span style="font-weight:500;color:var(--text-muted);">(scans, Wallet downloads)</span></div>
                             <div id="sysActivityFeed" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;"></div>
                         </div>
-                        <div>
+                        <div style="grid-column:1 / -1;">
                             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-                                <span style="font-size:13px;font-weight:700;margin-right:auto;">Live Logs <span id="sysLogLiveDot" class="sys-live-dot" title="Connecting…"></span></span>
+                                <span style="font-size:13px;font-weight:700;margin-right:auto;">Live Logs${helpIcon('system.liveLogs')} <span id="sysLogLiveDot" class="sys-live-dot" title="Connecting…"></span> <span id="sysLogCount" style="font-weight:500;color:var(--text-muted);"></span></span>
                                 <div class="sys-log-filters" id="sysLogLevelFilters">
                                     <button type="button" class="active" data-level="all" onclick="setSysLogFilter('all')">All</button>
                                     <button type="button" data-level="error" onclick="setSysLogFilter('error')">Errors</button>
                                     <button type="button" data-level="warn" onclick="setSysLogFilter('warn')">Warnings</button>
                                     <button type="button" data-level="info" onclick="setSysLogFilter('info')">Info</button>
                                 </div>
-                                <input type="text" id="sysLogSearch" placeholder="Search…" oninput="renderSysLogs()" style="width:100px;padding:5px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
+                                <select id="sysLogEventFilter" onchange="renderSysLogs()" title="Show logs for one event" style="max-width:200px;padding:5px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
+                                    <option value="">All events</option>
+                                </select>
+                                <input type="text" id="sysLogSearch" placeholder="Search…" oninput="renderSysLogs()" style="width:120px;padding:5px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
                             </div>
-                            <div id="sysLogViewer" style="max-height:280px;overflow-y:auto;background:#0f172a;border-radius:10px;padding:8px 10px;font-family:monospace;"></div>
+                            <div id="sysLogViewer" class="sys-log-viewer"></div>
                         </div>
                     </div>
 
@@ -9156,16 +9189,54 @@
             const viewer = document.getElementById('sysLogViewer');
             if (!viewer) return;
             const q = (document.getElementById('sysLogSearch')?.value || '').toLowerCase();
+            const eventSel = document.getElementById('sysLogEventFilter');
+            syncSysLogEventOptions(eventSel);
+            const eventFilter = eventSel?.value || '';
             const filtered = sysLastLogs.filter(l =>
                 (sysLogLevelFilter === 'all' || l.level === sysLogLevelFilter) &&
-                (!q || l.msg.toLowerCase().includes(q) || l.tag.toLowerCase().includes(q))
+                (!eventFilter || (eventFilter === '__none' ? !l.eventId : l.eventId === eventFilter)) &&
+                (!q || l.msg.toLowerCase().includes(q) || l.tag.toLowerCase().includes(q) || (l.eventName || '').toLowerCase().includes(q))
             );
+            const countEl = document.getElementById('sysLogCount');
+            if (countEl) countEl.textContent = `${filtered.length} of ${sysLastLogs.length}`;
+            // Keep the reader's place: only follow the newest line if they were already at the top.
+            const atTop = viewer.scrollTop < 4;
+            const prevHeight = viewer.scrollHeight;
             const levelColor = { error: '#f87171', warn: '#fbbf24', info: '#cbd5e1' };
-            viewer.innerHTML = filtered.length ? filtered.slice(0, 300).map(l => `
-                <div style="color:${levelColor[l.level] || '#cbd5e1'};font-size:11px;padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(l.msg)}">`
+            viewer.innerHTML = filtered.length ? filtered.map(l => `
+                <div class="sys-log-line" style="color:${levelColor[l.level] || '#cbd5e1'};">`
                     + `<span style="color:#64748b;">${l.time.replace('T', ' ').replace('Z', '')}</span> `
-                    + `<span style="color:#818cf8;">[${esc(l.tag)}]</span> ${esc(l.msg)}`
+                    + `<span style="color:#818cf8;">[${esc(l.tag)}]</span> `
+                    + (l.eventId ? `<button type="button" class="sys-log-event" onclick="filterSysLogsToEvent('${esc(l.eventId)}')" title="Show only this event's logs">${esc(l.eventName || l.eventId)}</button> ` : '')
+                    + esc(l.msg)
                     + `</div>`).join('') : '<div style="color:#64748b;font-size:11px;padding:8px 0;">No matching logs.</div>';
+            if (!atTop) viewer.scrollTop += viewer.scrollHeight - prevHeight;
+        }
+
+        // The event dropdown lists every event that appears in the buffer, newest activity first.
+        function syncSysLogEventOptions(sel) {
+            if (!sel) return;
+            const seen = new Map();
+            let hasNone = false;
+            for (const l of sysLastLogs) {
+                if (l.eventId) { if (!seen.has(l.eventId)) seen.set(l.eventId, l.eventName || l.eventId); }
+                else hasNone = true;
+            }
+            const current = sel.value;
+            const opts = [['', 'All events'], ...[...seen.entries()], ...(hasNone ? [['__none', 'Not tied to an event']] : [])];
+            const sig = opts.map(o => o.join('\u0001')).join('\u0002');
+            if (sel.dataset.sig === sig) return;
+            sel.dataset.sig = sig;
+            if (current && !opts.some(o => o[0] === current)) opts.push([current, current]);
+            sel.innerHTML = opts.map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join('');
+            sel.value = current;
+        }
+
+        function filterSysLogsToEvent(eventId) {
+            const sel = document.getElementById('sysLogEventFilter');
+            if (!sel) return;
+            sel.value = eventId;
+            renderSysLogs();
         }
 
         async function forceUpdateScanners(btn) {
@@ -10639,12 +10710,12 @@
             const el = document.getElementById('adminLogsContent');
             if (!el) return;
             el.innerHTML = logs.map(l => {
-                const isErr = l.msg.includes('❌') || l.tag.includes('error');
-                const isOk = l.msg.includes('✅') || l.msg.includes('📧') || l.msg.includes('✓');
-                const color = isErr ? '#f87171' : isOk ? '#34d399' : '#cbd5e1';
-                return `<div style="color:${color};font-size:11px;padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(l.msg)}">`
+                const color = { error: '#f87171', warn: '#fbbf24' }[l.level] || '#cbd5e1';
+                return `<div class="sys-log-line" style="color:${color};">`
                     + `<span style="color:#64748b;">${l.time.replace('T', ' ').replace('Z', '')}</span> `
-                    + `<span style="color:#818cf8;">[${esc(l.tag)}]</span> ${esc(l.msg)}`
+                    + `<span style="color:#818cf8;">[${esc(l.tag)}]</span> `
+                    + (l.eventId ? `<span class="sys-log-event" style="cursor:default;">${esc(l.eventName || l.eventId)}</span> ` : '')
+                    + esc(l.msg)
                     + `</div>`;
             }).join('') || '<div style="color:var(--text-muted);font-size:11px;">No logs yet.</div>';
         }
