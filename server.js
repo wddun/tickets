@@ -1457,7 +1457,8 @@ async function buildTicketEmailHtml({ firstName, intro, event, tickets, changesH
     // organiser's saved custom template can't drop the one way back to a
     // lost ticket.
     rows.push(`<tr><td style="padding:14px 32px 20px;border-top:1px solid #f3f4f6;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.5;">Lost a ticket email? <a href="${BASE_URL}/my-tickets.html" style="color:#4f46e5;text-decoration:underline;">See all your tickets</a> in one place.</p>
+  <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.5;">Lost a ticket email? <a href="${BASE_URL}/my-tickets.html" style="color:#4f46e5;text-decoration:underline;">See all your tickets</a> in one place.</p>${tickets[0]?.registrationId && ticketTransferWindow(event).open ? `
+  <p style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.5;">Can't go? <a href="${BASE_URL}/manage-ticket.html?id=${tickets[0].registrationId}&action=transfer" style="color:#4f46e5;text-decoration:underline;">Transfer your ticket</a> to someone who can.</p>` : ''}
 </td></tr>`);
 
     // Every color here (page/card background, block text, an organiser's
@@ -6551,6 +6552,7 @@ app.get('/api/registration/:id/manage', (req, res) => {
         eventLocation: eventLocationLine(event) || null,
         isPaid: (event.ticketPrice || 0) > 0,
         returns: window,
+        transfers: ticketTransferWindow(event),
         tickets: tickets.map(t => ({
             id: t.id,
             name: t.name,
@@ -6561,6 +6563,7 @@ app.get('/api/registration/:id/manage', (req, res) => {
             // here rather than re-derived client-side, so the button can never
             // offer something POST .../return would then refuse.
             returnable: !t.used_at && !t.expiredAt,
+            transferable: !t.used_at && !t.expiredAt && ticketTransferWindow(event).open,
         })),
         // Same branding the registration page and waitlist status page already
         // carry, so this doesn't land as an unstyled stranger mid-journey.
@@ -6673,6 +6676,122 @@ app.put('/api/event/:id/ticket-returns', requireAuth, (req, res) => {
         ticketReturnCutoffUnit: cutoffUnit,
         cutoffValue: cutoffMinutes / RETURN_CUTOFF_UNITS[cutoffUnit],
     });
+});
+
+// ── Ticket transfers ───────────────────────────────────────────────────────
+// An attendee who can't come handing their ticket to someone who can, instead
+// of returning it and hoping the right person gets the seat. Off per event
+// until the organiser turns it on (PUT /api/event/:id/ticket-transfers).
+//
+// Same trust model as returns: the registrationId is the bearer credential
+// (the manage link in the email, and My Tickets, which links to the same page).
+// A transfer keeps the ticket row and its seat but gives it a new holder, a new
+// QR token and a new registrationId, so nothing the old holder kept (the email,
+// the Wallet pass, the manage link) works for it any more. The old Wallet pass
+// is voided through the same tombstone a deleted ticket uses.
+//
+// Paid events are excluded: the order, and any later refund, belongs to the
+// original buyer's registration, and moving a ticket off it would leave a
+// refund with nowhere sensible to go.
+function ticketTransferWindow(event) {
+    const enabled = !!event?.ticketTransfersEnabled;
+    const isPaid = (event?.ticketPrice || 0) > 0;
+    const ended = !!event && eventHasEnded(event);
+    const reason = !enabled ? 'disabled' : (isPaid ? 'paid' : (ended ? 'ended' : null));
+    return { enabled, open: !reason, reason };
+}
+
+app.put('/api/event/:id/ticket-transfers', requireAuth, (req, res) => {
+    const event = rowToEvent(stmt.events.byId.get(req.params.id));
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (!userHasEventCapability(req.session.userId, event.id, 'manage_event')) {
+        return res.status(403).json({ error: 'Not authorized to change event settings' });
+    }
+    const enabled = req.body?.enabled === true || req.body?.enabled === 'true';
+    stmt.events.setTicketTransfers.run(enabled ? 1 : 0, event.id);
+    logAudit(req, { eventId: event.id, action: 'event.ticket_transfers_updated', details: { enabled } });
+    log('event-settings', `[edit] Ticket transfers ${enabled ? 'enabled' : 'disabled'} — event: ${event.name}  by: ${req.session.userId}`);
+    res.json({ success: true, ticketTransfersEnabled: enabled });
+});
+
+app.post('/api/registration/:id/transfer', publicWriteLimiter, async (req, res) => {
+    const all = stmt.tickets.byRegistrationId.all(req.params.id).map(rowToTicket);
+    if (!all.length) return res.status(404).json({ error: 'Not found' });
+    const event = rowToEvent(stmt.events.byId.get(all[0].eventId));
+    setLogEvent(all[0].eventId);
+    if (!event) return res.status(404).json({ error: 'Not found' });
+
+    const window = ticketTransferWindow(event);
+    if (window.reason === 'disabled') return res.status(403).json({ error: 'This event does not allow ticket transfers. Please contact the organizer.' });
+    if (window.reason === 'paid') return res.status(403).json({ error: 'Tickets for paid events cannot be transferred online. Please contact the organizer.' });
+    if (window.reason === 'ended') return res.status(409).json({ error: 'This event has ended, so its tickets can no longer be transferred.' });
+
+    const ticket = all.find(t => t.id === String(req.body?.ticketId || '')) || (all.length === 1 ? all[0] : null);
+    if (!ticket) return res.status(400).json({ error: 'Choose which ticket to transfer.' });
+    if (ticket.used_at) return res.status(409).json({ error: 'This ticket has already been used at the door, so it cannot be transferred.' });
+    if (ticket.expiredAt) return res.status(409).json({ error: 'This ticket is no longer valid, so it cannot be transferred.' });
+
+    const name = String(req.body?.name || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!name) return res.status(400).json({ error: "Enter the new holder's name." });
+    if (!EMAIL_SHAPE.test(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address for the new holder.' });
+    if (email === (ticket.email || '').toLowerCase().trim()) return res.status(400).json({ error: 'That is already the email on this ticket.' });
+    if (event.blockDuplicateEmails) {
+        const held = stmt.tickets.byEventAndEmail.get(event.id, email);
+        if (held && !held.expiredAt) return res.status(409).json({ error: 'That person already has a ticket for this event, and this event allows one ticket per email address.' });
+    }
+
+    const parts = name.split(' ');
+    const firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0];
+    const lastName = parts.length > 1 ? parts[parts.length - 1] : null;
+    const newToken = nanoid(12);
+    const newRegistrationId = nanoid(10);
+    const now = new Date().toISOString();
+    const result = stmt.tickets.transfer.run(newToken, newRegistrationId, name, firstName, lastName, email, now, now, ticket.id);
+    if (!result.changes) return res.status(409).json({ error: 'This ticket changed a moment ago (it may have just been scanned). Please reload and try again.' });
+
+    // The old token is gone from the tickets table now, so a device holding the
+    // old pass gets the voided copy from the tombstone on its next check-in.
+    voidWalletTickets([{ ...ticket }], event);
+    ticketStatusCache.clear();
+
+    logAudit(req, { eventId: event.id, action: 'ticket.transferred', details: { ticketId: ticket.id, fromName: ticket.name, fromEmail: ticket.email, toName: name, toEmail: email } });
+    log('ticket-transfer', `[transfer] ticket: ${ticket.id}  from: ${ticket.email}  to: ${email}  event: ${event.name}  ip: ${getIP(req)}`);
+    broadcastEventCounts(event.id);
+
+    const moved = rowToTicket(stmt.tickets.byId.get(ticket.id));
+    let emailed = false;
+    try {
+        const { html, attachments, subject } = await buildTicketEmailHtml({
+            firstName,
+            intro: `${escEmailText(ticket.name || 'Someone')} has transferred a ticket for <strong>${escEmailText(event.name)}</strong> to you.`,
+            event,
+            tickets: [moved],
+        });
+        await sendEmail({
+            to: email,
+            fromName: `Tickets - ${event.name}`,
+            replyTo: REPLY_TO_EMAIL,
+            subject: subject || `Your ticket for ${event.name}`,
+            html,
+            attachments,
+            registrationId: newRegistrationId,
+        });
+        stmt.tickets.setConfirmationSent.run(new Date().toISOString(), newRegistrationId);
+        emailed = true;
+    } catch (err) {
+        log('ticket-transfer', `[ERR] Ticket email to new holder failed — email: ${email}  err: ${err.message}`);
+    }
+    if (ticket.email) {
+        const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:520px;">
+  <p>Your ticket for <strong>${escEmailText(event.name)}</strong> has been transferred to ${escEmailText(name)}.</p>
+  <p>The QR code and Apple Wallet pass you had for it no longer work. If you didn't do this, contact the event organizer right away.</p>
+</div>`;
+        sendEmail({ to: ticket.email, fromName: `Tickets - ${event.name}`, replyTo: REPLY_TO_EMAIL, subject: `Your ticket for ${event.name} was transferred`, html, registrationId: req.params.id })
+            .catch(err => log('ticket-transfer', `[ERR] Notice to previous holder failed — email: ${ticket.email}  err: ${err.message}`));
+    }
+
+    res.json({ success: true, transferredTo: name, emailed });
 });
 
 // ── My Tickets (attendee sign-in by emailed link) ──────────────────────────
@@ -6847,6 +6966,10 @@ app.get('/api/my-tickets', requireAttendee, (req, res) => {
                 imageUrl: safeEmailImageUrl(event.imageUrl) || null,
             },
             returnsEnabled: ticketReturnWindow(event).enabled,
+            // Only offer "Return ticket" while a return would actually be accepted:
+            // past the cutoff the button would just lead to a closed page.
+            returnsOpen: ticketReturnWindow(event).open,
+            transfersOpen: ticketTransferWindow(event).open,
             ended: eventHasEnded(event),
             tickets: tickets.map(t => {
                 // Once the event is over the ticket is a record, not a pass:

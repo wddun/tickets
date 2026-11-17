@@ -46,7 +46,7 @@
             padding: 11px 13px; margin-bottom: 8px;
             background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
         }
-        .ticket-row input { width: 17px; height: 17px; flex-shrink: 0; margin: 0; cursor: pointer; }
+        .ticket-row input { width: 17px; height: 17px; min-height: 0; flex-shrink: 0; margin: 0; padding: 0; cursor: pointer; }
         .ticket-row-name { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; word-break: break-word; }
         .ticket-row.inactive { opacity: .6; }
         .ticket-row.inactive input { cursor: not-allowed; }
@@ -74,6 +74,20 @@
             background: var(--danger-soft-bg); color: var(--danger-soft-text);
             border: 1.5px solid var(--danger-soft-border);
         }
+
+        /* Transfer form. style.css already styles input and button. */
+        .transfer-form { text-align: left; margin-bottom: 14px; }
+        .transfer-form label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-muted); margin: 10px 0 4px; }
+        .transfer-form input[type="text"], .transfer-form input[type="email"] { width: 100%; box-sizing: border-box; }
+        .ticket-row input[type="radio"] { width: 17px; height: 17px; flex-shrink: 0; margin: 0; cursor: pointer; }
+        .alt-action {
+            display: block; width: 100%; min-height: 0; margin-top: 12px; padding: 0; background: none; border: none; box-shadow: none;
+            font-size: 13.5px; font-weight: 600; color: var(--red-text, #4f46e5);
+            text-decoration: underline; cursor: pointer;
+        }
+        .alt-action:hover { background: none; }
+        body.themed .transfer-form label { color: var(--rt-muted); }
+        [data-theme="dark"] body.themed .transfer-form label { color: var(--text-muted) !important; }
 
         @media (max-width: 480px) {
             .container { padding: 16px 12px 32px; }
@@ -166,6 +180,25 @@
 
                     <button type="button" class="btn-danger-outline" id="returnBtn">Return</button>
                     <div class="status-sub" style="margin:14px 0 0;font-size:12.5px;">Keep your ticket if you might still come &mdash; returning it cannot be undone from this page.</div>
+                    <button type="button" class="alt-action transfer-link" style="display:none;">Give it to someone else instead</button>
+                </div>
+            </div>
+
+            <div id="transferView" style="display:none;">
+                <div class="status-box">
+                    <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                    <div class="status-title">Transfer a ticket</div>
+                    <div class="event-meta" id="transferEventMeta"></div>
+                    <div id="transferTicketList" class="ticket-list"></div>
+                    <form class="transfer-form" id="transferForm" novalidate>
+                        <label for="transferName">Their name</label>
+                        <input type="text" id="transferName" autocomplete="off" maxlength="120" required>
+                        <label for="transferEmail">Their email</label>
+                        <input type="email" id="transferEmail" autocomplete="off" maxlength="200" required>
+                    </form>
+                    <div class="notice"><strong>The ticket becomes theirs.</strong> We email them a new ticket, and your QR code and Wallet pass for it stop working straight away. This cannot be undone from this page.</div>
+                    <button type="button" id="transferBtn">Transfer ticket</button>
+                    <button type="button" class="alt-action" id="transferBack" style="display:none;">Back</button>
                 </div>
             </div>
 
@@ -176,6 +209,7 @@
                     <div class="status-sub" id="closedMessage"></div>
                     <div class="event-meta" id="closedEventMeta" style="margin-top:14px;"></div>
                     <div id="closedTicketList" class="ticket-list"></div>
+                    <button type="button" class="alt-action transfer-link" style="display:none;">Transfer your ticket to someone else</button>
                 </div>
             </div>
 
@@ -185,7 +219,7 @@
                     <div class="status-title" id="doneTitle">Ticket returned</div>
                     <div class="status-sub" id="doneMessage"></div>
                     <div class="status-sub" id="doneRefund" style="display:none;"></div>
-                    <div class="status-sub" style="margin-top:12px;">Thank you for letting the organizer know &mdash; your spot can now go to someone else.</div>
+                    <div class="status-sub" id="doneThanks" style="margin-top:12px;">Thank you for letting the organizer know &mdash; your spot can now go to someone else.</div>
                 </div>
             </div>
 
@@ -219,7 +253,8 @@
         const id = params.get('id');
         let data = null;
 
-        const VIEWS = ['loadingView', 'manageView', 'closedView', 'doneView', 'errorView'];
+        const VIEWS = ['loadingView', 'manageView', 'transferView', 'closedView', 'doneView', 'errorView'];
+        let backView = null;
         function showView(name) {
             for (const v of VIEWS) document.getElementById(v).style.display = v === name ? 'block' : 'none';
         }
@@ -335,6 +370,19 @@
             renderBanner(data.eventImageUrl, data.theme);
 
             const returnable = data.tickets.filter(t => t.returnable);
+            const transferable = data.tickets.filter(t => t.transferable);
+            for (const el of document.querySelectorAll('.transfer-link')) {
+                el.style.display = transferable.length ? 'block' : 'none';
+            }
+
+            // Straight to the transfer form when that is what the link was
+            // for (the email's "Transfer your ticket"), or when it is the only
+            // thing this booking can still do.
+            if (transferable.length && (params.get('action') === 'transfer' || !returnable.length || !data.returns.open)) {
+                backView = (params.get('action') === 'transfer' && returnable.length && data.returns.open) ? 'manageView' : null;
+                if (backView) fillManageView();
+                return openTransfer();
+            }
 
             // Nothing left to give back: every ticket is used or already
             // returned. Reuses the closed view rather than a fourth near-
@@ -359,13 +407,85 @@
                 return showView('closedView');
             }
 
+            fillManageView();
+            showView('manageView');
+        }
+
+        function fillManageView() {
             document.getElementById('manageEventName').textContent = data.eventName;
             document.getElementById('manageEventMeta').innerHTML = eventMetaHtml(data);
             document.getElementById('returnNotice').innerHTML = returnNoticeHtml(data);
             renderTickets(document.getElementById('ticketList'), data.tickets, { selectable: true });
-            document.getElementById('ticketList').addEventListener('change', syncReturnButton);
             syncReturnButton();
-            showView('manageView');
+        }
+
+        // The transfer form. With more than one ticket that can still be
+        // handed on, the person picks which one (a radio, not checkboxes:
+        // each ticket goes to its own new holder).
+        function openTransfer() {
+            const transferable = data.tickets.filter(t => t.transferable);
+            document.getElementById('transferEventMeta').innerHTML =
+                `<strong>${esc(data.eventName)}</strong>${eventMetaHtml(data) ? '<br>' + eventMetaHtml(data) : ''}`;
+            const list = document.getElementById('transferTicketList');
+            const many = transferable.length > 1;
+            list.innerHTML = data.tickets.map(t => {
+                const tag = t.checkedIn ? 'Checked in' : (t.returned ? 'Returned' : (t.expired ? 'No longer valid' : ''));
+                const radio = many && t.transferable
+                    ? `<input type="radio" name="transferTicket" value="${esc(t.id)}"${t.id === transferable[0].id ? ' checked' : ''}>`
+                    : '';
+                return `<label class="ticket-row${t.transferable ? '' : ' inactive'}">${radio}
+                    <div class="ticket-row-name">${esc(t.name || 'Ticket')}</div>
+                    ${tag ? `<div class="ticket-tag">${esc(tag)}</div>` : ''}</label>`;
+            }).join('');
+            document.getElementById('transferBack').style.display = backView ? 'block' : 'none';
+            showView('transferView');
+            document.getElementById('transferName').focus();
+        }
+
+        function selectedTransferId() {
+            const r = document.querySelector('#transferTicketList input[name="transferTicket"]:checked');
+            if (r) return r.value;
+            const t = data.tickets.find(x => x.transferable);
+            return t ? t.id : null;
+        }
+
+        async function doTransfer() {
+            const name = document.getElementById('transferName').value.trim();
+            const email = document.getElementById('transferEmail').value.trim();
+            const ticketId = selectedTransferId();
+            if (!ticketId) return;
+            if (!name) { alert('Enter the name of the person you are giving the ticket to.'); return; }
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert('Enter a valid email address for them.'); return; }
+            if (!confirm(`Transfer this ticket to ${name} (${email})? Your QR code for it will stop working and this cannot be undone here.`)) return;
+
+            const btn = document.getElementById('transferBtn');
+            btn.disabled = true;
+            btn.textContent = 'Transferring…';
+            let res, body;
+            try {
+                res = await fetch(`/api/registration/${encodeURIComponent(id)}/transfer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ticketId, name, email }),
+                });
+                body = await res.json().catch(() => ({}));
+            } catch {
+                alert('Connection error. Your ticket has not been transferred. Please try again.');
+                btn.disabled = false; btn.textContent = 'Transfer ticket';
+                return;
+            }
+            btn.disabled = false; btn.textContent = 'Transfer ticket';
+            if (!res.ok) {
+                alert(body.error || 'Could not transfer this ticket. Please contact the organizer.');
+                return;
+            }
+            document.getElementById('doneTitle').textContent = 'Ticket transferred';
+            document.getElementById('doneMessage').textContent = body.emailed === false
+                ? `The ticket for ${data.eventName} now belongs to ${name}, but we could not email them. Ask the organizer to resend it.`
+                : `The ticket for ${data.eventName} now belongs to ${name}. We have emailed it to ${email}.`;
+            document.getElementById('doneThanks').textContent = 'Your old QR code and Wallet pass for this ticket no longer work.';
+            document.getElementById('doneRefund').style.display = 'none';
+            showView('doneView');
         }
 
         async function doReturn() {
@@ -431,6 +551,16 @@
         }
 
         document.getElementById('returnBtn').addEventListener('click', doReturn);
+        document.getElementById('ticketList').addEventListener('change', syncReturnButton);
+        document.getElementById('transferBtn').addEventListener('click', doTransfer);
+        document.getElementById('transferForm').addEventListener('submit', e => { e.preventDefault(); doTransfer(); });
+        document.getElementById('transferBack').addEventListener('click', () => showView(backView || 'manageView'));
+        for (const el of document.querySelectorAll('.transfer-link')) {
+            el.addEventListener('click', () => {
+                backView = document.getElementById('manageView').style.display === 'block' ? 'manageView' : 'closedView';
+                openTransfer();
+            });
+        }
         load();
     </script>
     <footer class="wts-footer">

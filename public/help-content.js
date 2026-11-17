@@ -335,6 +335,19 @@ window.HELP_CONTENT = {
             `The link itself is a "Return Ticket Link" block in the Ticket and Winner email editors — remove it there if you'd rather not mention it in a particular email's layout, or edit its wording. It only ever renders while this setting is on, block present or not.`,
         ],
     },
+    'registration.ticketTransfers': {
+        title: 'Allow Attendees to Transfer Tickets',
+        summary: 'Lets someone who can no longer come give their ticket to another person themselves, instead of asking you to cancel one ticket and issue another.',
+        details: [
+            `When it is on, every confirmation email carries a "Transfer your ticket" link, and the attendee's My Tickets page shows a Transfer button.`,
+            `They type the new person's name and email. The ticket keeps its seat but becomes the new person's: it gets a new QR code, the new holder is emailed it straight away, and the old QR code and Apple Wallet pass stop working at the door.`,
+            `The previous holder gets an email saying the ticket was transferred, so a transfer they didn't make doesn't go unnoticed.`,
+            `Custom field answers and the mobile number belonged to the old holder, so they are cleared on the transferred ticket.`,
+            `A checked-in, expired or returned ticket can't be transferred, and transfers close when the event ends. If "One Ticket Per Email" is on, a ticket can't be transferred to someone who already holds one.`,
+            `Paid events can't use transfers yet, because the payment and any refund stay tied to the original buyer.`,
+            `Every transfer is written to the audit log with both names. Off by default.`,
+        ],
+    },
     'registration.ticketReturnCutoff': {
         title: 'When Returns Close',
         summary: 'How long before the event starts the return link stops working — a number and a unit, from minutes up to weeks. 0 (the default) leaves returns open right up to the start time.',

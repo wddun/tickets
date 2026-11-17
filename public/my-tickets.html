@@ -70,6 +70,8 @@
             color: var(--text-muted); margin: 26px 0 10px;
         }
 
+        .section-hint { font-size: 12.5px; color: var(--text-muted); margin: -4px 0 10px; }
+        .reg.inactive-reg .reg-name { color: var(--text-muted); }
         .reg {
             background: var(--card); border: 1px solid var(--border); border-radius: 14px;
             box-shadow: var(--shadow); overflow: hidden; margin-bottom: 16px;
@@ -122,6 +124,7 @@
             .wrap { max-width: 100%; padding: 0; }
             .reg { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; page-break-inside: avoid; }
             .reg.no-valid { display: none !important; }
+            .reg.inactive-reg { display: none !important; }
             body.print-one .reg:not(.print-target) { display: none !important; }
             .reg-name, .ticket-name, .list-head h1 { color: #000 !important; }
             .reg-meta, .ticket-label, .ticket-token, .list-head .who { color: #444 !important; }
@@ -178,10 +181,14 @@
                     <button type="button" class="small-btn" id="signOutBtn">Sign out</button>
                 </div>
             </div>
-            <div id="upcoming"></div>
-            <div id="pastWrap" style="display:none;">
-                <div class="section-label">Past events</div>
-                <div id="past"></div>
+            <div id="activeWrap" style="display:none;">
+                <div class="section-label">Active tickets</div>
+                <div id="activeList"></div>
+            </div>
+            <div id="inactiveWrap" style="display:none;">
+                <div class="section-label">Inactive tickets</div>
+                <div class="section-hint">Used at the door, returned, no longer valid, or for an event that has ended.</div>
+                <div id="inactiveList"></div>
             </div>
             <div id="emptyState" class="panel empty" style="display:none;">No tickets are registered to this email address any more.</div>
         </div>
@@ -234,6 +241,7 @@
 
         const ICON_MAIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>';
         const ICON_PRINT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+        const ICON_TRANSFER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M21 3 14 10"/><path d="M8 21H3v-5"/><path d="M3 21l7-7"/></svg>';
         const ICON_RETURN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>';
 
         let walletAvailable = false;
@@ -265,8 +273,22 @@
                 ${walletAvailable && valid.length !== r.tickets.length ? valid.map(t => `<a class="wallet-link" href="/api/pass/${encodeURIComponent(t.token)}.pkpass" title="${esc(t.name)}"><img src="/apple-wallet-badge.png" alt="Add ${esc(t.name)} to Apple Wallet"></a>`).join('') : ''}
                 <button type="button" class="small-btn" data-resend="${esc(r.registrationId)}">${ICON_MAIL}Email again</button>
                 <button type="button" class="small-btn" data-print="${esc(r.registrationId)}">${ICON_PRINT}Print</button>
-                ${r.returnsEnabled ? `<a class="small-btn" href="/manage-ticket.html?id=${regId}">${ICON_RETURN}Can't go?</a>` : ''}
+                ${r.transfersOpen ? `<a class="small-btn" href="/manage-ticket.html?id=${regId}&action=transfer">${ICON_TRANSFER}Transfer</a>` : ''}
+                ${r.returnsOpen ? `<a class="small-btn" href="/manage-ticket.html?id=${regId}">${ICON_RETURN}Return ticket</a>` : ''}
             ` : '';
+            // A booking can be split across both sections (one ticket returned,
+            // the other still live), so the inactive copy gets its own attribute:
+            // re-send status and Print look a booking up by data-reg.
+            if (r.inactive) {
+                return `<div class="reg inactive-reg" data-reg-inactive="${esc(r.registrationId)}">
+                <div class="reg-stripe" style="background:${esc(r.event.color || '#6366f1')};opacity:.5;"></div>
+                <div class="reg-body">
+                    <div class="reg-name">${esc(r.event.name || 'Event')}</div>
+                    ${meta ? `<div class="reg-meta">${meta}</div>` : ''}
+                    <div class="tickets">${r.tickets.map((t, i) => ticketHtml(t, i, r.tickets.length, r.ended)).join('')}</div>
+                </div>
+            </div>`;
+            }
             return `<div class="reg${valid.length ? '' : ' no-valid'}" data-reg="${esc(r.registrationId)}">
                 <div class="reg-stripe" style="background:${esc(r.event.color || '#6366f1')};"></div>
                 <div class="reg-body">
@@ -289,11 +311,21 @@
             walletAvailable = !!data.walletAvailable;
 
             document.getElementById('whoEmail').textContent = data.email;
-            const upcoming = data.registrations.filter(r => !r.past);
-            const past = data.registrations.filter(r => r.past);
-            document.getElementById('upcoming').innerHTML = upcoming.map(regHtml).join('');
-            document.getElementById('past').innerHTML = past.map(regHtml).join('');
-            document.getElementById('pastWrap').style.display = past.length ? 'block' : 'none';
+            // Active: tickets that still get someone in (they carry a QR token).
+            // Inactive: everything else. The server already orders bookings
+            // upcoming-first, then most recent past event first.
+            const active = data.registrations
+                .filter(r => r.tickets.some(t => t.token))
+                .map(r => ({ ...r, tickets: r.tickets.filter(t => t.token) }));
+            const inactive = data.registrations
+                .filter(r => r.tickets.some(t => !t.token))
+                .map(r => ({ ...r, inactive: true, tickets: r.tickets.filter(t => !t.token) }));
+            document.getElementById('activeList').innerHTML = active.length
+                ? active.map(regHtml).join('')
+                : '<div class="panel empty">You have no active tickets right now.</div>';
+            document.getElementById('inactiveList').innerHTML = inactive.map(regHtml).join('');
+            document.getElementById('activeWrap').style.display = data.registrations.length ? 'block' : 'none';
+            document.getElementById('inactiveWrap').style.display = inactive.length ? 'block' : 'none';
             document.getElementById('emptyState').style.display = data.registrations.length ? 'none' : 'block';
             document.getElementById('printAllBtn').style.display =
                 data.registrations.some(r => r.tickets.some(t => t.token)) ? '' : 'none';

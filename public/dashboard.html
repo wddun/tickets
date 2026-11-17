@@ -3161,6 +3161,7 @@
                 await saveEmailPolicy(id);
                 await saveRegistrationLimits(id);
                 await saveTicketReturns(id);
+                await saveTicketTransfers(id);
                 await saveSmsEnabled(id);
             },
             'tab-waitlist': async (id) => {
@@ -6240,6 +6241,7 @@
             const perDevice = !!ev?.oneRegistrationPerDevice;
             const blockDupes = !!ev?.blockDuplicateEmails;
             const returnsOn = !!ev?.ticketReturnsEnabled;
+            const transfersOn = !!ev?.ticketTransfersEnabled;
             const smsOn = !!ev?.smsEnabled;
             const returnRefund = ev?.ticketReturnRefund === 'auto' ? 'auto' : 'none';
             const returnCutoffUnit = RETURN_CUTOFF_UNITS[ev?.ticketReturnCutoffUnit] ? ev.ticketReturnCutoffUnit : 'hours';
@@ -6387,6 +6389,16 @@
                         This event is free, so there is nothing to refund &mdash; returning simply gives the spot back.
                     </div>`}
                 </div>
+
+                <hr class="settings-divider">
+                <div class="settings-subhead">Ticket Transfers</div>
+                <label class="settings-toggle">
+                    <input type="checkbox" id="ticketTransfersToggle" ${transfersOn ? 'checked' : ''}>
+                    <div>
+                        <div class="settings-toggle-title">Allow Attendees to Transfer Tickets${helpIcon('registration.ticketTransfers')}</div>
+                        <div class="settings-toggle-desc">Lets someone who can't come give their ticket to another person, from a link in their confirmation email or from My Tickets. The new holder is emailed a fresh ticket and the old QR code and Wallet pass stop working. Transfers stay open until the event ends.${isPaid ? ' <strong>Paid events can\'t be transferred yet, so this has no effect while the event has a price.</strong>' : ''}</div>
+                    </div>
+                </label>
 
                 <hr class="settings-divider">
                 <div class="settings-subhead">Registration Page Look${helpIcon('registration.theme')}</div>
@@ -6541,6 +6553,24 @@
                 }
             } catch {
                 showToast('Network error while saving ticket returns.');
+            }
+        }
+
+        async function saveTicketTransfers(eventId) {
+            const toggle = document.getElementById('ticketTransfersToggle');
+            if (!toggle) return;
+            try {
+                const r = await fetch(`/api/event/${eventId}/ticket-transfers`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: toggle.checked }),
+                });
+                if (!r.ok) { showToast('Could not save ticket transfers.'); return; }
+                const d = await r.json();
+                const ev = events.find(e => e.id === eventId);
+                if (ev) ev.ticketTransfersEnabled = d.ticketTransfersEnabled;
+            } catch {
+                showToast('Network error while saving ticket transfers.');
             }
         }
 

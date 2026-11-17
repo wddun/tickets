@@ -676,6 +676,11 @@ try { db.exec(`ALTER TABLE events ADD COLUMN offlineFallbackMs INTEGER`); } catc
 try { db.exec(`ALTER TABLE events ADD COLUMN smsEnabled INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN phone TEXT`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN sms_sent_at TEXT`); } catch {}
+// Ticket transfers: an attendee handing their own ticket to someone else (a new
+// name, email, QR token and registration). Off per event until the organiser
+// turns it on. transferredAt marks a ticket that has changed hands at least once.
+try { db.exec(`ALTER TABLE events ADD COLUMN ticketTransfersEnabled INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN transferredAt TEXT`); } catch {}
 try {
     db.exec(`
         CREATE TABLE IF NOT EXISTS roomMessages (
@@ -892,6 +897,7 @@ export function rowToEvent(row) {
         roomChatEnabled: !!row.roomChatEnabled,
         offlineBackupEnabled: !!row.offlineBackupEnabled,
         smsEnabled: !!row.smsEnabled,
+        ticketTransfersEnabled: !!row.ticketTransfersEnabled,
         // How long a scanner waits on the server before answering from its
         // local copy. NULL (never configured) reads as the default.
         offlineFallbackMs: Math.max(1000, Math.min(15000, parseInt(row.offlineFallbackMs, 10) || 4000)),
@@ -963,6 +969,7 @@ export const DUPLICABLE_EVENT_COLUMNS = [
     'scanResultDurationMs', 'reminderEnabled', 'reminderMessage', 'reminderHoursBefore',
     'ticketReturnsEnabled', 'ticketReturnRefund', 'ticketReturnCutoffMinutes', 'ticketReturnCutoffUnit',
     'roomChatEnabled', 'offlineBackupEnabled', 'offlineFallbackMs', 'smsEnabled',
+    'ticketTransfersEnabled',
 ];
 
 // ── Prepared statements ────────────────────────────────────────────────────────
@@ -1000,6 +1007,7 @@ export const stmt = {
         setRoomChatEnabled: db.prepare(`UPDATE events SET roomChatEnabled=? WHERE id=?`),
         setOfflineBackup: db.prepare(`UPDATE events SET offlineBackupEnabled=?, offlineFallbackMs=? WHERE id=?`),
         setSmsEnabled: db.prepare(`UPDATE events SET smsEnabled=? WHERE id=?`),
+        setTicketTransfers: db.prepare(`UPDATE events SET ticketTransfersEnabled=? WHERE id=?`),
         setTicketExpiryScope: db.prepare(`UPDATE events SET ticketExpiryLimit=?, ticketExpiryOrder=? WHERE id=?`),
         setTicketExpiryMode: db.prepare(`UPDATE events SET ticketExpiryMode=? WHERE id=?`),
         setTicketExpiryPromotesWaitlist: db.prepare(`UPDATE events SET ticketExpiryPromotesWaitlist=? WHERE id=?`),
@@ -1060,6 +1068,14 @@ export const stmt = {
         countByEmail: db.prepare('SELECT COUNT(*) as cnt FROM tickets WHERE lower(email) = ?'),
         insert: db.prepare(`INSERT INTO tickets (id, eventId, token, registrationId, name, firstName, lastName, email, customFields, used_at, reentry_status, passHash, updated_at, created_at, wallet_downloaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
         updateInfo: db.prepare(`UPDATE tickets SET name=?, firstName=?, lastName=?, email=?, customFields=? WHERE id=?`),
+        // Hands a ticket to a new holder. Everything tied to the old holder (their
+        // answers, phone, Wallet state, email/text stamps) is cleared, and the
+        // token and registration change so the old QR, Wallet pass and manage
+        // link stop working. Guarded so a ticket scanned or expired a moment
+        // earlier is never transferred.
+        transfer: db.prepare(`UPDATE tickets SET token=?, registrationId=?, name=?, firstName=?, lastName=?, email=?,
+            customFields=NULL, phone=NULL, sms_sent_at=NULL, passHash=NULL, wallet_downloaded_at=NULL,
+            confirmation_sent_at=NULL, transferredAt=?, updated_at=? WHERE id=? AND used_at IS NULL AND expiredAt IS NULL`),
         checkIn: db.prepare(`UPDATE tickets SET used_at=?, updated_at=? WHERE id=?`),
         checkInReentry: db.prepare(`UPDATE tickets SET used_at=?, updated_at=?, reentry_status='inside' WHERE id=?`),
         reentryEnter: db.prepare(`UPDATE tickets SET reentry_status='inside', updated_at=? WHERE id=?`),
