@@ -149,6 +149,48 @@ describe('the ticket list', () => {
     });
 });
 
+describe('events that are over', () => {
+    const hoursAgo = h => new Date(Date.now() - h * 3600 * 1000).toISOString();
+
+    test('a ticket for an event that has ended is listed under past, without its QR, and cannot be re-sent', async () => {
+        const ev = await createEvent(owner.client, { name: 'Long Over', time: hoursAgo(30 * 24) });
+        const email = uniqueEmail('ended');
+        await addTicket(owner.client, ev.id, { email });
+
+        const client = await signedIn(email);
+        const reg = (await client.get('/api/my-tickets')).body.registrations.find(x => x.event.id === ev.id);
+        assert.equal(reg.ended, true);
+        assert.equal(reg.past, true);
+        assert.equal(reg.tickets[0].token, null, 'no QR once the event is over');
+        const resend = await client.post(`/api/my-tickets/${reg.registrationId}/resend`);
+        assert.equal(resend.status, 409);
+        assert.match(resend.body.error, /ended/);
+    });
+
+    test('an event with no end time stays live for a day after it starts', async () => {
+        const ev = await createEvent(owner.client, { name: 'On Right Now', time: hoursAgo(3) });
+        const email = uniqueEmail('ongoing');
+        await addTicket(owner.client, ev.id, { email });
+
+        const client = await signedIn(email);
+        const reg = (await client.get('/api/my-tickets')).body.registrations.find(x => x.event.id === ev.id);
+        assert.equal(reg.ended, false);
+        assert.equal(reg.past, false);
+        assert.ok(reg.tickets[0].token, 'someone at the door three hours in still has their QR');
+    });
+
+    test('an event with an end time is over once that passes', async () => {
+        const ev = await createEvent(owner.client, { name: 'Ended An Hour Ago', time: hoursAgo(5), endTime: hoursAgo(1) });
+        const email = uniqueEmail('endtime');
+        await addTicket(owner.client, ev.id, { email });
+
+        const client = await signedIn(email);
+        const reg = (await client.get('/api/my-tickets')).body.registrations.find(x => x.event.id === ev.id);
+        assert.equal(reg.ended, true);
+        assert.equal(reg.tickets[0].token, null);
+    });
+});
+
 describe('re-sending', () => {
     test('emails the tickets to the signed-in address only', async () => {
         const ev = await createEvent(owner.client, { name: 'Resend Me' });

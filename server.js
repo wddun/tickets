@@ -6808,6 +6808,16 @@ app.post('/api/my-tickets/logout', (req, res) => {
     res.json({ success: true });
 });
 
+// When My Tickets treats an event as over: its end time, or a day after it starts
+// when it has none (the same point a Wallet pass for it expires). Counting from the
+// start time alone would take the QR away from someone standing at the door while
+// the event is still on.
+function eventHasEnded(event, now = Date.now()) {
+    const end = event.endTime ? Date.parse(event.endTime)
+        : event.time ? Date.parse(event.time) + 24 * 60 * 60 * 1000 : NaN;
+    return !Number.isNaN(end) && end < now;
+}
+
 app.get('/api/my-tickets', requireAttendee, (req, res) => {
     const groups = new Map();
     for (const t of stmt.tickets.byEmail.all(req.attendeeEmail).map(rowToTicket)) {
@@ -6837,8 +6847,11 @@ app.get('/api/my-tickets', requireAttendee, (req, res) => {
                 imageUrl: safeEmailImageUrl(event.imageUrl) || null,
             },
             returnsEnabled: ticketReturnWindow(event).enabled,
+            ended: eventHasEnded(event),
             tickets: tickets.map(t => {
-                const live = !t.expiredAt;
+                // Once the event is over the ticket is a record, not a pass:
+                // no QR, no Wallet, nothing to re-send.
+                const live = !t.expiredAt && !eventHasEnded(event);
                 return {
                     id: t.id,
                     name: t.name,
@@ -6857,12 +6870,8 @@ app.get('/api/my-tickets', requireAttendee, (req, res) => {
 
     // Upcoming events first, soonest at the top; then past ones, most recent
     // first; events with no date at all after the upcoming ones.
-    const now = Date.now();
     const when = r => (r.event.time ? Date.parse(r.event.time) : NaN);
-    const isPast = r => {
-        const end = r.event.endTime ? Date.parse(r.event.endTime) : when(r);
-        return !isNaN(end) && end < now;
-    };
+    const isPast = r => r.ended;
     registrations.sort((a, b) => {
         const pa = isPast(a), pb = isPast(b);
         if (pa !== pb) return pa ? 1 : -1;
@@ -6881,6 +6890,7 @@ app.post('/api/my-tickets/:registrationId/resend', requireAttendee, attendeeRese
     const event = rowToEvent(stmt.events.byId.get(tickets[0].eventId));
     setLogEvent(tickets[0].eventId);
     if (!event) return res.status(404).json({ error: 'Not found' });
+    if (eventHasEnded(event)) return res.status(409).json({ error: 'This event has ended, so there is nothing to send.' });
     const live = tickets.filter(t => !t.expiredAt);
     if (!live.length) return res.status(409).json({ error: 'These tickets are no longer valid, so there is nothing to send.' });
 

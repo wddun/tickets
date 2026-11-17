@@ -85,7 +85,9 @@
         .wallet-link { display: inline-block; line-height: 0; }
         .wallet-link img { height: 36px; width: auto; display: block; }
 
-        .tickets { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-top: 14px; }
+        /* Fixed-width cards, centred as a group: auto-fill with 1fr left a lone
+           ticket pinned to the left of the booking with empty columns beside it. */
+        .tickets { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 215px)); justify-content: center; gap: 12px; margin-top: 14px; }
         .ticket {
             border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center;
             background: var(--bg);
@@ -236,13 +238,13 @@
 
         let walletAvailable = false;
 
-        function ticketHtml(t, i, n) {
-            const tag = t.returned ? 'Returned' : (t.expired ? 'No longer valid' : (t.checkedIn ? 'Checked in' : ''));
+        function ticketHtml(t, i, n, ended) {
+            const tag = t.returned ? 'Returned' : (t.expired ? 'No longer valid' : (t.checkedIn ? 'Checked in' : (ended ? 'Event ended' : '')));
             const label = n > 1 ? `Ticket ${i + 1} of ${n}` : 'Ticket';
             const body = t.token
                 ? `<img class="ticket-qr" src="/qr/${encodeURIComponent(t.token)}" alt="QR code for ${esc(t.name || 'ticket')}" width="160" height="160">
                    <div class="ticket-token">${esc(t.token)}</div>`
-                : `<div class="ticket-void">This ticket can no longer be used.</div>`;
+                : `<div class="ticket-void">${ended && !t.expired ? 'This event has ended.' : 'This ticket can no longer be used.'}</div>`;
             return `<div class="ticket${t.token ? '' : ' inactive'}">
                 <div class="ticket-label">${label}</div>
                 <div class="ticket-name">${esc(t.name || 'Ticket')}</div>
@@ -270,7 +272,7 @@
                 <div class="reg-body">
                     <div class="reg-name">${esc(r.event.name || 'Event')}</div>
                     ${meta ? `<div class="reg-meta">${meta}</div>` : ''}
-                    <div class="tickets">${r.tickets.map((t, i) => ticketHtml(t, i, r.tickets.length)).join('')}</div>
+                    <div class="tickets">${r.tickets.map((t, i) => ticketHtml(t, i, r.tickets.length, r.ended)).join('')}</div>
                     ${actions ? `<div class="reg-actions">${actions}</div>` : ''}
                     <div class="reg-status" data-status></div>
                 </div>
