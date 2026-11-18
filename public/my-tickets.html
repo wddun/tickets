@@ -113,25 +113,6 @@
         .footer-note { margin-top: 24px; font-size: 11px; color: var(--text-muted); text-align: center; }
         .footer-note a { color: var(--text-muted); }
 
-        /* ── Printing ─────────────────────────────────────────────────────
-           "Print all" prints every booking that has a valid ticket; a single
-           booking's Print button marks just that one with .print-target and
-           sets body.print-one, so the rest drop out. Either way only the
-           tickets themselves go to paper — no nav, buttons or status lines. */
-        @media print {
-            body { background: #fff !important; }
-            .page-nav, .no-print, .reg-actions, .reg-status, .section-label, .head-actions, .footer-note { display: none !important; }
-            .wrap { max-width: 100%; padding: 0; }
-            .reg { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; page-break-inside: avoid; }
-            .reg.no-valid { display: none !important; }
-            .reg.inactive-reg { display: none !important; }
-            body.print-one .reg:not(.print-target) { display: none !important; }
-            .reg-name, .ticket-name, .list-head h1 { color: #000 !important; }
-            .reg-meta, .ticket-label, .ticket-token, .list-head .who { color: #444 !important; }
-            .ticket { background: #fff !important; border-color: #ccc !important; break-inside: avoid; page-break-inside: avoid; }
-            .ticket.inactive { display: none; }
-            .reg-stripe { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        }
     </style>
 </head>
 <body>
@@ -357,18 +338,13 @@
             setStatus(regId, `Sent to ${document.getElementById('whoEmail').textContent}.`, 'ok');
         }
 
+        // Printing opens the shared ticket print page (the same one the
+        // organiser's dashboard prints from), laid out from the event's ticket
+        // email, rather than printing this list.
         function printTickets(regId) {
-            document.querySelectorAll('.reg.print-target').forEach(el => el.classList.remove('print-target'));
-            if (regId) {
-                const card = document.querySelector(`.reg[data-reg="${CSS.escape(regId)}"]`);
-                if (card) card.classList.add('print-target');
-                document.body.classList.add('print-one');
-            } else {
-                document.body.classList.remove('print-one');
-            }
-            window.print();
+            const url = '/api/my-tickets/print' + (regId ? '?reg=' + encodeURIComponent(regId) : '');
+            window.open(url, '_blank', 'noopener');
         }
-        window.addEventListener('afterprint', () => document.body.classList.remove('print-one'));
 
         document.getElementById('listView').addEventListener('click', e => {
             const resendBtn = e.target.closest('[data-resend]');

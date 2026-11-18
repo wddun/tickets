@@ -7340,7 +7340,200 @@ app.post('/api/event/:id/bulk-email', requireAuth, async (req, res) => {
     res.json({ success: true, sent, failed: errors.length });
 });
 
-// Print-friendly email preview
+// ── Printable tickets ──────────────────────────────────────────────────────
+// One renderer for every "Print" button: the dashboard's per-registration
+// Print, its "Print Selected", and the attendee's My Tickets page. Each
+// ticket is laid out like a real admission ticket (main body + perforated
+// stub with the QR), but everything printed on it comes from the event's
+// ticket email template, so paper never says anything the email doesn't and
+// the organiser controls it from the same editor:
+//   - logo: the event photo when the template has the eventImage block,
+//     otherwise the first image block the organiser added
+//   - title: the header block's title (defaults to the event name)
+//   - date and venue: only when the template keeps the eventDetails block
+//   - the ticket code under the QR: only when the tickets block shows it
+//   - the small print: the footerNote block's lines
+//   - colour: the template accent (or the event colour on 'auto')
+// Custom-field answers are left off on purpose: the normal confirmation email
+// does not carry them, and some fields are organiser-only notes.
+const PRINT_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+
+function printableTicketLook(event) {
+    const template = normalizeEmailTemplate(event.emailTemplate);
+    const has = type => template.blocks.find(b => b.type === type);
+    const accent = template.settings.accent === 'auto' ? eventAccentHexFor(event) : template.settings.accent;
+    const eventImage = has('eventImage') ? safeEmailImageUrl(event.imageUrl) : null;
+    const imageBlock = template.blocks.find(b => b.type === 'image' && b.props.url);
+    const header = has('header');
+    const ticketsBlock = has('tickets');
+    const footer = has('footerNote');
+    return {
+        accent,
+        accentText: contrastTextColor(accent),
+        logoUrl: eventImage || (imageBlock ? imageBlock.props.url : null),
+        titleSource: header ? (header.props.title || '{{eventName}}') : '{{eventName}}',
+        showDetails: !!has('eventDetails'),
+        showCode: !ticketsBlock || ticketsBlock.props.showToken !== false,
+        fineLines: footer ? (footer.props.lines || []).filter(l => String(l).trim()) : [],
+    };
+}
+
+// groups: [{ event, tickets }], tickets already filtered to the ones worth
+// printing. Returns a complete HTML page.
+async function renderPrintableTicketsPage(groups, { pageTitle } = {}) {
+    const looks = new Map();
+    const cards = [];
+    for (const { event, tickets } of groups) {
+        if (!looks.has(event.id)) looks.set(event.id, printableTicketLook(event));
+        const look = looks.get(event.id);
+        const dateStr = formatEventDateRange(event);
+        const { name: venueName, address: venueAddress } = eventVenue(event);
+        const n = tickets.length;
+        for (let i = 0; i < n; i++) {
+            const t = tickets[i];
+            const vars = {
+                firstName: t.firstName || '',
+                fullName: t.name || '',
+                lastName: t.lastName || '',
+                eventName: event.name || '',
+                eventDate: dateStr,
+                eventLocation: eventLocationLine(event),
+                ticketCount: String(n),
+            };
+            const qrSvg = await QRCode.toString(`ticket:${t.token}`, { type: 'svg', margin: 0, errorCorrectionLevel: 'M' });
+            const label = n > 1 ? `Ticket ${i + 1} of ${n}` : 'Ticket';
+            const fields = [`<div class="f f-wide"><dt>Attendee</dt><dd class="attendee">${escEmailText(t.name || '')}</dd></div>`];
+            if (look.showDetails && dateStr) fields.push(`<div class="f f-wide"><dt>Date &amp; time</dt><dd>${escEmailText(dateStr)}</dd></div>`);
+            if (look.showDetails && (venueName || venueAddress)) {
+                fields.push(`<div class="f f-wide"><dt>Venue</dt><dd>${escEmailText(venueName || venueAddress)}${venueName && venueAddress && venueName !== venueAddress ? `<span class="sub">${escEmailText(venueAddress)}</span>` : ''}</dd></div>`);
+            }
+            cards.push(`
+<article class="tkt" style="--accent:${look.accent};--accent-text:${look.accentText};">
+  <div class="tkt-main">
+    <div class="tkt-head">
+      ${look.logoUrl ? `<img class="tkt-logo" src="${escEmailText(look.logoUrl)}" alt="">` : ''}
+      <div class="tkt-head-text">
+        <div class="tkt-kicker">${label}</div>
+        <h2 class="tkt-title">${renderEmailInline(look.titleSource, vars)}</h2>
+      </div>
+    </div>
+    <dl class="tkt-fields">${fields.join('')}</dl>
+    ${look.fineLines.length ? `<div class="tkt-fine">${look.fineLines.map(l => `<p>${renderEmailInline(l, vars)}</p>`).join('')}</div>` : ''}
+  </div>
+  <div class="tkt-stub">
+    <div class="tkt-qr" role="img" aria-label="QR code">${qrSvg}</div>
+    ${look.showCode ? `<div class="tkt-code">${escEmailText(t.token)}</div>` : ''}
+    ${n > 1 ? `<div class="tkt-stub-label">${i + 1} of ${n}</div>` : ''}
+  </div>
+</article>`);
+        }
+    }
+
+    const count = cards.length;
+    const title = pageTitle || (count === 1 ? 'Ticket' : `Tickets (${count})`);
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light">
+<title>${escEmailText(title)}</title>
+<style>
+  :root { --page: #eceef2; --ink: #111827; --muted: #6b7280; --rule: #d1d5db; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--page); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  .bar { position: sticky; top: 0; z-index: 2; background: #fff; border-bottom: 1px solid #e5e7eb; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .bar-title { font-size: 14px; font-weight: 600; color: #374151; }
+  .bar-hint { font-size: 13px; color: var(--muted); }
+  .bar button { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; font: inherit; font-size: 14px; font-weight: 600; color: #fff; background: #111827; border: 0; border-radius: 8px; cursor: pointer; }
+  .bar button:hover { background: #1f2937; }
+  .sheet { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; display: flex; flex-direction: column; gap: 20px; }
+
+  .tkt { display: flex; background: #fff; border-radius: 14px; overflow: hidden; border: 1px solid var(--rule); break-inside: avoid; page-break-inside: avoid; min-height: 248px; }
+  .tkt-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; border-left: 10px solid var(--accent); }
+  .tkt-head { display: flex; align-items: center; gap: 16px; padding: 20px 24px 14px; }
+  .tkt-logo { display: block; max-height: 64px; max-width: 132px; width: auto; height: auto; border-radius: 8px; flex-shrink: 0; object-fit: contain; }
+  .tkt-head-text { min-width: 0; }
+  .tkt-kicker { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--accent-text); background: var(--accent); padding: 3px 8px; border-radius: 4px; margin-bottom: 7px; }
+  .tkt-title { margin: 0; font-size: 22px; line-height: 1.2; font-weight: 800; letter-spacing: -0.2px; overflow-wrap: anywhere; }
+  .tkt-fields { margin: 0; padding: 4px 24px 16px; display: grid; gap: 10px; }
+  .f { min-width: 0; }
+  .f dt { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); margin: 0 0 2px; }
+  .f dd { margin: 0; font-size: 14px; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+  .f dd.attendee { font-size: 17px; font-weight: 700; }
+  .f dd .sub { display: block; font-size: 12.5px; color: var(--muted); }
+  .tkt-fine { margin-top: auto; padding: 10px 24px 14px; border-top: 1px solid #eef0f3; }
+  .tkt-fine p { margin: 0; font-size: 10.5px; line-height: 1.5; color: var(--muted); }
+  .tkt-fine a { color: inherit; }
+
+  .tkt-stub { position: relative; flex: 0 0 214px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 18px 18px 16px; border-left: 2px dashed var(--rule); background: #fff; }
+  .tkt-stub::before, .tkt-stub::after { content: ''; position: absolute; left: -12px; width: 22px; height: 22px; border-radius: 50%; background: var(--page); border: 1px solid var(--rule); }
+  .tkt-stub::before { top: -12px; }
+  .tkt-stub::after { bottom: -12px; }
+  .tkt-qr { width: 164px; height: 164px; }
+  .tkt-qr svg { display: block; width: 100%; height: 100%; }
+  .tkt-code { margin-top: 10px; max-width: 176px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9.5px; line-height: 1.35; color: var(--muted); text-align: center; word-break: break-all; }
+  .tkt-stub-label { margin-top: 8px; font-size: 10px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--ink); }
+
+  @media (max-width: 560px) {
+    .tkt { flex-direction: column; }
+    .tkt-stub { flex-basis: auto; border-left: 0; border-top: 2px dashed var(--rule); }
+    .tkt-stub::before, .tkt-stub::after { top: -12px; bottom: auto; }
+    .tkt-stub::before { left: -12px; }
+    .tkt-stub::after { left: auto; right: -12px; }
+  }
+
+  @page { margin: 12mm; }
+  @media print {
+    :root { --page: #fff; }
+    body { background: #fff; }
+    .bar { display: none !important; }
+    .sheet { max-width: none; padding: 0; gap: 8mm; }
+    .tkt { flex-direction: row; min-height: 70mm; border-color: #bbb; }
+    .tkt-stub { flex-basis: 58mm; border-top: 0; border-left: 2px dashed #bbb; }
+    .tkt-stub::before { top: -12px; left: -12px; right: auto; bottom: auto; }
+    .tkt-stub::after { bottom: -12px; left: -12px; right: auto; top: auto; }
+    .tkt-main, .tkt-kicker { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="bar-title">${count === 1 ? '1 ticket' : `${count} tickets`}</span>
+  <span id="printAction"><button type="button" id="printBtn">${PRINT_ICON_SVG}Print or save as PDF</button></span>
+</div>
+<main class="sheet">
+${cards.join('\n')}
+</main>
+<script>
+  (function () {
+    // window.print() on iOS Safari blanks the page while the dialog is open,
+    // so there the share sheet's Print is the reliable route.
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+      document.getElementById('printAction').innerHTML = '<span class="bar-hint">Tap Share, then Print, to print or save as PDF.</span>';
+      return;
+    }
+    document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
+  })();
+</script>
+</body>
+</html>`;
+}
+
+function printableTicketsEmptyPage(message) {
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow"><title>Tickets</title>
+<style>body{margin:0;background:#eceef2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#374151;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;box-sizing:border-box}p{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px 24px;max-width:420px;text-align:center;line-height:1.5;margin:0}</style></head>
+<body><p>${escEmailText(message)}</p></body></html>`;
+}
+
+// A voided ticket (returned, transferred away, expired) prints nothing: its QR
+// would only be refused at the door.
+const printableTickets = tickets => tickets.filter(t => t.token && !t.expiredAt);
+
+// Dashboard: one registration's tickets.
 app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
     const ticket = rowToTicket(stmt.tickets.byId.get(req.params.id));
     if (!ticket) return res.status(404).send('Ticket not found');
@@ -7352,216 +7545,66 @@ app.get('/api/ticket/:id/preview', requireAuth, async (req, res) => {
         return res.status(403).send('Not authorized');
     }
 
-    const groupTickets = stmt.tickets.byRegistrationId.all(ticket.registrationId).map(rowToTicket);
-    const actualCount = groupTickets.length;
-
-    const qrBlocks = groupTickets.map((t, i) => `
-        <div class="qr-block">
-            <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
-                ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Ticket'}
-            </p>
-            <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" width="180" height="180" style="display:block; margin:0 auto;" />
-            <p style="font-size:11px; color:#aaa; margin:10px 0 0;">Token: ${t.token}</p>
-            ${t.used_at ? `<p style="font-size:11px; color:#059669; margin:4px 0 0;">✓ Checked in ${new Date(t.used_at).toLocaleString()}</p>` : ''}
-        </div>
-    `).join('');
-
-    const customFieldRows = Object.entries(groupTickets[0].customFields || {}).map(([k, v]) =>
-        `<tr><td style="padding:6px 12px;font-weight:600;color:#555;border-bottom:1px solid #f0f0f0;">${k}</td><td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;">${v}</td></tr>`
-    ).join('');
-
-    res.type('html').send(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ticket — ${ticket.name} — ${event.name}</title>
-<style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 40px auto; padding: 24px; color: #333; }
-    .qr-block { text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa; }
-    @media print {
-        body { margin: 0; max-width: 100%; padding: 16px; }
-        .no-print { display: none !important; }
-        .qr-block { break-inside: avoid; page-break-inside: avoid; border: 1px solid #ccc; }
-    }
-</style>
-</head>
-<body>
-<div class="no-print" id="printBar" style="margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-    <span id="loadHint" style="font-size:12px;color:#888;">Loading QR codes…</span>
-</div>
-<h2 style="margin-bottom:4px;">${ticket.name}</h2>
-<p style="color:#888;margin:0 0 4px;">${ticket.email}</p>
-<p style="color:#888;margin:0 0 16px;">Registered ${formatEventDateTime(groupTickets[0].created_at, event, { withWeekday: false, dateOnly: true })}</p>
-<hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
-<p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
-${(() => { const v = eventVenue(event); return v.hasAny ? `<p style="color:#555;margin:0 0 4px;">📍 ${v.name}${v.name && v.address ? ' — ' : ''}${v.address}</p>` : ''; })()}
-${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${formatEventDateRange(event, { withWeekday: false })}</p>` : ''}
-${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
-${qrBlocks}
-<script>
-    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-
-    // Once all QR images are loaded, show the appropriate action
-    var imgs = document.querySelectorAll('img');
-    var remaining = imgs.length;
-    function onImgDone() {
-        if (--remaining > 0) return;
-        document.getElementById('loadHint').textContent = '';
-        var bar = document.getElementById('printBar');
-        if (isIOS) {
-            // window.print() on iOS Safari blanks the page while the dialog is open — use native share instead
-            bar.innerHTML = '<span style="font-size:14px;color:#444;">Tap <strong style=\\'font-weight:700;\\'>&#xfe0f; Share</strong> then <strong style=\\'font-weight:700;\\'>Print</strong> to save as PDF</span>';
-        } else {
-            var btn = document.createElement('button');
-            btn.textContent = '🖨️ Print / Save PDF';
-            btn.style.cssText = 'padding:8px 18px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;';
-            btn.onclick = function() { window.print(); };
-            bar.appendChild(btn);
-        }
-    }
-    if (remaining === 0) { onImgDone(); }
-    else { imgs.forEach(function(img) {
-        if (img.complete) onImgDone();
-        else { img.addEventListener('load', onImgDone); img.addEventListener('error', onImgDone); }
-    }); }
-<\/script>
-</body>
-</html>`);
+    const tickets = printableTickets(stmt.tickets.byRegistrationId.all(ticket.registrationId).map(rowToTicket));
+    res.type('html');
+    if (!tickets.length) return res.send(printableTicketsEmptyPage('This registration has no valid tickets left to print.'));
+    res.send(await renderPrintableTicketsPage([{ event, tickets }], { pageTitle: `Ticket - ${ticket.name} - ${event.name}` }));
 });
 
-// Bulk print-friendly preview for multiple registrations
+// Dashboard: "Print Selected", several registrations at once.
 app.get('/api/tickets/bulk-preview', requireAuth, async (req, res) => {
-    const rawIds = (req.query.regIds || '').split(',').map(s => s.trim()).filter(Boolean);
+    const rawIds = [...new Set((req.query.regIds || '').split(',').map(s => s.trim()).filter(Boolean))];
     if (!rawIds.length) return res.status(400).send('No registration IDs provided');
 
-
-    const sections = [];
+    const groups = [];
+    const events = new Map();
     for (const regId of rawIds) {
-        const groupTickets = stmt.tickets.byRegistrationId.all(regId).map(rowToTicket);
-        if (!groupTickets.length) continue;
-
-        const ticket = groupTickets[0];
-        const event = rowToEvent(stmt.events.byId.get(ticket.eventId));
+        const tickets = printableTickets(stmt.tickets.byRegistrationId.all(regId).map(rowToTicket));
+        if (!tickets.length) continue;
+        const eventId = tickets[0].eventId;
+        if (!events.has(eventId)) events.set(eventId, rowToEvent(stmt.events.byId.get(eventId)));
+        const event = events.get(eventId);
         if (!event) continue;
-
         if (!userHasEventCapability(req.session.userId, event.id, 'email_attendees')) continue;
-
-        const actualCount = groupTickets.length;
-        const qrBlocks = groupTickets.map((t, i) => `
-        <div class="qr-block">
-            <p style="font-weight:600; font-size:14px; color:#555; margin:0 0 12px;">
-                ${actualCount > 1 ? `Ticket ${i + 1} of ${actualCount}` : 'Ticket'}
-            </p>
-            <img src="${BASE_URL}/qr/${t.token}" alt="QR Code" width="180" height="180" style="display:block; margin:0 auto;" />
-            <p style="font-size:11px; color:#aaa; margin:10px 0 0;">Token: ${t.token}</p>
-            ${t.used_at ? `<p style="font-size:11px; color:#059669; margin:4px 0 0;">✓ Checked in ${new Date(t.used_at).toLocaleString()}</p>` : ''}
-        </div>`).join('');
-
-        const customFieldRows = Object.entries(groupTickets[0].customFields || {}).map(([k, v]) =>
-            `<tr><td style="padding:6px 12px;font-weight:600;color:#555;border-bottom:1px solid #f0f0f0;">${k}</td><td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;">${v}</td></tr>`
-        ).join('');
-
-        sections.push(`
-<div class="registration-block">
-    <h2 style="margin-bottom:4px;">${ticket.name}</h2>
-    <p style="color:#888;margin:0 0 4px;">${ticket.email}</p>
-    <p style="color:#888;margin:0 0 16px;">Registered ${formatEventDateTime(ticket.created_at, event, { withWeekday: false, dateOnly: true })}</p>
-    <div class="reg-detail">
-    <hr style="border:none;border-top:1px solid #eee;margin-bottom:16px;">
-    <p style="margin:0 0 4px;"><strong>${event.name}</strong></p>
-    ${(() => { const v = eventVenue(event); return v.hasAny ? `<p style="color:#555;margin:0 0 4px;">📍 ${v.name}${v.name && v.address ? ' — ' : ''}${v.address}</p>` : ''; })()}
-    ${event.time ? `<p style="color:#555;margin:0 0 20px;">🕐 ${formatEventDateRange(event, { withWeekday: false })}</p>` : ''}
-    ${customFieldRows ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px;">${customFieldRows}</table>` : ''}
-    </div>
-    ${qrBlocks}
-</div>`);
+        groups.push({ event, tickets });
     }
 
-    if (!sections.length) return res.status(404).send('No accessible registrations found');
+    if (!groups.length) return res.status(404).type('html').send(printableTicketsEmptyPage('None of the selected registrations have valid tickets to print.'));
+    res.type('html').send(await renderPrintableTicketsPage(groups));
+});
 
-    res.type('html').send(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tickets (${sections.length})</title>
-<style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 40px auto; padding: 24px; color: #333; }
-    .qr-block { text-align:center; margin:24px 0; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa; }
-    .registration-block { margin-bottom: 40px; }
-    body.compact { max-width: 100%; margin: 0 auto; padding: 16px; }
-    body.compact #grid { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 10px; }
-    body.compact .sep, body.compact .reg-detail { display: none; }
-    body.compact .registration-block { margin: 0; padding: 8px; border: 1px solid #ccc; border-radius: 8px; break-inside: avoid; page-break-inside: avoid; }
-    body.compact .registration-block h2 { font-size: 14px; margin: 0 0 2px !important; }
-    body.compact .registration-block p { font-size: 11px; margin: 0 0 4px !important; }
-    body.compact .qr-block { margin: 6px 0 0; padding: 6px; border-radius: 6px; }
-    body.compact .qr-block p { display: none; }
-    body.compact .qr-block p:first-child { display: block; margin: 0 0 4px !important; }
-    body.compact .qr-block img { width: var(--qr, 110px); height: var(--qr, 110px); }
-    #compactBar { display: none; align-items: center; gap: 8px; font-size: 13px; color: #444; }
-    @media print {
-        body { margin: 0; max-width: 100%; padding: 16px; }
-        .no-print { display: none !important; }
-        .qr-block { break-inside: avoid; page-break-inside: avoid; border: 1px solid #ccc; }
-        .registration-block { page-break-after: always; }
-        .registration-block:last-child { page-break-after: avoid; }
-        body.compact .registration-block, body.compact .registration-block:last-child { page-break-after: auto; }
+// My Tickets: the signed-in attendee's own tickets, one booking (?reg=) or
+// every booking still worth printing. Same rule as the list: only tickets
+// that still carry a QR (not voided, event not over).
+app.get('/api/my-tickets/print', async (req, res) => {
+    // A page opened in its own tab, so a lapsed sign-in goes back to the
+    // sign-in screen rather than showing a bare JSON error.
+    req.attendeeEmail = sessionAttendeeEmail(req);
+    if (!req.attendeeEmail) return res.redirect('/my-tickets.html');
+    const only = req.query.reg ? String(req.query.reg) : null;
+    const byReg = new Map();
+    for (const t of stmt.tickets.byEmail.all(req.attendeeEmail).map(rowToTicket)) {
+        const key = t.registrationId || t.id;
+        if (only && key !== only) continue;
+        if (!byReg.has(key)) byReg.set(key, []);
+        byReg.get(key).push(t);
     }
-</style>
-</head>
-<body>
-<div class="no-print" style="margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-    <span id="loadHint" style="font-size:12px;color:#888;">Loading QR codes…</span>
-    <label id="compactBar"><input type="checkbox" id="compactToggle"> Compact</label>
-    <label id="compactCols" style="display:none;align-items:center;gap:6px;font-size:13px;color:#444;">Per row
-        <select id="compactColsSel"><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
-    </label>
-</div>
-<div id="grid">
-${sections.join('\n<hr class="sep" style="border:none;border-top:2px solid #e5e7eb;margin:32px 0;">\n')}
-</div>
-<script>
-    (function () {
-        var t = document.getElementById('compactToggle'), sel = document.getElementById('compactColsSel');
-        function apply() {
-            document.body.classList.toggle('compact', t.checked);
-            document.getElementById('compactCols').style.display = t.checked ? 'flex' : 'none';
-            var n = parseInt(sel.value, 10);
-            document.body.style.setProperty('--cols', n);
-            document.body.style.setProperty('--qr', (Math.floor(560 / n) - 30) + 'px');
-        }
-        t.addEventListener('change', apply); sel.addEventListener('change', apply);
-        document.getElementById('compactBar').style.display = 'flex';
-    })();
-</script>
-<script>
-    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    var imgs = document.querySelectorAll('img');
-    var remaining = imgs.length;
-    function onImgDone() {
-        if (--remaining > 0) return;
-        document.getElementById('loadHint').textContent = '';
-        var bar = document.querySelector('.no-print');
-        if (isIOS) {
-            bar.innerHTML = '<span style="font-size:14px;color:#444;">Tap <strong style=\\'font-weight:700;\\'>&#xfe0f; Share</strong> then <strong style=\\'font-weight:700;\\'>Print</strong> to save as PDF</span>';
-        } else {
-            var btn = document.createElement('button');
-            btn.textContent = '🖨️ Print / Save PDF';
-            btn.style.cssText = 'padding:8px 18px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;';
-            btn.onclick = function() { window.print(); };
-            bar.appendChild(btn);
-        }
+    const events = new Map();
+    const groups = [];
+    for (const tickets of byReg.values()) {
+        const eventId = tickets[0].eventId;
+        if (!events.has(eventId)) events.set(eventId, rowToEvent(stmt.events.byId.get(eventId)));
+        const event = events.get(eventId);
+        if (!event || eventHasEnded(event)) continue;
+        const live = printableTickets(tickets);
+        if (live.length) groups.push({ event, tickets: live });
     }
-    if (remaining === 0) { onImgDone(); }
-    else { imgs.forEach(function(img) {
-        if (img.complete) onImgDone();
-        else { img.addEventListener('load', onImgDone); img.addEventListener('error', onImgDone); }
-    }); }
-<\/script>
-</body>
-</html>`);
+    // Soonest event first, the same order as the list.
+    const when = g => (g.event.time ? Date.parse(g.event.time) : Infinity);
+    groups.sort((a, b) => when(a) - when(b));
+    res.type('html');
+    if (!groups.length) return res.status(404).send(printableTicketsEmptyPage('There are no valid tickets to print.'));
+    res.send(await renderPrintableTicketsPage(groups));
 });
 
 // Bulk check-in (must be defined before /:registrationId to avoid route conflict)
